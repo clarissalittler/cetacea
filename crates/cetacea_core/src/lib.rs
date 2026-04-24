@@ -366,6 +366,14 @@ pub enum Proof {
         body: Box<Proof>,
         target: Formula,
     },
+    NatInd {
+        var_name: Name,
+        target: Formula,
+        base_case: Box<Proof>,
+        step_var: Name,
+        ih_name: Name,
+        step_case: Box<Proof>,
+    },
     TheoremRef {
         name: Name,
         subst: SchemaSubst,
@@ -481,8 +489,9 @@ pub struct Theorem {
     pub name: Name,
     pub params: Vec<Param>,
     pub statement: Formula,
-    pub proof: Proof,
+    pub proof: Option<Proof>,
     pub mode_used: LogicMode,
+    pub is_axiom: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -606,6 +615,7 @@ impl Diagnostic {
 pub struct CheckedTheorem {
     pub name: Name,
     pub mode_used: LogicMode,
+    pub is_axiom: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -746,6 +756,50 @@ pub fn check_file(source: &str) -> CheckResult {
                     body: decl.body,
                 });
             }
+            Command::Axiom(decl) => {
+                if env.has_top_level_name(&decl.name) {
+                    result.diagnostics.push(Diagnostic::error(format!(
+                        "cannot redeclare `{}` as an axiom",
+                        decl.name
+                    )));
+                    continue;
+                }
+                let axiom_ctx = match build_theorem_context(&env, &decl.params) {
+                    Ok(ctx) => ctx,
+                    Err(err) => {
+                        result.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "axiom `{}` has invalid parameters",
+                                decl.name
+                            ))
+                            .with_note(err.message),
+                        );
+                        continue;
+                    }
+                };
+                if let Err(err) = validate_formula(&env, &axiom_ctx, &decl.statement) {
+                    result.diagnostics.push(
+                        Diagnostic::error(format!("axiom `{}` has invalid statement", decl.name))
+                            .with_note(err.message)
+                            .with_note(format!("target: {}", decl.statement)),
+                    );
+                    continue;
+                }
+
+                env.add_theorem(Theorem {
+                    name: decl.name.clone(),
+                    params: decl.params,
+                    statement: decl.statement,
+                    proof: None,
+                    mode_used: mode,
+                    is_axiom: true,
+                });
+                result.theorems.push(CheckedTheorem {
+                    name: decl.name,
+                    mode_used: mode,
+                    is_axiom: true,
+                });
+            }
             Command::Theorem(decl) => {
                 if env.has_top_level_name(&decl.name) {
                     result.diagnostics.push(Diagnostic::error(format!(
@@ -827,12 +881,14 @@ pub fn check_file(source: &str) -> CheckResult {
                     name: decl.name.clone(),
                     params: decl.params,
                     statement: decl.statement,
-                    proof,
+                    proof: Some(proof),
                     mode_used,
+                    is_axiom: false,
                 });
                 result.theorems.push(CheckedTheorem {
                     name: decl.name,
                     mode_used,
+                    is_axiom: false,
                 });
             }
         }
@@ -1226,6 +1282,51 @@ pub fn infer_proof(
             Ok(CheckedProof {
                 formula: target.clone(),
                 mode_used: checked_exists.mode_used.combine(body_mode),
+            })
+        }
+        Proof::NatInd {
+            var_name,
+            target,
+            base_case,
+            step_var,
+            ih_name,
+            step_case,
+        } => {
+            validate_formula(env, ctx, target)?;
+            let Some(var_type) = ctx.lookup_term(var_name) else {
+                return Err(KernelError::new(format!(
+                    "induction variable `{var_name}` is not in scope"
+                )));
+            };
+            if var_type != &Type::Nat {
+                return Err(KernelError::new(format!(
+                    "induction variable `{var_name}` has type `{var_type}`, but expected `Nat`"
+                )));
+            }
+            for binding in ctx.proofs() {
+                if formula_has_free_term(&binding.formula, var_name) {
+                    return Err(KernelError::new(format!(
+                        "cannot induct on `{var_name}` while hypothesis `{}` depends on it",
+                        binding.name
+                    )));
+                }
+            }
+
+            let base_target = subst_formula_term(target, var_name, &Term::Zero);
+            let base_mode = check_proof(env, ctx, base_case, &base_target, allowed_mode)?;
+
+            let mut step_ctx = ctx.clone();
+            step_ctx.add_term(step_var.clone(), Type::Nat);
+            let step_var_term = Term::Var(step_var.clone());
+            let ih_formula = subst_formula_term(target, var_name, &step_var_term);
+            step_ctx.add_proof(ih_name.clone(), ih_formula);
+            let step_target =
+                subst_formula_term(target, var_name, &Term::Succ(Box::new(step_var_term)));
+            let step_mode = check_proof(env, &step_ctx, step_case, &step_target, allowed_mode)?;
+
+            Ok(CheckedProof {
+                formula: target.clone(),
+                mode_used: base_mode.combine(step_mode),
             })
         }
         Proof::TheoremRef { name, subst } => {
@@ -2302,6 +2403,41 @@ fn formula_rewrite_sources(target: &Formula, from: &Term, to: &Term) -> Vec<Form
     replace_formula_once(target, to, from)
 }
 
+fn rewrite_source_score(formula: &Formula) -> usize {
+    if let Formula::Eq(left, right) = formula {
+        if normalize_term_compute(left) == normalize_term_compute(right) {
+            return 0;
+        }
+    }
+    1 + formula_size(formula)
+}
+
+fn formula_size(formula: &Formula) -> usize {
+    match formula {
+        Formula::True | Formula::False | Formula::Atom(_) => 1,
+        Formula::PredApp(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
+        Formula::Eq(left, right) | Formula::In(left, right) | Formula::Subset(left, right) => {
+            1 + term_size(left) + term_size(right)
+        }
+        Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
+            1 + formula_size(left) + formula_size(right)
+        }
+        Formula::Forall { body, .. } | Formula::Exists { body, .. } => 1 + formula_size(body),
+    }
+}
+
+fn term_size(term: &Term) -> usize {
+    match term {
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) => 1,
+        Term::App(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
+        Term::Succ(term) | Term::Singleton(term) => 1 + term_size(term),
+        Term::Add(left, right)
+        | Term::Union(left, right)
+        | Term::Inter(left, right)
+        | Term::Diff(left, right) => 1 + term_size(left) + term_size(right),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TheoremDecl {
     name: Name,
@@ -2318,6 +2454,13 @@ struct DefDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct AxiomDecl {
+    name: Name,
+    params: Vec<Param>,
+    statement: Formula,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Command {
     Mode(LogicMode),
     Sort(Name),
@@ -2325,6 +2468,7 @@ enum Command {
     Func(Name, Vec<Type>, Type),
     Pred(Name, Vec<Type>),
     Def(DefDecl),
+    Axiom(AxiomDecl),
     Theorem(TheoremDecl),
 }
 
@@ -2436,6 +2580,13 @@ enum Tactic {
     Rewrite(ProofExpr),
     Unfold(Name),
     Simp,
+    Induction {
+        var_name: Name,
+        zero_tactics: Vec<Tactic>,
+        step_var: Name,
+        ih_name: Name,
+        step_tactics: Vec<Tactic>,
+    },
     Exfalso,
     Contradiction,
     ByCases {
@@ -2888,6 +3039,27 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             continue;
         }
 
+        if trimmed.starts_with("axiom ") {
+            let mut header = String::from(trimmed);
+            i += 1;
+            while i < lines.len() {
+                let next = strip_comment(lines[i]).trim();
+                if is_command_start(next) {
+                    break;
+                }
+                header.push(' ');
+                header.push_str(next);
+                i += 1;
+            }
+            let (name, params, statement) = parse_axiom_header(&header)?;
+            commands.push(Command::Axiom(AxiomDecl {
+                name,
+                params,
+                statement,
+            }));
+            continue;
+        }
+
         if trimmed.starts_with("theorem ") {
             let mut header = String::from(trimmed);
             while !header.contains(":= by") {
@@ -2953,6 +3125,17 @@ fn parse_theorem_header(header: &str) -> Result<(Name, Vec<Param>, Formula), Par
     let name = tokens.expect_ident()?;
     let params = parse_decl_params(&mut tokens)?;
 
+    tokens.expect_sym(":")?;
+    let statement = tokens.parse_formula()?;
+    tokens.expect_eof()?;
+    Ok((name, params, statement))
+}
+
+fn parse_axiom_header(header: &str) -> Result<(Name, Vec<Param>, Formula), ParseError> {
+    let mut tokens = Tokens::new(header)?;
+    tokens.expect_keyword("axiom")?;
+    let name = tokens.expect_ident()?;
+    let params = parse_decl_params(&mut tokens)?;
     tokens.expect_sym(":")?;
     let statement = tokens.parse_formula()?;
     tokens.expect_eof()?;
@@ -3105,6 +3288,39 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             continue;
         }
 
+        if let Some(var_name) = trimmed
+            .strip_prefix("induction ")
+            .and_then(|rest| rest.strip_suffix(" with"))
+        {
+            i += 1;
+            if i >= lines.len() {
+                return Err(ParseError::new("expected zero case arm"));
+            }
+            parse_zero_case_arm(lines[i].trim())?;
+            i += 1;
+            let zero_start = i;
+            while i < lines.len() && !lines[i].trim().starts_with("| succ ") {
+                i += 1;
+            }
+            if i >= lines.len() {
+                return Err(ParseError::new("expected successor case arm"));
+            }
+            let zero_tactics = parse_tactic_lines(&lines[zero_start..i])?;
+            let (step_var, ih_name) = parse_succ_case_arm(lines[i].trim())?;
+            i += 1;
+            let step_tactics = parse_tactic_lines(&lines[i..])?;
+            i = lines.len();
+
+            tactics.push(Tactic::Induction {
+                var_name: expect_single_name(var_name, "induction")?,
+                zero_tactics,
+                step_var,
+                ih_name,
+                step_tactics,
+            });
+            continue;
+        }
+
         tactics.push(parse_tactic_line(trimmed)?);
         i += 1;
     }
@@ -3138,6 +3354,30 @@ fn parse_exists_case_arm(line: &str) -> Result<(Name, Name), ParseError> {
     if names.len() != 2 {
         return Err(ParseError::new(
             "existential case arm expects witness and hypothesis names",
+        ));
+    }
+    Ok((names[0].to_string(), names[1].to_string()))
+}
+
+fn parse_zero_case_arm(line: &str) -> Result<(), ParseError> {
+    if line == "| zero =>" {
+        Ok(())
+    } else {
+        Err(ParseError::new("expected `| zero =>` case arm"))
+    }
+}
+
+fn parse_succ_case_arm(line: &str) -> Result<(Name, Name), ParseError> {
+    let Some(rest) = line.strip_prefix("| succ ") else {
+        return Err(ParseError::new("expected successor case arm"));
+    };
+    let Some(names) = rest.strip_suffix("=>") else {
+        return Err(ParseError::new("case arm must end with `=>`"));
+    };
+    let names: Vec<&str> = names.split_whitespace().collect();
+    if names.len() != 2 {
+        return Err(ParseError::new(
+            "successor case arm expects variable and induction hypothesis names",
         ));
     }
     Ok((names[0].to_string(), names[1].to_string()))
@@ -3991,7 +4231,7 @@ fn run_tactic(
             };
             let Some(source_target) = formula_rewrite_sources(&goal.target, &left, &right)
                 .into_iter()
-                .next()
+                .min_by_key(rewrite_source_score)
             else {
                 return Err(TacticError::new(format!(
                     "rewrite could not find `{right}` in goal `{}`",
@@ -4060,6 +4300,65 @@ fn run_tactic(
                     context: goal.context,
                     target,
                 }],
+            })
+        }
+        Tactic::Induction {
+            var_name,
+            zero_tactics,
+            step_var,
+            ih_name,
+            step_tactics,
+        } => {
+            let Some(var_type) = goal.context.lookup_term(var_name) else {
+                return Err(TacticError::new(format!(
+                    "induction variable `{var_name}` is not in scope"
+                )));
+            };
+            if var_type != &Type::Nat {
+                return Err(TacticError::new(format!(
+                    "induction variable `{var_name}` has type `{var_type}`, but expected `Nat`"
+                )));
+            }
+            if let Some(binding) = goal
+                .context
+                .proofs()
+                .iter()
+                .find(|binding| formula_has_free_term(&binding.formula, var_name))
+            {
+                return Err(TacticError::new(format!(
+                    "cannot induct on `{var_name}` while hypothesis `{}` depends on it",
+                    binding.name
+                )));
+            }
+
+            let base_target = subst_formula_term(&goal.target, var_name, &Term::Zero);
+            let base_case = prove(
+                env,
+                goal.context.clone(),
+                base_target,
+                zero_tactics,
+                allowed_mode,
+            )?;
+
+            let mut step_ctx = goal.context.clone();
+            step_ctx.add_term(step_var.clone(), Type::Nat);
+            let step_var_term = Term::Var(step_var.clone());
+            let ih_formula = subst_formula_term(&goal.target, var_name, &step_var_term);
+            step_ctx.add_proof(ih_name.clone(), ih_formula);
+            let step_target =
+                subst_formula_term(&goal.target, var_name, &Term::Succ(Box::new(step_var_term)));
+            let step_case = prove(env, step_ctx, step_target, step_tactics, allowed_mode)?;
+
+            Ok(StepResult {
+                replacement: PartialProof::Done(Proof::NatInd {
+                    var_name: var_name.clone(),
+                    target: goal.target,
+                    base_case: Box::new(base_case),
+                    step_var: step_var.clone(),
+                    ih_name: ih_name.clone(),
+                    step_case: Box::new(step_case),
+                }),
+                new_goals: Vec::new(),
             })
         }
         Tactic::Exfalso => {
@@ -4472,11 +4771,101 @@ fn ensure_schema_subst_complete(params: &[Param], subst: &SchemaSubst) -> Result
 }
 
 fn subst_formula_terms(formula: &Formula, subst: &HashMap<Name, Term>) -> Formula {
-    let mut result = formula.clone();
-    for (var, replacement) in subst {
-        result = subst_formula_term(&result, var, replacement);
+    match formula {
+        Formula::True => Formula::True,
+        Formula::False => Formula::False,
+        Formula::Atom(name) => Formula::Atom(name.clone()),
+        Formula::Eq(left, right) => Formula::eq(
+            subst_term_terms(left, subst),
+            subst_term_terms(right, subst),
+        ),
+        Formula::In(elem, set) => {
+            Formula::membership(subst_term_terms(elem, subst), subst_term_terms(set, subst))
+        }
+        Formula::Subset(left, right) => Formula::subset(
+            subst_term_terms(left, subst),
+            subst_term_terms(right, subst),
+        ),
+        Formula::PredApp(name, args) => Formula::PredApp(
+            name.clone(),
+            args.iter()
+                .map(|arg| subst_term_terms(arg, subst))
+                .collect(),
+        ),
+        Formula::And(left, right) => Formula::and(
+            subst_formula_terms(left, subst),
+            subst_formula_terms(right, subst),
+        ),
+        Formula::Or(left, right) => Formula::or(
+            subst_formula_terms(left, subst),
+            subst_formula_terms(right, subst),
+        ),
+        Formula::Implies(left, right) => Formula::implies(
+            subst_formula_terms(left, subst),
+            subst_formula_terms(right, subst),
+        ),
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut scoped = subst.clone();
+            scoped.remove(var);
+            Formula::forall(
+                var.clone(),
+                var_type.clone(),
+                subst_formula_terms(body, &scoped),
+            )
+        }
+        Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut scoped = subst.clone();
+            scoped.remove(var);
+            Formula::exists(
+                var.clone(),
+                var_type.clone(),
+                subst_formula_terms(body, &scoped),
+            )
+        }
     }
-    result
+}
+
+fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
+    match term {
+        Term::Var(name) => subst
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| Term::Var(name.clone())),
+        Term::App(name, args) => Term::App(
+            name.clone(),
+            args.iter()
+                .map(|arg| subst_term_terms(arg, subst))
+                .collect(),
+        ),
+        Term::Zero => Term::Zero,
+        Term::Succ(term) => Term::Succ(Box::new(subst_term_terms(term, subst))),
+        Term::Add(left, right) => Term::Add(
+            Box::new(subst_term_terms(left, subst)),
+            Box::new(subst_term_terms(right, subst)),
+        ),
+        Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
+        Term::Singleton(term) => Term::Singleton(Box::new(subst_term_terms(term, subst))),
+        Term::Union(left, right) => Term::Union(
+            Box::new(subst_term_terms(left, subst)),
+            Box::new(subst_term_terms(right, subst)),
+        ),
+        Term::Inter(left, right) => Term::Inter(
+            Box::new(subst_term_terms(left, subst)),
+            Box::new(subst_term_terms(right, subst)),
+        ),
+        Term::Diff(left, right) => Term::Diff(
+            Box::new(subst_term_terms(left, subst)),
+            Box::new(subst_term_terms(right, subst)),
+        ),
+    }
 }
 
 struct UnifyState<'a> {
@@ -4577,10 +4966,7 @@ fn unify_formula(
 
 fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Result<(), ()> {
     match pattern {
-        Term::Var(name)
-            if unify.term_metas.contains(name)
-                || schema_term_param(unify.schema_params, name).is_some() =>
-        {
+        Term::Var(name) if unify.term_metas.contains(name) => {
             if let Some(existing) = unify.term_subst.get(name) {
                 if existing == target {
                     Ok(())
@@ -4589,12 +4975,29 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
                 }
             } else {
                 unify.term_subst.insert(name.clone(), target.clone());
-                if schema_term_param(unify.schema_params, name).is_some() {
-                    unify
-                        .schema_subst
-                        .term_args
-                        .insert(name.clone(), target.clone());
+                Ok(())
+            }
+        }
+        Term::Var(name) if schema_term_param(unify.schema_params, name).is_some() => {
+            let param_ty = schema_term_param(unify.schema_params, name).ok_or(())?;
+            if let Some(existing) = unify.schema_subst.term_args.get(name) {
+                if existing == target {
+                    Ok(())
+                } else {
+                    Err(())
                 }
+            } else {
+                let actual_ty = validate_term(unify.env, unify.ctx, target).map_err(|_| ())?;
+                unify_type(
+                    param_ty,
+                    &actual_ty,
+                    unify.schema_params,
+                    unify.schema_subst,
+                )?;
+                unify
+                    .schema_subst
+                    .term_args
+                    .insert(name.clone(), target.clone());
                 Ok(())
             }
         }
@@ -5568,6 +5971,45 @@ theorem add_one_zero : add(succ(0), 0) = succ(0) := by
     }
 
     #[test]
+    fn nat_induction_proves_add_zero_right() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
+"#,
+        );
+    }
+
+    #[test]
+    fn induction_rejects_hypothesis_depending_on_variable() {
+        check_err_contains(
+            r#"
+mode constructive
+
+pred P(Nat)
+
+theorem bad (n : Nat) : P(n) -> P(n) := by
+  intro h
+  induction n with
+  | zero =>
+      exact h
+  | succ k ih =>
+      exact h
+"#,
+            "cannot induct on `n` while hypothesis `h` depends on it",
+        );
+    }
+
+    #[test]
     fn set_membership_computes_under_simp() {
         check_ok(
             r#"
@@ -5627,6 +6069,64 @@ theorem subset_apply
   apply h
   exact ha
 "#,
+        );
+    }
+
+    #[test]
+    fn axiom_can_be_referenced_like_a_theorem() {
+        check_ok(
+            r#"
+mode constructive
+
+axiom ax_id (P : Prop) : P -> P
+
+theorem use_axiom (P : Prop) : P -> P := by
+  exact ax_id
+"#,
+        );
+    }
+
+    #[test]
+    fn set_extensionality_axiom_proves_inter_comm() {
+        check_ok(
+            r#"
+mode constructive
+
+axiom set_ext
+  (T : Type)
+  (A B : Set T)
+  : (forall x : T, x in A <-> x in B) -> A = B
+
+theorem inter_comm
+  (T : Type)
+  (A B : Set T)
+  : inter(A, B) = inter(B, A) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  split
+  exact hx.right
+  exact hx.left
+  intro hx
+  split
+  exact hx.right
+  exact hx.left
+"#,
+        );
+    }
+
+    #[test]
+    fn axiom_redeclaration_is_rejected() {
+        check_err_contains(
+            r#"
+mode constructive
+
+axiom trusted : True
+theorem trusted : True := by
+"#,
+            "cannot redeclare `trusted` as a theorem",
         );
     }
 

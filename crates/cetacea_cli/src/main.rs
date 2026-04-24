@@ -25,7 +25,8 @@ fn main() {
     let result = cetacea_core::check_file(&source);
     if result.diagnostics.is_empty() {
         for theorem in result.theorems {
-            println!("accepted theorem {} ({})", theorem.name, theorem.mode_used);
+            let kind = if theorem.is_axiom { "axiom" } else { "theorem" };
+            println!("accepted {kind} {} ({})", theorem.name, theorem.mode_used);
         }
         return;
     }

@@ -4,6 +4,11 @@ sort Person
 
 const alice : Person
 
+axiom set_ext
+  (T : Type)
+  (A B : Set T)
+  : (forall x : T, x in A <-> x in B) -> A = B
+
 theorem add_zero_left (n : Nat) : add(0, n) = n := by
   simp
   refl
@@ -11,6 +16,16 @@ theorem add_zero_left (n : Nat) : add(0, n) = n := by
 theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
   simp
   refl
+
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
 
 theorem singleton_member : alice in singleton(alice) := by
   simp
@@ -57,3 +72,20 @@ theorem union_subset
   | right hxB =>
       apply hBC
       exact hxB
+
+theorem inter_comm
+  (T : Type)
+  (A B : Set T)
+  : inter(A, B) = inter(B, A) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  split
+  exact hx.right
+  exact hx.left
+  intro hx
+  split
+  exact hx.right
+  exact hx.left
