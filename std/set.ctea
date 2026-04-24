@@ -1,0 +1,125 @@
+mode constructive
+
+axiom set_ext
+  (T : Type)
+  (A B : Set T)
+  : (forall x : T, x in A <-> x in B) -> A = B
+
+theorem subset_refl
+  (T : Type)
+  (A : Set T)
+  : A subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx
+
+theorem subset_trans
+  (T : Type)
+  (A B C : Set T)
+  : A subset B -> B subset C -> A subset C := by
+  intro hAB
+  intro hBC
+  simp
+  intro x
+  intro hx
+  apply hBC
+  apply hAB
+  exact hx
+
+theorem inter_subset_left
+  (T : Type)
+  (A B : Set T)
+  : inter(A, B) subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx.left
+
+theorem inter_subset_right
+  (T : Type)
+  (A B : Set T)
+  : inter(A, B) subset B := by
+  simp
+  intro x
+  intro hx
+  exact hx.right
+
+theorem subset_union_left
+  (T : Type)
+  (A B : Set T)
+  : A subset union(A, B) := by
+  simp
+  intro x
+  intro hx
+  left
+  exact hx
+
+theorem subset_union_right
+  (T : Type)
+  (A B : Set T)
+  : B subset union(A, B) := by
+  simp
+  intro x
+  intro hx
+  right
+  exact hx
+
+theorem union_subset
+  (T : Type)
+  (A B C : Set T)
+  : A subset C -> B subset C -> union(A, B) subset C := by
+  intro hAC
+  intro hBC
+  simp
+  intro x
+  intro hx
+  cases hx with
+  | left hxA =>
+      apply hAC
+      exact hxA
+  | right hxB =>
+      apply hBC
+      exact hxB
+
+theorem union_comm
+  (T : Type)
+  (A B : Set T)
+  : union(A, B) = union(B, A) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  cases hx with
+  | left hxA =>
+      right
+      exact hxA
+  | right hxB =>
+      left
+      exact hxB
+  intro hx
+  cases hx with
+  | left hxB =>
+      right
+      exact hxB
+  | right hxA =>
+      left
+      exact hxA
+
+theorem inter_comm
+  (T : Type)
+  (A B : Set T)
+  : inter(A, B) = inter(B, A) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  split
+  exact hx.right
+  exact hx.left
+  intro hx
+  split
+  exact hx.right
+  exact hx.left

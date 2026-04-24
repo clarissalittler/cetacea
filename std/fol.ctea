@@ -1,0 +1,58 @@
+mode constructive
+
+theorem forall_and_left
+  (A : Type)
+  (P Q : A -> Prop)
+  : (forall x : A, P(x) /\ Q(x)) -> forall x : A, P(x) := by
+  intro h
+  intro x
+  exact (h x).left
+
+theorem forall_and_right
+  (A : Type)
+  (P Q : A -> Prop)
+  : (forall x : A, P(x) /\ Q(x)) -> forall x : A, Q(x) := by
+  intro h
+  intro x
+  exact (h x).right
+
+theorem exists_and_left
+  (A : Type)
+  (P Q : A -> Prop)
+  : (exists x : A, P(x) /\ Q(x)) -> exists x : A, P(x) := by
+  intro h
+  cases h with
+  | intro x hx =>
+      exists x
+      exact hx.left
+
+theorem exists_and_right
+  (A : Type)
+  (P Q : A -> Prop)
+  : (exists x : A, P(x) /\ Q(x)) -> exists x : A, Q(x) := by
+  intro h
+  cases h with
+  | intro x hx =>
+      exists x
+      exact hx.right
+
+theorem not_exists_to_forall_not
+  (A : Type)
+  (P : A -> Prop)
+  : not (exists x : A, P(x)) -> forall x : A, not P(x) := by
+  intro h
+  intro x
+  intro hp
+  apply h
+  exists x
+  exact hp
+
+theorem forall_apply
+  (A : Type)
+  (P Q : A -> Prop)
+  (a : A)
+  : (forall x : A, P(x) -> Q(x)) -> P(a) -> Q(a) := by
+  intro h
+  intro hp
+  apply h
+  exact hp

@@ -15,6 +15,7 @@ definition arity, set element compatibility, and argument type compatibility.
 - `crates/cetacea_core`: parser, AST, tactics, proof objects, and kernel
   checker.
 - `crates/cetacea_cli`: command-line checker.
+- `std`: checked theorem-library files.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
 - `examples/set_nat.ctea`: typed set and natural-number simplification examples.
@@ -26,6 +27,8 @@ cargo test
 cargo run -p cetacea_cli -- examples/prop.ctea
 cargo run -p cetacea_cli -- examples/fol.ctea
 cargo run -p cetacea_cli -- examples/set_nat.ctea
+cargo run -p cetacea_cli -- std/set.ctea
+cargo run -p cetacea_cli -- std/nat.ctea
 ```
 
 The CLI prints each accepted theorem or axiom and the strongest mode used by
@@ -50,6 +53,8 @@ its checked proof object.
   inferred type parameters
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
+- checked library files for propositional logic, first-order logic, equality,
+  sets, and natural numbers
 - goal-directed schema instantiation for bare theorem references in `exact` and
   `apply`
 - explicit theorem-instantiation syntax:
@@ -69,6 +74,6 @@ its checked proof object.
 
 1. Improve diagnostics with source spans and proof-state rendering.
 2. Improve theorem-instantiation diagnostics and broaden inference.
-3. Add a small standard library for sets and equality.
+3. Add an import mechanism for checked library files.
 4. Broaden `simp` with more computation rules and optional hypothesis
    simplification.

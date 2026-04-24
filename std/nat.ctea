@@ -1,0 +1,29 @@
+mode constructive
+
+theorem add_zero_left (n : Nat) : add(0, n) = n := by
+  simp
+  refl
+
+theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
+  simp
+  refl
+
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
+
+theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl

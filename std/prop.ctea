@@ -1,0 +1,69 @@
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem imp_trans (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
+  intro hpq
+  intro hqr
+  intro hp
+  apply hqr
+  apply hpq
+  exact hp
+
+theorem and_comm (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  split
+  exact h.right
+  exact h.left
+
+theorem and_assoc_left (P Q R : Prop) : (P /\ Q) /\ R -> P /\ (Q /\ R) := by
+  intro h
+  split
+  exact h.left.left
+  split
+  exact h.left.right
+  exact h.right
+
+theorem and_assoc_right (P Q R : Prop) : P /\ (Q /\ R) -> (P /\ Q) /\ R := by
+  intro h
+  split
+  split
+  exact h.left
+  exact h.right.left
+  exact h.right.right
+
+theorem or_comm (P Q : Prop) : P \/ Q -> Q \/ P := by
+  intro h
+  cases h with
+  | left hp =>
+      right
+      exact hp
+  | right hq =>
+      left
+      exact hq
+
+theorem not_not_em (P : Prop) : not not (P \/ not P) := by
+  intro h
+  apply h
+  right
+  intro p
+  apply h
+  left
+  exact p
+
+mode classical
+
+theorem em (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+
+theorem dne (P : Prop) : not not P -> P := by
+  intro hnn
+  by_contra hn
+  apply hnn
+  exact hn

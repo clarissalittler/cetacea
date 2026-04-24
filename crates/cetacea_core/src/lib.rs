@@ -3243,15 +3243,18 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             .and_then(|rest| rest.strip_suffix(" with"))
         {
             i += 1;
+            i = skip_empty_tactic_lines(lines, i);
             if i >= lines.len() {
                 return Err(ParseError::new("expected case arm"));
             }
 
             if lines[i].trim().starts_with("| intro ") {
+                let arm_indent = line_indent(&lines[i]);
                 let (witness_name, hyp_name) = parse_exists_case_arm(lines[i].trim())?;
                 i += 1;
-                let body_tactics = parse_tactic_lines(&lines[i..])?;
-                i = lines.len();
+                let body_end = case_body_end(lines, i, arm_indent);
+                let body_tactics = parse_tactic_lines(&lines[i..body_end])?;
+                i = body_end;
 
                 tactics.push(Tactic::CasesExists {
                     expr: parse_proof_expr(expr.trim())?,
@@ -3262,21 +3265,24 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
                 continue;
             }
 
+            let left_indent = line_indent(&lines[i]);
             let left_name = parse_case_arm(lines[i].trim(), "left")?;
             i += 1;
             let left_start = i;
-            while i < lines.len() && !lines[i].trim().starts_with("| right ") {
-                i += 1;
-            }
+            let left_end = case_body_end(lines, i, left_indent);
+            i = skip_empty_tactic_lines(lines, left_end);
             if i >= lines.len() {
                 return Err(ParseError::new("expected right case arm"));
             }
-            let left_tactics = parse_tactic_lines(&lines[left_start..i])?;
+            let left_tactics = parse_tactic_lines(&lines[left_start..left_end])?;
 
+            let right_indent = line_indent(&lines[i]);
             let right_name = parse_case_arm(lines[i].trim(), "right")?;
             i += 1;
-            let right_tactics = parse_tactic_lines(&lines[i..])?;
-            i = lines.len();
+            let right_start = i;
+            let right_end = case_body_end(lines, i, right_indent);
+            let right_tactics = parse_tactic_lines(&lines[right_start..right_end])?;
+            i = right_end;
 
             tactics.push(Tactic::CasesOr {
                 expr: parse_proof_expr(expr.trim())?,
@@ -3293,23 +3299,27 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             .and_then(|rest| rest.strip_suffix(" with"))
         {
             i += 1;
+            i = skip_empty_tactic_lines(lines, i);
             if i >= lines.len() {
                 return Err(ParseError::new("expected zero case arm"));
             }
+            let zero_indent = line_indent(&lines[i]);
             parse_zero_case_arm(lines[i].trim())?;
             i += 1;
             let zero_start = i;
-            while i < lines.len() && !lines[i].trim().starts_with("| succ ") {
-                i += 1;
-            }
+            let zero_end = case_body_end(lines, i, zero_indent);
+            i = skip_empty_tactic_lines(lines, zero_end);
             if i >= lines.len() {
                 return Err(ParseError::new("expected successor case arm"));
             }
-            let zero_tactics = parse_tactic_lines(&lines[zero_start..i])?;
+            let zero_tactics = parse_tactic_lines(&lines[zero_start..zero_end])?;
+            let step_indent = line_indent(&lines[i]);
             let (step_var, ih_name) = parse_succ_case_arm(lines[i].trim())?;
             i += 1;
-            let step_tactics = parse_tactic_lines(&lines[i..])?;
-            i = lines.len();
+            let step_start = i;
+            let step_end = case_body_end(lines, i, step_indent);
+            let step_tactics = parse_tactic_lines(&lines[step_start..step_end])?;
+            i = step_end;
 
             tactics.push(Tactic::Induction {
                 var_name: expect_single_name(var_name, "induction")?,
@@ -3326,6 +3336,28 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
     }
 
     Ok(tactics)
+}
+
+fn skip_empty_tactic_lines(lines: &[String], mut i: usize) -> usize {
+    while i < lines.len() && lines[i].trim().is_empty() {
+        i += 1;
+    }
+    i
+}
+
+fn case_body_end(lines: &[String], mut i: usize, arm_indent: usize) -> usize {
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if !trimmed.is_empty() && line_indent(&lines[i]) <= arm_indent {
+            break;
+        }
+        i += 1;
+    }
+    i
+}
+
+fn line_indent(line: &str) -> usize {
+    line.chars().take_while(|ch| ch.is_whitespace()).count()
 }
 
 fn parse_case_arm(line: &str, side: &str) -> Result<Name, ParseError> {
@@ -5267,6 +5299,31 @@ mod tests {
     }
 
     #[test]
+    fn std_prop_checks() {
+        check_ok(include_str!("../../../std/prop.ctea"));
+    }
+
+    #[test]
+    fn std_fol_checks() {
+        check_ok(include_str!("../../../std/fol.ctea"));
+    }
+
+    #[test]
+    fn std_eq_checks() {
+        check_ok(include_str!("../../../std/eq.ctea"));
+    }
+
+    #[test]
+    fn std_set_checks() {
+        check_ok(include_str!("../../../std/set.ctea"));
+    }
+
+    #[test]
+    fn std_nat_checks() {
+        check_ok(include_str!("../../../std/nat.ctea"));
+    }
+
+    #[test]
     fn and_comm_succeeds_constructively() {
         let result = check_ok(
             r#"
@@ -5455,6 +5512,48 @@ theorem exists_and_left
   | intro x hx =>
       exists x
       exact hx.left
+"#,
+        );
+    }
+
+    #[test]
+    fn or_cases_block_allows_following_tactic() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem cases_then_next_goal (P Q : Prop) : (P \/ Q) -> (Q \/ P) /\ (P \/ Q) := by
+  intro h
+  split
+  cases h with
+  | left hp =>
+      right
+      exact hp
+  | right hq =>
+      left
+      exact hq
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn exists_cases_block_allows_following_tactic() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem exists_cases_then_next_goal
+  (A : Type)
+  (P : A -> Prop)
+  : (exists x : A, P(x)) -> (exists x : A, P(x)) /\ (exists x : A, P(x)) := by
+  intro h
+  split
+  cases h with
+  | intro x hx =>
+      exists x
+      exact hx
+  exact h
 "#,
         );
     }
@@ -5985,6 +6084,27 @@ theorem add_zero_right (n : Nat) : add(n, 0) = n := by
       simp
       rewrite ih
       refl
+"#,
+        );
+    }
+
+    #[test]
+    fn induction_block_allows_following_tactic() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem induction_then_next_goal (n : Nat) : add(n, 0) = n /\ n = n := by
+  split
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
+  refl
 "#,
         );
     }
