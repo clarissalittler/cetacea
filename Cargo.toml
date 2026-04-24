@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/cetacea_core",
+    "crates/cetacea_cli",
+]
+resolver = "2"
+

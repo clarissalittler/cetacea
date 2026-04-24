@@ -1,0 +1,7 @@
+target/
+.codex
+
+# Editor and OS noise
+.DS_Store
+*.swp
+*.swo
