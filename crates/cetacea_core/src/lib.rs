@@ -6,12 +6,16 @@ pub type Name = String;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Named(Name),
+    Nat,
+    Set(Box<Type>),
 }
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Named(name) => write!(f, "{name}"),
+            Type::Nat => write!(f, "Nat"),
+            Type::Set(elem) => write!(f, "Set {elem}"),
         }
     }
 }
@@ -20,6 +24,14 @@ impl fmt::Display for Type {
 pub enum Term {
     Var(Name),
     App(Name, Vec<Term>),
+    Zero,
+    Succ(Box<Term>),
+    Add(Box<Term>, Box<Term>),
+    EmptySet(Type),
+    Singleton(Box<Term>),
+    Union(Box<Term>, Box<Term>),
+    Inter(Box<Term>, Box<Term>),
+    Diff(Box<Term>, Box<Term>),
 }
 
 impl fmt::Display for Term {
@@ -36,6 +48,14 @@ impl fmt::Display for Term {
                 }
                 write!(f, ")")
             }
+            Term::Zero => write!(f, "0"),
+            Term::Succ(term) => write!(f, "succ({term})"),
+            Term::Add(left, right) => write!(f, "add({left}, {right})"),
+            Term::EmptySet(ty) => write!(f, "empty({ty})"),
+            Term::Singleton(term) => write!(f, "singleton({term})"),
+            Term::Union(left, right) => write!(f, "union({left}, {right})"),
+            Term::Inter(left, right) => write!(f, "inter({left}, {right})"),
+            Term::Diff(left, right) => write!(f, "diff({left}, {right})"),
         }
     }
 }
@@ -47,6 +67,8 @@ pub enum Formula {
     Atom(Name),
     PredApp(Name, Vec<Term>),
     Eq(Term, Term),
+    In(Term, Term),
+    Subset(Term, Term),
     And(Box<Formula>, Box<Formula>),
     Or(Box<Formula>, Box<Formula>),
     Implies(Box<Formula>, Box<Formula>),
@@ -77,6 +99,14 @@ impl Formula {
 
     pub fn eq(left: Term, right: Term) -> Self {
         Self::Eq(left, right)
+    }
+
+    pub fn membership(elem: Term, set: Term) -> Self {
+        Self::In(elem, set)
+    }
+
+    pub fn subset(left: Term, right: Term) -> Self {
+        Self::Subset(left, right)
     }
 
     pub fn negate(formula: Formula) -> Self {
@@ -116,7 +146,9 @@ impl Formula {
             | Formula::False
             | Formula::Atom(_)
             | Formula::PredApp(_, _)
-            | Formula::Eq(_, _) => 4,
+            | Formula::Eq(_, _)
+            | Formula::In(_, _)
+            | Formula::Subset(_, _) => 4,
         }
     }
 
@@ -155,6 +187,8 @@ impl Formula {
                 write!(f, ")")?;
             }
             Formula::Eq(left, right) => write!(f, "{left} = {right}")?,
+            Formula::In(elem, set) => write!(f, "{elem} in {set}")?,
+            Formula::Subset(left, right) => write!(f, "{left} subset {right}")?,
             Formula::And(left, right) => {
                 left.fmt_with_prec(f, my_prec)?;
                 write!(f, " /\\ ")?;
@@ -307,6 +341,10 @@ pub enum Proof {
         proof_body: Box<Proof>,
         target: Formula,
     },
+    Convert {
+        proof_body: Box<Proof>,
+        target: Formula,
+    },
     ForallIntro {
         var: Name,
         var_type: Type,
@@ -355,6 +393,13 @@ pub struct TermBinding {
 pub struct FuncDecl {
     pub args: Vec<Type>,
     pub result: Type,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormulaDef {
+    pub name: Name,
+    pub params: Vec<Param>,
+    pub body: Formula,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -446,6 +491,7 @@ pub struct Env {
     consts: HashMap<Name, Type>,
     funcs: HashMap<Name, FuncDecl>,
     preds: HashMap<Name, Vec<Type>>,
+    defs: HashMap<Name, FormulaDef>,
     theorems: HashMap<Name, Theorem>,
 }
 
@@ -478,6 +524,14 @@ impl Env {
         self.preds.insert(name, args);
     }
 
+    pub fn add_def(&mut self, def: FormulaDef) {
+        self.defs.insert(def.name.clone(), def);
+    }
+
+    fn formula_def(&self, name: &str) -> Option<&FormulaDef> {
+        self.defs.get(name)
+    }
+
     fn has_sort(&self, name: &str) -> bool {
         self.sorts.contains_key(name)
     }
@@ -498,13 +552,26 @@ impl Env {
         self.theorems.contains_key(name)
     }
 
+    fn has_def(&self, name: &str) -> bool {
+        self.defs.contains_key(name)
+    }
+
     fn has_top_level_name(&self, name: &str) -> bool {
-        self.has_sort(name)
+        is_builtin_name(name)
+            || self.has_sort(name)
             || self.has_const(name)
             || self.has_func(name)
             || self.has_pred(name)
+            || self.has_def(name)
             || self.has_theorem(name)
     }
+}
+
+fn is_builtin_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Nat" | "Set" | "succ" | "add" | "empty" | "singleton" | "union" | "inter" | "diff"
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -634,6 +701,51 @@ pub fn check_file(source: &str) -> CheckResult {
                 }
                 env.add_pred(name, args);
             }
+            Command::Def(decl) => {
+                if env.has_top_level_name(&decl.name) {
+                    result.diagnostics.push(Diagnostic::error(format!(
+                        "cannot redeclare `{}` as a definition",
+                        decl.name
+                    )));
+                    continue;
+                }
+                if let Err(err) = validate_formula_def_params(&decl.params) {
+                    result.diagnostics.push(
+                        Diagnostic::error(format!(
+                            "definition `{}` has invalid parameters",
+                            decl.name
+                        ))
+                        .with_note(err.message),
+                    );
+                    continue;
+                }
+                let def_ctx = match build_theorem_context(&env, &decl.params) {
+                    Ok(ctx) => ctx,
+                    Err(err) => {
+                        result.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "definition `{}` has invalid parameters",
+                                decl.name
+                            ))
+                            .with_note(err.message),
+                        );
+                        continue;
+                    }
+                };
+                if let Err(err) = validate_formula(&env, &def_ctx, &decl.body) {
+                    result.diagnostics.push(
+                        Diagnostic::error(format!("definition `{}` has invalid body", decl.name))
+                            .with_note(err.message)
+                            .with_note(format!("body: {}", decl.body)),
+                    );
+                    continue;
+                }
+                env.add_def(FormulaDef {
+                    name: decl.name,
+                    params: decl.params,
+                    body: decl.body,
+                });
+            }
             Command::Theorem(decl) => {
                 if env.has_top_level_name(&decl.name) {
                     result.diagnostics.push(Diagnostic::error(format!(
@@ -729,6 +841,17 @@ pub fn check_file(source: &str) -> CheckResult {
     result
 }
 
+fn validate_formula_def_params(params: &[Param]) -> Result<(), ValidationError> {
+    for param in params {
+        if matches!(param.kind, ParamKind::Prop | ParamKind::Predicate(_)) {
+            return Err(ValidationError::new(
+                "formula definitions currently support only type and term parameters",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn build_theorem_context(env: &Env, params: &[Param]) -> Result<Context, ValidationError> {
     let mut ctx = Context::new();
     for param in params {
@@ -805,7 +928,7 @@ pub fn check_proof(
     validate_formula(env, ctx, expected)?;
     let checked = infer_proof(env, ctx, proof, allowed_mode)?;
     validate_formula(env, ctx, &checked.formula)?;
-    if checked.formula == *expected {
+    if formulas_def_eq(env, ctx, &checked.formula, expected)? {
         Ok(checked.mode_used)
     } else {
         Err(KernelError::new(format!(
@@ -856,7 +979,8 @@ pub fn infer_proof(
         }
         Proof::AndElimLeft(proof) => {
             let checked = infer_proof(env, ctx, proof, allowed_mode)?;
-            let Formula::And(left, _) = checked.formula else {
+            let formula = normalize_formula_defs(env, ctx, &checked.formula)?;
+            let Formula::And(left, _) = formula else {
                 return Err(KernelError::new(
                     "`.left` can only be used on a conjunction",
                 ));
@@ -868,7 +992,8 @@ pub fn infer_proof(
         }
         Proof::AndElimRight(proof) => {
             let checked = infer_proof(env, ctx, proof, allowed_mode)?;
-            let Formula::And(_, right) = checked.formula else {
+            let formula = normalize_formula_defs(env, ctx, &checked.formula)?;
+            let Formula::And(_, right) = formula else {
                 return Err(KernelError::new(
                     "`.right` can only be used on a conjunction",
                 ));
@@ -909,7 +1034,8 @@ pub fn infer_proof(
             target,
         } => {
             let checked_or = infer_proof(env, ctx, proof_or, allowed_mode)?;
-            let Formula::Or(left_formula, right_formula) = checked_or.formula else {
+            let formula = normalize_formula_defs(env, ctx, &checked_or.formula)?;
+            let Formula::Or(left_formula, right_formula) = formula else {
                 return Err(KernelError::new("cases can only eliminate a disjunction"));
             };
 
@@ -945,7 +1071,8 @@ pub fn infer_proof(
             proof_arg,
         } => {
             let checked_imp = infer_proof(env, ctx, proof_imp, allowed_mode)?;
-            let Formula::Implies(premise, conclusion) = checked_imp.formula else {
+            let formula = normalize_formula_defs(env, ctx, &checked_imp.formula)?;
+            let Formula::Implies(premise, conclusion) = formula else {
                 return Err(KernelError::new("apply expected an implication"));
             };
             let arg_mode = check_proof(env, ctx, proof_arg, &premise, allowed_mode)?;
@@ -968,7 +1095,8 @@ pub fn infer_proof(
         } => {
             validate_formula(env, ctx, target)?;
             let checked_eq = infer_proof(env, ctx, eq_proof, allowed_mode)?;
-            let Formula::Eq(left, right) = checked_eq.formula else {
+            let formula = normalize_formula_defs(env, ctx, &checked_eq.formula)?;
+            let Formula::Eq(left, right) = formula else {
                 return Err(KernelError::new("rewrite expected an equality proof"));
             };
             let checked_body = infer_proof(env, ctx, proof_body, allowed_mode)?;
@@ -981,6 +1109,20 @@ pub fn infer_proof(
             Ok(CheckedProof {
                 formula: target.clone(),
                 mode_used: checked_eq.mode_used.combine(checked_body.mode_used),
+            })
+        }
+        Proof::Convert { proof_body, target } => {
+            validate_formula(env, ctx, target)?;
+            let checked_body = infer_proof(env, ctx, proof_body, allowed_mode)?;
+            if !formulas_def_eq(env, ctx, &checked_body.formula, target)? {
+                return Err(KernelError::new(format!(
+                    "cannot convert proof of `{}` to `{target}` by unfolding definitions",
+                    checked_body.formula
+                )));
+            }
+            Ok(CheckedProof {
+                formula: target.clone(),
+                mode_used: checked_body.mode_used,
             })
         }
         Proof::ForallIntro {
@@ -999,11 +1141,12 @@ pub fn infer_proof(
         }
         Proof::ForallElim { proof_forall, arg } => {
             let checked = infer_proof(env, ctx, proof_forall, allowed_mode)?;
+            let formula = normalize_formula_defs(env, ctx, &checked.formula)?;
             let Formula::Forall {
                 var,
                 var_type,
                 body,
-            } = checked.formula
+            } = formula
             else {
                 return Err(KernelError::new(
                     "first-order application expects a universal proof",
@@ -1058,11 +1201,12 @@ pub fn infer_proof(
         } => {
             validate_formula(env, ctx, target)?;
             let checked_exists = infer_proof(env, ctx, proof_exists, allowed_mode)?;
+            let formula = normalize_formula_defs(env, ctx, &checked_exists.formula)?;
             let Formula::Exists {
                 var,
                 var_type,
                 body: exists_body,
-            } = checked_exists.formula
+            } = formula
             else {
                 return Err(KernelError::new(
                     "cases can only eliminate an existential or disjunction",
@@ -1220,6 +1364,8 @@ fn instantiate_theorem(
 
 fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationError> {
     match ty {
+        Type::Nat => Ok(()),
+        Type::Set(elem) => validate_type(env, ctx, elem),
         Type::Named(name) if env.has_sort(name) || ctx.has_type_var(name) => Ok(()),
         Type::Named(name) => Err(ValidationError::new(format!("unknown type `{name}`"))),
     }
@@ -1254,6 +1400,58 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             }
             Ok(func.result.clone())
         }
+        Term::Zero => Ok(Type::Nat),
+        Term::Succ(term) => {
+            let actual = validate_term(env, ctx, term)?;
+            if actual == Type::Nat {
+                Ok(Type::Nat)
+            } else {
+                Err(ValidationError::new(format!(
+                    "succ argument has type `{actual}`, but expected `Nat`"
+                )))
+            }
+        }
+        Term::Add(left, right) => {
+            for (idx, term) in [left.as_ref(), right.as_ref()].iter().enumerate() {
+                let actual = validate_term(env, ctx, term)?;
+                if actual != Type::Nat {
+                    return Err(ValidationError::new(format!(
+                        "argument {} of `add` has type `{actual}`, but expected `Nat`",
+                        idx + 1
+                    )));
+                }
+            }
+            Ok(Type::Nat)
+        }
+        Term::EmptySet(elem_ty) => {
+            validate_type(env, ctx, elem_ty)?;
+            Ok(Type::Set(Box::new(elem_ty.clone())))
+        }
+        Term::Singleton(elem) => {
+            let elem_ty = validate_term(env, ctx, elem)?;
+            Ok(Type::Set(Box::new(elem_ty)))
+        }
+        Term::Union(left, right) | Term::Inter(left, right) | Term::Diff(left, right) => {
+            let left_ty = validate_term(env, ctx, left)?;
+            let right_ty = validate_term(env, ctx, right)?;
+            let Type::Set(left_elem) = left_ty else {
+                return Err(ValidationError::new(format!(
+                    "set operation argument 1 has type `{left_ty}`, but expected a set"
+                )));
+            };
+            let Type::Set(right_elem) = right_ty else {
+                return Err(ValidationError::new(format!(
+                    "set operation argument 2 has type `{right_ty}`, but expected a set"
+                )));
+            };
+            if left_elem == right_elem {
+                Ok(Type::Set(left_elem))
+            } else {
+                Err(ValidationError::new(format!(
+                    "set operation combines `Set {left_elem}` with `Set {right_elem}`"
+                )))
+            }
+        }
     }
 }
 
@@ -1270,6 +1468,8 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
                 || matches!(predicate_signature(env, ctx, name), Some(sig) if sig.is_empty())
             {
                 Ok(())
+            } else if let Some(def) = env.formula_def(name) {
+                instantiate_formula_def(env, ctx, def, &[]).map(|_| ())
             } else {
                 Err(ValidationError::new(format!(
                     "unknown proposition variable `{name}`"
@@ -1287,27 +1487,56 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
                 )))
             }
         }
-        Formula::PredApp(name, args) => {
-            let Some(signature) = predicate_signature(env, ctx, name) else {
-                return Err(ValidationError::new(format!("unknown predicate `{name}`")));
-            };
-            if signature.len() != args.len() {
-                return Err(ValidationError::new(format!(
-                    "predicate `{name}` expects {} argument(s), but got {}",
-                    signature.len(),
-                    args.len()
-                )));
+        Formula::In(elem, set) => {
+            let elem_type = validate_term(env, ctx, elem)?;
+            let set_type = validate_term(env, ctx, set)?;
+            match set_type {
+                Type::Set(expected) if elem_type == *expected => Ok(()),
+                Type::Set(expected) => Err(ValidationError::new(format!(
+                    "membership compares `{elem}` of type `{elem_type}` with a set of `{expected}`"
+                ))),
+                other => Err(ValidationError::new(format!(
+                    "right side of membership has type `{other}`, but expected a set"
+                ))),
             }
-            for (idx, (arg, expected)) in args.iter().zip(signature.iter()).enumerate() {
-                let actual = validate_term(env, ctx, arg)?;
-                if &actual != expected {
+        }
+        Formula::Subset(left, right) => {
+            let left_type = validate_term(env, ctx, left)?;
+            let right_type = validate_term(env, ctx, right)?;
+            match (&left_type, &right_type) {
+                (Type::Set(left_elem), Type::Set(right_elem)) if left_elem == right_elem => Ok(()),
+                (Type::Set(_), Type::Set(_)) => Err(ValidationError::new(format!(
+                    "subset compares `{left}` of type `{left_type}` with `{right}` of type `{right_type}`"
+                ))),
+                _ => Err(ValidationError::new(format!(
+                    "subset expects set arguments, but got `{left_type}` and `{right_type}`"
+                ))),
+            }
+        }
+        Formula::PredApp(name, args) => {
+            if let Some(signature) = predicate_signature(env, ctx, name) {
+                if signature.len() != args.len() {
                     return Err(ValidationError::new(format!(
-                        "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
-                        idx + 1
+                        "predicate `{name}` expects {} argument(s), but got {}",
+                        signature.len(),
+                        args.len()
                     )));
                 }
+                for (idx, (arg, expected)) in args.iter().zip(signature.iter()).enumerate() {
+                    let actual = validate_term(env, ctx, arg)?;
+                    if &actual != expected {
+                        return Err(ValidationError::new(format!(
+                            "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
+                            idx + 1
+                        )));
+                    }
+                }
+                Ok(())
+            } else if let Some(def) = env.formula_def(name) {
+                instantiate_formula_def(env, ctx, def, args).map(|_| ())
+            } else {
+                Err(ValidationError::new(format!("unknown predicate `{name}`")))
             }
-            Ok(())
         }
         Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
             validate_formula(env, ctx, left)?;
@@ -1331,8 +1560,316 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
     }
 }
 
+fn instantiate_formula_def(
+    env: &Env,
+    ctx: &Context,
+    def: &FormulaDef,
+    args: &[Term],
+) -> Result<Formula, ValidationError> {
+    let expected_args = def
+        .params
+        .iter()
+        .filter(|param| matches!(param.kind, ParamKind::Term(_)))
+        .count();
+    if expected_args != args.len() {
+        return Err(ValidationError::new(format!(
+            "definition `{}` expects {expected_args} argument(s), but got {}",
+            def.name,
+            args.len()
+        )));
+    }
+
+    let mut schema_subst = SchemaSubst::default();
+    let mut term_subst = HashMap::new();
+    let mut args = args.iter();
+    let mut arg_idx = 0usize;
+
+    for param in &def.params {
+        match &param.kind {
+            ParamKind::Type => {}
+            ParamKind::Term(ty) => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let actual = validate_term(env, ctx, arg)?;
+                unify_type(ty, &actual, &def.params, &mut schema_subst).map_err(|_| {
+                    let expected = subst_type_schema(ty, &schema_subst);
+                    ValidationError::new(format!(
+                        "argument {} of definition `{}` has type `{actual}`, but expected `{expected}`",
+                        arg_idx + 1,
+                        def.name
+                    ))
+                })?;
+                term_subst.insert(param.name.clone(), arg.clone());
+                arg_idx += 1;
+            }
+            ParamKind::Prop | ParamKind::Predicate(_) => {
+                return Err(ValidationError::new(
+                    "formula definitions currently support only type and term parameters",
+                ));
+            }
+        }
+    }
+
+    for param in &def.params {
+        if matches!(param.kind, ParamKind::Type)
+            && !schema_subst.type_args.contains_key(&param.name)
+        {
+            return Err(ValidationError::new(format!(
+                "cannot infer type argument `{}` for definition `{}`",
+                param.name, def.name
+            )));
+        }
+    }
+
+    let body = subst_formula_terms(&subst_formula_schema(&def.body, &schema_subst), &term_subst);
+    validate_formula(env, ctx, &body)?;
+    Ok(body)
+}
+
+fn formulas_def_eq(
+    env: &Env,
+    ctx: &Context,
+    left: &Formula,
+    right: &Formula,
+) -> Result<bool, ValidationError> {
+    Ok(normalize_formula_defs(env, ctx, left)? == normalize_formula_defs(env, ctx, right)?)
+}
+
+fn normalize_formula_defs(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+) -> Result<Formula, ValidationError> {
+    unfold_formula_defs(env, ctx, formula, None).map(|(formula, _)| formula)
+}
+
+fn unfold_named_formula_def(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+    name: &str,
+) -> Result<(Formula, bool), ValidationError> {
+    unfold_formula_defs(env, ctx, formula, Some(name))
+}
+
+fn unfold_formula_defs(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+    only: Option<&str>,
+) -> Result<(Formula, bool), ValidationError> {
+    match formula {
+        Formula::True => Ok((Formula::True, false)),
+        Formula::False => Ok((Formula::False, false)),
+        Formula::Atom(name) => {
+            if only.is_none_or(|only| only == name) {
+                if let Some(def) = env.formula_def(name) {
+                    let unfolded = instantiate_formula_def(env, ctx, def, &[])?;
+                    if only.is_none() {
+                        let (unfolded, _) = unfold_formula_defs(env, ctx, &unfolded, only)?;
+                        return Ok((unfolded, true));
+                    }
+                    return Ok((unfolded, true));
+                }
+            }
+            Ok((formula.clone(), false))
+        }
+        Formula::PredApp(name, args) => {
+            if only.is_none_or(|only| only == name) {
+                if let Some(def) = env.formula_def(name) {
+                    let unfolded = instantiate_formula_def(env, ctx, def, args)?;
+                    if only.is_none() {
+                        let (unfolded, _) = unfold_formula_defs(env, ctx, &unfolded, only)?;
+                        return Ok((unfolded, true));
+                    }
+                    return Ok((unfolded, true));
+                }
+            }
+            Ok((formula.clone(), false))
+        }
+        Formula::Eq(left, right) => {
+            if only.is_some() {
+                return Ok((formula.clone(), false));
+            }
+            let simplified =
+                Formula::eq(normalize_term_compute(left), normalize_term_compute(right));
+            Ok((simplified.clone(), &simplified != formula))
+        }
+        Formula::In(elem, set) => {
+            if only.is_some() {
+                return Ok((formula.clone(), false));
+            }
+            let elem = normalize_term_compute(elem);
+            let set = normalize_term_compute(set);
+            let simplified = match set {
+                Term::EmptySet(_) => Formula::False,
+                Term::Singleton(singleton_elem) => Formula::eq(elem, *singleton_elem),
+                Term::Union(left, right) => Formula::or(
+                    Formula::membership(elem.clone(), *left),
+                    Formula::membership(elem, *right),
+                ),
+                Term::Inter(left, right) => Formula::and(
+                    Formula::membership(elem.clone(), *left),
+                    Formula::membership(elem, *right),
+                ),
+                Term::Diff(left, right) => Formula::and(
+                    Formula::membership(elem.clone(), *left),
+                    Formula::negate(Formula::membership(elem, *right)),
+                ),
+                other => Formula::membership(elem, other),
+            };
+            let changed = &simplified != formula;
+            if changed {
+                let (simplified, _) = unfold_formula_defs(env, ctx, &simplified, only)?;
+                Ok((simplified, true))
+            } else {
+                Ok((simplified, false))
+            }
+        }
+        Formula::Subset(left, right) => {
+            if only.is_some() {
+                return Ok((formula.clone(), false));
+            }
+            let left = normalize_term_compute(left);
+            let right = normalize_term_compute(right);
+            let elem_ty = set_element_type(env, ctx, &left)?;
+            let right_elem_ty = set_element_type(env, ctx, &right)?;
+            if elem_ty != right_elem_ty {
+                return Err(ValidationError::new(format!(
+                    "subset compares `Set {elem_ty}` with `Set {right_elem_ty}`"
+                )));
+            }
+            let var = fresh_set_element_name(ctx, &[&left, &right]);
+            let elem = Term::Var(var.clone());
+            let expanded = Formula::forall(
+                var,
+                elem_ty,
+                Formula::implies(
+                    Formula::membership(elem.clone(), left),
+                    Formula::membership(elem, right),
+                ),
+            );
+            let (simplified, _) = unfold_formula_defs(env, ctx, &expanded, only)?;
+            Ok((simplified, true))
+        }
+        Formula::And(left, right) => {
+            unfold_binary_formula(env, ctx, left, right, only, Formula::and)
+        }
+        Formula::Or(left, right) => unfold_binary_formula(env, ctx, left, right, only, Formula::or),
+        Formula::Implies(left, right) => {
+            unfold_binary_formula(env, ctx, left, right, only, Formula::implies)
+        }
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            let (body, changed) = unfold_formula_defs(env, &body_ctx, body, only)?;
+            Ok((
+                Formula::forall(var.clone(), var_type.clone(), body),
+                changed,
+            ))
+        }
+        Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            let (body, changed) = unfold_formula_defs(env, &body_ctx, body, only)?;
+            Ok((
+                Formula::exists(var.clone(), var_type.clone(), body),
+                changed,
+            ))
+        }
+    }
+}
+
+fn normalize_term_compute(term: &Term) -> Term {
+    match term {
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) => term.clone(),
+        Term::App(name, args) => Term::App(
+            name.clone(),
+            args.iter().map(normalize_term_compute).collect(),
+        ),
+        Term::Succ(term) => Term::Succ(Box::new(normalize_term_compute(term))),
+        Term::Add(left, right) => {
+            let left = normalize_term_compute(left);
+            let right = normalize_term_compute(right);
+            match left {
+                Term::Zero => right,
+                Term::Succ(pred) => {
+                    normalize_term_compute(&Term::Succ(Box::new(Term::Add(pred, Box::new(right)))))
+                }
+                other => Term::Add(Box::new(other), Box::new(right)),
+            }
+        }
+        Term::Singleton(term) => Term::Singleton(Box::new(normalize_term_compute(term))),
+        Term::Union(left, right) => Term::Union(
+            Box::new(normalize_term_compute(left)),
+            Box::new(normalize_term_compute(right)),
+        ),
+        Term::Inter(left, right) => Term::Inter(
+            Box::new(normalize_term_compute(left)),
+            Box::new(normalize_term_compute(right)),
+        ),
+        Term::Diff(left, right) => Term::Diff(
+            Box::new(normalize_term_compute(left)),
+            Box::new(normalize_term_compute(right)),
+        ),
+    }
+}
+
+fn set_element_type(env: &Env, ctx: &Context, set: &Term) -> Result<Type, ValidationError> {
+    match validate_term(env, ctx, set)? {
+        Type::Set(elem) => Ok(*elem),
+        other => Err(ValidationError::new(format!(
+            "term `{set}` has type `{other}`, but expected a set"
+        ))),
+    }
+}
+
+fn fresh_set_element_name(ctx: &Context, terms: &[&Term]) -> Name {
+    for idx in 0.. {
+        let candidate = if idx == 0 {
+            "x".to_string()
+        } else {
+            format!("x{idx}")
+        };
+        if ctx.has_schema_name(&candidate)
+            || terms.iter().any(|term| term_has_free_var(term, &candidate))
+        {
+            continue;
+        }
+        return candidate;
+    }
+    unreachable!("fresh name search is infinite")
+}
+
+fn unfold_binary_formula(
+    env: &Env,
+    ctx: &Context,
+    left: &Formula,
+    right: &Formula,
+    only: Option<&str>,
+    rebuild: fn(Formula, Formula) -> Formula,
+) -> Result<(Formula, bool), ValidationError> {
+    let (left, left_changed) = unfold_formula_defs(env, ctx, left, only)?;
+    let (right, right_changed) = unfold_formula_defs(env, ctx, right, only)?;
+    Ok((rebuild(left, right), left_changed || right_changed))
+}
+
 fn subst_type_schema(ty: &Type, subst: &SchemaSubst) -> Type {
     match ty {
+        Type::Nat => Type::Nat,
+        Type::Set(elem) => Type::Set(Box::new(subst_type_schema(elem, subst))),
         Type::Named(name) => subst
             .type_args
             .get(name)
@@ -1354,6 +1891,26 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
                 .map(|arg| subst_term_schema(arg, subst))
                 .collect(),
         ),
+        Term::Zero => Term::Zero,
+        Term::Succ(term) => Term::Succ(Box::new(subst_term_schema(term, subst))),
+        Term::Add(left, right) => Term::Add(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
+        Term::EmptySet(ty) => Term::EmptySet(subst_type_schema(ty, subst)),
+        Term::Singleton(term) => Term::Singleton(Box::new(subst_term_schema(term, subst))),
+        Term::Union(left, right) => Term::Union(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
+        Term::Inter(left, right) => Term::Inter(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
+        Term::Diff(left, right) => Term::Diff(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
     }
 }
 
@@ -1373,6 +1930,14 @@ fn subst_formula_schema(formula: &Formula, subst: &SchemaSubst) -> Formula {
             .cloned()
             .unwrap_or_else(|| Formula::Atom(name.clone())),
         Formula::Eq(left, right) => Formula::eq(
+            subst_term_schema(left, subst),
+            subst_term_schema(right, subst),
+        ),
+        Formula::In(elem, set) => Formula::membership(
+            subst_term_schema(elem, subst),
+            subst_term_schema(set, subst),
+        ),
+        Formula::Subset(left, right) => Formula::subset(
             subst_term_schema(left, subst),
             subst_term_schema(right, subst),
         ),
@@ -1439,6 +2004,26 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
                 .map(|arg| subst_term(arg, var, replacement))
                 .collect(),
         ),
+        Term::Zero => Term::Zero,
+        Term::Succ(term) => Term::Succ(Box::new(subst_term(term, var, replacement))),
+        Term::Add(left, right) => Term::Add(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
+        Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
+        Term::Singleton(term) => Term::Singleton(Box::new(subst_term(term, var, replacement))),
+        Term::Union(left, right) => Term::Union(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
+        Term::Inter(left, right) => Term::Inter(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
+        Term::Diff(left, right) => Term::Diff(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
     }
 }
 
@@ -1448,6 +2033,14 @@ fn subst_formula_term(formula: &Formula, var: &str, replacement: &Term) -> Formu
         Formula::False => Formula::False,
         Formula::Atom(name) => Formula::Atom(name.clone()),
         Formula::Eq(left, right) => Formula::eq(
+            subst_term(left, var, replacement),
+            subst_term(right, var, replacement),
+        ),
+        Formula::In(elem, set) => Formula::membership(
+            subst_term(elem, var, replacement),
+            subst_term(set, var, replacement),
+        ),
+        Formula::Subset(left, right) => Formula::subset(
             subst_term(left, var, replacement),
             subst_term(right, var, replacement),
         ),
@@ -1504,13 +2097,23 @@ fn term_has_free_var(term: &Term, name: &str) -> bool {
     match term {
         Term::Var(var) => var == name,
         Term::App(_, args) => args.iter().any(|arg| term_has_free_var(arg, name)),
+        Term::Zero | Term::EmptySet(_) => false,
+        Term::Succ(term) | Term::Singleton(term) => term_has_free_var(term, name),
+        Term::Add(left, right)
+        | Term::Union(left, right)
+        | Term::Inter(left, right)
+        | Term::Diff(left, right) => {
+            term_has_free_var(left, name) || term_has_free_var(right, name)
+        }
     }
 }
 
 fn formula_has_free_term(formula: &Formula, name: &str) -> bool {
     match formula {
         Formula::True | Formula::False | Formula::Atom(_) => false,
-        Formula::Eq(left, right) => term_has_free_var(left, name) || term_has_free_var(right, name),
+        Formula::Eq(left, right) | Formula::In(left, right) | Formula::Subset(left, right) => {
+            term_has_free_var(left, name) || term_has_free_var(right, name)
+        }
         Formula::PredApp(_, args) => args.iter().any(|arg| term_has_free_var(arg, name)),
         Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
             formula_has_free_term(left, name) || formula_has_free_term(right, name)
@@ -1540,6 +2143,52 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
         }
     }
 
+    match term {
+        Term::Succ(inner) => {
+            for replaced in replace_term_once(inner, from, to) {
+                results.push(Term::Succ(Box::new(replaced)));
+            }
+        }
+        Term::Add(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::Add(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::Add(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::Singleton(inner) => {
+            for replaced in replace_term_once(inner, from, to) {
+                results.push(Term::Singleton(Box::new(replaced)));
+            }
+        }
+        Term::Union(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::Union(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::Union(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::Inter(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::Inter(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::Inter(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::Diff(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::Diff(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::Diff(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::Var(_) | Term::App(_, _) | Term::Zero | Term::EmptySet(_) => {}
+    }
+
     results
 }
 
@@ -1555,6 +2204,12 @@ fn replace_formula_once(formula: &Formula, from: &Term, to: &Term) -> Vec<Formul
                 results.push(Formula::eq(left.clone(), new_right));
             }
             results
+        }
+        Formula::In(left, right) => {
+            replace_binary_term_formula(left, right, from, to, Formula::membership)
+        }
+        Formula::Subset(left, right) => {
+            replace_binary_term_formula(left, right, from, to, Formula::subset)
         }
         Formula::PredApp(name, args) => {
             let mut results = Vec::new();
@@ -1603,6 +2258,23 @@ fn replace_formula_once(formula: &Formula, from: &Term, to: &Term) -> Vec<Formul
     }
 }
 
+fn replace_binary_term_formula(
+    left: &Term,
+    right: &Term,
+    from: &Term,
+    to: &Term,
+    rebuild: fn(Term, Term) -> Formula,
+) -> Vec<Formula> {
+    let mut results = Vec::new();
+    for new_left in replace_term_once(left, from, to) {
+        results.push(rebuild(new_left, right.clone()));
+    }
+    for new_right in replace_term_once(right, from, to) {
+        results.push(rebuild(left.clone(), new_right));
+    }
+    results
+}
+
 fn replace_binary_formula(
     left: &Formula,
     right: &Formula,
@@ -1639,12 +2311,20 @@ struct TheoremDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct DefDecl {
+    name: Name,
+    params: Vec<Param>,
+    body: Formula,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Command {
     Mode(LogicMode),
     Sort(Name),
     Const(Name, Type),
     Func(Name, Vec<Type>, Type),
     Pred(Name, Vec<Type>),
+    Def(DefDecl),
     Theorem(TheoremDecl),
 }
 
@@ -1754,6 +2434,8 @@ enum Tactic {
     Exists(Term),
     Refl,
     Rewrite(ProofExpr),
+    Unfold(Name),
+    Simp,
     Exfalso,
     Contradiction,
     ByCases {
@@ -1851,41 +2533,41 @@ impl Tokens {
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
         let name = self.expect_ident()?;
-        if name == "Prop" || name == "Type" {
-            return Err(ParseError::new(format!(
+        match name.as_str() {
+            "Prop" | "Type" => Err(ParseError::new(format!(
                 "`{name}` is not a first-order type"
-            )));
+            ))),
+            "Nat" => Ok(Type::Nat),
+            "Set" => Ok(Type::Set(Box::new(self.parse_type()?))),
+            _ => Ok(Type::Named(name)),
         }
-        Ok(Type::Named(name))
     }
 
     fn parse_param_kind(&mut self) -> Result<ParamKind, ParseError> {
-        let first = self.expect_ident()?;
-        if first == "Prop" {
+        if self.eat_ident("Prop") {
             return Ok(ParamKind::Prop);
         }
-        if first == "Type" {
+        if self.eat_ident("Type") {
             return Ok(ParamKind::Type);
         }
 
-        let ty = Type::Named(first.clone());
+        let ty = self.parse_type()?;
         if self.eat_sym("->") {
             let mut args = vec![ty];
             loop {
-                let next = self.expect_ident()?;
-                if next == "Prop" {
+                if self.eat_ident("Prop") {
                     return Ok(ParamKind::Predicate(args));
                 }
-                if next == "Type" {
+                if matches!(self.peek(), TokenKind::Ident(name) if name == "Type") {
                     return Err(ParseError::new(
                         "`Type` cannot appear in predicate arguments",
                     ));
                 }
-                args.push(Type::Named(next));
+                args.push(self.parse_type()?);
                 self.expect_sym("->")?;
             }
         } else {
-            Ok(ParamKind::Term(Type::Named(first)))
+            Ok(ParamKind::Term(ty))
         }
     }
 
@@ -1906,8 +2588,16 @@ impl Tokens {
     }
 
     fn parse_term(&mut self) -> Result<Term, ParseError> {
+        if self.eat_sym("0") {
+            return Ok(Term::Zero);
+        }
         let name = self.expect_ident()?;
         if self.eat_sym("(") {
+            if name == "empty" {
+                let ty = self.parse_type()?;
+                self.expect_sym(")")?;
+                return Ok(Term::EmptySet(ty));
+            }
             let mut args = Vec::new();
             if !self.eat_sym(")") {
                 loop {
@@ -1918,7 +2608,29 @@ impl Tokens {
                     self.expect_sym(",")?;
                 }
             }
-            return Ok(Term::App(name, args));
+            return match (name.as_str(), args.as_slice()) {
+                ("succ", [arg]) => Ok(Term::Succ(Box::new(arg.clone()))),
+                ("add", [left, right]) => {
+                    Ok(Term::Add(Box::new(left.clone()), Box::new(right.clone())))
+                }
+                ("singleton", [arg]) => Ok(Term::Singleton(Box::new(arg.clone()))),
+                ("union", [left, right]) => {
+                    Ok(Term::Union(Box::new(left.clone()), Box::new(right.clone())))
+                }
+                ("inter", [left, right]) => {
+                    Ok(Term::Inter(Box::new(left.clone()), Box::new(right.clone())))
+                }
+                ("diff", [left, right]) => {
+                    Ok(Term::Diff(Box::new(left.clone()), Box::new(right.clone())))
+                }
+                ("succ" | "singleton", _) => Err(ParseError::new(format!(
+                    "`{name}` expects exactly one argument"
+                ))),
+                ("add" | "union" | "inter" | "diff", _) => Err(ParseError::new(format!(
+                    "`{name}` expects exactly two arguments"
+                ))),
+                _ => Ok(Term::App(name, args)),
+            };
         }
         Ok(Term::Var(name))
     }
@@ -1999,9 +2711,25 @@ impl Tokens {
             let right = self.parse_term()?;
             return Ok(Formula::eq(term, right));
         }
+        if self.eat_ident("in") {
+            let set = self.parse_term()?;
+            return Ok(Formula::membership(term, set));
+        }
+        if self.eat_ident("subset") {
+            let right = self.parse_term()?;
+            return Ok(Formula::subset(term, right));
+        }
         match term {
             Term::Var(name) => Ok(Formula::Atom(name)),
             Term::App(name, args) => Ok(Formula::PredApp(name, args)),
+            Term::Zero
+            | Term::Succ(_)
+            | Term::Add(_, _)
+            | Term::EmptySet(_)
+            | Term::Singleton(_)
+            | Term::Union(_, _)
+            | Term::Inter(_, _)
+            | Term::Diff(_, _) => Err(ParseError::new(format!("term `{term}` is not a formula"))),
         }
     }
 }
@@ -2014,6 +2742,13 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
     while i < chars.len() {
         let ch = chars[i];
         if ch.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if ch == '0' {
+            tokens.push(Token {
+                kind: TokenKind::Sym("0".to_string()),
+            });
             i += 1;
             continue;
         }
@@ -2129,6 +2864,30 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             continue;
         }
 
+        if trimmed.starts_with("def ") {
+            let mut header = String::from(trimmed);
+            while !header.contains(":=") {
+                i += 1;
+                if i >= lines.len() {
+                    return Err(ParseError::new("unterminated definition"));
+                }
+                header.push(' ');
+                header.push_str(strip_comment(lines[i]).trim());
+            }
+
+            let Some((header, body)) = header.split_once(":=") else {
+                return Err(ParseError::new("expected `:=` in definition"));
+            };
+            let (name, params) = parse_def_header(header)?;
+            commands.push(Command::Def(DefDecl {
+                name,
+                params,
+                body: parse_formula_str(body.trim())?,
+            }));
+            i += 1;
+            continue;
+        }
+
         if trimmed.starts_with("theorem ") {
             let mut header = String::from(trimmed);
             while !header.contains(":= by") {
@@ -2192,6 +2951,26 @@ fn parse_theorem_header(header: &str) -> Result<(Name, Vec<Param>, Formula), Par
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("theorem")?;
     let name = tokens.expect_ident()?;
+    let params = parse_decl_params(&mut tokens)?;
+
+    tokens.expect_sym(":")?;
+    let statement = tokens.parse_formula()?;
+    tokens.expect_eof()?;
+    Ok((name, params, statement))
+}
+
+fn parse_def_header(header: &str) -> Result<(Name, Vec<Param>), ParseError> {
+    let mut tokens = Tokens::new(header)?;
+    tokens.expect_keyword("def")?;
+    let name = tokens.expect_ident()?;
+    let params = parse_decl_params(&mut tokens)?;
+    tokens.expect_sym(":")?;
+    tokens.expect_keyword("Prop")?;
+    tokens.expect_eof()?;
+    Ok((name, params))
+}
+
+fn parse_decl_params(tokens: &mut Tokens) -> Result<Vec<Param>, ParseError> {
     let mut params = Vec::new();
 
     while tokens.eat_sym("(") {
@@ -2213,10 +2992,7 @@ fn parse_theorem_header(header: &str) -> Result<(Name, Vec<Param>, Formula), Par
         }
     }
 
-    tokens.expect_sym(":")?;
-    let statement = tokens.parse_formula()?;
-    tokens.expect_eof()?;
-    Ok((name, params, statement))
+    Ok(params)
 }
 
 fn parse_type_str(input: &str) -> Result<Type, ParseError> {
@@ -2388,6 +3164,12 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     }
     if let Some(rest) = line.strip_prefix("rewrite ") {
         return Ok(Tactic::Rewrite(parse_proof_expr(rest.trim())?));
+    }
+    if let Some(rest) = line.strip_prefix("unfold ") {
+        return Ok(Tactic::Unfold(expect_single_name(rest, "unfold")?));
+    }
+    if line == "simp" {
+        return Ok(Tactic::Simp);
     }
     if line == "split" {
         return Ok(Tactic::Split);
@@ -2658,6 +3440,10 @@ enum PartialProof {
         proof_body: Box<PartialProof>,
         target: Formula,
     },
+    Convert {
+        proof_body: Box<PartialProof>,
+        target: Formula,
+    },
     ForallIntro {
         var: Name,
         var_type: Type,
@@ -2719,6 +3505,7 @@ impl PartialProof {
                 proof_body,
                 ..
             } => eq_proof.replace_hole(id, replacement) || proof_body.replace_hole(id, replacement),
+            PartialProof::Convert { proof_body, .. } => proof_body.replace_hole(id, replacement),
             PartialProof::ForallIntro { body, .. } => body.replace_hole(id, replacement),
             PartialProof::ForallElim { proof_forall, .. } => {
                 proof_forall.replace_hole(id, replacement)
@@ -2798,6 +3585,10 @@ impl PartialProof {
                 target,
             } => Ok(Proof::EqSubst {
                 eq_proof: Box::new(eq_proof.complete()?),
+                proof_body: Box::new(proof_body.complete()?),
+                target,
+            }),
+            PartialProof::Convert { proof_body, target } => Ok(Proof::Convert {
                 proof_body: Box::new(proof_body.complete()?),
                 target,
             }),
@@ -2952,13 +3743,16 @@ fn run_tactic(
             })
         }
         Tactic::Assumption => {
-            let Some(binding) = goal
-                .context
-                .proofs()
-                .iter()
-                .rev()
-                .find(|binding| binding.formula == goal.target)
-            else {
+            let mut matched = None;
+            for binding in goal.context.proofs().iter().rev() {
+                if formulas_def_eq(env, &goal.context, &binding.formula, &goal.target)
+                    .map_err(|err| TacticError::new(err.message))?
+                {
+                    matched = Some(binding);
+                    break;
+                }
+            }
+            let Some(binding) = matched else {
                 return Err(TacticError::new("no matching assumption found"));
             };
             Ok(StepResult {
@@ -3066,7 +3860,9 @@ fn run_tactic(
             let proof_or = expr.to_proof(env, &goal.context);
             let checked = infer_proof(env, &goal.context, &proof_or, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot case split: {}", err.message)))?;
-            let Formula::Or(left_formula, right_formula) = checked.formula else {
+            let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
+                .map_err(|err| TacticError::new(err.message))?;
+            let Formula::Or(left_formula, right_formula) = formula else {
                 return Err(TacticError::new("cases expects a disjunction proof"));
             };
 
@@ -3111,11 +3907,13 @@ fn run_tactic(
             let proof_exists = expr.to_proof(env, &goal.context);
             let checked = infer_proof(env, &goal.context, &proof_exists, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot case split: {}", err.message)))?;
+            let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
+                .map_err(|err| TacticError::new(err.message))?;
             let Formula::Exists {
                 var,
                 var_type,
                 body,
-            } = checked.formula
+            } = formula
             else {
                 return Err(TacticError::new("cases expects an existential proof"));
             };
@@ -3186,7 +3984,9 @@ fn run_tactic(
             let eq_proof = proof_expr_for_inferred(env, &goal.context, expr)?;
             let checked = infer_proof(env, &goal.context, &eq_proof, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot rewrite: {}", err.message)))?;
-            let Formula::Eq(left, right) = checked.formula else {
+            let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
+                .map_err(|err| TacticError::new(err.message))?;
+            let Formula::Eq(left, right) = formula else {
                 return Err(TacticError::new("rewrite expects an equality proof"));
             };
             let Some(source_target) = formula_rewrite_sources(&goal.target, &left, &right)
@@ -3213,6 +4013,55 @@ fn run_tactic(
                 }],
             })
         }
+        Tactic::Unfold(name) => {
+            if env.formula_def(name).is_none() {
+                return Err(TacticError::new(format!("unknown definition `{name}`")));
+            }
+            let (target, changed) =
+                unfold_named_formula_def(env, &goal.context, &goal.target, name).map_err(
+                    |err| TacticError::new(format!("cannot unfold `{name}`: {}", err.message)),
+                )?;
+            if !changed {
+                return Err(TacticError::new(format!(
+                    "no occurrence of definition `{name}` in goal `{}`",
+                    goal.target
+                )));
+            }
+            let id = fresh_goal(next_goal_id);
+            Ok(StepResult {
+                replacement: PartialProof::Convert {
+                    proof_body: Box::new(PartialProof::Hole(id)),
+                    target: goal.target,
+                },
+                new_goals: vec![Goal {
+                    id,
+                    context: goal.context,
+                    target,
+                }],
+            })
+        }
+        Tactic::Simp => {
+            let (target, changed) = unfold_formula_defs(env, &goal.context, &goal.target, None)
+                .map_err(|err| TacticError::new(format!("cannot simplify: {}", err.message)))?;
+            if !changed {
+                return Err(TacticError::new(format!(
+                    "simp made no progress on goal `{}`",
+                    goal.target
+                )));
+            }
+            let id = fresh_goal(next_goal_id);
+            Ok(StepResult {
+                replacement: PartialProof::Convert {
+                    proof_body: Box::new(PartialProof::Hole(id)),
+                    target: goal.target,
+                },
+                new_goals: vec![Goal {
+                    id,
+                    context: goal.context,
+                    target,
+                }],
+            })
+        }
         Tactic::Exfalso => {
             let id = fresh_goal(next_goal_id);
             Ok(StepResult {
@@ -3227,7 +4076,7 @@ fn run_tactic(
                 }],
             })
         }
-        Tactic::Contradiction => contradiction_step(goal),
+        Tactic::Contradiction => contradiction_step(env, goal),
         Tactic::ByCases { name, formula } => {
             if matches!(allowed_mode, LogicMode::Constructive) {
                 return Err(TacticError::new(format!(
@@ -3510,8 +4359,13 @@ fn apply_plan_for_goal(
     schema_params: &[Param],
     initial_schema_subst: SchemaSubst,
 ) -> Result<ApplyPlan, TacticError> {
+    let normalized_formula =
+        normalize_formula_defs(env, ctx, formula).map_err(|err| TacticError::new(err.message))?;
+    let normalized_target =
+        normalize_formula_defs(env, ctx, target).map_err(|err| TacticError::new(err.message))?;
+
     let mut forall_vars = Vec::new();
-    let mut cursor = formula;
+    let mut cursor = &normalized_formula;
     while let Formula::Forall {
         var,
         var_type,
@@ -3540,7 +4394,7 @@ fn apply_plan_for_goal(
             term_subst: &mut term_subst,
             schema_subst: &mut schema_subst,
         };
-        unify_formula(cursor, target, &mut unify).map_err(|_| {
+        unify_formula(cursor, &normalized_target, &mut unify).map_err(|_| {
             TacticError::new(format!(
                 "cannot apply expression with conclusion `{cursor}` to goal `{target}`"
             ))
@@ -3646,6 +4500,11 @@ fn unify_formula(
         }
         (Formula::Atom(p_name), Formula::Atom(t_name)) if p_name == t_name => Ok(()),
         (Formula::Eq(p_left, p_right), Formula::Eq(t_left, t_right)) => {
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
+        (Formula::In(p_left, p_right), Formula::In(t_left, t_right))
+        | (Formula::Subset(p_left, p_right), Formula::Subset(t_left, t_right)) => {
             unify_term(p_left, t_left, unify)?;
             unify_term(p_right, t_right, unify)
         }
@@ -3758,6 +4617,64 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             }
             Ok(())
         }
+        Term::Zero => {
+            if matches!(target, Term::Zero) {
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+        Term::Succ(pattern) => {
+            let Term::Succ(target) = target else {
+                return Err(());
+            };
+            unify_term(pattern, target, unify)
+        }
+        Term::Add(p_left, p_right) => {
+            let Term::Add(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
+        Term::EmptySet(pattern_ty) => {
+            let Term::EmptySet(target_ty) = target else {
+                return Err(());
+            };
+            unify_type(
+                pattern_ty,
+                target_ty,
+                unify.schema_params,
+                unify.schema_subst,
+            )
+        }
+        Term::Singleton(pattern) => {
+            let Term::Singleton(target) = target else {
+                return Err(());
+            };
+            unify_term(pattern, target, unify)
+        }
+        Term::Union(p_left, p_right) => {
+            let Term::Union(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
+        Term::Inter(p_left, p_right) => {
+            let Term::Inter(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
+        Term::Diff(p_left, p_right) => {
+            let Term::Diff(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
     }
 }
 
@@ -3842,6 +4759,12 @@ fn unify_type(
     schema_subst: &mut SchemaSubst,
 ) -> Result<(), ()> {
     match pattern {
+        Type::Set(pattern_elem) => {
+            let Type::Set(target_elem) = target else {
+                return Err(());
+            };
+            unify_type(pattern_elem, target_elem, schema_params, schema_subst)
+        }
         Type::Named(name) if schema_type_param(schema_params, name) => {
             if let Some(existing) = schema_subst.type_args.get(name) {
                 if existing == target {
@@ -3864,14 +4787,13 @@ fn unify_type(
     }
 }
 
-fn contradiction_step(goal: Goal) -> Result<StepResult, TacticError> {
-    if let Some(binding) = goal
-        .context
-        .proofs()
-        .iter()
-        .rev()
-        .find(|binding| matches!(&binding.formula, Formula::False))
-    {
+fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> {
+    for binding in goal.context.proofs().iter().rev() {
+        if !formulas_def_eq(env, &goal.context, &binding.formula, &Formula::False)
+            .map_err(|err| TacticError::new(err.message))?
+        {
+            continue;
+        }
         return Ok(StepResult {
             replacement: PartialProof::FalseElim {
                 proof_false: Box::new(PartialProof::Done(Proof::Hyp(binding.name.clone()))),
@@ -3888,12 +4810,16 @@ fn contradiction_step(goal: Goal) -> Result<StepResult, TacticError> {
         if !matches!(conclusion.as_ref(), Formula::False) {
             continue;
         }
-        if let Some(pos) = goal
-            .context
-            .proofs()
-            .iter()
-            .find(|binding| &binding.formula == premise.as_ref())
-        {
+        let mut pos = None;
+        for binding in goal.context.proofs() {
+            if formulas_def_eq(env, &goal.context, &binding.formula, premise)
+                .map_err(|err| TacticError::new(err.message))?
+            {
+                pos = Some(binding);
+                break;
+            }
+        }
+        if let Some(pos) = pos {
             return Ok(StepResult {
                 replacement: PartialProof::FalseElim {
                     proof_false: Box::new(PartialProof::Done(Proof::ImpElim {
@@ -4468,6 +5394,274 @@ theorem bad : alice = mother(alice) -> Happy(alice) -> Happy(alice) := by
   rewrite h
 "#,
             "rewrite could not find `mother(alice)` in goal `Happy(alice)`",
+        );
+    }
+
+    #[test]
+    fn formula_definition_can_be_used_by_exact() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+def HappyMother (x : Person) : Prop := Happy(mother(x))
+
+theorem def_elim : HappyMother(alice) -> Happy(mother(alice)) := by
+  intro h
+  exact h
+
+theorem def_intro : Happy(mother(alice)) -> HappyMother(alice) := by
+  intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn unfold_expands_definition_in_goal() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+def HappyMother (x : Person) : Prop := Happy(mother(x))
+
+theorem unfold_goal : Happy(mother(alice)) -> HappyMother(alice) := by
+  intro h
+  unfold HappyMother
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn simp_unfolds_formula_definitions_in_goal() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+def HappyMother (x : Person) : Prop := Happy(mother(x))
+def VeryHappyMother (x : Person) : Prop := HappyMother(x)
+
+theorem simp_goal : Happy(mother(alice)) -> VeryHappyMother(alice) := by
+  intro h
+  simp
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn formula_definition_infers_type_parameter_from_term_argument() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+def SelfEq (A : Type) (x : A) : Prop := x = x
+
+theorem self_eq_alice : SelfEq(alice) := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn formula_definition_arity_mismatch_is_rejected() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+pred Happy(Person)
+
+def PairHappy (x y : Person) : Prop := Happy(x)
+
+theorem bad : PairHappy(alice) := by
+"#,
+            "definition `PairHappy` expects 2 argument(s), but got 1",
+        );
+    }
+
+    #[test]
+    fn formula_definition_rejects_uninferrable_type_parameter() {
+        check_err_contains(
+            r#"
+mode constructive
+
+def Mystery (A : Type) : Prop := True
+
+theorem bad : Mystery := by
+"#,
+            "cannot infer type argument `A` for definition `Mystery`",
+        );
+    }
+
+    #[test]
+    fn unfold_rejects_missing_definition_occurrence() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+pred Happy(Person)
+
+def HappyAlice : Prop := Happy(alice)
+
+theorem bad : True := by
+  unfold HappyAlice
+"#,
+            "no occurrence of definition `HappyAlice` in goal `True`",
+        );
+    }
+
+    #[test]
+    fn simp_rejects_no_progress() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad : True := by
+  simp
+"#,
+            "simp made no progress on goal `True`",
+        );
+    }
+
+    #[test]
+    fn nat_addition_computes_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem add_zero_left (n : Nat) : add(0, n) = n := by
+  simp
+  refl
+
+theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
+  simp
+  refl
+
+theorem add_one_zero : add(succ(0), 0) = succ(0) := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn set_membership_computes_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+theorem singleton_member : alice in singleton(alice) := by
+  simp
+  refl
+
+theorem empty_member_implies_false : alice in empty(Person) -> False := by
+  intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn subset_computes_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+
+theorem inter_subset_left (A B : Set Person) : inter(A, B) subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx.left
+
+theorem subset_refl (A : Set Person) : A subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx
+"#,
+        );
+    }
+
+    #[test]
+    fn subset_hypothesis_can_be_applied_after_normalization() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+
+theorem subset_apply
+  (A B : Set Person)
+  (a : Person)
+  : A subset B -> a in A -> a in B := by
+  intro h
+  intro ha
+  apply h
+  exact ha
+"#,
+        );
+    }
+
+    #[test]
+    fn set_type_parameter_works_with_subset_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem subset_refl
+  (T : Type)
+  (A : Set T)
+  : A subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx
+"#,
+        );
+    }
+
+    #[test]
+    fn membership_type_mismatch_is_rejected() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+sort Color
+const alice : Person
+const red : Color
+
+theorem bad : alice in singleton(red) := by
+"#,
+            "membership compares `alice` of type `Person` with a set of `Color`",
         );
     }
 

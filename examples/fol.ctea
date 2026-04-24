@@ -9,6 +9,8 @@ func mother : Person -> Person
 pred Student(Person)
 pred Happy(Person)
 
+def HappyMother (x : Person) : Prop := Happy(mother(x))
+
 theorem student_exists : Student(alice) -> exists x : Person, Student(x) := by
   intro h
   exists alice
@@ -30,6 +32,20 @@ theorem rewrite_happy
   intro ha
   rewrite h
   exact ha
+
+theorem happy_mother_def_elim : HappyMother(alice) -> Happy(mother(alice)) := by
+  intro h
+  exact h
+
+theorem happy_mother_def_intro : Happy(mother(alice)) -> HappyMother(alice) := by
+  intro h
+  unfold HappyMother
+  exact h
+
+theorem happy_mother_def_simp : Happy(mother(alice)) -> HappyMother(alice) := by
+  intro h
+  simp
+  exact h
 
 theorem forall_and_left
   (P : Person -> Prop)

@@ -1,0 +1,59 @@
+mode constructive
+
+sort Person
+
+const alice : Person
+
+theorem add_zero_left (n : Nat) : add(0, n) = n := by
+  simp
+  refl
+
+theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
+  simp
+  refl
+
+theorem singleton_member : alice in singleton(alice) := by
+  simp
+  refl
+
+theorem empty_member_implies_false
+  (T : Type)
+  (x : T)
+  : x in empty(T) -> False := by
+  intro h
+  exact h
+
+theorem inter_subset_left
+  (T : Type)
+  (A B : Set T)
+  : inter(A, B) subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx.left
+
+theorem subset_refl
+  (T : Type)
+  (A : Set T)
+  : A subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx
+
+theorem union_subset
+  (T : Type)
+  (A B C : Set T)
+  : A subset C -> B subset C -> union(A, B) subset C := by
+  intro hAC
+  intro hBC
+  simp
+  intro x
+  intro hx
+  cases hx with
+  | left hxA =>
+      apply hAC
+      exact hxA
+  | right hxB =>
+      apply hBC
+      exact hxB
