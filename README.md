@@ -44,15 +44,16 @@ proof object.
   `exact theorem_name {A := Person; P := Happy; x := alice}`
 - proof objects for natural-deduction rules over implication, conjunction,
   disjunction, truth, falsehood, universal quantification, existential
-  quantification, equality reflexivity, theorem references, and classical rules
+  quantification, equality reflexivity, equality substitution, theorem
+  references, and classical rules
 - tactics: `intro`, `exact`, `assumption`, `apply`, `split`, `left`, `right`,
-  `cases`, `exists`, `refl`, `exfalso`, `contradiction`, `by_cases`, `by_contra`
+  `cases`, `exists`, `refl`, `rewrite`, `exfalso`, `contradiction`, `by_cases`,
+  `by_contra`
 - kernel reporting of constructive versus classical proof use
 
 ## Next Milestones
 
 1. Improve diagnostics with source spans and proof-state rendering.
 2. Improve theorem-instantiation diagnostics and broaden inference.
-3. Add equality substitution and rewriting.
-4. Add typed sets and the set simplification layer.
-5. Add natural numbers and induction.
+3. Add typed sets and the set simplification layer.
+4. Add natural numbers and induction.

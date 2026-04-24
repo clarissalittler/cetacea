@@ -302,6 +302,11 @@ pub enum Proof {
         proof_arg: Box<Proof>,
     },
     EqRefl(Term),
+    EqSubst {
+        eq_proof: Box<Proof>,
+        proof_body: Box<Proof>,
+        target: Formula,
+    },
     ForallIntro {
         var: Name,
         var_type: Type,
@@ -956,6 +961,28 @@ pub fn infer_proof(
                 mode_used: LogicMode::Constructive,
             })
         }
+        Proof::EqSubst {
+            eq_proof,
+            proof_body,
+            target,
+        } => {
+            validate_formula(env, ctx, target)?;
+            let checked_eq = infer_proof(env, ctx, eq_proof, allowed_mode)?;
+            let Formula::Eq(left, right) = checked_eq.formula else {
+                return Err(KernelError::new("rewrite expected an equality proof"));
+            };
+            let checked_body = infer_proof(env, ctx, proof_body, allowed_mode)?;
+            if !formula_rewrite_matches(&checked_body.formula, target, &left, &right) {
+                return Err(KernelError::new(format!(
+                    "cannot rewrite `{}` to `{target}` using `{left} = {right}`",
+                    checked_body.formula
+                )));
+            }
+            Ok(CheckedProof {
+                formula: target.clone(),
+                mode_used: checked_eq.mode_used.combine(checked_body.mode_used),
+            })
+        }
         Proof::ForallIntro {
             var,
             var_type,
@@ -1497,6 +1524,112 @@ fn formula_has_free_term(formula: &Formula, name: &str) -> bool {
     }
 }
 
+fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
+    let mut results = Vec::new();
+    if term == from {
+        results.push(to.clone());
+    }
+
+    if let Term::App(name, args) = term {
+        for (idx, arg) in args.iter().enumerate() {
+            for replaced_arg in replace_term_once(arg, from, to) {
+                let mut new_args = args.clone();
+                new_args[idx] = replaced_arg;
+                results.push(Term::App(name.clone(), new_args));
+            }
+        }
+    }
+
+    results
+}
+
+fn replace_formula_once(formula: &Formula, from: &Term, to: &Term) -> Vec<Formula> {
+    match formula {
+        Formula::True | Formula::False | Formula::Atom(_) => Vec::new(),
+        Formula::Eq(left, right) => {
+            let mut results = Vec::new();
+            for new_left in replace_term_once(left, from, to) {
+                results.push(Formula::eq(new_left, right.clone()));
+            }
+            for new_right in replace_term_once(right, from, to) {
+                results.push(Formula::eq(left.clone(), new_right));
+            }
+            results
+        }
+        Formula::PredApp(name, args) => {
+            let mut results = Vec::new();
+            for (idx, arg) in args.iter().enumerate() {
+                for replaced_arg in replace_term_once(arg, from, to) {
+                    let mut new_args = args.clone();
+                    new_args[idx] = replaced_arg;
+                    results.push(Formula::PredApp(name.clone(), new_args));
+                }
+            }
+            results
+        }
+        Formula::And(left, right) => replace_binary_formula(left, right, from, to, Formula::and),
+        Formula::Or(left, right) => replace_binary_formula(left, right, from, to, Formula::or),
+        Formula::Implies(left, right) => {
+            replace_binary_formula(left, right, from, to, Formula::implies)
+        }
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        } => {
+            if term_has_free_var(from, var) || term_has_free_var(to, var) {
+                Vec::new()
+            } else {
+                replace_formula_once(body, from, to)
+                    .into_iter()
+                    .map(|new_body| Formula::forall(var.clone(), var_type.clone(), new_body))
+                    .collect()
+            }
+        }
+        Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            if term_has_free_var(from, var) || term_has_free_var(to, var) {
+                Vec::new()
+            } else {
+                replace_formula_once(body, from, to)
+                    .into_iter()
+                    .map(|new_body| Formula::exists(var.clone(), var_type.clone(), new_body))
+                    .collect()
+            }
+        }
+    }
+}
+
+fn replace_binary_formula(
+    left: &Formula,
+    right: &Formula,
+    from: &Term,
+    to: &Term,
+    rebuild: fn(Formula, Formula) -> Formula,
+) -> Vec<Formula> {
+    let mut results = Vec::new();
+    for new_left in replace_formula_once(left, from, to) {
+        results.push(rebuild(new_left, right.clone()));
+    }
+    for new_right in replace_formula_once(right, from, to) {
+        results.push(rebuild(left.clone(), new_right));
+    }
+    results
+}
+
+fn formula_rewrite_matches(source: &Formula, target: &Formula, from: &Term, to: &Term) -> bool {
+    replace_formula_once(source, from, to)
+        .into_iter()
+        .any(|rewritten| &rewritten == target)
+}
+
+fn formula_rewrite_sources(target: &Formula, from: &Term, to: &Term) -> Vec<Formula> {
+    replace_formula_once(target, to, from)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TheoremDecl {
     name: Name,
@@ -1620,6 +1753,7 @@ enum Tactic {
     },
     Exists(Term),
     Refl,
+    Rewrite(ProofExpr),
     Exfalso,
     Contradiction,
     ByCases {
@@ -2252,6 +2386,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if line == "refl" {
         return Ok(Tactic::Refl);
     }
+    if let Some(rest) = line.strip_prefix("rewrite ") {
+        return Ok(Tactic::Rewrite(parse_proof_expr(rest.trim())?));
+    }
     if line == "split" {
         return Ok(Tactic::Split);
     }
@@ -2516,6 +2653,11 @@ enum PartialProof {
         proof_imp: Box<PartialProof>,
         proof_arg: Box<PartialProof>,
     },
+    EqSubst {
+        eq_proof: Box<PartialProof>,
+        proof_body: Box<PartialProof>,
+        target: Formula,
+    },
     ForallIntro {
         var: Name,
         var_type: Type,
@@ -2572,6 +2714,11 @@ impl PartialProof {
                 proof_imp,
                 proof_arg,
             } => proof_imp.replace_hole(id, replacement) || proof_arg.replace_hole(id, replacement),
+            PartialProof::EqSubst {
+                eq_proof,
+                proof_body,
+                ..
+            } => eq_proof.replace_hole(id, replacement) || proof_body.replace_hole(id, replacement),
             PartialProof::ForallIntro { body, .. } => body.replace_hole(id, replacement),
             PartialProof::ForallElim { proof_forall, .. } => {
                 proof_forall.replace_hole(id, replacement)
@@ -2644,6 +2791,15 @@ impl PartialProof {
             } => Ok(Proof::ImpElim {
                 proof_imp: Box::new(proof_imp.complete()?),
                 proof_arg: Box::new(proof_arg.complete()?),
+            }),
+            PartialProof::EqSubst {
+                eq_proof,
+                proof_body,
+                target,
+            } => Ok(Proof::EqSubst {
+                eq_proof: Box::new(eq_proof.complete()?),
+                proof_body: Box::new(proof_body.complete()?),
+                target,
             }),
             PartialProof::ForallIntro {
                 var,
@@ -3026,6 +3182,37 @@ fn run_tactic(
                 new_goals: Vec::new(),
             })
         }
+        Tactic::Rewrite(expr) => {
+            let eq_proof = proof_expr_for_inferred(env, &goal.context, expr)?;
+            let checked = infer_proof(env, &goal.context, &eq_proof, allowed_mode)
+                .map_err(|err| TacticError::new(format!("cannot rewrite: {}", err.message)))?;
+            let Formula::Eq(left, right) = checked.formula else {
+                return Err(TacticError::new("rewrite expects an equality proof"));
+            };
+            let Some(source_target) = formula_rewrite_sources(&goal.target, &left, &right)
+                .into_iter()
+                .next()
+            else {
+                return Err(TacticError::new(format!(
+                    "rewrite could not find `{right}` in goal `{}`",
+                    goal.target
+                )));
+            };
+
+            let body_id = fresh_goal(next_goal_id);
+            Ok(StepResult {
+                replacement: PartialProof::EqSubst {
+                    eq_proof: Box::new(PartialProof::Done(eq_proof)),
+                    proof_body: Box::new(PartialProof::Hole(body_id)),
+                    target: goal.target.clone(),
+                },
+                new_goals: vec![Goal {
+                    id: body_id,
+                    context: goal.context,
+                    target: source_target,
+                }],
+            })
+        }
         Tactic::Exfalso => {
             let id = fresh_goal(next_goal_id);
             Ok(StepResult {
@@ -3114,6 +3301,32 @@ fn run_tactic(
             })
         }
     }
+}
+
+fn proof_expr_for_inferred(
+    env: &Env,
+    ctx: &Context,
+    expr: &ProofExpr,
+) -> Result<Proof, TacticError> {
+    if expr.is_bare_theorem_ref(env, ctx) {
+        let theorem = env
+            .theorem(&expr.base)
+            .ok_or_else(|| TacticError::new(format!("unknown theorem `{}`", expr.base)))?;
+        let subst = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
+        ensure_schema_subst_complete(&theorem.params, &subst)?;
+        return Ok(Proof::TheoremRef {
+            name: expr.base.clone(),
+            subst,
+        });
+    }
+
+    if expr.has_explicit_args() {
+        return Err(TacticError::new(
+            "explicit theorem arguments can only be used with theorem references",
+        ));
+    }
+
+    Ok(expr.to_proof(env, ctx))
 }
 
 fn explicit_schema_subst(
@@ -4136,6 +4349,125 @@ func mother : Person -> Person
 theorem eq_refl_mother (a : Person) : mother(a) = mother(a) := by
   refl
 "#,
+        );
+    }
+
+    #[test]
+    fn rewrite_proves_predicate_goal() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+theorem rewrite_predicate
+  : alice = mother(alice) -> Happy(alice) -> Happy(mother(alice)) := by
+  intro h
+  intro ha
+  rewrite h
+  exact ha
+"#,
+        );
+    }
+
+    #[test]
+    fn rewrite_proves_equality_goal() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+
+theorem rewrite_equality
+  : alice = mother(alice) -> alice = alice -> alice = mother(alice) := by
+  intro h
+  intro ha
+  rewrite h
+  exact ha
+"#,
+        );
+    }
+
+    #[test]
+    fn rewrite_can_descend_under_quantifier_without_capture() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Likes(Person, Person)
+
+theorem rewrite_under_forall
+  : alice = mother(alice)
+    -> (forall x : Person, Likes(x, alice))
+    -> forall x : Person, Likes(x, mother(alice)) := by
+  intro h
+  intro ha
+  rewrite h
+  exact ha
+"#,
+        );
+    }
+
+    #[test]
+    fn rewrite_rejects_non_equality_proof() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad (P : Prop) : P -> P := by
+  intro h
+  rewrite h
+"#,
+            "rewrite expects an equality proof",
+        );
+    }
+
+    #[test]
+    fn rewrite_rejects_capture_under_quantifier() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+pred Happy(Person)
+
+theorem bad
+  (x : Person)
+  : alice = x -> (forall x : Person, Happy(alice)) -> forall x : Person, Happy(x) := by
+  intro h
+  intro ha
+  rewrite h
+"#,
+            "rewrite could not find `x` in goal `forall x : Person, Happy(x)`",
+        );
+    }
+
+    #[test]
+    fn rewrite_rejects_missing_rhs_occurrence() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+theorem bad : alice = mother(alice) -> Happy(alice) -> Happy(alice) := by
+  intro h
+  intro ha
+  rewrite h
+"#,
+            "rewrite could not find `mother(alice)` in goal `Happy(alice)`",
         );
     }
 

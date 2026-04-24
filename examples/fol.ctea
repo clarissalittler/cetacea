@@ -24,6 +24,13 @@ theorem alice_eq_refl : alice = alice := by
 theorem mother_eq_refl : mother(alice) = mother(alice) := by
   refl
 
+theorem rewrite_happy
+  : alice = mother(alice) -> Happy(alice) -> Happy(mother(alice)) := by
+  intro h
+  intro ha
+  rewrite h
+  exact ha
+
 theorem forall_and_left
   (P : Person -> Prop)
   (Q : Person -> Prop)
