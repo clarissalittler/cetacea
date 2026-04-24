@@ -27,6 +27,31 @@ theorem subset_trans
   apply hAB
   exact hx
 
+theorem subset_antisymm
+  (T : Type)
+  (A B : Set T)
+  : A subset B -> B subset A -> A = B := by
+  intro hAB
+  intro hBA
+  apply set_ext
+  intro x
+  split
+  intro hx
+  apply hAB
+  exact hx
+  intro hx
+  apply hBA
+  exact hx
+
+theorem empty_subset
+  (T : Type)
+  (A : Set T)
+  : empty(T) subset A := by
+  simp
+  intro x
+  intro hx
+  contradiction
+
 theorem inter_subset_left
   (T : Type)
   (A B : Set T)
@@ -82,6 +107,25 @@ theorem union_subset
       apply hBC
       exact hxB
 
+theorem diff_subset_left
+  (T : Type)
+  (A B : Set T)
+  : diff(A, B) subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx.left
+
+theorem diff_disjoint_right
+  (T : Type)
+  (A B : Set T)
+  : inter(diff(A, B), B) subset empty(T) := by
+  simp
+  intro x
+  intro hx
+  apply hx.left.right
+  exact hx.right
+
 theorem union_comm
   (T : Type)
   (A B : Set T)
@@ -107,6 +151,81 @@ theorem union_comm
       left
       exact hxA
 
+theorem union_assoc_left
+  (T : Type)
+  (A B C : Set T)
+  : union(union(A, B), C) = union(A, union(B, C)) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  cases hx with
+  | left hxAB =>
+      cases hxAB with
+      | left hxA =>
+          left
+          exact hxA
+      | right hxB =>
+          right
+          left
+          exact hxB
+  | right hxC =>
+      right
+      right
+      exact hxC
+  intro hx
+  cases hx with
+  | left hxA =>
+      left
+      left
+      exact hxA
+  | right hxBC =>
+      cases hxBC with
+      | left hxB =>
+          left
+          right
+          exact hxB
+      | right hxC =>
+          right
+          exact hxC
+
+theorem union_empty_left
+  (T : Type)
+  (A : Set T)
+  : union(empty(T), A) = A := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  cases hx with
+  | left hfalse =>
+      contradiction
+  | right hxA =>
+      exact hxA
+  intro hx
+  right
+  exact hx
+
+theorem union_empty_right
+  (T : Type)
+  (A : Set T)
+  : union(A, empty(T)) = A := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  cases hx with
+  | left hxA =>
+      exact hxA
+  | right hfalse =>
+      contradiction
+  intro hx
+  left
+  exact hx
+
 theorem inter_comm
   (T : Type)
   (A B : Set T)
@@ -123,3 +242,50 @@ theorem inter_comm
   split
   exact hx.right
   exact hx.left
+
+theorem inter_assoc_left
+  (T : Type)
+  (A B C : Set T)
+  : inter(inter(A, B), C) = inter(A, inter(B, C)) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  split
+  exact hx.left.left
+  split
+  exact hx.left.right
+  exact hx.right
+  intro hx
+  split
+  split
+  exact hx.left
+  exact hx.right.left
+  exact hx.right.right
+
+theorem inter_empty_left
+  (T : Type)
+  (A : Set T)
+  : inter(empty(T), A) = empty(T) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  exact hx.left
+  intro hfalse
+  contradiction
+
+theorem inter_empty_right
+  (T : Type)
+  (A : Set T)
+  : inter(A, empty(T)) = empty(T) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  exact hx.right
+  intro hfalse
+  contradiction

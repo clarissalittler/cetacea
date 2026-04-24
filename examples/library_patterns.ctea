@@ -1,0 +1,51 @@
+mode constructive
+
+sort Person
+
+const alice : Person
+
+pred Student(Person)
+pred Enrolled(Person)
+pred Graduated(Person)
+
+theorem pipeline_for_alice
+  : (forall x : Person, Student(x) -> Enrolled(x))
+    -> (forall x : Person, Enrolled(x) -> Graduated(x))
+    -> Student(alice)
+    -> Graduated(alice) := by
+  intro hSE
+  intro hEG
+  intro hS
+  apply hEG
+  apply hSE
+  exact hS
+
+theorem pipeline_exists
+  : (forall x : Person, Student(x) -> Enrolled(x))
+    -> (forall x : Person, Enrolled(x) -> Graduated(x))
+    -> (exists x : Person, Student(x))
+    -> exists x : Person, Graduated(x) := by
+  intro hSE
+  intro hEG
+  intro hSomeStudent
+  cases hSomeStudent with
+  | intro x hS =>
+      exists x
+      apply hEG
+      apply hSE
+      exact hS
+
+theorem package_two_certificates
+  : (forall x : Person, Student(x) -> Enrolled(x))
+    -> (forall x : Person, Student(x) -> Graduated(x))
+    -> forall x : Person, Student(x) -> Enrolled(x) /\ Graduated(x) := by
+  intro hSE
+  intro hSG
+  intro x
+  intro hS
+  split
+  apply hSE
+  exact hS
+  apply hSG
+  exact hS
+

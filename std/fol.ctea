@@ -16,6 +16,27 @@ theorem forall_and_right
   intro x
   exact (h x).right
 
+theorem forall_and_intro
+  (A : Type)
+  (P Q : A -> Prop)
+  : (forall x : A, P(x)) -> (forall x : A, Q(x)) -> forall x : A, P(x) /\ Q(x) := by
+  intro hp
+  intro hq
+  intro x
+  split
+  exact hp x
+  exact hq x
+
+theorem forall_mono
+  (A : Type)
+  (P Q : A -> Prop)
+  : (forall x : A, P(x) -> Q(x)) -> (forall x : A, P(x)) -> forall x : A, Q(x) := by
+  intro hpq
+  intro hp
+  intro x
+  apply hpq
+  exact hp x
+
 theorem exists_and_left
   (A : Type)
   (P Q : A -> Prop)
@@ -36,6 +57,40 @@ theorem exists_and_right
       exists x
       exact hx.right
 
+theorem exists_or_left
+  (A : Type)
+  (P Q : A -> Prop)
+  : (exists x : A, P(x)) -> exists x : A, P(x) \/ Q(x) := by
+  intro h
+  cases h with
+  | intro x hx =>
+      exists x
+      left
+      exact hx
+
+theorem exists_or_right
+  (A : Type)
+  (P Q : A -> Prop)
+  : (exists x : A, Q(x)) -> exists x : A, P(x) \/ Q(x) := by
+  intro h
+  cases h with
+  | intro x hx =>
+      exists x
+      right
+      exact hx
+
+theorem exists_mono
+  (A : Type)
+  (P Q : A -> Prop)
+  : (forall x : A, P(x) -> Q(x)) -> (exists x : A, P(x)) -> exists x : A, Q(x) := by
+  intro hpq
+  intro h
+  cases h with
+  | intro x hx =>
+      exists x
+      apply hpq
+      exact hx
+
 theorem not_exists_to_forall_not
   (A : Type)
   (P : A -> Prop)
@@ -46,6 +101,17 @@ theorem not_exists_to_forall_not
   apply h
   exists x
   exact hp
+
+theorem forall_not_to_not_exists
+  (A : Type)
+  (P : A -> Prop)
+  : (forall x : A, not P(x)) -> not (exists x : A, P(x)) := by
+  intro h
+  intro hex
+  cases hex with
+  | intro x hx =>
+      apply h x
+      exact hx
 
 theorem forall_apply
   (A : Type)

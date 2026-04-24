@@ -18,6 +18,10 @@ theorem add_zero_right (n : Nat) : add(n, 0) = n := by
       rewrite ih
       refl
 
+theorem add_zero_right_rev (n : Nat) : n = add(n, 0) := by
+  rewrite add_zero_right {n := n}
+  refl
+
 theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
   induction n with
   | zero =>
@@ -25,5 +29,31 @@ theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
       refl
   | succ k ih =>
       simp
+      rewrite ih
+      refl
+
+theorem add_succ_right_rev (n m : Nat) : succ(add(n, m)) = add(n, succ(m)) := by
+  rewrite add_succ_right {n := n; m := m}
+  refl
+
+theorem add_assoc (n m k : Nat) : add(add(n, m), k) = add(n, add(m, k)) := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ n0 ih =>
+      simp
+      rewrite ih
+      refl
+
+theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
+  induction n with
+  | zero =>
+      simp
+      rewrite add_zero_right {n := m}
+      refl
+  | succ n0 ih =>
+      simp
+      rewrite add_succ_right_rev {n := m; m := n0}
       rewrite ih
       refl

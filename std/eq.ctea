@@ -21,6 +21,28 @@ theorem congr_pred
   rewrite h
   exact hp
 
+theorem congr_pred2_left
+  (A B : Type)
+  (R : A -> B -> Prop)
+  (x y : A)
+  (z : B)
+  : x = y -> R(x, z) -> R(y, z) := by
+  intro h
+  intro hr
+  rewrite h
+  exact hr
+
+theorem congr_pred2_right
+  (A B : Type)
+  (R : A -> B -> Prop)
+  (x : A)
+  (y z : B)
+  : y = z -> R(x, y) -> R(x, z) := by
+  intro h
+  intro hr
+  rewrite h
+  exact hr
+
 theorem eq_subst_left
   (A : Type)
   (P : A -> Prop)
@@ -32,3 +54,10 @@ theorem eq_subst_left
   apply eq_symm
   exact h
   exact hp
+
+theorem eq_subst_right
+  (A : Type)
+  (P : A -> Prop)
+  (x y : A)
+  : x = y -> P(x) -> P(y) := by
+  exact congr_pred

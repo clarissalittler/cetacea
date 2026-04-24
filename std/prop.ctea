@@ -4,6 +4,10 @@ theorem id (P : Prop) : P -> P := by
   intro h
   exact h
 
+theorem false_elim (P : Prop) : False -> P := by
+  intro h
+  contradiction
+
 theorem imp_trans (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
   intro hpq
   intro hqr
@@ -11,6 +15,37 @@ theorem imp_trans (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
   apply hqr
   apply hpq
   exact hp
+
+theorem imp_swap (P Q R : Prop) : (P -> Q -> R) -> Q -> P -> R := by
+  intro h
+  intro hq
+  intro hp
+  apply h
+  exact hp
+  exact hq
+
+theorem modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+  intro hpq
+  intro hnq
+  intro hp
+  apply hnq
+  apply hpq
+  exact hp
+
+theorem and_left (P Q : Prop) : P /\ Q -> P := by
+  intro h
+  exact h.left
+
+theorem and_right (P Q : Prop) : P /\ Q -> Q := by
+  intro h
+  exact h.right
+
+theorem and_intro (P Q : Prop) : P -> Q -> P /\ Q := by
+  intro hp
+  intro hq
+  split
+  exact hp
+  exact hq
 
 theorem and_comm (P Q : Prop) : P /\ Q -> Q /\ P := by
   intro h
@@ -42,6 +77,52 @@ theorem or_comm (P Q : Prop) : P \/ Q -> Q \/ P := by
       exact hp
   | right hq =>
       left
+      exact hq
+
+theorem or_assoc_left (P Q R : Prop) : (P \/ Q) \/ R -> P \/ (Q \/ R) := by
+  intro h
+  cases h with
+  | left hpq =>
+      cases hpq with
+      | left hp =>
+          left
+          exact hp
+      | right hq =>
+          right
+          left
+          exact hq
+  | right hr =>
+      right
+      right
+      exact hr
+
+theorem or_assoc_right (P Q R : Prop) : P \/ (Q \/ R) -> (P \/ Q) \/ R := by
+  intro h
+  cases h with
+  | left hp =>
+      left
+      left
+      exact hp
+  | right hqr =>
+      cases hqr with
+      | left hq =>
+          left
+          right
+          exact hq
+      | right hr =>
+          right
+          exact hr
+
+theorem or_elim (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+  intro hpr
+  intro hqr
+  intro hpq
+  cases hpq with
+  | left hp =>
+      apply hpr
+      exact hp
+  | right hq =>
+      apply hqr
       exact hq
 
 theorem not_not_em (P : Prop) : not not (P \/ not P) := by

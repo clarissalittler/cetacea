@@ -5324,6 +5324,26 @@ mod tests {
     }
 
     #[test]
+    fn example_prop_checks() {
+        check_ok(include_str!("../../../examples/prop.ctea"));
+    }
+
+    #[test]
+    fn example_fol_checks() {
+        check_ok(include_str!("../../../examples/fol.ctea"));
+    }
+
+    #[test]
+    fn example_set_nat_checks() {
+        check_ok(include_str!("../../../examples/set_nat.ctea"));
+    }
+
+    #[test]
+    fn example_library_patterns_checks() {
+        check_ok(include_str!("../../../examples/library_patterns.ctea"));
+    }
+
+    #[test]
     fn and_comm_succeeds_constructively() {
         let result = check_ok(
             r#"

@@ -19,6 +19,8 @@ definition arity, set element compatibility, and argument type compatibility.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
 - `examples/set_nat.ctea`: typed set and natural-number simplification examples.
+- `examples/library_patterns.ctea`: larger standalone proof patterns over a
+  small first-order domain.
 
 ## Run
 
@@ -27,6 +29,7 @@ cargo test
 cargo run -p cetacea_cli -- examples/prop.ctea
 cargo run -p cetacea_cli -- examples/fol.ctea
 cargo run -p cetacea_cli -- examples/set_nat.ctea
+cargo run -p cetacea_cli -- examples/library_patterns.ctea
 cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
@@ -55,6 +58,7 @@ its checked proof object.
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
   sets, and natural numbers
+- examples checked by the core test suite
 - goal-directed schema instantiation for bare theorem references in `exact` and
   `apply`
 - explicit theorem-instantiation syntax:
