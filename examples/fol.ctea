@@ -1,0 +1,80 @@
+mode constructive
+
+sort Person
+
+const alice : Person
+
+func mother : Person -> Person
+
+pred Student(Person)
+pred Happy(Person)
+
+theorem student_exists : Student(alice) -> exists x : Person, Student(x) := by
+  intro h
+  exists alice
+  exact h
+
+theorem happy_mother : Happy(mother(alice)) -> Happy(mother(alice)) := by
+  intro h
+  exact h
+
+theorem alice_eq_refl : alice = alice := by
+  refl
+
+theorem mother_eq_refl : mother(alice) = mother(alice) := by
+  refl
+
+theorem forall_and_left
+  (P : Person -> Prop)
+  (Q : Person -> Prop)
+  : (forall x : Person, P(x) /\ Q(x)) -> forall x : Person, P(x) := by
+  intro h
+  intro x
+  exact (h x).left
+
+theorem exists_and_left
+  (P : Person -> Prop)
+  (Q : Person -> Prop)
+  : (exists x : Person, P(x) /\ Q(x)) -> exists x : Person, P(x) := by
+  intro h
+  cases h with
+  | intro x hx =>
+      exists x
+      exact hx.left
+
+theorem not_exists_to_forall_not
+  (P : Person -> Prop)
+  : not (exists x : Person, P(x)) -> forall x : Person, not P(x) := by
+  intro h
+  intro x
+  intro hp
+  apply h
+  exists x
+  exact hp
+
+theorem forall_apply
+  (P : Person -> Prop)
+  (Q : Person -> Prop)
+  (a : Person)
+  : (forall x : Person, P(x) -> Q(x)) -> P(a) -> Q(a) := by
+  intro h
+  intro hp
+  apply h
+  exact hp
+
+theorem forall_self
+  (A : Type)
+  (P : A -> Prop)
+  : (forall x : A, P(x)) -> forall x : A, P(x) := by
+  intro h
+  exact h
+
+theorem use_forall_self
+  (P : Person -> Prop)
+  : (forall x : Person, P(x)) -> forall x : Person, P(x) := by
+  exact forall_self
+
+theorem use_forall_self_explicit
+  (P : Person -> Prop)
+  : (forall x : Person, P(x)) -> forall x : Person, P(x) := by
+  exact forall_self {A := Person; P := P}
