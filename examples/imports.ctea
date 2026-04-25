@@ -1,7 +1,4 @@
-import ../std/prop.ctea
-import ../std/fol.ctea
-import ../std/nat.ctea
-import ../std/set.ctea
+import ../std/prelude.ctea
 
 mode constructive
 
@@ -34,4 +31,3 @@ theorem imported_subset_trans
   (A B C : Set Person)
   : A subset B -> B subset C -> A subset C := by
   exact subset_trans
-

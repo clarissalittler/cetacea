@@ -16,6 +16,7 @@ definition arity, set element compatibility, and argument type compatibility.
   checker.
 - `crates/cetacea_cli`: command-line checker.
 - `std`: checked theorem-library files.
+- `std/prelude.ctea`: imports the current standard-library theorem files.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
 - `examples/set_nat.ctea`: typed set and natural-number simplification examples.
@@ -32,12 +33,13 @@ cargo run -p cetacea_cli -- examples/fol.ctea
 cargo run -p cetacea_cli -- examples/set_nat.ctea
 cargo run -p cetacea_cli -- examples/library_patterns.ctea
 cargo run -p cetacea_cli -- examples/imports.ctea
+cargo run -p cetacea_cli -- std/prelude.ctea
 cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
 
-The CLI prints each accepted theorem or axiom and the strongest mode used by
-its checked proof object.
+The CLI prints each accepted theorem or axiom from the root file and the
+strongest mode used by its checked proof object.
 
 Import paths are resolved relative to the importing file first, then relative
 to the current working directory. A file imported more than once is checked and
@@ -65,6 +67,7 @@ loaded once.
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
   sets, and natural numbers
+- checked standard-library prelude
 - examples checked by the core test suite
 - goal-directed schema instantiation for bare theorem references in `exact` and
   `apply`

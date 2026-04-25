@@ -15,9 +15,18 @@ fn main() {
 
     let result = cetacea_core::check_file_at_path(&path);
     if result.diagnostics.is_empty() {
-        for theorem in result.theorems {
+        let mut accepted = false;
+        for theorem in result
+            .theorems
+            .into_iter()
+            .filter(|theorem| !theorem.is_imported)
+        {
+            accepted = true;
             let kind = if theorem.is_axiom { "axiom" } else { "theorem" };
             println!("accepted {kind} {} ({})", theorem.name, theorem.mode_used);
+        }
+        if !accepted {
+            println!("accepted file");
         }
         return;
     }

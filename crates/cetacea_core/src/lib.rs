@@ -618,6 +618,7 @@ pub struct CheckedTheorem {
     pub name: Name,
     pub mode_used: LogicMode,
     pub is_axiom: bool,
+    pub is_imported: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -667,7 +668,7 @@ impl FileChecker {
                 return;
             }
         };
-        self.check_commands(file.commands, base_dir);
+        self.check_commands(file.commands, base_dir, false);
     }
 
     fn check_path(&mut self, path: &Path) {
@@ -681,7 +682,7 @@ impl FileChecker {
                 return;
             }
         };
-        self.check_canonical_path(canonical_path);
+        self.check_canonical_path(canonical_path, false);
     }
 
     fn check_import(&mut self, import_path: &str, base_dir: Option<&Path>) {
@@ -692,7 +693,7 @@ impl FileChecker {
                 return;
             }
         };
-        self.check_canonical_path(canonical_path);
+        self.check_canonical_path(canonical_path, true);
     }
 
     fn resolve_import_path(
@@ -726,7 +727,7 @@ impl FileChecker {
         Err(diagnostic)
     }
 
-    fn check_canonical_path(&mut self, path: PathBuf) {
+    fn check_canonical_path(&mut self, path: PathBuf, is_imported: bool) {
         if self.loaded_files.contains(&path) {
             return;
         }
@@ -761,12 +762,17 @@ impl FileChecker {
 
         self.import_stack.push(path.clone());
         let base_dir = path.parent().map(Path::to_path_buf);
-        self.check_commands(file.commands, base_dir.as_deref());
+        self.check_commands(file.commands, base_dir.as_deref(), is_imported);
         self.import_stack.pop();
         self.loaded_files.insert(path);
     }
 
-    fn check_commands(&mut self, commands: Vec<Command>, base_dir: Option<&Path>) {
+    fn check_commands(
+        &mut self,
+        commands: Vec<Command>,
+        base_dir: Option<&Path>,
+        is_imported: bool,
+    ) {
         let mut mode = LogicMode::Constructive;
 
         for command in commands {
@@ -937,6 +943,7 @@ impl FileChecker {
                         name: decl.name,
                         mode_used: mode,
                         is_axiom: true,
+                        is_imported,
                     });
                 }
                 Command::Theorem(decl) => {
@@ -1031,6 +1038,7 @@ impl FileChecker {
                         name: decl.name,
                         mode_used,
                         is_axiom: false,
+                        is_imported,
                     });
                 }
             }
@@ -5519,6 +5527,11 @@ mod tests {
     }
 
     #[test]
+    fn std_prelude_checks() {
+        check_path_ok("std/prelude.ctea");
+    }
+
+    #[test]
     fn example_prop_checks() {
         check_ok(include_str!("../../../examples/prop.ctea"));
     }
@@ -5546,7 +5559,7 @@ mod tests {
     #[test]
     fn duplicate_import_is_loaded_once() {
         let import = import_line("std/prop.ctea");
-        check_ok(&format!(
+        let result = check_ok(&format!(
             r#"
 {import}
 {import}
@@ -5555,6 +5568,32 @@ theorem use_imported_id (P : Prop) : P -> P := by
   exact id
 "#
         ));
+        assert_eq!(
+            result
+                .theorems
+                .iter()
+                .filter(|theorem| theorem.name == "id")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn imports_mark_imported_and_root_theorems() {
+        let result = check_path_ok("examples/imports.ctea");
+        let imported = result
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "imp_trans")
+            .expect("imported theorem");
+        assert!(imported.is_imported);
+
+        let root = result
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "imported_imp_trans")
+            .expect("root theorem");
+        assert!(!root.is_imported);
     }
 
     #[test]
