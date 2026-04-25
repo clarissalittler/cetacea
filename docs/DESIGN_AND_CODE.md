@@ -438,6 +438,7 @@ refl
 rewrite h
 unfold Name
 simp
+simp at h
 exfalso
 contradiction
 by_contra h
@@ -654,14 +655,15 @@ A subset B  ==>  forall x : T, x in A -> x in B
 
 The `simp` tactic is intentionally small. It normalizes the current goal using
 transparent formula definitions, set computation, subset expansion, and Nat
-computation inside formula terms. It rejects no-op calls so users notice when
-`simp` did not change anything.
+computation inside formula terms. `simp at h` applies the same normalization
+to a named hypothesis in the local proof state. Both forms reject no-op calls
+so users notice when `simp` did not change anything.
 
 Current design tradeoff:
 
 - `simp` is predictable and easy to inspect.
 - It is not yet a theorem-driven simplifier.
-- It does not simplify hypotheses.
+- Hypothesis simplification is local to one named hypothesis.
 
 This keeps the implementation simple while still supporting useful examples.
 

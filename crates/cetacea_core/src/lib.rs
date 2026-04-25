@@ -3351,7 +3351,7 @@ impl ProofExpr {
         } else if let Some(theorem) = env.theorem(&self.base) {
             let subst = if self.has_explicit_args() {
                 let subst = explicit_schema_subst(env, ctx, theorem, &self.explicit_args)?;
-                ensure_schema_subst_complete(&theorem.params, &subst)?;
+                ensure_schema_subst_complete(&theorem.params, &subst, Some(theorem.name.as_str()))?;
                 subst
             } else {
                 SchemaSubst::default()
@@ -3523,7 +3523,7 @@ impl ProofExpr {
             }
         }
 
-        ensure_schema_subst_complete(&theorem.params, &schema_subst)?;
+        ensure_schema_subst_complete(&theorem.params, &schema_subst, Some(theorem.name.as_str()))?;
         let mut proof = Proof::TheoremRef {
             name: theorem.name.clone(),
             subst: schema_subst,
@@ -3581,6 +3581,7 @@ enum Tactic {
     },
     Unfold(Name),
     Simp,
+    SimpAt(Name),
     Induction {
         var_name: Name,
         zero_tactics: Vec<Tactic>,
@@ -4608,6 +4609,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if line == "simp" {
         return Ok(Tactic::Simp);
     }
+    if let Some(rest) = line.strip_prefix("simp at ") {
+        return Ok(Tactic::SimpAt(expect_single_name(rest, "simp at")?));
+    }
     if line == "split" {
         return Ok(Tactic::Split);
     }
@@ -5535,6 +5539,31 @@ fn run_tactic(
                 }],
             })
         }
+        Tactic::SimpAt(name) => {
+            let Some(formula) = goal.context.lookup(name).cloned() else {
+                return Err(TacticError::new(format!("unknown hypothesis `{name}`")));
+            };
+            let (formula, changed) = unfold_formula_defs(env, &goal.context, &formula, None)
+                .map_err(|err| {
+                    TacticError::new(format!("cannot simplify `{name}`: {}", err.message))
+                })?;
+            if !changed {
+                return Err(TacticError::new(format!(
+                    "simp made no progress on hypothesis `{name}`"
+                )));
+            }
+            let mut context = goal.context;
+            context.add_proof(name.clone(), formula);
+            let id = fresh_goal(next_goal_id);
+            Ok(StepResult {
+                replacement: PartialProof::Hole(id),
+                new_goals: vec![Goal {
+                    id,
+                    context,
+                    target: goal.target,
+                }],
+            })
+        }
         Tactic::Induction {
             var_name,
             zero_tactics,
@@ -5717,7 +5746,7 @@ fn proof_expr_for_inferred(
             .theorem(&expr.base)
             .ok_or_else(|| TacticError::new(format!("unknown theorem `{}`", expr.base)))?;
         let subst = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
-        ensure_schema_subst_complete(&theorem.params, &subst)?;
+        ensure_schema_subst_complete(&theorem.params, &subst, Some(theorem.name.as_str()))?;
         return Ok(Proof::TheoremRef {
             name: expr.base.clone(),
             subst,
@@ -5746,42 +5775,77 @@ fn explicit_schema_subst(
         seen.push(arg.name.clone());
 
         let Some(param) = theorem.params.iter().find(|param| param.name == arg.name) else {
+            let available = theorem_schema_arg_list(theorem);
             return Err(TacticError::new(format!(
-                "theorem `{}` has no schema argument `{}`",
-                theorem.name, arg.name
+                "theorem `{}` has no schema argument `{}`; available schema arguments: {}",
+                theorem.name, arg.name, available
             )));
         };
 
         match &param.kind {
             ParamKind::Type => {
-                let ty = parse_type_str(&arg.value).map_err(|err| TacticError::new(err.message))?;
-                validate_type(env, ctx, &ty).map_err(|err| TacticError::new(err.message))?;
+                let ty = parse_type_str(&arg.value)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                validate_type(env, ctx, &ty)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 subst.type_args.insert(arg.name.clone(), ty);
             }
             ParamKind::Prop => {
-                let formula =
-                    parse_formula_str(&arg.value).map_err(|err| TacticError::new(err.message))?;
+                let formula = parse_formula_str(&arg.value)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 validate_formula(env, ctx, &formula)
-                    .map_err(|err| TacticError::new(err.message))?;
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 subst.formula_args.insert(arg.name.clone(), formula);
             }
             ParamKind::Predicate(_) => {
-                let name = parse_predicate_arg_name(&arg.value)?;
+                let name = parse_predicate_arg_name(&arg.value)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 if predicate_signature(env, ctx, &name).is_none() {
-                    return Err(TacticError::new(format!("unknown predicate `{name}`")));
+                    return Err(explicit_schema_arg_error(
+                        theorem,
+                        arg,
+                        format!("unknown predicate `{name}`"),
+                    ));
                 }
                 subst.predicate_args.insert(arg.name.clone(), name);
             }
             ParamKind::Term(_) => {
-                let term =
-                    parse_term_str(&arg.value).map_err(|err| TacticError::new(err.message))?;
-                validate_term(env, ctx, &term).map_err(|err| TacticError::new(err.message))?;
+                let term = parse_term_str(&arg.value)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                validate_term(env, ctx, &term)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 subst.term_args.insert(arg.name.clone(), term);
             }
         }
     }
 
     Ok(subst)
+}
+
+fn theorem_schema_arg_list(theorem: &Theorem) -> String {
+    if theorem.params.is_empty() {
+        "none".to_string()
+    } else {
+        theorem
+            .params
+            .iter()
+            .map(|param| format!("`{}`", param.name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn explicit_schema_arg_error(
+    theorem: &Theorem,
+    arg: &ExplicitArg,
+    message: impl Into<String>,
+) -> TacticError {
+    TacticError::new(format!(
+        "invalid value for schema argument `{}` of theorem `{}`: {}",
+        arg.name,
+        theorem.name,
+        message.into()
+    ))
 }
 
 fn parse_predicate_arg_name(input: &str) -> Result<Name, TacticError> {
@@ -5827,6 +5891,7 @@ fn proof_expr_for_expected(
             &theorem.statement,
             expected,
             explicit,
+            Some(theorem.name.as_str()),
         )?;
         return Ok(Proof::TheoremRef {
             name: expr.base.clone(),
@@ -5856,6 +5921,7 @@ fn proof_expr_for_apply(
             target,
             &theorem.params,
             explicit,
+            Some(theorem.name.as_str()),
         )?;
         return Ok((
             Proof::TheoremRef {
@@ -5877,6 +5943,7 @@ fn proof_expr_for_apply(
         target,
         &[],
         SchemaSubst::default(),
+        None,
     )?;
     Ok((proof, plan.forall_args, plan.premises))
 }
@@ -5900,6 +5967,7 @@ fn apply_plan_for_goal(
     target: &Formula,
     schema_params: &[Param],
     initial_schema_subst: SchemaSubst,
+    theorem_name: Option<&str>,
 ) -> Result<ApplyPlan, TacticError> {
     let schema_ctx;
     let formula_ctx = if schema_params.is_empty() {
@@ -5950,7 +6018,7 @@ fn apply_plan_for_goal(
             ))
         })?;
     }
-    ensure_schema_subst_complete(schema_params, &schema_subst)?;
+    ensure_schema_subst_complete(schema_params, &schema_subst, theorem_name)?;
 
     let mut forall_args = Vec::new();
     for (var, _) in forall_vars {
@@ -5983,6 +6051,7 @@ fn infer_schema_subst_for_formula(
     pattern: &Formula,
     target: &Formula,
     initial_schema_subst: SchemaSubst,
+    theorem_name: Option<&str>,
 ) -> Result<SchemaSubst, TacticError> {
     let mut schema_subst = initial_schema_subst;
     let mut term_subst = HashMap::new();
@@ -5999,11 +6068,15 @@ fn infer_schema_subst_for_formula(
             TacticError::new(format!("cannot instantiate theorem for goal `{target}`"))
         })?;
     }
-    ensure_schema_subst_complete(params, &schema_subst)?;
+    ensure_schema_subst_complete(params, &schema_subst, theorem_name)?;
     Ok(schema_subst)
 }
 
-fn ensure_schema_subst_complete(params: &[Param], subst: &SchemaSubst) -> Result<(), TacticError> {
+fn ensure_schema_subst_complete(
+    params: &[Param],
+    subst: &SchemaSubst,
+    theorem_name: Option<&str>,
+) -> Result<(), TacticError> {
     for param in params {
         let complete = match &param.kind {
             ParamKind::Type => subst.type_args.contains_key(&param.name),
@@ -6012,13 +6085,30 @@ fn ensure_schema_subst_complete(params: &[Param], subst: &SchemaSubst) -> Result
             ParamKind::Term(_) => subst.term_args.contains_key(&param.name),
         };
         if !complete {
+            let kind = schema_param_description(param);
+            let theorem = theorem_name
+                .map(|name| format!(" for theorem `{name}`"))
+                .unwrap_or_default();
             return Err(TacticError::new(format!(
-                "cannot infer schema argument `{}`",
-                param.name
+                "cannot infer schema argument `{}`{theorem} ({kind}); provide it explicitly with `{{{} := ...}}`",
+                param.name, param.name
             )));
         }
     }
     Ok(())
+}
+
+fn schema_param_description(param: &Param) -> String {
+    match &param.kind {
+        ParamKind::Type => "type parameter".to_string(),
+        ParamKind::Prop => "proposition parameter".to_string(),
+        ParamKind::Predicate(args) => {
+            let mut parts = args.iter().map(ToString::to_string).collect::<Vec<_>>();
+            parts.push("Prop".to_string());
+            format!("predicate parameter of type `{}`", parts.join(" -> "))
+        }
+        ParamKind::Term(ty) => format!("term parameter of type `{ty}`"),
+    }
 }
 
 fn subst_formula_terms(formula: &Formula, subst: &HashMap<Name, Term>) -> Formula {
@@ -7821,6 +7911,39 @@ theorem even_zero_to_simplified_arg : Even(0) -> Even(add(0, 0)) := by
     }
 
     #[test]
+    fn simp_at_simplifies_named_hypothesis() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem inter_hyp_right
+  (T : Type)
+  (x : T)
+  (A B : Set T)
+  : x in inter(A, B) -> x in B := by
+  intro h
+  simp at h
+  exact h.right
+"#,
+        );
+    }
+
+    #[test]
+    fn simp_at_rejects_no_progress() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad (P : Prop) : P -> P := by
+  intro h
+  simp at h
+  exact h
+"#,
+            "simp made no progress on hypothesis `h`",
+        );
+    }
+
+    #[test]
     fn nat_multiplication_computes_under_simp() {
         check_ok(
             r#"
@@ -8258,7 +8381,39 @@ theorem id (P : Prop) : P -> P := by
 theorem bad (Q : Prop) : Q -> Q := by
   exact id {Missing := Q}
 "#,
-            "has no schema argument `Missing`",
+            "available schema arguments: `P`",
+        );
+    }
+
+    #[test]
+    fn invalid_explicit_schema_argument_value_names_the_argument() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem refl_arg (A : Type) (x : A) : x = x := by
+  refl
+
+theorem bad (A : Type) (x : A) : x = x := by
+  exact refl_arg {A := A; x := missing}
+"#,
+            "invalid value for schema argument `x` of theorem `refl_arg`: unknown term `missing`",
+        );
+    }
+
+    #[test]
+    fn missing_schema_argument_reports_theorem_and_parameter_kind() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem unused_type (A B : Type) (x : A) : x = x := by
+  refl
+
+theorem bad (A : Type) (x : A) : x = x := by
+  exact unused_type {A := A; x := x}
+"#,
+            "cannot infer schema argument `B` for theorem `unused_type` (type parameter); provide it explicitly with `{B := ...}`",
         );
     }
 

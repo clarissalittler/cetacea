@@ -633,6 +633,8 @@ It currently knows:
 - the built-in equations for `add`, `mul`, `sub`, and `le`, including inside
   predicate and function arguments
 
+Use `simp at h` to simplify a named hypothesis in the local context.
+
 Examples:
 
 ```text
@@ -659,6 +661,17 @@ theorem even_zero_to_simplified_arg : Even(0) -> Even(add(0, 0)) := by
   intro h
   simp
   exact h
+```
+
+```text
+theorem inter_hyp_right
+  (T : Type)
+  (x : T)
+  (A B : Set T)
+  : x in inter(A, B) -> x in B := by
+  intro h
+  simp at h
+  exact h.right
 ```
 
 ### `induction`

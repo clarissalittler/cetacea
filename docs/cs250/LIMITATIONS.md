@@ -17,44 +17,26 @@ apply subset_trans {T := Person; A := C; B := A; C := B}
 ```
 
 That works, but the syntax is a lot for beginners. The diagnostics are
-also still more kernel-shaped than course-shaped when inference fails.
+better than they used to be, but the user still needs to know which
+intermediate object to provide.
 
-**Possible improvement:** improve missing-parameter diagnostics and add
-more goal-directed inference for intermediate terms.
+**Possible improvement:** add more goal-directed inference for
+intermediate terms.
 
-### 2. Parenthesized proof expressions are not supported
-
-You can write chained applications such as:
-
-```text
-exact h x
-exact h hp
-exact h.left
-```
-
-but not parenthesized subexpressions:
-
-```text
-exact (h hp).left
-apply (htrans x y x)
-```
-
-The workaround is to use a few explicit proof-script steps instead of
-one compound expression.
-
-### 3. `simp` is built-in, not theorem-driven
+### 2. `simp` is built-in, not theorem-driven
 
 `simp` knows transparent definitions, set membership, subset expansion,
-and built-in Nat computation. It does not use arbitrary imported lemmas
-as rewrite rules, and it does not simplify hypotheses in context.
+and built-in Nat computation. `simp at h` can simplify a named
+hypothesis. It does not use arbitrary imported lemmas as rewrite rules,
+and there is no "simplify every hypothesis" form.
 
 For example, a goal may simplify cleanly while a matching hypothesis
 still needs an explicit `rewrite`, `exact`, or helper theorem.
 
-**Possible improvement:** add a theorem-driven simplifier or a smaller
-`simp at h` form for hypotheses.
+**Possible improvement:** add a theorem-driven simplifier and perhaps a
+broader `simp at *` form.
 
-### 4. Addition and multiplication recurse on the left
+### 3. Addition and multiplication recurse on the left
 
 The CS 250 text defines addition by recursion on the second argument:
 
@@ -81,7 +63,7 @@ This flips which textbook facts are "by definition" and which require
 induction. The `std/nat.ctea` file includes both directions where useful,
 but the convention needs to be flagged in class.
 
-### 5. User-defined recursive functions are not available
+### 4. User-defined recursive functions are not available
 
 Cetacea has transparent non-recursive definitions, but no syntax for
 defining recursive functions over `Nat`. If a tutorial wants the
@@ -91,7 +73,7 @@ an uninterpreted function and axiomatize its recursion equations.
 That is fine for short course examples, but it is not a replacement for
 a real recursive-function facility.
 
-### 6. Induction is `Nat`-only
+### 5. Induction is `Nat`-only
 
 Cetacea has no general structural induction. Lists, trees, the BNF
 types in later CS 250 modules, and user-defined inductive structures are
@@ -101,7 +83,7 @@ This means the Module 8 sequence/recursion material, Module 9
 recurrences, and Module 10 structural induction material mostly need to
 stay outside Cetacea.
 
-### 7. Truth-table evaluation is outside Cetacea
+### 6. Truth-table evaluation is outside Cetacea
 
 Cetacea is a proof system, not a truth-table evaluator. Module 2's truth
 tables should still be done on paper or with the course Python tools.
@@ -109,7 +91,7 @@ tables should still be done on paper or with the course Python tools.
 The useful bridge is: formulas classified by truth tables can often be
 re-derived as Cetacea theorems using the proof rules from Module 3.
 
-### 8. Arithmetic is intentionally small
+### 7. Arithmetic is intentionally small
 
 Nat currently has `0`, `succ`, `add`, `mul`, truncated `sub`, and
 `le`. It does not have division, modular arithmetic, cardinalities, or a
@@ -118,7 +100,7 @@ decision procedure for arithmetic goals.
 CS 250 modular arithmetic examples should be modeled axiomatically if
 they are used in Cetacea at all.
 
-### 9. Set theory is typed and finite in scope
+### 8. Set theory is typed and finite in scope
 
 Cetacea has typed sets, set builders, union, intersection, difference,
 subset, and extensionality. It does not have powersets, Cartesian
@@ -128,7 +110,7 @@ comprehension beyond predicate set builders.
 The Module 1 set-identity proofs fit well. Counting arguments and
 powerset/cardinality exercises do not.
 
-### 10. Diagnostics still have line granularity, not token spans
+### 9. Diagnostics still have line granularity, not token spans
 
 Parse and checking errors now report useful line numbers, and failed
 tactics report the current goal. They still do not point at an exact
@@ -137,7 +119,7 @@ token span within the line.
 That is good enough for short tutorial files but can still be vague in
 long theorem headers.
 
-### 11. Imports and names are global
+### 10. Imports and names are global
 
 There are no namespaces or qualified imports. Imported declarations enter
 one global environment, and built-in names such as `add`, `mul`, `sub`,
@@ -146,7 +128,7 @@ and `le` cannot be reused for local functions or predicates.
 This is simple and readable at the current project size, but larger
 course libraries will eventually want namespaces.
 
-### 12. Predicate arguments must be names
+### 11. Predicate arguments must be names
 
 Definitions can take predicate parameters:
 
@@ -185,8 +167,11 @@ are now implemented:
 - Set-builder terms `{ x : T | P(x) }` are supported.
 - `simp` reduces built-in computation under predicate and function
   arguments.
+- `simp at h` simplifies a named hypothesis.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
   compound proof expressions such as `rewrite eq_symm h`.
+- Parenthesized proof expressions such as `exact (h hp).left` and
+  `apply (htrans x y x)` parse.
 - Multi-binder `forall x y : T, ...` and `exists x y : T, ...` parse.
 - Explicit theorem schema arguments can be combined with ordinary
   forall arguments.
