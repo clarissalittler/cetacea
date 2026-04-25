@@ -1,5 +1,4 @@
 use std::env;
-use std::fs;
 use std::process;
 
 fn main() {
@@ -14,15 +13,7 @@ fn main() {
         process::exit(2);
     }
 
-    let source = match fs::read_to_string(&path) {
-        Ok(source) => source,
-        Err(err) => {
-            eprintln!("error: could not read `{path}`: {err}");
-            process::exit(1);
-        }
-    };
-
-    let result = cetacea_core::check_file(&source);
+    let result = cetacea_core::check_file_at_path(&path);
     if result.diagnostics.is_empty() {
         for theorem in result.theorems {
             let kind = if theorem.is_axiom { "axiom" } else { "theorem" };

@@ -21,6 +21,7 @@ definition arity, set element compatibility, and argument type compatibility.
 - `examples/set_nat.ctea`: typed set and natural-number simplification examples.
 - `examples/library_patterns.ctea`: larger standalone proof patterns over a
   small first-order domain.
+- `examples/imports.ctea`: example use of checked theorem-library imports.
 
 ## Run
 
@@ -30,6 +31,7 @@ cargo run -p cetacea_cli -- examples/prop.ctea
 cargo run -p cetacea_cli -- examples/fol.ctea
 cargo run -p cetacea_cli -- examples/set_nat.ctea
 cargo run -p cetacea_cli -- examples/library_patterns.ctea
+cargo run -p cetacea_cli -- examples/imports.ctea
 cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
@@ -37,9 +39,14 @@ cargo run -p cetacea_cli -- std/nat.ctea
 The CLI prints each accepted theorem or axiom and the strongest mode used by
 its checked proof object.
 
+Import paths are resolved relative to the importing file first, then relative
+to the current working directory. A file imported more than once is checked and
+loaded once.
+
 ## Implemented
 
 - `mode constructive` and `mode classical`
+- file imports with `import path/to/file.ctea`
 - `sort`, `const`, `func`, `pred`, formula `def`, and `axiom` declarations
   with type and term parameters
 - theorem declarations with proposition, predicate, type, and term parameters
@@ -78,6 +85,5 @@ its checked proof object.
 
 1. Improve diagnostics with source spans and proof-state rendering.
 2. Improve theorem-instantiation diagnostics and broaden inference.
-3. Add an import mechanism for checked library files.
-4. Broaden `simp` with more computation rules and optional hypothesis
+3. Broaden `simp` with more computation rules and optional hypothesis
    simplification.

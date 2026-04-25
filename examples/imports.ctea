@@ -1,0 +1,37 @@
+import ../std/prop.ctea
+import ../std/fol.ctea
+import ../std/nat.ctea
+import ../std/set.ctea
+
+mode constructive
+
+sort Person
+
+pred Student(Person)
+pred Enrolled(Person)
+
+theorem imported_imp_trans
+  (P Q R : Prop)
+  : (P -> Q) -> (Q -> R) -> P -> R := by
+  exact imp_trans
+
+theorem imported_forall_mono
+  : (forall x : Person, Student(x) -> Enrolled(x))
+    -> (forall x : Person, Student(x))
+    -> forall x : Person, Enrolled(x) := by
+  exact forall_mono {A := Person; P := Student; Q := Enrolled}
+
+theorem imported_exists_mono
+  : (forall x : Person, Student(x) -> Enrolled(x))
+    -> (exists x : Person, Student(x))
+    -> exists x : Person, Enrolled(x) := by
+  exact exists_mono {A := Person; P := Student; Q := Enrolled}
+
+theorem imported_add_comm (n m : Nat) : add(n, m) = add(m, n) := by
+  exact add_comm
+
+theorem imported_subset_trans
+  (A B C : Set Person)
+  : A subset B -> B subset C -> A subset C := by
+  exact subset_trans
+

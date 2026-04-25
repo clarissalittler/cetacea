@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub type Name = String;
 
@@ -625,114 +627,233 @@ pub struct CheckResult {
 }
 
 pub fn check_file(source: &str) -> CheckResult {
-    let file = match parse_file(source) {
-        Ok(file) => file,
-        Err(err) => {
-            return CheckResult {
-                theorems: Vec::new(),
-                diagnostics: vec![Diagnostic::error(err.message)],
-            };
+    let mut checker = FileChecker::new();
+    checker.check_source(source, None);
+    checker.finish()
+}
+
+pub fn check_file_at_path(path: impl AsRef<Path>) -> CheckResult {
+    let mut checker = FileChecker::new();
+    checker.check_path(path.as_ref());
+    checker.finish()
+}
+
+struct FileChecker {
+    env: Env,
+    result: CheckResult,
+    loaded_files: HashSet<PathBuf>,
+    import_stack: Vec<PathBuf>,
+}
+
+impl FileChecker {
+    fn new() -> Self {
+        Self {
+            env: Env::new(),
+            result: CheckResult::default(),
+            loaded_files: HashSet::new(),
+            import_stack: Vec::new(),
         }
-    };
+    }
 
-    let mut env = Env::new();
-    let mut mode = LogicMode::Constructive;
-    let mut result = CheckResult::default();
+    fn finish(self) -> CheckResult {
+        self.result
+    }
 
-    for command in file.commands {
-        match command {
-            Command::Mode(next_mode) => mode = next_mode,
-            Command::Sort(name) => {
-                if env.has_top_level_name(&name) {
-                    result.diagnostics.push(Diagnostic::error(format!(
-                        "cannot redeclare `{name}` as a sort"
-                    )));
-                    continue;
-                }
-                env.add_sort(name);
+    fn check_source(&mut self, source: &str, base_dir: Option<&Path>) {
+        let file = match parse_file(source) {
+            Ok(file) => file,
+            Err(err) => {
+                self.result.diagnostics.push(Diagnostic::error(err.message));
+                return;
             }
-            Command::Const(name, ty) => {
-                if env.has_top_level_name(&name) {
-                    result.diagnostics.push(Diagnostic::error(format!(
-                        "cannot redeclare `{name}` as a constant"
-                    )));
-                    continue;
-                }
-                if let Err(err) = validate_type(&env, &Context::new(), &ty) {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!("constant `{name}` has invalid type"))
-                            .with_note(err.message),
-                    );
-                    continue;
-                }
-                env.add_const(name, ty);
+        };
+        self.check_commands(file.commands, base_dir);
+    }
+
+    fn check_path(&mut self, path: &Path) {
+        let canonical_path = match path.canonicalize() {
+            Ok(path) => path,
+            Err(err) => {
+                self.result.diagnostics.push(
+                    Diagnostic::error(format!("could not read `{}`", path.display()))
+                        .with_note(err.to_string()),
+                );
+                return;
             }
-            Command::Func(name, args, result_type) => {
-                if env.has_top_level_name(&name) {
-                    result.diagnostics.push(Diagnostic::error(format!(
-                        "cannot redeclare `{name}` as a function"
-                    )));
-                    continue;
-                }
-                let empty_ctx = Context::new();
-                let mut invalid_type = None;
-                for ty in args.iter().chain(std::iter::once(&result_type)) {
-                    if let Err(err) = validate_type(&env, &empty_ctx, ty) {
-                        invalid_type = Some(err);
-                        break;
-                    }
-                }
-                if let Some(err) = invalid_type {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!("function `{name}` has invalid type"))
-                            .with_note(err.message),
-                    );
-                    continue;
-                }
-                env.add_func(name, args, result_type);
+        };
+        self.check_canonical_path(canonical_path);
+    }
+
+    fn check_import(&mut self, import_path: &str, base_dir: Option<&Path>) {
+        let canonical_path = match self.resolve_import_path(import_path, base_dir) {
+            Ok(path) => path,
+            Err(diagnostic) => {
+                self.result.diagnostics.push(diagnostic);
+                return;
             }
-            Command::Pred(name, args) => {
-                if env.has_top_level_name(&name) {
-                    result.diagnostics.push(Diagnostic::error(format!(
-                        "cannot redeclare `{name}` as a predicate"
-                    )));
-                    continue;
-                }
-                let empty_ctx = Context::new();
-                if let Err(err) = args
-                    .iter()
-                    .try_for_each(|arg| validate_type(&env, &empty_ctx, arg))
-                {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!("predicate `{name}` has invalid argument type"))
-                            .with_note(err.message),
-                    );
-                    continue;
-                }
-                env.add_pred(name, args);
+        };
+        self.check_canonical_path(canonical_path);
+    }
+
+    fn resolve_import_path(
+        &self,
+        import_path: &str,
+        base_dir: Option<&Path>,
+    ) -> Result<PathBuf, Diagnostic> {
+        let raw = Path::new(import_path);
+        let mut candidates = Vec::new();
+        if raw.is_absolute() {
+            candidates.push(raw.to_path_buf());
+        } else {
+            if let Some(base_dir) = base_dir {
+                candidates.push(base_dir.join(raw));
             }
-            Command::Def(decl) => {
-                if env.has_top_level_name(&decl.name) {
-                    result.diagnostics.push(Diagnostic::error(format!(
-                        "cannot redeclare `{}` as a definition",
-                        decl.name
-                    )));
-                    continue;
-                }
-                if let Err(err) = validate_formula_def_params(&decl.params) {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!(
-                            "definition `{}` has invalid parameters",
-                            decl.name
-                        ))
+            candidates.push(raw.to_path_buf());
+        }
+
+        let mut last_error = None;
+        for candidate in candidates {
+            match candidate.canonicalize() {
+                Ok(path) => return Ok(path),
+                Err(err) => last_error = Some((candidate, err)),
+            }
+        }
+
+        let mut diagnostic = Diagnostic::error(format!("could not read import `{import_path}`"));
+        if let Some((candidate, err)) = last_error {
+            diagnostic = diagnostic.with_note(format!("{}: {err}", candidate.display()));
+        }
+        Err(diagnostic)
+    }
+
+    fn check_canonical_path(&mut self, path: PathBuf) {
+        if self.loaded_files.contains(&path) {
+            return;
+        }
+        if self.import_stack.contains(&path) {
+            self.result.diagnostics.push(
+                Diagnostic::error(format!("import cycle involving `{}`", path.display()))
+                    .with_note("the file is already being checked"),
+            );
+            return;
+        }
+
+        let source = match fs::read_to_string(&path) {
+            Ok(source) => source,
+            Err(err) => {
+                self.result.diagnostics.push(
+                    Diagnostic::error(format!("could not read `{}`", path.display()))
+                        .with_note(err.to_string()),
+                );
+                return;
+            }
+        };
+        let file = match parse_file(&source) {
+            Ok(file) => file,
+            Err(err) => {
+                self.result.diagnostics.push(
+                    Diagnostic::error(format!("could not parse `{}`", path.display()))
                         .with_note(err.message),
-                    );
-                    continue;
+                );
+                return;
+            }
+        };
+
+        self.import_stack.push(path.clone());
+        let base_dir = path.parent().map(Path::to_path_buf);
+        self.check_commands(file.commands, base_dir.as_deref());
+        self.import_stack.pop();
+        self.loaded_files.insert(path);
+    }
+
+    fn check_commands(&mut self, commands: Vec<Command>, base_dir: Option<&Path>) {
+        let mut mode = LogicMode::Constructive;
+
+        for command in commands {
+            match command {
+                Command::Import(path) => self.check_import(&path, base_dir),
+                Command::Mode(next_mode) => mode = next_mode,
+                Command::Sort(name) => {
+                    if self.env.has_top_level_name(&name) {
+                        self.result.diagnostics.push(Diagnostic::error(format!(
+                            "cannot redeclare `{name}` as a sort"
+                        )));
+                        continue;
+                    }
+                    self.env.add_sort(name);
                 }
-                let def_ctx = match build_theorem_context(&env, &decl.params) {
-                    Ok(ctx) => ctx,
-                    Err(err) => {
-                        result.diagnostics.push(
+                Command::Const(name, ty) => {
+                    if self.env.has_top_level_name(&name) {
+                        self.result.diagnostics.push(Diagnostic::error(format!(
+                            "cannot redeclare `{name}` as a constant"
+                        )));
+                        continue;
+                    }
+                    if let Err(err) = validate_type(&self.env, &Context::new(), &ty) {
+                        self.result.diagnostics.push(
+                            Diagnostic::error(format!("constant `{name}` has invalid type"))
+                                .with_note(err.message),
+                        );
+                        continue;
+                    }
+                    self.env.add_const(name, ty);
+                }
+                Command::Func(name, args, result_type) => {
+                    if self.env.has_top_level_name(&name) {
+                        self.result.diagnostics.push(Diagnostic::error(format!(
+                            "cannot redeclare `{name}` as a function"
+                        )));
+                        continue;
+                    }
+                    let empty_ctx = Context::new();
+                    let mut invalid_type = None;
+                    for ty in args.iter().chain(std::iter::once(&result_type)) {
+                        if let Err(err) = validate_type(&self.env, &empty_ctx, ty) {
+                            invalid_type = Some(err);
+                            break;
+                        }
+                    }
+                    if let Some(err) = invalid_type {
+                        self.result.diagnostics.push(
+                            Diagnostic::error(format!("function `{name}` has invalid type"))
+                                .with_note(err.message),
+                        );
+                        continue;
+                    }
+                    self.env.add_func(name, args, result_type);
+                }
+                Command::Pred(name, args) => {
+                    if self.env.has_top_level_name(&name) {
+                        self.result.diagnostics.push(Diagnostic::error(format!(
+                            "cannot redeclare `{name}` as a predicate"
+                        )));
+                        continue;
+                    }
+                    let empty_ctx = Context::new();
+                    if let Err(err) = args
+                        .iter()
+                        .try_for_each(|arg| validate_type(&self.env, &empty_ctx, arg))
+                    {
+                        self.result.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "predicate `{name}` has invalid argument type"
+                            ))
+                            .with_note(err.message),
+                        );
+                        continue;
+                    }
+                    self.env.add_pred(name, args);
+                }
+                Command::Def(decl) => {
+                    if self.env.has_top_level_name(&decl.name) {
+                        self.result.diagnostics.push(Diagnostic::error(format!(
+                            "cannot redeclare `{}` as a definition",
+                            decl.name
+                        )));
+                        continue;
+                    }
+                    if let Err(err) = validate_formula_def_params(&decl.params) {
+                        self.result.diagnostics.push(
                             Diagnostic::error(format!(
                                 "definition `{}` has invalid parameters",
                                 decl.name
@@ -741,160 +862,180 @@ pub fn check_file(source: &str) -> CheckResult {
                         );
                         continue;
                     }
-                };
-                if let Err(err) = validate_formula(&env, &def_ctx, &decl.body) {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!("definition `{}` has invalid body", decl.name))
+                    let def_ctx = match build_theorem_context(&self.env, &decl.params) {
+                        Ok(ctx) => ctx,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                Diagnostic::error(format!(
+                                    "definition `{}` has invalid parameters",
+                                    decl.name
+                                ))
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(err) = validate_formula(&self.env, &def_ctx, &decl.body) {
+                        self.result.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "definition `{}` has invalid body",
+                                decl.name
+                            ))
                             .with_note(err.message)
                             .with_note(format!("body: {}", decl.body)),
-                    );
-                    continue;
-                }
-                env.add_def(FormulaDef {
-                    name: decl.name,
-                    params: decl.params,
-                    body: decl.body,
-                });
-            }
-            Command::Axiom(decl) => {
-                if env.has_top_level_name(&decl.name) {
-                    result.diagnostics.push(Diagnostic::error(format!(
-                        "cannot redeclare `{}` as an axiom",
-                        decl.name
-                    )));
-                    continue;
-                }
-                let axiom_ctx = match build_theorem_context(&env, &decl.params) {
-                    Ok(ctx) => ctx,
-                    Err(err) => {
-                        result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "axiom `{}` has invalid parameters",
-                                decl.name
-                            ))
-                            .with_note(err.message),
                         );
                         continue;
                     }
-                };
-                if let Err(err) = validate_formula(&env, &axiom_ctx, &decl.statement) {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!("axiom `{}` has invalid statement", decl.name))
-                            .with_note(err.message)
-                            .with_note(format!("target: {}", decl.statement)),
-                    );
-                    continue;
+                    self.env.add_def(FormulaDef {
+                        name: decl.name,
+                        params: decl.params,
+                        body: decl.body,
+                    });
                 }
-
-                env.add_theorem(Theorem {
-                    name: decl.name.clone(),
-                    params: decl.params,
-                    statement: decl.statement,
-                    proof: None,
-                    mode_used: mode,
-                    is_axiom: true,
-                });
-                result.theorems.push(CheckedTheorem {
-                    name: decl.name,
-                    mode_used: mode,
-                    is_axiom: true,
-                });
-            }
-            Command::Theorem(decl) => {
-                if env.has_top_level_name(&decl.name) {
-                    result.diagnostics.push(Diagnostic::error(format!(
-                        "cannot redeclare `{}` as a theorem",
-                        decl.name
-                    )));
-                    continue;
-                }
-                let theorem_ctx = match build_theorem_context(&env, &decl.params) {
-                    Ok(ctx) => ctx,
-                    Err(err) => {
-                        result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "theorem `{}` has invalid parameters",
-                                decl.name
-                            ))
-                            .with_note(err.message),
-                        );
-                        continue;
-                    }
-                };
-                if let Err(err) = validate_formula(&env, &theorem_ctx, &decl.statement) {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!("theorem `{}` has invalid statement", decl.name))
-                            .with_note(err.message)
-                            .with_note(format!("target: {}", decl.statement)),
-                    );
-                    continue;
-                }
-                let proof = match prove(
-                    &env,
-                    theorem_ctx.clone(),
-                    decl.statement.clone(),
-                    &decl.tactics,
-                    mode,
-                ) {
-                    Ok(proof) => proof,
-                    Err(err) => {
-                        result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "theorem `{}` failed: {}",
-                                decl.name, err.message
-                            ))
-                            .with_note(format!("target: {}", decl.statement)),
-                        );
-                        continue;
-                    }
-                };
-
-                let mode_used = match check_proof(&env, &theorem_ctx, &proof, &decl.statement, mode)
-                {
-                    Ok(mode_used) => mode_used,
-                    Err(err) => {
-                        result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "theorem `{}` was rejected by the kernel: {}",
-                                decl.name, err.message
-                            ))
-                            .with_note(format!("target: {}", decl.statement)),
-                        );
-                        continue;
-                    }
-                };
-
-                if matches!(mode, LogicMode::Constructive)
-                    && matches!(mode_used, LogicMode::Classical)
-                {
-                    result.diagnostics.push(
-                        Diagnostic::error(format!(
-                            "theorem `{}` uses classical reasoning in constructive mode",
+                Command::Axiom(decl) => {
+                    if self.env.has_top_level_name(&decl.name) {
+                        self.result.diagnostics.push(Diagnostic::error(format!(
+                            "cannot redeclare `{}` as an axiom",
                             decl.name
-                        ))
-                        .with_note("change to `mode classical` or use a constructive proof"),
-                    );
-                    continue;
-                }
+                        )));
+                        continue;
+                    }
+                    let axiom_ctx = match build_theorem_context(&self.env, &decl.params) {
+                        Ok(ctx) => ctx,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                Diagnostic::error(format!(
+                                    "axiom `{}` has invalid parameters",
+                                    decl.name
+                                ))
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(err) = validate_formula(&self.env, &axiom_ctx, &decl.statement) {
+                        self.result.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "axiom `{}` has invalid statement",
+                                decl.name
+                            ))
+                            .with_note(err.message)
+                            .with_note(format!("target: {}", decl.statement)),
+                        );
+                        continue;
+                    }
 
-                env.add_theorem(Theorem {
-                    name: decl.name.clone(),
-                    params: decl.params,
-                    statement: decl.statement,
-                    proof: Some(proof),
-                    mode_used,
-                    is_axiom: false,
-                });
-                result.theorems.push(CheckedTheorem {
-                    name: decl.name,
-                    mode_used,
-                    is_axiom: false,
-                });
+                    self.env.add_theorem(Theorem {
+                        name: decl.name.clone(),
+                        params: decl.params,
+                        statement: decl.statement,
+                        proof: None,
+                        mode_used: mode,
+                        is_axiom: true,
+                    });
+                    self.result.theorems.push(CheckedTheorem {
+                        name: decl.name,
+                        mode_used: mode,
+                        is_axiom: true,
+                    });
+                }
+                Command::Theorem(decl) => {
+                    if self.env.has_top_level_name(&decl.name) {
+                        self.result.diagnostics.push(Diagnostic::error(format!(
+                            "cannot redeclare `{}` as a theorem",
+                            decl.name
+                        )));
+                        continue;
+                    }
+                    let theorem_ctx = match build_theorem_context(&self.env, &decl.params) {
+                        Ok(ctx) => ctx,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                Diagnostic::error(format!(
+                                    "theorem `{}` has invalid parameters",
+                                    decl.name
+                                ))
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(err) = validate_formula(&self.env, &theorem_ctx, &decl.statement) {
+                        self.result.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "theorem `{}` has invalid statement",
+                                decl.name
+                            ))
+                            .with_note(err.message)
+                            .with_note(format!("target: {}", decl.statement)),
+                        );
+                        continue;
+                    }
+                    let proof = match prove(
+                        &self.env,
+                        theorem_ctx.clone(),
+                        decl.statement.clone(),
+                        &decl.tactics,
+                        mode,
+                    ) {
+                        Ok(proof) => proof,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                Diagnostic::error(format!(
+                                    "theorem `{}` failed: {}",
+                                    decl.name, err.message
+                                ))
+                                .with_note(format!("target: {}", decl.statement)),
+                            );
+                            continue;
+                        }
+                    };
+
+                    let mode_used =
+                        match check_proof(&self.env, &theorem_ctx, &proof, &decl.statement, mode) {
+                            Ok(mode_used) => mode_used,
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    Diagnostic::error(format!(
+                                        "theorem `{}` was rejected by the kernel: {}",
+                                        decl.name, err.message
+                                    ))
+                                    .with_note(format!("target: {}", decl.statement)),
+                                );
+                                continue;
+                            }
+                        };
+
+                    if matches!(mode, LogicMode::Constructive)
+                        && matches!(mode_used, LogicMode::Classical)
+                    {
+                        self.result.diagnostics.push(
+                            Diagnostic::error(format!(
+                                "theorem `{}` uses classical reasoning in constructive mode",
+                                decl.name
+                            ))
+                            .with_note("change to `mode classical` or use a constructive proof"),
+                        );
+                        continue;
+                    }
+
+                    self.env.add_theorem(Theorem {
+                        name: decl.name.clone(),
+                        params: decl.params,
+                        statement: decl.statement,
+                        proof: Some(proof),
+                        mode_used,
+                        is_axiom: false,
+                    });
+                    self.result.theorems.push(CheckedTheorem {
+                        name: decl.name,
+                        mode_used,
+                        is_axiom: false,
+                    });
+                }
             }
         }
     }
-
-    result
 }
 
 fn validate_formula_def_params(params: &[Param]) -> Result<(), ValidationError> {
@@ -2462,6 +2603,7 @@ struct AxiomDecl {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Command {
+    Import(String),
     Mode(LogicMode),
     Sort(Name),
     Const(Name, Type),
@@ -2965,6 +3107,12 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             continue;
         }
 
+        if let Some(rest) = trimmed.strip_prefix("import ") {
+            commands.push(Command::Import(parse_import_path(rest)?));
+            i += 1;
+            continue;
+        }
+
         if let Some(rest) = trimmed.strip_prefix("mode ") {
             let mode = match rest.trim() {
                 "constructive" => LogicMode::Constructive,
@@ -3109,7 +3257,8 @@ fn strip_comment(line: &str) -> &str {
 }
 
 fn is_command_start(trimmed: &str) -> bool {
-    trimmed.starts_with("mode ")
+    trimmed.starts_with("import ")
+        || trimmed.starts_with("mode ")
         || trimmed.starts_with("theorem ")
         || trimmed.starts_with("sort ")
         || trimmed.starts_with("const ")
@@ -3117,6 +3266,30 @@ fn is_command_start(trimmed: &str) -> bool {
         || trimmed.starts_with("pred ")
         || trimmed.starts_with("def ")
         || trimmed.starts_with("axiom ")
+}
+
+fn parse_import_path(rest: &str) -> Result<String, ParseError> {
+    let path = rest.trim();
+    if path.is_empty() {
+        return Err(ParseError::new("import declaration needs a path"));
+    }
+
+    if let Some(quoted) = path.strip_prefix('"') {
+        let Some(quoted) = quoted.strip_suffix('"') else {
+            return Err(ParseError::new("quoted import path must end with `\"`"));
+        };
+        if quoted.is_empty() {
+            return Err(ParseError::new("import declaration needs a path"));
+        }
+        return Ok(quoted.to_string());
+    }
+
+    if path.contains(char::is_whitespace) {
+        return Err(ParseError::new(
+            "unquoted import paths cannot contain whitespace",
+        ));
+    }
+    Ok(path.to_string())
 }
 
 fn parse_theorem_header(header: &str) -> Result<(Name, Vec<Param>, Formula), ParseError> {
@@ -5274,9 +5447,21 @@ fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn check_ok(source: &str) -> CheckResult {
         let result = check_file(source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            result.diagnostics
+        );
+        result
+    }
+
+    fn check_path_ok(relative_path: &str) -> CheckResult {
+        let path = repo_path(relative_path);
+        let result = check_file_at_path(&path);
         assert!(
             result.diagnostics.is_empty(),
             "unexpected diagnostics: {:#?}",
@@ -5296,6 +5481,16 @@ mod tests {
             rendered.contains(needle),
             "diagnostics did not contain `{needle}`:\n{rendered}"
         );
+    }
+
+    fn repo_path(relative_path: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(relative_path)
+    }
+
+    fn import_line(relative_path: &str) -> String {
+        format!("import \"{}\"", repo_path(relative_path).display())
     }
 
     #[test]
@@ -5341,6 +5536,68 @@ mod tests {
     #[test]
     fn example_library_patterns_checks() {
         check_ok(include_str!("../../../examples/library_patterns.ctea"));
+    }
+
+    #[test]
+    fn example_imports_checks() {
+        check_path_ok("examples/imports.ctea");
+    }
+
+    #[test]
+    fn duplicate_import_is_loaded_once() {
+        let import = import_line("std/prop.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+{import}
+
+theorem use_imported_id (P : Prop) : P -> P := by
+  exact id
+"#
+        ));
+    }
+
+    #[test]
+    fn missing_import_is_reported() {
+        check_err_contains("import definitely_missing.ctea", "could not read import");
+    }
+
+    #[test]
+    fn import_cycle_is_reported() {
+        let dir = std::env::temp_dir().join(format!("cetacea-import-cycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp import-cycle directory");
+        std::fs::write(dir.join("a.ctea"), "import b.ctea\n").expect("write a.ctea");
+        std::fs::write(dir.join("b.ctea"), "import a.ctea\n").expect("write b.ctea");
+
+        let result = check_file_at_path(dir.join("a.ctea"));
+        let rendered = format!("{:#?}", result.diagnostics);
+        assert!(
+            rendered.contains("import cycle involving"),
+            "diagnostics did not contain import cycle:\n{rendered}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_mode_does_not_leak() {
+        let import = import_line("std/prop.ctea");
+        check_err_contains(
+            &format!(
+                r#"
+{import}
+
+theorem bad (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+"#
+            ),
+            "requires classical mode",
+        );
     }
 
     #[test]
