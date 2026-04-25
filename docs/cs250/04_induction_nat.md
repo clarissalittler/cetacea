@@ -5,7 +5,7 @@ addition `add(n, m)`, multiplication `mul(n, m)`, truncated subtraction
 `sub(n, m)`, and comparison `le(n, m)`. The `induction` tactic does
 Module 4 §6's natural induction, exactly as advertised.
 
-## Convention warning: addition recurses on the *left*
+## Convention note: arithmetic simplification accepts both directions
 
 The CS 250 textbook defines addition by recursion on the **second**
 argument:
@@ -24,44 +24,30 @@ $$
 \text{add}(\text{succ}(n), m) = \text{succ}(\text{add}(n, m))
 $$
 
-This means the "free" direction *flips*. In the textbook, $n + 0 = n$
-falls out by definition, but $0 + n = n$ requires induction. In Cetacea
-it's the other way: `add(0, n) = n` is the base case (one `simp` step),
-and `add(n, 0) = n` is the one that needs induction. Don't fight this;
-just notice it when you compare to the book.
+The simplifier now recognizes both orientations. The left-recursive
+equations are still the primitive implementation, but the textbook
+right-recursive equations also compute:
+
+```text
+add(n, 0) = n
+add(n, succ(m)) = succ(add(n, m))
+```
 
 The standard library has both worked out as `add_zero_left` and
-`add_zero_right`. Read them side by side.
+`add_zero_right`.
 
-## A first proof: `add(n, 0) = n`
+## A direct computation proof: `add(n, 0) = n`
 
 The companion file is [`code/04_induction_nat.ctea`](code/04_induction_nat.ctea).
 
 ```text
 theorem add_zero_right_demo (n : Nat) : add(n, 0) = n := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      rewrite ih
-      refl
+  simp
+  refl
 ```
 
-Reading the proof:
-
-- `induction n with | zero => ... | succ k ih => ...` is the literal
-  form of Module 4's induction rule.
-- In the `zero` arm the goal is `add(0, 0) = 0`. `simp` fires the
-  built-in left-recursive equation `add(0, n) = n` to reduce it to
-  `0 = 0`, which `refl` closes.
-- In the `succ k ih` arm the goal is `add(succ(k), 0) = succ(k)`, with
-  inductive hypothesis `ih : add(k, 0) = k`. `simp` fires the second
-  equation, turning the goal into `succ(add(k, 0)) = succ(k)`. Then
-  `rewrite ih` rewrites the right-hand `k` back to `add(k, 0)` (rewrite
-  goes RHS-to-LHS in the goal), giving `succ(add(k, 0)) = succ(add(k, 0))`,
-  and `refl` closes that.
+`simp` reduces the arithmetic expression, and `refl` closes the resulting
+identity.
 
 ## Commutativity of addition
 
@@ -70,31 +56,24 @@ theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
   induction n with
   | zero =>
       simp
-      rewrite add_zero_right {n := m}
       refl
   | succ n0 ih =>
       simp
-      rewrite add_succ_right_rev {n := m; m := n0}
       rewrite ih
       refl
 ```
 
 The full proof is also in `std/nat.ctea` as `add_comm`. The neat thing
-to notice: every step is a *named* algebraic fact about `add`. The proof
-is more or less a list of equational rewrites, the way you'd do
-algebra on paper but with each step named.
+to notice: `simp` handles the recursive computation in each branch, and
+the induction hypothesis supplies the remaining algebraic step.
 
-The auxiliary `add_succ_right_rev` exists because `rewrite` only
-matches the *right-hand side* of an equation in the goal. To go the
-other direction you need the "reversed" equation. Both directions are
-in `std/nat.ctea`.
+## A custom right-recursive addition
 
-## A textbook-style claim: `0 + n = n` (their `+`)
-
-If you really want to prove things using the textbook's right-recursive
-addition, you can axiomatize it. This is mostly an exercise — Cetacea's
-built-in `add` is already there and the lemmas are already proved. But
-it shows what happens when you commit to the textbook convention:
+If you want a second addition-like operation with the textbook's
+right-recursive equations, you can axiomatize it. This is mostly an
+exercise, because Cetacea's built-in `add` already computes these
+equations. It still shows how to model a recursively specified function
+when the language has no user-defined recursion:
 
 ```text
 mode constructive
@@ -128,15 +107,18 @@ gets tedious; see `LIMITATIONS.md`.
 
 ## Module 4 Exercise 11: `0 · n = 0`
 
-Multiplication is now built in. It follows the same left-recursive
-convention as `add`:
+Multiplication is built in. Like addition, `simp` recognizes both the
+left-recursive equations and the textbook right-recursive equations:
 
 ```text
 mul(0, n) = 0
 mul(succ(n), m) = add(m, mul(n, m))
+mul(n, 0) = 0
+mul(n, succ(m)) = add(n, mul(n, m))
 ```
 
-So the theorem `0 * n = 0` is definitional in Cetacea:
+So both `0 * n = 0` and `n * 0 = 0` are direct computation proofs in
+Cetacea:
 
 ```text
 theorem zero_mul_n_builtin (n : Nat) : mul(0, n) = 0 := by

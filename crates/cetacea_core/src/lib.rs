@@ -2624,24 +2624,32 @@ fn normalize_term_compute(term: &Term) -> Term {
         Term::Add(left, right) => {
             let left = normalize_term_compute(left);
             let right = normalize_term_compute(right);
-            match left {
-                Term::Zero => right,
-                Term::Succ(pred) => {
+            match (left, right) {
+                (Term::Zero, right) => right,
+                (left, Term::Zero) => left,
+                (Term::Succ(pred), right) => {
                     normalize_term_compute(&Term::Succ(Box::new(Term::Add(pred, Box::new(right)))))
                 }
-                other => Term::Add(Box::new(other), Box::new(right)),
+                (left, Term::Succ(pred)) => {
+                    normalize_term_compute(&Term::Succ(Box::new(Term::Add(Box::new(left), pred))))
+                }
+                (left, right) => Term::Add(Box::new(left), Box::new(right)),
             }
         }
         Term::Mul(left, right) => {
             let left = normalize_term_compute(left);
             let right = normalize_term_compute(right);
-            match left {
-                Term::Zero => Term::Zero,
-                Term::Succ(pred) => normalize_term_compute(&Term::Add(
+            match (left, right) {
+                (Term::Zero, _) | (_, Term::Zero) => Term::Zero,
+                (Term::Succ(pred), right) => normalize_term_compute(&Term::Add(
                     Box::new(right.clone()),
                     Box::new(Term::Mul(pred, Box::new(right))),
                 )),
-                other => Term::Mul(Box::new(other), Box::new(right)),
+                (left, Term::Succ(pred)) => normalize_term_compute(&Term::Add(
+                    Box::new(left.clone()),
+                    Box::new(Term::Mul(Box::new(left), pred)),
+                )),
+                (left, right) => Term::Mul(Box::new(left), Box::new(right)),
             }
         }
         Term::Sub(left, right) => {
@@ -8132,6 +8140,14 @@ theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
   simp
   refl
 
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  simp
+  refl
+
+theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
+  simp
+  refl
+
 theorem add_one_zero : add(succ(0), 0) = succ(0) := by
   simp
   refl
@@ -8237,6 +8253,14 @@ theorem mul_succ_left (n m : Nat) : mul(succ(n), m) = add(m, mul(n, m)) := by
   simp
   refl
 
+theorem mul_zero_right (n : Nat) : mul(n, 0) = 0 := by
+  simp
+  refl
+
+theorem mul_succ_right (n m : Nat) : mul(n, succ(m)) = add(n, mul(n, m)) := by
+  simp
+  refl
+
 theorem mul_two_one : mul(succ(succ(0)), succ(0)) = succ(succ(0)) := by
   simp
   refl
@@ -8297,12 +8321,12 @@ theorem two_not_le_one : le(succ(succ(0)), succ(0)) -> False := by
     }
 
     #[test]
-    fn nat_induction_proves_add_zero_right() {
+    fn nat_induction_proves_add_assoc() {
         check_ok(
             r#"
 mode constructive
 
-theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+theorem add_assoc (n m k : Nat) : add(add(n, m), k) = add(n, add(m, k)) := by
   induction n with
   | zero =>
       simp
@@ -8329,7 +8353,6 @@ theorem induction_then_next_goal (n : Nat) : add(n, 0) = n /\ n = n := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
       refl
   refl
 "#,

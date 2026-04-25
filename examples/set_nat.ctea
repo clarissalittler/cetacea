@@ -18,14 +18,8 @@ theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
   refl
 
 theorem add_zero_right (n : Nat) : add(n, 0) = n := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      rewrite ih
-      refl
+  simp
+  refl
 
 theorem singleton_member : alice in singleton(alice) := by
   simp

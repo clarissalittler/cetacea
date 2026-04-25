@@ -614,9 +614,13 @@ truncated subtraction:
 
 ```text
 add(0, n)         ==> n
+add(n, 0)         ==> n
 add(succ(n), m)  ==> succ(add(n, m))
+add(n, succ(m))  ==> succ(add(n, m))
 mul(0, n)         ==> 0
+mul(n, 0)         ==> 0
 mul(succ(n), m)  ==> add(m, mul(n, m))
+mul(n, succ(m))  ==> add(n, mul(n, m))
 sub(n, 0)         ==> n
 sub(0, n)         ==> 0
 sub(succ(n), succ(m))  ==> sub(n, m)

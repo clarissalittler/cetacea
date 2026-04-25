@@ -35,44 +35,19 @@ still needs an explicit `rewrite`, `exact`, or helper theorem.
 
 **Possible improvement:** add a theorem-driven simplifier.
 
-### 3. Addition and multiplication recurse on the left
-
-The CS 250 text defines addition by recursion on the second argument:
-
-```text
-n + 0 = n
-n + succ(m) = succ(n + m)
-```
-
-Cetacea's built-in `add` recurses on the first argument:
-
-```text
-add(0, n) = n
-add(succ(n), m) = succ(add(n, m))
-```
-
-Multiplication follows the same left-recursive convention:
-
-```text
-mul(0, n) = 0
-mul(succ(n), m) = add(m, mul(n, m))
-```
-
-This flips which textbook facts are "by definition" and which require
-induction. The `std/nat.ctea` file includes both directions where useful,
-but the convention needs to be flagged in class.
-
-### 4. User-defined recursive functions are not available
+### 3. User-defined recursive functions are not available
 
 Cetacea has transparent non-recursive definitions, but no syntax for
-defining recursive functions over `Nat`. If a tutorial wants the
-textbook's right-recursive addition or multiplication, it must introduce
-an uninterpreted function and axiomatize its recursion equations.
+defining recursive functions over `Nat`. Built-in `add` and `mul` now
+simplify both the implementation's left-recursive equations and the CS
+250 textbook's right-recursive equations, but custom recursive examples
+must still be introduced as uninterpreted functions with axiomatized
+recursion equations.
 
 That is fine for short course examples, but it is not a replacement for
 a real recursive-function facility.
 
-### 5. Induction is `Nat`-only
+### 4. Induction is `Nat`-only
 
 Cetacea has no general structural induction. Lists, trees, the BNF
 types in later CS 250 modules, and user-defined inductive structures are
@@ -82,7 +57,7 @@ This means the Module 8 sequence/recursion material, Module 9
 recurrences, and Module 10 structural induction material mostly need to
 stay outside Cetacea.
 
-### 6. Truth-table evaluation is outside Cetacea
+### 5. Truth-table evaluation is outside Cetacea
 
 Cetacea is a proof system, not a truth-table evaluator. Module 2's truth
 tables should still be done on paper or with the course Python tools.
@@ -90,7 +65,7 @@ tables should still be done on paper or with the course Python tools.
 The useful bridge is: formulas classified by truth tables can often be
 re-derived as Cetacea theorems using the proof rules from Module 3.
 
-### 7. Arithmetic is intentionally small
+### 6. Arithmetic is intentionally small
 
 Nat currently has `0`, `succ`, `add`, `mul`, truncated `sub`, and
 `le`. It does not have division, modular arithmetic, cardinalities, or a
@@ -99,7 +74,7 @@ decision procedure for arithmetic goals.
 CS 250 modular arithmetic examples should be modeled axiomatically if
 they are used in Cetacea at all.
 
-### 8. Set theory is typed and finite in scope
+### 7. Set theory is typed and finite in scope
 
 Cetacea has typed sets, set builders, union, intersection, difference,
 powersets, subset, and extensionality. It does not have Cartesian
@@ -109,7 +84,7 @@ comprehension beyond predicate set builders.
 The Module 1 set-identity and powerset-monotonicity proofs fit well.
 Counting arguments and cardinality exercises do not.
 
-### 9. Diagnostics still have line granularity, not token spans
+### 8. Diagnostics still have line granularity, not token spans
 
 Parse and checking errors now report useful line numbers, and failed
 tactics report the current goal. They still do not point at an exact
@@ -118,7 +93,7 @@ token span within the line.
 That is good enough for short tutorial files but can still be vague in
 long theorem headers.
 
-### 10. Imports and names are global
+### 9. Imports and names are global
 
 There are no namespaces or qualified imports. Imported declarations enter
 one global environment, and built-in names such as `add`, `mul`, `sub`,
@@ -127,7 +102,7 @@ and `le` cannot be reused for local functions or predicates.
 This is simple and readable at the current project size, but larger
 course libraries will eventually want namespaces.
 
-### 11. Predicate arguments must be names
+### 10. Predicate arguments must be names
 
 Definitions can take predicate parameters:
 
@@ -168,6 +143,9 @@ are now implemented:
   arguments.
 - `simp at h` simplifies a named hypothesis, and `simp at *` simplifies
   all hypotheses plus the goal.
+- Built-in `add` and `mul` simplify the CS 250 textbook's
+  right-recursive equations as well as the implementation's
+  left-recursive equations.
 - `powerset(A)` is supported, with membership simplifying to subset.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
   compound proof expressions such as `rewrite eq_symm h`.

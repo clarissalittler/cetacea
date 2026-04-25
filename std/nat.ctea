@@ -9,31 +9,19 @@ theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
   refl
 
 theorem add_zero_right (n : Nat) : add(n, 0) = n := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      rewrite ih
-      refl
+  simp
+  refl
 
 theorem add_zero_right_rev (n : Nat) : n = add(n, 0) := by
-  rewrite add_zero_right {n := n}
+  simp
   refl
 
 theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      rewrite ih
-      refl
+  simp
+  refl
 
 theorem add_succ_right_rev (n m : Nat) : succ(add(n, m)) = add(n, succ(m)) := by
-  rewrite add_succ_right {n := n; m := m}
+  simp
   refl
 
 theorem add_assoc (n m k : Nat) : add(add(n, m), k) = add(n, add(m, k)) := by
@@ -50,11 +38,9 @@ theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
   induction n with
   | zero =>
       simp
-      rewrite add_zero_right {n := m}
       refl
   | succ n0 ih =>
       simp
-      rewrite add_succ_right_rev {n := m; m := n0}
       rewrite ih
       refl
 
@@ -67,13 +53,12 @@ theorem mul_succ_left (n m : Nat) : mul(succ(n), m) = add(m, mul(n, m)) := by
   refl
 
 theorem mul_zero_right (n : Nat) : mul(n, 0) = 0 := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      exact ih
+  simp
+  refl
+
+theorem mul_succ_right (n m : Nat) : mul(n, succ(m)) = add(n, mul(n, m)) := by
+  simp
+  refl
 
 theorem sub_zero_right (n : Nat) : sub(n, 0) = n := by
   simp

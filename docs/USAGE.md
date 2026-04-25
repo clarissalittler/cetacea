@@ -216,10 +216,10 @@ mul(n, m)
 sub(n, m)
 ```
 
-`add` computes by recursion on its first argument, so `add(0, n)` simplifies
-directly while facts such as `add(n, 0) = n` are proved by induction.
-`mul` follows the same convention: `mul(0, n)` simplifies directly, and
-`mul(n, 0) = 0` is proved by induction.
+`add` and `mul` simplify using both the left-recursive built-in equations and
+the textbook right-recursive equations. In particular, `add(0, n)`,
+`add(n, 0)`, `add(succ(n), m)`, `add(n, succ(m))`, `mul(0, n)`, and
+`mul(n, 0)` all compute directly.
 `sub` is truncated subtraction: `sub(n, 0)`, `sub(0, n)`, and
 `sub(succ(n), succ(m))` simplify directly.
 
@@ -698,18 +698,13 @@ Use `induction n with` for natural-number induction.
 
 ```text
 theorem add_zero_right (n : Nat) : add(n, 0) = n := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      rewrite ih
-      refl
+  simp
+  refl
 ```
 
-The zero and successor arm bodies are indented. In the successor arm, `k` is
-the predecessor variable and `ih` is the induction hypothesis.
+For facts that still need induction, the zero and successor arm bodies are
+indented. In the successor arm, `k` is the predecessor variable and `ih` is the
+induction hypothesis.
 
 The checker rejects induction if a local hypothesis depends on the induction
 variable, because the current induction rule does not generalize such
@@ -898,6 +893,7 @@ Includes basic Nat addition, multiplication, subtraction, and order lemmas:
 - `mul_zero_left`
 - `mul_succ_left`
 - `mul_zero_right`
+- `mul_succ_right`
 - `sub_zero_right`
 - `sub_zero_left`
 - `sub_succ_succ`
@@ -1071,14 +1067,8 @@ Use `simp` in each branch to expose computation equations.
 
 ```text
 theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      rewrite ih
-      refl
+  simp
+  refl
 ```
 
 ## Current Limitations

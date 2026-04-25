@@ -5,24 +5,16 @@ import ../../../std/prelude.ctea
 mode constructive
 
 theorem add_zero_right_demo (n : Nat) : add(n, 0) = n := by
-  induction n with
-  | zero =>
-      simp
-      refl
-  | succ k ih =>
-      simp
-      rewrite ih
-      refl
+  simp
+  refl
 
 theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
   induction n with
   | zero =>
       simp
-      rewrite add_zero_right {n := m}
       refl
   | succ n0 ih =>
       simp
-      rewrite add_succ_right_rev {n := m; m := n0}
       rewrite ih
       refl
 
@@ -47,8 +39,7 @@ theorem myadd_zero_n (n : Nat) : myadd(0, n) = n := by
       refl
 
 -- Module 4 Exercise 11: `0 * n = 0`.
--- Cetacea's built-in multiplication recurses on the left, so this
--- particular direction is definitional.
+-- Cetacea's built-in multiplication computes this directly.
 theorem zero_mul_n_builtin (n : Nat) : mul(0, n) = 0 := by
   simp
   refl
