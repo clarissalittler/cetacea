@@ -81,15 +81,14 @@ theorem inter_union_distrib
       exact hxAC.right
 
 -- A finitary version of "A ⊆ B → 𝒫(A) ⊆ 𝒫(B)": every subset of A is
--- also a subset of B. The cleanest way is to keep our local names the
--- same as `subset_trans`'s schema names (A, B, C) so the explicit
--- substitution is straightforward.
+-- also a subset of B. `apply subset_trans` infers the intermediate set
+-- from the local hypotheses.
 theorem subsets_carry
   (A B C : Set Person)
   : A subset B -> C subset A -> C subset B := by
   intro hAB
   intro hCA
-  apply subset_trans {T := Person; A := C; B := A; C := B}
+  apply subset_trans
   exact hCA
   exact hAB
 

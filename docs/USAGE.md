@@ -489,6 +489,21 @@ theorem forall_apply
   exact hp
 ```
 
+For transitive lemmas, `apply` can often infer the intermediate object from
+local hypotheses:
+
+```text
+theorem subsets_carry
+  (T : Type)
+  (A B C : Set T)
+  : A subset B -> C subset A -> C subset B := by
+  intro hAB
+  intro hCA
+  apply subset_trans
+  exact hCA
+  exact hAB
+```
+
 ### `split`
 
 Use `split` to prove conjunctions and biconditionals. Since `<->` parses as a

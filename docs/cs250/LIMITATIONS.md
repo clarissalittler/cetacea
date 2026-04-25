@@ -9,19 +9,20 @@ fixed; see the resolved section at the end for historical context.
 ### 1. Theorem instantiation still sometimes needs explicit arguments
 
 `exact` and `apply` can infer many theorem parameters, but not all of
-them. Transitive lemmas are the common case where an intermediate term
-is not forced by the goal:
+them. Transitive lemmas are much better than they used to be: when the
+intermediate object appears in local hypotheses, `apply` can usually
+infer it:
 
 ```text
-apply subset_trans {T := Person; A := C; B := A; C := B}
+apply subset_trans
 ```
 
-That works, but the syntax is a lot for beginners. The diagnostics are
-better than they used to be, but the user still needs to know which
-intermediate object to provide.
+The remaining rough edge is the genuinely underdetermined case where
+the intermediate object is not present in the goal or local hypotheses.
+Then the user still needs to provide an explicit schema argument.
 
-**Possible improvement:** add more goal-directed inference for
-intermediate terms.
+**Possible improvement:** add a more principled search procedure for
+underconstrained theorem parameters.
 
 ### 2. `simp` is built-in, not theorem-driven
 
@@ -146,6 +147,8 @@ are now implemented:
 - Built-in `add` and `mul` simplify the CS 250 textbook's
   right-recursive equations as well as the implementation's
   left-recursive equations.
+- `apply` can infer intermediate schema arguments for transitive lemmas
+  such as `subset_trans` and `eq_trans` from matching local hypotheses.
 - `powerset(A)` is supported, with membership simplifying to subset.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
   compound proof expressions such as `rewrite eq_symm h`.

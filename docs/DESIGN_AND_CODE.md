@@ -906,16 +906,17 @@ Good tactic design in Cetacea means:
 ## How To Improve Theorem Instantiation
 
 The current system supports both inferred and explicit schema substitution.
-Inference is intentionally limited. Improving it likely means working in the
-schema-matching and theorem-reference code rather than the parser.
+Inference uses the expected goal and, for `apply`, matching local hypotheses.
+It is still intentionally limited. Improving it further likely means working
+in the schema-matching and theorem-reference code rather than the parser.
 
 Useful future improvements:
 
 - infer more term parameters from equality and predicate positions
 - produce better messages when only one schema argument is missing
 - explain which theorem parameter could not be inferred
-- use expected goal shape more aggressively in `apply`
-- avoid requiring explicit arguments in common Nat rewrite lemmas
+- add backtracking when several local hypotheses could instantiate the same
+  missing theorem parameter
 
 This would make library proofs shorter without changing the kernel.
 

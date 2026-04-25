@@ -6249,6 +6249,15 @@ fn apply_plan_for_goal(
             ))
         })?;
     }
+    infer_apply_args_from_context(
+        env,
+        ctx,
+        &premises,
+        schema_params,
+        &quantified,
+        &mut term_subst,
+        &mut schema_subst,
+    )?;
     ensure_schema_subst_complete(schema_params, &schema_subst, theorem_name)?;
 
     let mut forall_args = Vec::new();
@@ -6273,6 +6282,49 @@ fn apply_plan_for_goal(
         forall_args,
         premises,
     })
+}
+
+fn infer_apply_args_from_context(
+    env: &Env,
+    ctx: &Context,
+    premises: &[Formula],
+    schema_params: &[Param],
+    term_metas: &[Name],
+    term_subst: &mut HashMap<Name, Term>,
+    schema_subst: &mut SchemaSubst,
+) -> Result<(), TacticError> {
+    if premises.is_empty() || ctx.proofs().is_empty() {
+        return Ok(());
+    }
+
+    let mut normalized_hypotheses = Vec::new();
+    for binding in ctx.proofs() {
+        let formula = normalize_formula_defs(env, ctx, &binding.formula)
+            .map_err(|err| TacticError::new(err.message))?;
+        normalized_hypotheses.push(formula);
+    }
+
+    for premise in premises {
+        for hypothesis in normalized_hypotheses.iter().rev() {
+            let mut candidate_term_subst = term_subst.clone();
+            let mut candidate_schema_subst = schema_subst.clone();
+            let mut unify = UnifyState {
+                env,
+                ctx,
+                term_metas,
+                schema_params,
+                term_subst: &mut candidate_term_subst,
+                schema_subst: &mut candidate_schema_subst,
+            };
+            if unify_formula(premise, hypothesis, &mut unify).is_ok() {
+                *term_subst = candidate_term_subst;
+                *schema_subst = candidate_schema_subst;
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn infer_schema_subst_for_formula(
@@ -8541,6 +8593,47 @@ theorem subsets_carry
   apply subset_trans {{T := T; A := S; B := A; C := B}}
   exact hSA
   exact hAB
+"#
+        ));
+    }
+
+    #[test]
+    fn apply_infers_intermediate_schema_argument_from_hypotheses() {
+        let import = import_line("std/set.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem subsets_carry_without_explicit_middle
+  (T : Type)
+  (A B S : Set T)
+  : A subset B -> S subset A -> S subset B := by
+  intro hAB
+  intro hSA
+  apply subset_trans
+  exact hSA
+  exact hAB
+"#
+        ));
+    }
+
+    #[test]
+    fn apply_infers_eq_trans_middle_from_hypotheses() {
+        let import = import_line("std/eq.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem eq_trans_without_explicit_middle
+  (x y z : Nat)
+  : x = y -> y = z -> x = z := by
+  intro hxy
+  intro hyz
+  apply eq_trans
+  exact hxy
+  exact hyz
 "#
         ));
     }

@@ -176,7 +176,7 @@ theorem powerset_mono_demo
 
 - Module 1 Exercise 9: `A ⊆ B -> P(A) ⊆ P(B)` is now direct:
   `A subset B -> powerset(A) subset powerset(B)`. The proof is the same
-  element-subset argument as on paper, with one `subset_trans` step.
+  element-subset argument as on paper.
 - Re-prove `union_comm` from scratch (without using the imported
   version).
 - Module 1 Exercise 10 (inclusion-exclusion) is **not** doable directly
