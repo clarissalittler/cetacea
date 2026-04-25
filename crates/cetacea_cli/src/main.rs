@@ -32,7 +32,13 @@ fn main() {
     }
 
     for diagnostic in result.diagnostics {
-        eprintln!("error: {}", diagnostic.message);
+        match diagnostic.location {
+            Some(location) => match location.path {
+                Some(path) => eprintln!("error: {path}:{}: {}", location.line, diagnostic.message),
+                None => eprintln!("error: line {}: {}", location.line, diagnostic.message),
+            },
+            None => eprintln!("error: {}", diagnostic.message),
+        }
         for note in diagnostic.notes {
             eprintln!("  note: {note}");
         }

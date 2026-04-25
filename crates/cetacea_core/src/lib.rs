@@ -592,8 +592,15 @@ pub struct Span {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceLocation {
+    pub path: Option<String>,
+    pub line: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
     pub span: Option<Span>,
+    pub location: Option<SourceLocation>,
     pub message: String,
     pub notes: Vec<String>,
 }
@@ -602,15 +609,32 @@ impl Diagnostic {
     fn error(message: impl Into<String>) -> Self {
         Self {
             span: None,
+            location: None,
             message: message.into(),
             notes: Vec::new(),
         }
+    }
+
+    fn with_location(mut self, path: Option<&Path>, line: usize) -> Self {
+        self.location = Some(SourceLocation {
+            path: path.map(|path| path.display().to_string()),
+            line,
+        });
+        self
     }
 
     fn with_note(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
         self
     }
+}
+
+fn diagnostic_at(
+    source_path: Option<&Path>,
+    line: usize,
+    message: impl Into<String>,
+) -> Diagnostic {
+    Diagnostic::error(message).with_location(source_path, line)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -668,7 +692,7 @@ impl FileChecker {
                 return;
             }
         };
-        self.check_commands(file.commands, base_dir, false);
+        self.check_commands(file.commands, base_dir, false, None);
     }
 
     fn check_path(&mut self, path: &Path) {
@@ -685,10 +709,17 @@ impl FileChecker {
         self.check_canonical_path(canonical_path, false);
     }
 
-    fn check_import(&mut self, import_path: &str, base_dir: Option<&Path>) {
+    fn check_import(
+        &mut self,
+        import_path: &str,
+        base_dir: Option<&Path>,
+        source_path: Option<&Path>,
+        line: usize,
+    ) {
         let canonical_path = match self.resolve_import_path(import_path, base_dir) {
             Ok(path) => path,
-            Err(diagnostic) => {
+            Err(mut diagnostic) => {
+                diagnostic = diagnostic.with_location(source_path, line);
                 self.result.diagnostics.push(diagnostic);
                 return;
             }
@@ -762,43 +793,59 @@ impl FileChecker {
 
         self.import_stack.push(path.clone());
         let base_dir = path.parent().map(Path::to_path_buf);
-        self.check_commands(file.commands, base_dir.as_deref(), is_imported);
+        self.check_commands(
+            file.commands,
+            base_dir.as_deref(),
+            is_imported,
+            Some(path.as_path()),
+        );
         self.import_stack.pop();
         self.loaded_files.insert(path);
     }
 
     fn check_commands(
         &mut self,
-        commands: Vec<Command>,
+        commands: Vec<LocatedCommand>,
         base_dir: Option<&Path>,
         is_imported: bool,
+        source_path: Option<&Path>,
     ) {
         let mut mode = LogicMode::Constructive;
 
-        for command in commands {
+        for located in commands {
+            let line = located.line;
+            let command = located.command;
             match command {
-                Command::Import(path) => self.check_import(&path, base_dir),
+                Command::Import(path) => self.check_import(&path, base_dir, source_path, line),
                 Command::Mode(next_mode) => mode = next_mode,
                 Command::Sort(name) => {
                     if self.env.has_top_level_name(&name) {
-                        self.result.diagnostics.push(Diagnostic::error(format!(
-                            "cannot redeclare `{name}` as a sort"
-                        )));
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{name}` as a sort"),
+                        ));
                         continue;
                     }
                     self.env.add_sort(name);
                 }
                 Command::Const(name, ty) => {
                     if self.env.has_top_level_name(&name) {
-                        self.result.diagnostics.push(Diagnostic::error(format!(
-                            "cannot redeclare `{name}` as a constant"
-                        )));
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{name}` as a constant"),
+                        ));
                         continue;
                     }
                     if let Err(err) = validate_type(&self.env, &Context::new(), &ty) {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!("constant `{name}` has invalid type"))
-                                .with_note(err.message),
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!("constant `{name}` has invalid type"),
+                            )
+                            .with_note(err.message),
                         );
                         continue;
                     }
@@ -806,9 +853,11 @@ impl FileChecker {
                 }
                 Command::Func(name, args, result_type) => {
                     if self.env.has_top_level_name(&name) {
-                        self.result.diagnostics.push(Diagnostic::error(format!(
-                            "cannot redeclare `{name}` as a function"
-                        )));
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{name}` as a function"),
+                        ));
                         continue;
                     }
                     let empty_ctx = Context::new();
@@ -821,8 +870,12 @@ impl FileChecker {
                     }
                     if let Some(err) = invalid_type {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!("function `{name}` has invalid type"))
-                                .with_note(err.message),
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!("function `{name}` has invalid type"),
+                            )
+                            .with_note(err.message),
                         );
                         continue;
                     }
@@ -830,9 +883,11 @@ impl FileChecker {
                 }
                 Command::Pred(name, args) => {
                     if self.env.has_top_level_name(&name) {
-                        self.result.diagnostics.push(Diagnostic::error(format!(
-                            "cannot redeclare `{name}` as a predicate"
-                        )));
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{name}` as a predicate"),
+                        ));
                         continue;
                     }
                     let empty_ctx = Context::new();
@@ -841,9 +896,11 @@ impl FileChecker {
                         .try_for_each(|arg| validate_type(&self.env, &empty_ctx, arg))
                     {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "predicate `{name}` has invalid argument type"
-                            ))
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!("predicate `{name}` has invalid argument type"),
+                            )
                             .with_note(err.message),
                         );
                         continue;
@@ -852,18 +909,20 @@ impl FileChecker {
                 }
                 Command::Def(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
-                        self.result.diagnostics.push(Diagnostic::error(format!(
-                            "cannot redeclare `{}` as a definition",
-                            decl.name
-                        )));
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{}` as a definition", decl.name),
+                        ));
                         continue;
                     }
                     if let Err(err) = validate_formula_def_params(&decl.params) {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "definition `{}` has invalid parameters",
-                                decl.name
-                            ))
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!("definition `{}` has invalid parameters", decl.name),
+                            )
                             .with_note(err.message),
                         );
                         continue;
@@ -872,10 +931,11 @@ impl FileChecker {
                         Ok(ctx) => ctx,
                         Err(err) => {
                             self.result.diagnostics.push(
-                                Diagnostic::error(format!(
-                                    "definition `{}` has invalid parameters",
-                                    decl.name
-                                ))
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("definition `{}` has invalid parameters", decl.name),
+                                )
                                 .with_note(err.message),
                             );
                             continue;
@@ -883,10 +943,11 @@ impl FileChecker {
                     };
                     if let Err(err) = validate_formula(&self.env, &def_ctx, &decl.body) {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "definition `{}` has invalid body",
-                                decl.name
-                            ))
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!("definition `{}` has invalid body", decl.name),
+                            )
                             .with_note(err.message)
                             .with_note(format!("body: {}", decl.body)),
                         );
@@ -900,20 +961,22 @@ impl FileChecker {
                 }
                 Command::Axiom(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
-                        self.result.diagnostics.push(Diagnostic::error(format!(
-                            "cannot redeclare `{}` as an axiom",
-                            decl.name
-                        )));
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{}` as an axiom", decl.name),
+                        ));
                         continue;
                     }
                     let axiom_ctx = match build_theorem_context(&self.env, &decl.params) {
                         Ok(ctx) => ctx,
                         Err(err) => {
                             self.result.diagnostics.push(
-                                Diagnostic::error(format!(
-                                    "axiom `{}` has invalid parameters",
-                                    decl.name
-                                ))
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("axiom `{}` has invalid parameters", decl.name),
+                                )
                                 .with_note(err.message),
                             );
                             continue;
@@ -921,10 +984,11 @@ impl FileChecker {
                     };
                     if let Err(err) = validate_formula(&self.env, &axiom_ctx, &decl.statement) {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "axiom `{}` has invalid statement",
-                                decl.name
-                            ))
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!("axiom `{}` has invalid statement", decl.name),
+                            )
                             .with_note(err.message)
                             .with_note(format!("target: {}", decl.statement)),
                         );
@@ -948,20 +1012,22 @@ impl FileChecker {
                 }
                 Command::Theorem(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
-                        self.result.diagnostics.push(Diagnostic::error(format!(
-                            "cannot redeclare `{}` as a theorem",
-                            decl.name
-                        )));
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{}` as a theorem", decl.name),
+                        ));
                         continue;
                     }
                     let theorem_ctx = match build_theorem_context(&self.env, &decl.params) {
                         Ok(ctx) => ctx,
                         Err(err) => {
                             self.result.diagnostics.push(
-                                Diagnostic::error(format!(
-                                    "theorem `{}` has invalid parameters",
-                                    decl.name
-                                ))
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("theorem `{}` has invalid parameters", decl.name),
+                                )
                                 .with_note(err.message),
                             );
                             continue;
@@ -969,10 +1035,11 @@ impl FileChecker {
                     };
                     if let Err(err) = validate_formula(&self.env, &theorem_ctx, &decl.statement) {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "theorem `{}` has invalid statement",
-                                decl.name
-                            ))
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!("theorem `{}` has invalid statement", decl.name),
+                            )
                             .with_note(err.message)
                             .with_note(format!("target: {}", decl.statement)),
                         );
@@ -988,10 +1055,11 @@ impl FileChecker {
                         Ok(proof) => proof,
                         Err(err) => {
                             self.result.diagnostics.push(
-                                Diagnostic::error(format!(
-                                    "theorem `{}` failed: {}",
-                                    decl.name, err.message
-                                ))
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("theorem `{}` failed: {}", decl.name, err.message),
+                                )
                                 .with_note(format!("target: {}", decl.statement)),
                             );
                             continue;
@@ -1003,10 +1071,14 @@ impl FileChecker {
                             Ok(mode_used) => mode_used,
                             Err(err) => {
                                 self.result.diagnostics.push(
-                                    Diagnostic::error(format!(
-                                        "theorem `{}` was rejected by the kernel: {}",
-                                        decl.name, err.message
-                                    ))
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!(
+                                            "theorem `{}` was rejected by the kernel: {}",
+                                            decl.name, err.message
+                                        ),
+                                    )
                                     .with_note(format!("target: {}", decl.statement)),
                                 );
                                 continue;
@@ -1017,10 +1089,14 @@ impl FileChecker {
                         && matches!(mode_used, LogicMode::Classical)
                     {
                         self.result.diagnostics.push(
-                            Diagnostic::error(format!(
-                                "theorem `{}` uses classical reasoning in constructive mode",
-                                decl.name
-                            ))
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "theorem `{}` uses classical reasoning in constructive mode",
+                                    decl.name
+                                ),
+                            )
                             .with_note("change to `mode classical` or use a constructive proof"),
                         );
                         continue;
@@ -2624,7 +2700,13 @@ enum Command {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct File {
-    commands: Vec<Command>,
+    commands: Vec<LocatedCommand>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LocatedCommand {
+    line: usize,
+    command: Command,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3114,9 +3196,13 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             i += 1;
             continue;
         }
+        let command_line = i + 1;
 
         if let Some(rest) = trimmed.strip_prefix("import ") {
-            commands.push(Command::Import(parse_import_path(rest)?));
+            commands.push(located_command(
+                command_line,
+                Command::Import(parse_import_path(rest)?),
+            ));
             i += 1;
             continue;
         }
@@ -3127,7 +3213,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 "classical" => LogicMode::Classical,
                 other => return Err(ParseError::new(format!("unknown mode `{other}`"))),
             };
-            commands.push(Command::Mode(mode));
+            commands.push(located_command(command_line, Command::Mode(mode)));
             i += 1;
             continue;
         }
@@ -3137,7 +3223,10 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             if name.is_empty() {
                 return Err(ParseError::new("sort declaration needs a name"));
             }
-            commands.push(Command::Sort(name.to_string()));
+            commands.push(located_command(
+                command_line,
+                Command::Sort(name.to_string()),
+            ));
             i += 1;
             continue;
         }
@@ -3146,9 +3235,9 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             let Some((name, ty)) = rest.split_once(':') else {
                 return Err(ParseError::new("const declaration expects `name : Type`"));
             };
-            commands.push(Command::Const(
-                name.trim().to_string(),
-                parse_type_str(ty.trim())?,
+            commands.push(located_command(
+                command_line,
+                Command::Const(name.trim().to_string(), parse_type_str(ty.trim())?),
             ));
             i += 1;
             continue;
@@ -3159,14 +3248,17 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 return Err(ParseError::new("func declaration expects `name : A -> B`"));
             };
             let (args, result) = parse_function_type_str(ty.trim())?;
-            commands.push(Command::Func(name.trim().to_string(), args, result));
+            commands.push(located_command(
+                command_line,
+                Command::Func(name.trim().to_string(), args, result),
+            ));
             i += 1;
             continue;
         }
 
         if let Some(rest) = trimmed.strip_prefix("pred ") {
             let (name, args) = parse_pred_decl(rest.trim())?;
-            commands.push(Command::Pred(name, args));
+            commands.push(located_command(command_line, Command::Pred(name, args)));
             i += 1;
             continue;
         }
@@ -3186,11 +3278,14 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 return Err(ParseError::new("expected `:=` in definition"));
             };
             let (name, params) = parse_def_header(header)?;
-            commands.push(Command::Def(DefDecl {
-                name,
-                params,
-                body: parse_formula_str(body.trim())?,
-            }));
+            commands.push(located_command(
+                command_line,
+                Command::Def(DefDecl {
+                    name,
+                    params,
+                    body: parse_formula_str(body.trim())?,
+                }),
+            ));
             i += 1;
             continue;
         }
@@ -3208,11 +3303,14 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 i += 1;
             }
             let (name, params, statement) = parse_axiom_header(&header)?;
-            commands.push(Command::Axiom(AxiomDecl {
-                name,
-                params,
-                statement,
-            }));
+            commands.push(located_command(
+                command_line,
+                Command::Axiom(AxiomDecl {
+                    name,
+                    params,
+                    statement,
+                }),
+            ));
             continue;
         }
 
@@ -3243,12 +3341,15 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 i += 1;
             }
 
-            commands.push(Command::Theorem(TheoremDecl {
-                name,
-                params,
-                statement,
-                tactics: parse_tactic_lines(&tactic_lines)?,
-            }));
+            commands.push(located_command(
+                command_line,
+                Command::Theorem(TheoremDecl {
+                    name,
+                    params,
+                    statement,
+                    tactics: parse_tactic_lines(&tactic_lines)?,
+                }),
+            ));
             continue;
         }
 
@@ -3256,6 +3357,10 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
     }
 
     Ok(File { commands })
+}
+
+fn located_command(line: usize, command: Command) -> LocatedCommand {
+    LocatedCommand { line, command }
 }
 
 fn strip_comment(line: &str) -> &str {
@@ -5488,6 +5593,22 @@ mod tests {
         assert!(
             rendered.contains(needle),
             "diagnostics did not contain `{needle}`:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn theorem_diagnostic_reports_command_line() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem bad (P : Prop) : P := by
+  assumption
+"#,
+        );
+        assert_eq!(
+            result.diagnostics[0].location.as_ref().map(|loc| loc.line),
+            Some(4)
         );
     }
 
