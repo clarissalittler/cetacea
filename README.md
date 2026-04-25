@@ -15,6 +15,8 @@ definition arity, set element compatibility, and argument type compatibility.
 - `crates/cetacea_core`: parser, AST, tactics, proof objects, and kernel
   checker.
 - `crates/cetacea_cli`: command-line checker.
+- `docs/USAGE.md`: language and proving guide.
+- `docs/DESIGN_AND_CODE.md`: implementation and design guide.
 - `std`: checked theorem-library files.
 - `std/prelude.ctea`: imports the current standard-library theorem files.
 - `examples/prop.ctea`: constructive and classical propositional examples.
