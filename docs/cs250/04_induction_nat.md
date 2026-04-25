@@ -1,8 +1,9 @@
 # Natural-Number Induction (CS 250 Module 4 §6)
 
 Cetacea has built-in `Nat`, with constructors `0` and `succ(n)`, plus
-addition `add(n, m)`. The `induction` tactic does Module 4 §6's natural
-induction, exactly as advertised.
+addition `add(n, m)`, multiplication `mul(n, m)`, truncated subtraction
+`sub(n, m)`, and comparison `le(n, m)`. The `induction` tactic does
+Module 4 §6's natural induction, exactly as advertised.
 
 ## Convention warning: addition recurses on the *left*
 
@@ -127,27 +128,44 @@ gets tedious; see `LIMITATIONS.md`.
 
 ## Module 4 Exercise 11: `0 · n = 0`
 
-Multiplication isn't built in, so we axiomatize it analogously.
+Multiplication is now built in. It follows the same left-recursive
+convention as `add`:
 
 ```text
-func mul : Nat -> Nat -> Nat
+mul(0, n) = 0
+mul(succ(n), m) = add(m, mul(n, m))
+```
 
-axiom mul_zero_right (n : Nat) : mul(n, 0) = 0
-axiom mul_succ_right (n m : Nat)
-  : mul(n, succ(m)) = add(mul(n, m), n)
+So the theorem `0 * n = 0` is definitional in Cetacea:
 
-theorem zero_mul_n (n : Nat) : mul(0, n) = 0 := by
+```text
+theorem zero_mul_n_builtin (n : Nat) : mul(0, n) = 0 := by
+  simp
+  refl
+```
+
+The *textbook-style* exercise is still useful if we axiomatize a
+right-recursive multiplication:
+
+```text
+func mymul : Nat -> Nat -> Nat
+
+axiom mymul_zero_right (n : Nat) : mymul(n, 0) = 0
+axiom mymul_succ_right (n m : Nat)
+  : mymul(n, succ(m)) = add(mymul(n, m), n)
+
+theorem zero_mymul_n (n : Nat) : mymul(0, n) = 0 := by
   induction n with
   | zero =>
-      exact mul_zero_right
+      exact mymul_zero_right
   | succ k ih =>
-      -- mul(0, succ(k))
-      --   = add(mul(0, k), 0)   by mul_succ_right
-      --   = mul(0, k)           by add_zero_right
+      -- mymul(0, succ(k))
+      --   = add(mymul(0, k), 0)   by mymul_succ_right
+      --   = mymul(0, k)           by add_zero_right
       --   = 0                   by ih
-      apply eq_trans {A := Nat; x := mul(0, succ(k)); y := mul(0, k); z := 0}
-      apply eq_trans {A := Nat; x := mul(0, succ(k)); y := add(mul(0, k), 0); z := mul(0, k)}
-      exact mul_succ_right
+      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := mymul(0, k); z := 0}
+      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := add(mymul(0, k), 0); z := mymul(0, k)}
+      exact mymul_succ_right
       exact add_zero_right
       exact ih
 ```
@@ -156,9 +174,10 @@ The proof is a pure equational chain. `eq_trans` from `std/eq.ctea`
 takes you from `x = y` and `y = z` to `x = z`. Stitching three
 equational steps takes two `eq_trans` invocations.
 
-The high-level point is the same as in the textbook: you can't get
-$0 \cdot n = 0$ for free — it takes induction even though the symmetric
-$n \cdot 0 = 0$ falls out of the definition.
+The high-level point is the same as in the textbook once you use the
+textbook recursion convention: you can't get $0 \cdot n = 0$ for free
+from right-recursive multiplication. It takes induction even though the
+symmetric $n \cdot 0 = 0$ falls out of the definition.
 
 ## Try it
 

@@ -296,8 +296,7 @@ Formula definitions support type, term, proposition, and predicate parameters:
 
 ```text
 def ConjSelf (P : Prop) : Prop := P /\ P
-def Reflexive (T : Type) (R : T -> T -> Prop) : Prop :=
-  forall x : T, R(x, x)
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
 ```
 
 Term definitions are also transparent and can take type, term, proposition, and

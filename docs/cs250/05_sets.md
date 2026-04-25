@@ -7,16 +7,17 @@ the basic constructors are `empty(T)`, `singleton(x)`, `union(A, B)`,
 axiom (`set_ext` in `std/set.ctea`). The standard library proves a
 small algebra of set-theoretic identities.
 
-## What's *not* here
+Set-builder notation is supported:
 
-Cetacea **does not** support set-builder notation. You cannot write
-`{ x : T | P(x) }` to define a set by a predicate. So things like
-"the set of even naturals" can only be talked about via `forall x, x in S <-> Even(x)`-style characterizations, not by directly defining the set.
+```text
+{ x : T | P(x) }
+```
 
-This is a real limitation for Module 1's "set-builder" examples. For
-those, use the Python companion `code/module01_sets.py` from the course
-repo. Cetacea is the right tool for proving identities about set
-operations.
+so you can name predicate-defined sets with transparent term
+definitions. What Cetacea still does not have is powersets,
+cardinalities, or finite-set enumeration. Use the course Python tools
+for counting exercises; Cetacea is the right tool here for proving
+identities about set operations and predicate-defined sets.
 
 ## Subset, union, intersection
 
@@ -30,6 +31,7 @@ mode constructive
 sort Person
 
 const alice : Person
+pred Tall(Person)
 
 theorem alice_in_singleton : alice in singleton(alice) := by
   simp
@@ -38,6 +40,18 @@ theorem alice_in_singleton : alice in singleton(alice) := by
 
 `simp` knows `x in singleton(y)` reduces to `x = y`, so this becomes
 `alice = alice`, which `refl` closes.
+
+Set builders reduce by substituting the element into the defining
+predicate:
+
+```text
+def TallSet : Set Person := { x : Person | Tall(x) }
+
+theorem alice_in_tall_set : Tall(alice) -> alice in TallSet := by
+  intro h
+  simp
+  exact h
+```
 
 ```text
 theorem subset_refl_demo
@@ -139,7 +153,7 @@ Cetacea makes you commit to which direction at each step.
 
 ## Try it
 
-- Module 1 Exercise 9: `A ⊆ B → 𝒫(A) ⊆ 𝒫(B)`. Cetacea has no powerset
+- Module 1 Exercise 9: `A ⊆ B -> P(A) ⊆ P(B)`. Cetacea has no powerset
   type, but you can state a finitary version:
   `forall S, S subset A -> S subset B`. The proof is one line via
   `subset_trans`.

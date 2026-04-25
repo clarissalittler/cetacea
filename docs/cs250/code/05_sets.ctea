@@ -7,10 +7,18 @@ mode constructive
 sort Person
 
 const alice : Person
+pred Tall(Person)
 
 theorem alice_in_singleton : alice in singleton(alice) := by
   simp
   refl
+
+def TallSet : Set Person := { x : Person | Tall(x) }
+
+theorem alice_in_tall_set : Tall(alice) -> alice in TallSet := by
+  intro h
+  simp
+  exact h
 
 theorem subset_refl_demo
   (T : Type)

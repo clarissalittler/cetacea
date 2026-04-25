@@ -6,11 +6,17 @@ mode constructive
 
 sort Thing
 
+def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
+
+def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
+
+def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(y, z) -> R(x, z)
+
 theorem refl_self
   (A : Type)
   (R : A -> A -> Prop)
   (a : A)
-  : (forall x : A, R(x, x)) -> R(a, a) := by
+  : Reflexive(R) -> R(a, a) := by
   intro hrefl
   exact hrefl a
 
@@ -24,9 +30,8 @@ theorem refl_from_witness
   (A : Type)
   (R : A -> A -> Prop)
   (x : A)
-  : (forall a : A, forall b : A, R(a, b) -> R(b, a))
-    -> (forall a : A, forall b : A, forall c : A,
-          R(a, b) -> R(b, c) -> R(a, c))
+  : Symmetric(R)
+    -> Transitive(R)
     -> (exists y : A, R(x, y))
     -> R(x, x) := by
   intro hsym

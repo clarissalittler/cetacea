@@ -46,26 +46,33 @@ theorem myadd_zero_n (n : Nat) : myadd(0, n) = n := by
       rewrite ih
       refl
 
--- Module 4 Exercise 11: `0 * n = 0`. We axiomatize multiplication.
-func mul : Nat -> Nat -> Nat
+-- Module 4 Exercise 11: `0 * n = 0`.
+-- Cetacea's built-in multiplication recurses on the left, so this
+-- particular direction is definitional.
+theorem zero_mul_n_builtin (n : Nat) : mul(0, n) = 0 := by
+  simp
+  refl
 
-axiom mul_zero_right (n : Nat) : mul(n, 0) = 0
-axiom mul_succ_right (n m : Nat)
-  : mul(n, succ(m)) = add(mul(n, m), n)
+-- Same exercise, but using the textbook's right-recursive multiplication.
+func mymul : Nat -> Nat -> Nat
 
-theorem zero_mul_n (n : Nat) : mul(0, n) = 0 := by
+axiom mymul_zero_right (n : Nat) : mymul(n, 0) = 0
+axiom mymul_succ_right (n m : Nat)
+  : mymul(n, succ(m)) = add(mymul(n, m), n)
+
+theorem zero_mymul_n (n : Nat) : mymul(0, n) = 0 := by
   induction n with
   | zero =>
-      exact mul_zero_right
+      exact mymul_zero_right
   | succ k ih =>
-      -- Goal: mul(0, succ(k)) = 0.
+      -- Goal: mymul(0, succ(k)) = 0.
       -- Strategy:
-      --   mul(0, succ(k)) = add(mul(0, k), 0)         by mul_succ_right
-      --                   = mul(0, k)                 by add_zero_right
-      --                   = 0                         by ih
+      --   mymul(0, succ(k)) = add(mymul(0, k), 0)     by mymul_succ_right
+      --                     = mymul(0, k)             by add_zero_right
+      --                     = 0                       by ih
       -- We chain via eq_trans from std/eq.ctea.
-      apply eq_trans {A := Nat; x := mul(0, succ(k)); y := mul(0, k); z := 0}
-      apply eq_trans {A := Nat; x := mul(0, succ(k)); y := add(mul(0, k), 0); z := mul(0, k)}
-      exact mul_succ_right
+      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := mymul(0, k); z := 0}
+      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := add(mymul(0, k), 0); z := mymul(0, k)}
+      exact mymul_succ_right
       exact add_zero_right
       exact ih

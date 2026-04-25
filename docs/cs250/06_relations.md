@@ -10,22 +10,22 @@ Cetacea has no built-in support for relations as objects (there's no
 `R : T -> T -> Prop`. Most of what Module 1 says about relations
 translates to theorems quantified over a generic `R`.
 
-## What's *not* here
+## Relation properties as definitions
 
-Cetacea **does not currently allow predicate parameters in formula
-definitions**. This means you cannot write something like:
+Cetacea has no built-in `Relation T` type, but formula definitions can
+take predicate parameters. That lets us write the usual Module 1
+properties directly:
 
 ```text
-def Reflexive (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
+
+def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
+
+def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(y, z) -> R(x, z)
 ```
 
-That's the *natural* way to formalize Module 1's definitions. Since
-Cetacea rejects it, our workaround is to write each property
-*directly* into the theorems we want to prove. So instead of "this
-theorem assumes Reflexive(R)" we write "this theorem assumes
-`forall x, R(x, x)`."
-
-This is a real friction for Module 1. See `LIMITATIONS.md`.
+When you use `Reflexive(R)`, the type parameter `A` is inferred from
+the predicate argument `R`.
 
 ## Reflexivity, symmetry, transitivity inline
 
@@ -36,12 +36,18 @@ mode constructive
 
 sort Thing
 
+def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
+
+def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
+
+def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(y, z) -> R(x, z)
+
 -- A theorem with R abstract: if R is reflexive, every R(a, a) holds.
 theorem refl_self
   (A : Type)
   (R : A -> A -> Prop)
   (a : A)
-  : (forall x : A, R(x, x)) -> R(a, a) := by
+  : Reflexive(R) -> R(a, a) := by
   intro hrefl
   exact hrefl a
 
@@ -69,8 +75,8 @@ theorem refl_from_witness
   (A : Type)
   (R : A -> A -> Prop)
   (x : A)
-  : (forall a : A, forall b : A, R(a, b) -> R(b, a))
-    -> (forall a : A, forall b : A, forall c : A, R(a, b) -> R(b, c) -> R(a, c))
+  : Symmetric(R)
+    -> Transitive(R)
     -> (exists y : A, R(x, y))
     -> R(x, x) := by
   intro hsym
@@ -92,10 +98,11 @@ Reading the proof:
 4. The second premise is `R(y, x)`. We get that from symmetry: from
    `R(x, y)`, conclude `R(y, x)`. So `apply hsym x y` then `exact hxy`.
 
-Note multi-binder `forall a b : A, ...` is **not** parsed; you have to
-nest `forall a : A, forall b : A, ...`. Likewise, `apply htrans x y x`
-works (passing three forall-args), but you cannot wrap subexpressions in
-parens like `apply (htrans x y x)` — the parser doesn't accept that.
+The definitions use multi-binders such as `forall x y : A, ...`, which
+parse as nested quantifiers. `apply htrans x y x` works by unfolding the
+transparent definition in the hypothesis and passing three forall
+arguments. One parser limitation remains: you cannot wrap proof
+subexpressions in parens like `apply (htrans x y x)`.
 
 ## Equivalence relations and equality
 
@@ -141,13 +148,10 @@ of CS 250 Module 6 is out of reach because of this.
 ## Try it
 
 - Prove that the diagonal relation `D(x, y) = (x = y)` is reflexive,
-  symmetric, and transitive. (Not as a single theorem — as three
-  separate theorems, since you can't define `Reflexive` etc. as
-  predicates.)
+  symmetric, and transitive.
 - Prove: if `R` is symmetric and transitive, then for any `x`, the set
-  `{ y | R(x, y) }`... well, you can't write set-builder notation, but
-  you can state and prove that `forall y z, R(x, y) -> R(x, z) -> R(y, z)`.
-  This is the key fact for using equivalence relations to build
-  equivalence classes.
+  `{ y : A | R(x, y) }` is closed under relatedness. In Cetacea terms,
+  state and prove `forall y z : A, R(x, y) -> R(x, z) -> R(y, z)`.
+  This is the key fact behind equivalence classes.
 - Prove that the empty relation `Empty(x, y) := False` is symmetric and
   transitive (trivially) but not reflexive (unless the domain is empty).

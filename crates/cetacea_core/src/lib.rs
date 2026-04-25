@@ -6581,6 +6581,21 @@ mod tests {
         );
     }
 
+    fn check_path_err_contains(relative_path: &str, needle: &str) -> CheckResult {
+        let path = repo_path(relative_path);
+        let result = check_file_at_path(&path);
+        assert!(
+            !result.diagnostics.is_empty(),
+            "expected diagnostics, but `{relative_path}` checked successfully"
+        );
+        let rendered = format!("{:#?}", result.diagnostics);
+        assert!(
+            rendered.contains(needle),
+            "diagnostics for `{relative_path}` did not contain `{needle}`:\n{rendered}"
+        );
+        result
+    }
+
     #[test]
     fn theorem_diagnostic_reports_command_line() {
         let result = check_file(
@@ -6744,6 +6759,33 @@ theorem trivial_true : True := by
     #[test]
     fn example_imports_checks() {
         check_path_ok("examples/imports.ctea");
+    }
+
+    #[test]
+    fn cs250_positive_examples_check() {
+        for path in [
+            "docs/cs250/code/01_propositional.ctea",
+            "docs/cs250/code/02_proof_systems.ctea",
+            "docs/cs250/code/03_first_order.ctea",
+            "docs/cs250/code/04_induction_nat.ctea",
+            "docs/cs250/code/05_sets.ctea",
+            "docs/cs250/code/06_relations.ctea",
+        ] {
+            check_path_ok(path);
+        }
+    }
+
+    #[test]
+    fn cs250_fallacies_example_fails_as_documented() {
+        let result = check_path_err_contains(
+            "docs/cs250/code/02_fallacies_negative.ctea",
+            "proof has type `Q`, but expected `P`",
+        );
+        let rendered = format!("{:#?}", result.diagnostics);
+        assert!(
+            rendered.contains("converse_error") && rendered.contains("inverse_error"),
+            "diagnostics did not mention both intended fallacies:\n{rendered}"
+        );
     }
 
     #[test]

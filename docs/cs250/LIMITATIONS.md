@@ -1,335 +1,213 @@
 # Limitations and Rough Edges (notes for the instructor)
 
-This is a list of friction I hit while writing the CS 250 tutorials.
-Some are real bugs, some are limitations of the documented surface,
-some are paper cuts that show up in error messages. Roughly ordered by
-how often a student is likely to bump into them.
+This is a current list of friction points for using Cetacea with the CS
+250 tutorials. The most severe bugs from the first draft have been
+fixed; see the resolved section at the end for historical context.
 
-## Real bugs (or close to)
+## Current rough edges students may hit
 
-### 1. There is no way to prove `True` from tactics
+### 1. Theorem instantiation still sometimes needs explicit arguments
 
-The kernel has a `Proof::TrueIntro` constructor (in
-`crates/cetacea_core/src/lib.rs:307`), but no tactic surfaces it. So a
-freshman writing the smallest possible theorem:
-
-```text
-theorem t : True := by
-  exact True
-```
-
-gets `unknown hypothesis 'True'`. Trying `assumption`, `split`, `simp`,
-and `refl` all fail with their respective "wrong shape" errors.
-
-**Workaround:** declare `axiom triv : True` and `exact triv`.
-
-**Suggested fix:** add a `Tactic::TrueIntro` (perhaps spelled
-`trivial`, matching Lean / Coq) that produces `Proof::TrueIntro` when
-the goal is `Formula::True`. Or have `exact` recognize the bare token
-`True` as introducing it.
-
-### 2. The diagnostic always shows the *original* `note: target:`, not the current open subgoal
-
-Every kernel error ends with a line like
-`  note: target: <whole theorem statement>`. That target string is the
-original theorem being proved, not the current open goal at the point
-of failure. So if the second of two `split` subgoals fails, the
-diagnostic still shows the conjunction goal as the target.
-
-The actually-useful part is in the *body* of the message — e.g. "exact
-expression does not solve the goal: proof has type `Q`, but expected
-`P`" tells you the current expected formula. But students will read the
-`target:` line, not the body, and get confused about which subgoal they
-were on.
-
-**Suggested fix:** print the current open subgoal in `note: target:`
-instead of the original theorem statement. Or prefix it with "(initial
-target)" so it isn't misread as the current goal.
-
-### 3. Parser errors lose the line number
-
-Most kernel errors include `<file>:<line>`. But parse-time errors are
-emitted as
-
-```
-error: could not parse `<file>`
-  note: <some hint>
-```
-
-with no line. `unknown tactic 'exatc h'` is the kind of typo a student
-will make, and the file might be 60 lines long.
-
-**Suggested fix:** thread token positions through the parser and emit
-`<file>:<line>` for parser errors too. (May already be planned; the
-README mentions "Improve diagnostics with precise source spans.")
-
-## Real limitations a CS 250 student will hit
-
-### 4. No predicate or proposition parameters in `def`
+`exact` and `apply` can infer many theorem parameters, but not all of
+them. Transitive lemmas are the common case where an intermediate term
+is not forced by the goal:
 
 ```text
-def Reflexive (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+apply subset_trans {T := Person; A := C; B := A; C := B}
 ```
 
-is rejected with `formula definitions currently support only type and
-term parameters`. Same for any `def` that quantifies over a `Prop`:
+That works, but the syntax is a lot for beginners. The diagnostics are
+also still more kernel-shaped than course-shaped when inference fails.
+
+**Possible improvement:** improve missing-parameter diagnostics and add
+more goal-directed inference for intermediate terms.
+
+### 2. Parenthesized proof expressions are not supported
+
+You can write chained applications such as:
 
 ```text
-def Conj_self (P : Prop) : Prop := P /\ P
+exact h x
+exact h hp
+exact h.left
 ```
 
-Same error. This is significant for cs250 module 1, where reflexive /
-symmetric / transitive *want* to be defined as predicates over `R`. The
-workaround is to inline these properties into every theorem statement
-that uses them, which gets verbose.
-
-**Suggested fix:** the README's "Next Milestones" already lists
-"broaden inference" — extending `def` to allow predicate and Prop
-parameters would be the most pedagogically valuable extension.
-
-### 5. No set-builder notation
+but not parenthesized subexpressions:
 
 ```text
-def TallSet : Set Person := { x : Person | Tall(x) }
+exact (h hp).left
+apply (htrans x y x)
 ```
 
-doesn't parse. There's no syntax for constructing a set from a
-predicate. You can only build sets from `empty(T)`, `singleton(x)`,
-`union`, `inter`, `diff`. So you cannot define "the even numbers" or
-"the truth set of P" directly — you have to characterize them via
-biconditional.
+The workaround is to use a few explicit proof-script steps instead of
+one compound expression.
 
-This makes cs250 module 1 examples like `{n ∈ ℕ | n % 2 = 0}` not
-expressible as Cetacea sets. It also blocks much of cs250 module 4
-once you try to define "the truth set of a predicate."
+### 3. `simp` is built-in, not theorem-driven
 
-### 6. `simp` does not reduce inside predicates or function arguments
+`simp` knows transparent definitions, set membership, subset expansion,
+and built-in Nat computation. It does not use arbitrary imported lemmas
+as rewrite rules, and it does not simplify hypotheses in context.
+
+For example, a goal may simplify cleanly while a matching hypothesis
+still needs an explicit `rewrite`, `exact`, or helper theorem.
+
+**Possible improvement:** add a theorem-driven simplifier or a smaller
+`simp at h` form for hypotheses.
+
+### 4. Addition and multiplication recurse on the left
+
+The CS 250 text defines addition by recursion on the second argument:
 
 ```text
-theorem t : Even(add(0, 0)) := by
-  simp
-```
-
-fails with `simp made no progress on goal 'Even(add(0, 0))'`, even
-though the same `add(0, 0)` *would* simp-reduce inside an equality goal
-`add(0, 0) = 0`. So `simp` is picking up the equality structure of the
-goal, not just rewriting subterms.
-
-**Workaround:** use `apply eq_subst_left {...}` with explicit schema
-arguments. This works but is much harder to teach than `simp`.
-
-**Suggested fix:** make `simp` traverse function/predicate arguments
-when looking for built-in computation rules to fire.
-
-### 7. `rewrite` is one-directional and can't accept compound proof expressions
-
-`rewrite h` finds the right-hand side of `h`'s equality in the goal and
-replaces it with the left-hand side. There's no equivalent in the other
-direction. This means almost every nat-induction proof needs a `_rev`
-helper:
-
-```text
-theorem add_succ_right_rev (n m : Nat)
-  : succ(add(n, m)) = add(n, succ(m)) := by
-  rewrite add_succ_right {n := n; m := m}
-  refl
-```
-
-The standard library knows this and provides `add_succ_right_rev`,
-`add_zero_right_rev`, etc. But anyone who writes their own recursive
-function via axioms needs the same dance.
-
-Also: `rewrite eq_symm h` doesn't work — `rewrite` only accepts a
-direct theorem reference or hypothesis, not a chained proof
-expression. You can't compose with `eq_symm` inline.
-
-### 8. Theorem instantiation is finicky when local variable names overlap with the lemma's parameter names
-
-A student might write:
-
-```text
-theorem subsets_carry
-  (T : Type)
-  (A B S : Set T)
-  : A subset B -> S subset A -> S subset B := by
-  intro hAB
-  intro hSA
-  apply subset_trans
-  exact hSA
-  exact hAB
-```
-
-They get `cannot infer schema argument 'B'` because `subset_trans`'s
-middle variable can't be guessed. So they try the explicit form:
-
-```text
-  apply subset_trans {T := T; A := S; B := A; C := B}
-```
-
-Now it complains `unknown term 'C'`, which is the *parameter name in
-subset_trans*, not anything in scope. Confusing.
-
-The only reliable fix I found was to **rename the local variables to
-match the lemma's parameter names** (here, `A`, `B`, `C`). That's
-clearly a workaround, not the intended workflow.
-
-**Suggested fix:** the explicit-args parser should distinguish between
-schema parameter names (LHS of `:=`) and term references (RHS), and the
-diagnostic on the LHS should say something like `subset_trans has no
-schema parameter 'C'` rather than `unknown term 'C'`.
-
-### 9. No multi-binder `forall`/`exists`
-
-```text
-forall x y : A, R(x, y)
-```
-
-doesn't parse. Students have to nest:
-
-```text
-forall x : A, forall y : A, R(x, y)
-```
-
-Cosmetic, but the textbook uses multi-binder notation throughout.
-
-### 10. Cannot parenthesize sub-proof-expressions
-
-`apply (htrans x y x)` doesn't parse. Neither does `exact (h hp).left`.
-You either have to use a step-by-step `apply` chain or split into a
-helper theorem. Workable, but verbose.
-
-### 11. `h x` (forall application in a proof expression) doesn't work for plain implications
-
-You can write `exact h alice` when `h : forall x, P(x)`. You **cannot**
-write `exact h hp` when `h : P -> Q` and `hp : P`. The error is
-"first-order application expects a universal proof." So the standard
-"function application" idiom diverges between universals and
-implications.
-
-**Workaround:** use `apply h` and discharge the antecedent on the next
-line. Or wrap in a helper: `apply imp_apply` etc.
-
-### 12. Schema-substituted theorem refs can't be combined with forall args
-
-```text
-apply subset_trans {T := Person} X Y Z
-```
-
-is rejected with `explicit theorem arguments can only be used with
-theorem references`, even though `subset_trans` is a theorem reference.
-You can give the schema OR the term arguments, but not both inline. The
-practical effect is that some intermediate-difficulty `apply`s have no
-clean form.
-
-## Pedagogical mismatches with CS 250
-
-### 13. `add` recurses on the wrong argument
-
-The textbook (cs250 module 4 §6.1) defines `+` recursively on the
-**second** argument:
-
-$$
 n + 0 = n
-\qquad
-n + \text{succ}(m) = \text{succ}(n + m)
-$$
+n + succ(m) = succ(n + m)
+```
 
-Cetacea's built-in `add` recurses on the **first** argument. So:
+Cetacea's built-in `add` recurses on the first argument:
 
-- The textbook's $n + 0 = n$ is "free" for them, but in Cetacea
-  `add(n, 0) = n` requires induction.
-- The textbook's $0 + n = n$ requires induction, but in Cetacea
-  `add(0, n) = n` is "free" via simp.
+```text
+add(0, n) = n
+add(succ(n), m) = succ(add(n, m))
+```
 
-Walking through the Module 4 worked example "$\forall n.\; 0 + n = n$"
-in Cetacea is therefore *backwards*. Students will be confused unless
-the convention mismatch is flagged loudly, ideally in the doc next to
-where `add` is introduced.
+Multiplication follows the same left-recursive convention:
 
-**Suggestion:** add a sentence to `docs/USAGE.md`'s Nat section noting
-the recursion convention, and consider whether to make the textbook
-convention available as `addr` (right-recursive) or to provide both.
+```text
+mul(0, n) = 0
+mul(succ(n), m) = add(m, mul(n, m))
+```
 
-### 14. No multiplication, no comparison, no subtraction
+This flips which textbook facts are "by definition" and which require
+induction. The `std/nat.ctea` file includes both directions where useful,
+but the convention needs to be flagged in class.
 
-`Nat` has only `0`, `succ`, and `add`. No `mul`, no `<=`, no `sub`. CS
-250 module 4 Exercise 11 is multiplication, and Modules 5–6 are
-modular arithmetic. Students who want to do those exercises in Cetacea
-must axiomatize `mul` themselves, which they can do but it's a lot of
-ceremony.
+### 5. User-defined recursive functions are not available
 
-### 15. Induction is `Nat`-only
+Cetacea has transparent non-recursive definitions, but no syntax for
+defining recursive functions over `Nat`. If a tutorial wants the
+textbook's right-recursive addition or multiplication, it must introduce
+an uninterpreted function and axiomatize its recursion equations.
 
-Cetacea has no general structural induction. Lists, trees, the BNF-
-defined inductive types of cs250 module 10 — none of these are
-expressible. So Module 8 (sequences/recursion), Module 9 (recurrences),
-and Module 10 (structural induction) cannot be done in Cetacea at all.
+That is fine for short course examples, but it is not a replacement for
+a real recursive-function facility.
 
-This isn't a bug, just the size of the system. Worth mentioning
-prominently in any course-facing doc.
+### 6. Induction is `Nat`-only
 
-### 16. No truth-table evaluation
+Cetacea has no general structural induction. Lists, trees, the BNF
+types in later CS 250 modules, and user-defined inductive structures are
+not expressible.
 
-Cetacea is a proof system; it doesn't evaluate formulas under
-assignments. So all of Module 2 (truth tables) must be done outside
-Cetacea — on paper or with `code/module02_logic.py`. The bridge to
-Cetacea is "anything you'd verify via a truth table can be derived as a
-theorem in Cetacea using the rules of Module 3." That's the right
-framing for a course tutorial, but worth stating up front.
+This means the Module 8 sequence/recursion material, Module 9
+recurrences, and Module 10 structural induction material mostly need to
+stay outside Cetacea.
 
-### 17. No proof-state introspection
+### 7. Truth-table evaluation is outside Cetacea
 
-There's no `show_goal` or `print_state` tactic. When a proof gets
-stuck, you can't ask "what's my current open goal?" You can either:
+Cetacea is a proof system, not a truth-table evaluator. Module 2's truth
+tables should still be done on paper or with the course Python tools.
 
-(a) read the kernel error message body and infer it from "expected
-`X`", or
+The useful bridge is: formulas classified by truth tables can often be
+re-derived as Cetacea theorems using the proof rules from Module 3.
 
-(b) extract the failing step into a separate named theorem, so its
-statement is the goal.
+### 8. Arithmetic is intentionally small
 
-For a course where proof debugging is the *point*, this hurts. Even a
-tactic that prints the current goal to stderr would help.
+Nat currently has `0`, `succ`, `add`, `mul`, truncated `sub`, and
+`le`. It does not have division, modular arithmetic, cardinalities, or a
+decision procedure for arithmetic goals.
+
+CS 250 modular arithmetic examples should be modeled axiomatically if
+they are used in Cetacea at all.
+
+### 9. Set theory is typed and finite in scope
+
+Cetacea has typed sets, set builders, union, intersection, difference,
+subset, and extensionality. It does not have powersets, Cartesian
+products as set objects, cardinalities, finite-set enumeration, or
+comprehension beyond predicate set builders.
+
+The Module 1 set-identity proofs fit well. Counting arguments and
+powerset/cardinality exercises do not.
+
+### 10. Diagnostics still have line granularity, not token spans
+
+Parse and checking errors now report useful line numbers, and failed
+tactics report the current goal. They still do not point at an exact
+token span within the line.
+
+That is good enough for short tutorial files but can still be vague in
+long theorem headers.
+
+### 11. Imports and names are global
+
+There are no namespaces or qualified imports. Imported declarations enter
+one global environment, and built-in names such as `add`, `mul`, `sub`,
+and `le` cannot be reused for local functions or predicates.
+
+This is simple and readable at the current project size, but larger
+course libraries will eventually want namespaces.
+
+### 12. Predicate arguments must be names
+
+Definitions can take predicate parameters:
+
+```text
+def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
+```
+
+But predicate arguments are still predicate names, not arbitrary lambda
+expressions. You can pass `Likes`, but not an inline predicate expression
+like "the relation `fun x y => x = y`".
 
 ## Smaller gripes
 
-### 18. Hypothesis name shadowing in `intro` is allowed silently
+### Indentation is forgiving but under-specified
 
-If a hypothesis name already exists in context, `intro h` with the same
-name shadows it without warning. This is conventional but can confuse
-beginners.
+The block parser accepts a range of indentation styles. The tutorials use
+one consistent style, but the accepted grammar is more permissive than
+the prose explains.
 
-### 19. Indentation rules are forgiving but undocumented
+### Error messages are still implementation-flavored
 
-The docs say `cases` arms are "indented by four spaces under the arm,"
-but anything from one space to many works in practice. Students may
-relax their indentation and then be confused by some other error that
-*does* show up.
+The checker is much clearer than it was, but messages still mention
+schema arguments, target formulas, and proof expressions in terms that
+are more natural to implementers than first-time proof students.
 
-### 20. `cases h.left` style projections work in `exact` but not in
-`cases`
+## Resolved since the first tutorial draft
 
-You can write `exact h.left` but `cases h.left with | left ... =>` is
-fine — actually, both work. Disregard. (Leaving the bullet because the
-reverse used to be what I expected from a short read of the docs.)
+These were real blockers when the CS 250 notes were first written and
+are now implemented:
 
-## Things that actually work very well
+- `True` goals can be closed with `trivial` or `exact True`.
+- Failed tactics report the current open goal in the `target:` note.
+- Parse errors report useful line numbers.
+- Formula and term definitions can take type, term, proposition, and
+  predicate parameters.
+- Set-builder terms `{ x : T | P(x) }` are supported.
+- `simp` reduces built-in computation under predicate and function
+  arguments.
+- `rewrite -> h` supports the forward direction, and `rewrite` accepts
+  compound proof expressions such as `rewrite eq_symm h`.
+- Multi-binder `forall x y : T, ...` and `exists x y : T, ...` parse.
+- Explicit theorem schema arguments can be combined with ordinary
+  forall arguments.
+- Nat has built-in `mul`, `sub`, and `le`.
+- `show_goal` reports the current goal.
+- `intro` rejects shadowing instead of silently replacing a local name.
 
-To balance: a substantial part of CS 250 *does* go through cleanly.
+## Things that work well
 
-- **Module 3** (proof systems) is a near-perfect fit: every intro/elim
-  rule has a matching tactic, the constructive/classical distinction
-  shows up live in the file output, and the "common fallacies" become
-  proofs that visibly fail.
-- **Module 4** (FOL, quantifier reasoning) works well end-to-end, with
-  good standard-library support.
-- **Set algebra** (Module 1's set operations, plus the cardinality
-  intermezzo's "subset / union / intersection identities") all
-  goes through, modulo the no-set-builder limitation.
-- **Equality and rewriting** are fine for the typical needs of the
-  course (transitivity, substitution into predicates).
-- **Standard library** is exactly the right size for a one-term course
-  — students can read every file in an afternoon.
-
-If the bugs in §1–§3 above were fixed, this would be a remarkably
-teachable system at this scope.
+- **Module 3** proof systems are a strong fit: intro and elimination
+  rules line up directly with tactics, and fallacies become visibly
+  rejected proof scripts.
+- **Module 4** quantifier reasoning works well, with useful standard
+  library support.
+- **Set algebra** goes through cleanly with typed sets, set builders,
+  subset expansion, and set extensionality.
+- **Relations** can be represented as predicate parameters, so
+  reflexive/symmetric/transitive definitions can be written directly.
+- **Equality and rewriting** cover the usual course needs:
+  reflexivity, symmetry, transitivity, substitution into predicates, and
+  local equational rewriting.
+- **The standard library** is small enough for students to read while
+  still covering propositional logic, first-order logic, equality, sets,
+  and basic Nat facts.
