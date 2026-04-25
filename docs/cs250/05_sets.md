@@ -2,10 +2,10 @@
 
 Cetacea has a typed set theory: `Set T` is a type for any sort `T`, and
 the basic constructors are `empty(T)`, `singleton(x)`, `union(A, B)`,
-`inter(A, B)`, and `diff(A, B)`. Membership is `x in A`, subset is
-`A subset B`, equality of sets is plain `=`. Set extensionality is an
-axiom (`set_ext` in `std/set.ctea`). The standard library proves a
-small algebra of set-theoretic identities.
+`inter(A, B)`, `diff(A, B)`, and `powerset(A)`. Membership is `x in A`,
+subset is `A subset B`, equality of sets is plain `=`. Set
+extensionality is an axiom (`set_ext` in `std/set.ctea`). The standard
+library proves a small algebra of set-theoretic identities.
 
 Set-builder notation is supported:
 
@@ -14,10 +14,11 @@ Set-builder notation is supported:
 ```
 
 so you can name predicate-defined sets with transparent term
-definitions. What Cetacea still does not have is powersets,
-cardinalities, or finite-set enumeration. Use the course Python tools
-for counting exercises; Cetacea is the right tool here for proving
-identities about set operations and predicate-defined sets.
+definitions. What Cetacea still does not have is cardinalities,
+Cartesian products as set objects, or finite-set enumeration. Use the
+course Python tools for counting exercises; Cetacea is the right tool
+here for proving identities about set operations, powersets, and
+predicate-defined sets.
 
 ## Subset, union, intersection
 
@@ -103,6 +104,7 @@ own. It does:
 - Union is commutative, associative, has empty as identity.
 - Subset properties of union and intersection.
 - Difference and disjointness lemmas.
+- Powerset introduction, elimination, and monotonicity.
 
 ## A larger CS 250 problem: distributivity
 
@@ -151,12 +153,30 @@ Reading this proof, you can see the underlying skeleton from CS 250:
 "introduce an arbitrary element, argue both directions of containment."
 Cetacea makes you commit to which direction at each step.
 
+## Powersets
+
+For powersets, `simp` turns membership into subset:
+
+```text
+theorem powerset_mono_demo
+  (A B : Set Person)
+  : A subset B -> powerset(A) subset powerset(B) := by
+  intro hAB
+  simp
+  intro S
+  intro hSA
+  intro x
+  intro hx
+  apply hAB
+  apply hSA
+  exact hx
+```
+
 ## Try it
 
-- Module 1 Exercise 9: `A ⊆ B -> P(A) ⊆ P(B)`. Cetacea has no powerset
-  type, but you can state a finitary version:
-  `forall S, S subset A -> S subset B`. The proof is one line via
-  `subset_trans`.
+- Module 1 Exercise 9: `A ⊆ B -> P(A) ⊆ P(B)` is now direct:
+  `A subset B -> powerset(A) subset powerset(B)`. The proof is the same
+  element-subset argument as on paper, with one `subset_trans` step.
 - Re-prove `union_comm` from scratch (without using the imported
   version).
 - Module 1 Exercise 10 (inclusion-exclusion) is **not** doable directly

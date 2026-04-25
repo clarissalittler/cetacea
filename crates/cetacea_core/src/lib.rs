@@ -36,6 +36,7 @@ pub enum Term {
     Union(Box<Term>, Box<Term>),
     Inter(Box<Term>, Box<Term>),
     Diff(Box<Term>, Box<Term>),
+    Powerset(Box<Term>),
     SetBuilder {
         var: Name,
         var_type: Type,
@@ -67,6 +68,7 @@ impl fmt::Display for Term {
             Term::Union(left, right) => write!(f, "union({left}, {right})"),
             Term::Inter(left, right) => write!(f, "inter({left}, {right})"),
             Term::Diff(left, right) => write!(f, "diff({left}, {right})"),
+            Term::Powerset(term) => write!(f, "powerset({term})"),
             Term::SetBuilder {
                 var,
                 var_type,
@@ -630,6 +632,7 @@ fn is_builtin_name(name: &str) -> bool {
             | "union"
             | "inter"
             | "diff"
+            | "powerset"
     )
 }
 
@@ -1869,6 +1872,15 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             let elem_ty = validate_term(env, ctx, elem)?;
             Ok(Type::Set(Box::new(elem_ty)))
         }
+        Term::Powerset(set) => {
+            let set_ty = validate_term(env, ctx, set)?;
+            let Type::Set(elem_ty) = set_ty else {
+                return Err(ValidationError::new(format!(
+                    "powerset argument has type `{set_ty}`, but expected a set"
+                )));
+            };
+            Ok(Type::Set(Box::new(Type::Set(elem_ty))))
+        }
         Term::Union(left, right) | Term::Inter(left, right) | Term::Diff(left, right) => {
             let left_ty = validate_term(env, ctx, left)?;
             let right_ty = validate_term(env, ctx, right)?;
@@ -2265,7 +2277,151 @@ fn formulas_def_eq(
     left: &Formula,
     right: &Formula,
 ) -> Result<bool, ValidationError> {
-    Ok(normalize_formula_defs(env, ctx, left)? == normalize_formula_defs(env, ctx, right)?)
+    Ok(alpha_eq_formula(
+        &normalize_formula_defs(env, ctx, left)?,
+        &normalize_formula_defs(env, ctx, right)?,
+    ))
+}
+
+#[derive(Default)]
+struct AlphaEnv {
+    left_to_right: HashMap<Name, Name>,
+    right_to_left: HashMap<Name, Name>,
+}
+
+fn alpha_eq_formula(left: &Formula, right: &Formula) -> bool {
+    alpha_eq_formula_with(left, right, &mut AlphaEnv::default())
+}
+
+fn with_alpha_binding(
+    env: &mut AlphaEnv,
+    left: &Name,
+    right: &Name,
+    check: impl FnOnce(&mut AlphaEnv) -> bool,
+) -> bool {
+    let old_left = env.left_to_right.insert(left.clone(), right.clone());
+    let old_right = env.right_to_left.insert(right.clone(), left.clone());
+    let result = check(env);
+    if let Some(old) = old_left {
+        env.left_to_right.insert(left.clone(), old);
+    } else {
+        env.left_to_right.remove(left);
+    }
+    if let Some(old) = old_right {
+        env.right_to_left.insert(right.clone(), old);
+    } else {
+        env.right_to_left.remove(right);
+    }
+    result
+}
+
+fn alpha_eq_var(left: &Name, right: &Name, env: &AlphaEnv) -> bool {
+    if let Some(mapped) = env.left_to_right.get(left) {
+        mapped == right
+    } else if env.right_to_left.contains_key(right) {
+        false
+    } else {
+        left == right
+    }
+}
+
+fn alpha_eq_terms(left: &[Term], right: &[Term], env: &mut AlphaEnv) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| alpha_eq_term(left, right, env))
+}
+
+fn alpha_eq_term(left: &Term, right: &Term, env: &mut AlphaEnv) -> bool {
+    match (left, right) {
+        (Term::Var(left), Term::Var(right)) => alpha_eq_var(left, right, env),
+        (Term::App(left_name, left_args), Term::App(right_name, right_args)) => {
+            left_name == right_name && alpha_eq_terms(left_args, right_args, env)
+        }
+        (Term::Zero, Term::Zero) => true,
+        (Term::Succ(left), Term::Succ(right)) => alpha_eq_term(left, right, env),
+        (Term::Add(left_a, left_b), Term::Add(right_a, right_b))
+        | (Term::Mul(left_a, left_b), Term::Mul(right_a, right_b))
+        | (Term::Sub(left_a, left_b), Term::Sub(right_a, right_b))
+        | (Term::Union(left_a, left_b), Term::Union(right_a, right_b))
+        | (Term::Inter(left_a, left_b), Term::Inter(right_a, right_b))
+        | (Term::Diff(left_a, left_b), Term::Diff(right_a, right_b)) => {
+            alpha_eq_term(left_a, right_a, env) && alpha_eq_term(left_b, right_b, env)
+        }
+        (Term::EmptySet(left_ty), Term::EmptySet(right_ty)) => left_ty == right_ty,
+        (Term::Singleton(left), Term::Singleton(right))
+        | (Term::Powerset(left), Term::Powerset(right)) => alpha_eq_term(left, right, env),
+        (
+            Term::SetBuilder {
+                var: left_var,
+                var_type: left_ty,
+                body: left_body,
+            },
+            Term::SetBuilder {
+                var: right_var,
+                var_type: right_ty,
+                body: right_body,
+            },
+        ) => {
+            left_ty == right_ty
+                && with_alpha_binding(env, left_var, right_var, |env| {
+                    alpha_eq_formula_with(left_body, right_body, env)
+                })
+        }
+        _ => false,
+    }
+}
+
+fn alpha_eq_formula_with(left: &Formula, right: &Formula, env: &mut AlphaEnv) -> bool {
+    match (left, right) {
+        (Formula::True, Formula::True) | (Formula::False, Formula::False) => true,
+        (Formula::Atom(left), Formula::Atom(right)) => left == right,
+        (Formula::PredApp(left_name, left_args), Formula::PredApp(right_name, right_args)) => {
+            left_name == right_name && alpha_eq_terms(left_args, right_args, env)
+        }
+        (Formula::Eq(left_a, left_b), Formula::Eq(right_a, right_b))
+        | (Formula::In(left_a, left_b), Formula::In(right_a, right_b))
+        | (Formula::Subset(left_a, left_b), Formula::Subset(right_a, right_b)) => {
+            alpha_eq_term(left_a, right_a, env) && alpha_eq_term(left_b, right_b, env)
+        }
+        (Formula::And(left_a, left_b), Formula::And(right_a, right_b))
+        | (Formula::Or(left_a, left_b), Formula::Or(right_a, right_b))
+        | (Formula::Implies(left_a, left_b), Formula::Implies(right_a, right_b)) => {
+            alpha_eq_formula_with(left_a, right_a, env)
+                && alpha_eq_formula_with(left_b, right_b, env)
+        }
+        (
+            Formula::Forall {
+                var: left_var,
+                var_type: left_ty,
+                body: left_body,
+            },
+            Formula::Forall {
+                var: right_var,
+                var_type: right_ty,
+                body: right_body,
+            },
+        )
+        | (
+            Formula::Exists {
+                var: left_var,
+                var_type: left_ty,
+                body: left_body,
+            },
+            Formula::Exists {
+                var: right_var,
+                var_type: right_ty,
+                body: right_body,
+            },
+        ) => {
+            left_ty == right_ty
+                && with_alpha_binding(env, left_var, right_var, |env| {
+                    alpha_eq_formula_with(left_body, right_body, env)
+                })
+        }
+        _ => false,
+    }
 }
 
 fn normalize_formula_defs(
@@ -2370,6 +2526,7 @@ fn unfold_formula_defs(
                     Formula::membership(elem.clone(), *left),
                     Formula::negate(Formula::membership(elem, *right)),
                 ),
+                Term::Powerset(base) => Formula::subset(elem, *base),
                 Term::SetBuilder {
                     var,
                     var_type: _,
@@ -2512,6 +2669,7 @@ fn normalize_term_compute(term: &Term) -> Term {
             Box::new(normalize_term_compute(left)),
             Box::new(normalize_term_compute(right)),
         ),
+        Term::Powerset(term) => Term::Powerset(Box::new(normalize_term_compute(term))),
         Term::SetBuilder {
             var,
             var_type,
@@ -2581,6 +2739,7 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
             Box::new(normalize_term(env, ctx, left)?),
             Box::new(normalize_term(env, ctx, right)?),
         )),
+        Term::Powerset(term) => Ok(Term::Powerset(Box::new(normalize_term(env, ctx, term)?))),
         Term::SetBuilder {
             var,
             var_type,
@@ -2690,6 +2849,7 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(left, subst)),
             Box::new(subst_term_schema(right, subst)),
         ),
+        Term::Powerset(term) => Term::Powerset(Box::new(subst_term_schema(term, subst))),
         Term::SetBuilder {
             var,
             var_type,
@@ -2823,6 +2983,7 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(left, var, replacement)),
             Box::new(subst_term(right, var, replacement)),
         ),
+        Term::Powerset(term) => Term::Powerset(Box::new(subst_term(term, var, replacement))),
         Term::SetBuilder {
             var: bound,
             var_type,
@@ -2915,7 +3076,9 @@ fn term_has_free_var(term: &Term, name: &str) -> bool {
         Term::Var(var) => var == name,
         Term::App(_, args) => args.iter().any(|arg| term_has_free_var(arg, name)),
         Term::Zero | Term::EmptySet(_) => false,
-        Term::Succ(term) | Term::Singleton(term) => term_has_free_var(term, name),
+        Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => {
+            term_has_free_var(term, name)
+        }
         Term::Add(left, right)
         | Term::Mul(left, right)
         | Term::Sub(left, right)
@@ -3021,6 +3184,11 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
             }
             for replaced in replace_term_once(right, from, to) {
                 results.push(Term::Diff(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::Powerset(inner) => {
+            for replaced in replace_term_once(inner, from, to) {
+                results.push(Term::Powerset(Box::new(replaced)));
             }
         }
         Term::SetBuilder {
@@ -3181,7 +3349,7 @@ fn term_size(term: &Term) -> usize {
     match term {
         Term::Var(_) | Term::Zero | Term::EmptySet(_) => 1,
         Term::App(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
-        Term::Succ(term) | Term::Singleton(term) => 1 + term_size(term),
+        Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => 1 + term_size(term),
         Term::Add(left, right)
         | Term::Mul(left, right)
         | Term::Sub(left, right)
@@ -3582,6 +3750,7 @@ enum Tactic {
     Unfold(Name),
     Simp,
     SimpAt(Name),
+    SimpAll,
     Induction {
         var_name: Name,
         zero_tactics: Vec<Tactic>,
@@ -3796,7 +3965,8 @@ impl Tokens {
                 ("diff", [left, right]) => {
                     Ok(Term::Diff(Box::new(left.clone()), Box::new(right.clone())))
                 }
-                ("succ" | "singleton", _) => Err(ParseError::new(format!(
+                ("powerset", [arg]) => Ok(Term::Powerset(Box::new(arg.clone()))),
+                ("succ" | "singleton" | "powerset", _) => Err(ParseError::new(format!(
                     "`{name}` expects exactly one argument"
                 ))),
                 ("add" | "mul" | "sub" | "union" | "inter" | "diff", _) => Err(ParseError::new(
@@ -3911,6 +4081,7 @@ impl Tokens {
             | Term::Union(_, _)
             | Term::Inter(_, _)
             | Term::Diff(_, _)
+            | Term::Powerset(_)
             | Term::SetBuilder { .. } => {
                 Err(ParseError::new(format!("term `{term}` is not a formula")))
             }
@@ -4608,6 +4779,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     }
     if line == "simp" {
         return Ok(Tactic::Simp);
+    }
+    if line == "simp at *" {
+        return Ok(Tactic::SimpAll);
     }
     if let Some(rest) = line.strip_prefix("simp at ") {
         return Ok(Tactic::SimpAt(expect_single_name(rest, "simp at")?));
@@ -5564,6 +5738,36 @@ fn run_tactic(
                 }],
             })
         }
+        Tactic::SimpAll => {
+            let (context, hypotheses_changed) = simplify_hypotheses(env, &goal.context)?;
+            let (target, target_changed) = unfold_formula_defs(env, &context, &goal.target, None)
+                .map_err(|err| {
+                TacticError::new(format!("cannot simplify goal: {}", err.message))
+            })?;
+            if !hypotheses_changed && !target_changed {
+                return Err(TacticError::new(format!(
+                    "simp made no progress on goal or hypotheses for `{}`",
+                    goal.target
+                )));
+            }
+            let id = fresh_goal(next_goal_id);
+            let replacement = if target_changed {
+                PartialProof::Convert {
+                    proof_body: Box::new(PartialProof::Hole(id)),
+                    target: goal.target,
+                }
+            } else {
+                PartialProof::Hole(id)
+            };
+            Ok(StepResult {
+                replacement,
+                new_goals: vec![Goal {
+                    id,
+                    context,
+                    target,
+                }],
+            })
+        }
         Tactic::Induction {
             var_name,
             zero_tactics,
@@ -5729,6 +5933,25 @@ fn ensure_intro_name_unused(ctx: &Context, name: &str) -> Result<(), TacticError
         )));
     }
     Ok(())
+}
+
+fn simplify_hypotheses(env: &Env, ctx: &Context) -> Result<(Context, bool), TacticError> {
+    let mut context = ctx.clone();
+    let mut changed = false;
+    for binding in ctx.proofs() {
+        let (formula, binding_changed) = unfold_formula_defs(env, ctx, &binding.formula, None)
+            .map_err(|err| {
+                TacticError::new(format!(
+                    "cannot simplify `{}`: {}",
+                    binding.name, err.message
+                ))
+            })?;
+        if binding_changed {
+            context.add_proof(binding.name.clone(), formula);
+            changed = true;
+        }
+    }
+    Ok((context, changed))
 }
 
 fn proof_expr_for_inferred(
@@ -6214,6 +6437,7 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
             Box::new(subst_term_terms(left, subst)),
             Box::new(subst_term_terms(right, subst)),
         ),
+        Term::Powerset(term) => Term::Powerset(Box::new(subst_term_terms(term, subst))),
         Term::SetBuilder {
             var,
             var_type,
@@ -6453,6 +6677,12 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             };
             unify_term(p_left, t_left, unify)?;
             unify_term(p_right, t_right, unify)
+        }
+        Term::Powerset(pattern) => {
+            let Term::Powerset(target) = target else {
+                return Err(());
+            };
+            unify_term(pattern, target, unify)
         }
         Term::SetBuilder {
             var: p_var,
@@ -7282,6 +7512,21 @@ theorem imp_projection (P Q R : Prop) : (P -> Q /\ R) -> P -> Q := by
     }
 
     #[test]
+    fn alpha_equivalent_forall_binders_are_definitionally_equal() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem alpha_forall
+  (P : Nat -> Prop)
+  : (forall x : Nat, P(x)) -> forall y : Nat, P(y) := by
+  intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
     fn exact_instantiates_proposition_schema_theorem() {
         check_ok(
             r#"
@@ -7944,6 +8189,41 @@ theorem bad (P : Prop) : P -> P := by
     }
 
     #[test]
+    fn simp_at_star_simplifies_goal_and_hypotheses() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem inter_hyp_and_goal
+  (T : Type)
+  (x : T)
+  (A B : Set T)
+  : x in inter(A, B) -> x in inter(B, B) := by
+  intro h
+  simp at *
+  split
+  exact h.right
+  exact h.right
+"#,
+        );
+    }
+
+    #[test]
+    fn simp_at_star_rejects_no_progress() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad (P : Prop) : P -> P := by
+  intro h
+  simp at *
+  exact h
+"#,
+            "simp made no progress on goal or hypotheses",
+        );
+    }
+
+    #[test]
     fn nat_multiplication_computes_under_simp() {
         check_ok(
             r#"
@@ -8116,6 +8396,43 @@ theorem subset_refl (A : Set Person) : A subset A := by
   intro hx
   exact hx
 "#,
+        );
+    }
+
+    #[test]
+    fn powerset_membership_computes_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+
+theorem powerset_intro_demo
+  (A B : Set Person)
+  : B subset A -> B in powerset(A) := by
+  intro h
+  simp
+  exact h
+
+theorem powerset_elim_demo
+  (A B : Set Person)
+  : B in powerset(A) -> B subset A := by
+  intro h
+  simp at h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn powerset_argument_must_be_a_set() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad (n : Nat) : empty(Nat) in powerset(n) := by
+"#,
+            "powerset argument has type `Nat`, but expected a set",
         );
     }
 

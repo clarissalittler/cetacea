@@ -60,7 +60,7 @@ loaded once.
 - built-in `Nat`, `Set T`, `0`, `succ(n)`, `add(n, m)`, `mul(n, m)`,
   and `sub(n, m)`, plus Nat predicate `le(n, m)`
 - typed set terms: `empty(T)`, `singleton(x)`, `union(A, B)`, `inter(A, B)`,
-  `diff(A, B)`, and set builders `{ x : T | P(x) }`
+  `diff(A, B)`, `powerset(A)`, and set builders `{ x : T | P(x) }`
 - formulas: `True`, `False`, atoms, equality, membership, subset, `not`, `/\`,
   `\/`, `->`, `<->`
 - first-order formulas: `forall x : T, P(x)`, `exists x : T, P(x)`, and

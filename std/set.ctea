@@ -27,6 +27,36 @@ theorem subset_trans
   apply hAB
   exact hx
 
+theorem powerset_intro
+  (T : Type)
+  (A B : Set T)
+  : B subset A -> B in powerset(A) := by
+  intro h
+  simp
+  exact h
+
+theorem powerset_elim
+  (T : Type)
+  (A B : Set T)
+  : B in powerset(A) -> B subset A := by
+  intro h
+  simp at h
+  exact h
+
+theorem powerset_mono
+  (T : Type)
+  (A B : Set T)
+  : A subset B -> powerset(A) subset powerset(B) := by
+  intro hAB
+  simp
+  intro S
+  intro hSA
+  intro x
+  intro hx
+  apply hAB
+  apply hSA
+  exact hx
+
 theorem subset_antisymm
   (T : Type)
   (A B : Set T)

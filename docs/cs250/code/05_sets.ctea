@@ -92,3 +92,16 @@ theorem subsets_carry
   apply subset_trans {T := Person; A := C; B := A; C := B}
   exact hCA
   exact hAB
+
+theorem powerset_mono_demo
+  (A B : Set Person)
+  : A subset B -> powerset(A) subset powerset(B) := by
+  intro hAB
+  simp
+  intro S
+  intro hSA
+  intro x
+  intro hx
+  apply hAB
+  apply hSA
+  exact hx

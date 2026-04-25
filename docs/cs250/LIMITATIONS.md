@@ -27,14 +27,13 @@ intermediate terms.
 
 `simp` knows transparent definitions, set membership, subset expansion,
 and built-in Nat computation. `simp at h` can simplify a named
-hypothesis. It does not use arbitrary imported lemmas as rewrite rules,
-and there is no "simplify every hypothesis" form.
+hypothesis, and `simp at *` simplifies the goal plus all hypotheses. It
+does not use arbitrary imported lemmas as rewrite rules.
 
 For example, a goal may simplify cleanly while a matching hypothesis
 still needs an explicit `rewrite`, `exact`, or helper theorem.
 
-**Possible improvement:** add a theorem-driven simplifier and perhaps a
-broader `simp at *` form.
+**Possible improvement:** add a theorem-driven simplifier.
 
 ### 3. Addition and multiplication recurse on the left
 
@@ -103,12 +102,12 @@ they are used in Cetacea at all.
 ### 8. Set theory is typed and finite in scope
 
 Cetacea has typed sets, set builders, union, intersection, difference,
-subset, and extensionality. It does not have powersets, Cartesian
+powersets, subset, and extensionality. It does not have Cartesian
 products as set objects, cardinalities, finite-set enumeration, or
 comprehension beyond predicate set builders.
 
-The Module 1 set-identity proofs fit well. Counting arguments and
-powerset/cardinality exercises do not.
+The Module 1 set-identity and powerset-monotonicity proofs fit well.
+Counting arguments and cardinality exercises do not.
 
 ### 9. Diagnostics still have line granularity, not token spans
 
@@ -167,7 +166,9 @@ are now implemented:
 - Set-builder terms `{ x : T | P(x) }` are supported.
 - `simp` reduces built-in computation under predicate and function
   arguments.
-- `simp at h` simplifies a named hypothesis.
+- `simp at h` simplifies a named hypothesis, and `simp at *` simplifies
+  all hypotheses plus the goal.
+- `powerset(A)` is supported, with membership simplifying to subset.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
   compound proof expressions such as `rewrite eq_symm h`.
 - Parenthesized proof expressions such as `exact (h hp).left` and

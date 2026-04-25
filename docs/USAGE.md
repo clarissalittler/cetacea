@@ -231,8 +231,12 @@ singleton(x)
 union(A, B)
 inter(A, B)
 diff(A, B)
+powerset(A)
 { x : T | P(x) }
 ```
+
+`powerset(A)` has type `Set (Set T)` when `A : Set T`; membership
+`B in powerset(A)` simplifies to `B subset A`.
 
 The checker validates arities and types for functions, predicates, membership,
 subset, and set operations.
@@ -627,13 +631,14 @@ It currently knows:
 
 - formula definitions
 - transparent term definitions
-- set membership in `empty`, `singleton`, `union`, `inter`, `diff`, and set
-  builders
+- set membership in `empty`, `singleton`, `union`, `inter`, `diff`,
+  `powerset`, and set builders
 - subset expansion
 - the built-in equations for `add`, `mul`, `sub`, and `le`, including inside
   predicate and function arguments
 
-Use `simp at h` to simplify a named hypothesis in the local context.
+Use `simp at h` to simplify a named hypothesis in the local context, or
+`simp at *` to simplify the current goal and all local hypotheses.
 
 Examples:
 
@@ -671,6 +676,19 @@ theorem inter_hyp_right
   : x in inter(A, B) -> x in B := by
   intro h
   simp at h
+  exact h.right
+```
+
+```text
+theorem inter_hyp_and_goal
+  (T : Type)
+  (x : T)
+  (A B : Set T)
+  : x in inter(A, B) -> x in inter(B, B) := by
+  intro h
+  simp at *
+  split
+  exact h.right
   exact h.right
 ```
 
@@ -897,6 +915,9 @@ Includes set extensionality as an axiom plus set lemmas:
 - `set_ext`
 - `subset_refl`
 - `subset_trans`
+- `powerset_intro`
+- `powerset_elim`
+- `powerset_mono`
 - `subset_antisymm`
 - `empty_subset`
 - `inter_subset_left`
