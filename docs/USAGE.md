@@ -50,8 +50,8 @@ If a file has only imports, the CLI prints:
 accepted file
 ```
 
-Diagnostics include the file and command line when the checker was given a file
-path:
+Diagnostics include the file and command or tactic line when the checker was
+given a file path:
 
 ```text
 error: /tmp/cetacea-bad.ctea:3: theorem `bad` failed: no matching assumption found
@@ -212,7 +212,13 @@ Built-in Nat terms:
 0
 succ(n)
 add(n, m)
+mul(n, m)
 ```
+
+`add` computes by recursion on its first argument, so `add(0, n)` simplifies
+directly while facts such as `add(n, 0) = n` are proved by induction.
+`mul` follows the same convention: `mul(0, n)` simplifies directly, and
+`mul(n, 0) = 0` is proved by induction.
 
 Built-in set terms:
 
@@ -222,6 +228,7 @@ singleton(x)
 union(A, B)
 inter(A, B)
 diff(A, B)
+{ x : T | P(x) }
 ```
 
 The checker validates arities and types for functions, predicates, membership,
@@ -246,6 +253,8 @@ P -> Q
 P <-> Q
 forall x : T, P(x)
 exists x : T, P(x)
+forall x y : T, R(x, y)
+exists x y : T, R(x, y)
 ```
 
 `not P` is represented as `P -> False`.
@@ -279,8 +288,24 @@ theorem happy_mother_def_intro : Happy(mother(alice)) -> HappyMother(alice) := b
   exact h
 ```
 
-Formula definitions currently support type and term parameters. They do not yet
-support proposition or predicate parameters.
+Formula definitions support type, term, proposition, and predicate parameters:
+
+```text
+def ConjSelf (P : Prop) : Prop := P /\ P
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop :=
+  forall x : T, R(x, x)
+```
+
+Term definitions are also transparent. They currently do not take parameters.
+
+```text
+def TallSet : Set Person := { x : Person | Tall(x) }
+
+theorem tall_member : Tall(alice) -> alice in TallSet := by
+  intro h
+  simp
+  exact h
+```
 
 ## Theorems
 
@@ -390,6 +415,24 @@ theorem use_id (Q : Prop) : Q -> Q := by
 exact h.left
 exact h.right
 exact h x
+```
+
+It can also apply an implication proof inline, and `exact True` introduces
+`True`:
+
+```text
+exact h hp
+exact (h hp).left
+exact True
+```
+
+### `trivial`
+
+Use `trivial` to prove a `True` goal.
+
+```text
+theorem true_intro : True := by
+  trivial
 ```
 
 ### `assumption`
@@ -537,11 +580,20 @@ theorem rewrite_happy
 
 Here the target is `Happy(mother(alice))`, and `h` is
 `alice = mother(alice)`. `rewrite h` changes the subgoal to `Happy(alice)`.
+Use `rewrite -> h` for the opposite direction, where the target contains the
+left side and the new subgoal contains the right side.
 
 For theorem schemas, explicit instantiation is sometimes needed:
 
 ```text
 rewrite add_zero_right {n := m}
+```
+
+Compound proof expressions are allowed, so equality lemmas can be applied
+inline:
+
+```text
+rewrite eq_symm h
 ```
 
 ### `unfold`
@@ -563,9 +615,12 @@ it makes progress.
 It currently knows:
 
 - formula definitions
-- set membership in `empty`, `singleton`, `union`, `inter`, and `diff`
+- transparent term definitions
+- set membership in `empty`, `singleton`, `union`, `inter`, `diff`, and set
+  builders
 - subset expansion
-- the left-recursive equations for `add`
+- the left-recursive equations for `add` and `mul`, including inside predicate and
+  function arguments
 
 Examples:
 
@@ -584,6 +639,15 @@ theorem subset_refl
   intro x
   intro hx
   exact hx
+```
+
+```text
+pred Even(Nat)
+
+theorem even_zero_to_simplified_arg : Even(0) -> Even(add(0, 0)) := by
+  intro h
+  simp
+  exact h
 ```
 
 ### `induction`
@@ -622,6 +686,16 @@ Use `contradiction` when the context contains either:
 theorem false_elim (P : Prop) : False -> P := by
   intro h
   contradiction
+```
+
+### `show_goal`
+
+Use `show_goal` or `print_state` as a debugging tactic. It intentionally stops
+the proof and reports the current open goal.
+
+```text
+theorem stuck (P : Prop) : P := by
+  show_goal
 ```
 
 ### `by_cases`
@@ -683,6 +757,13 @@ Forall application:
 ```text
 exact h x
 apply h x
+```
+
+Implication application:
+
+```text
+exact h hp
+exact (h hp).left
 ```
 
 Explicit theorem instantiation:
@@ -762,7 +843,7 @@ Includes equality lemmas:
 
 ### `std/nat.ctea`
 
-Includes basic Nat addition lemmas:
+Includes basic Nat addition and multiplication lemmas:
 
 - `add_zero_left`
 - `add_succ_left`
@@ -772,6 +853,9 @@ Includes basic Nat addition lemmas:
 - `add_succ_right_rev`
 - `add_assoc`
 - `add_comm`
+- `mul_zero_left`
+- `mul_succ_left`
+- `mul_zero_right`
 
 ### `std/set.ctea`
 
@@ -950,16 +1034,18 @@ Cetacea is intentionally small. Important current limitations:
 - There are no namespaces or qualified imports.
 - Imported declarations enter one global environment.
 - The parser is line-oriented and intentionally simple.
-- Precise source spans are not implemented yet. Diagnostics report command
-  lines, not exact tactic or token spans.
+- Precise source spans are not implemented yet. Diagnostics report line
+  numbers, not exact token spans.
 - `simp` uses built-in computation rules and formula definitions. It does not
   yet use arbitrary imported rewrite lemmas.
 - Theorem instantiation is useful but incomplete. Some proofs still need
   explicit schema arguments.
-- Formula definitions cannot currently take proposition or predicate
-  parameters.
+- Term definitions cannot currently take parameters.
+- Nat has addition and multiplication, but no built-in order or subtraction.
 - Nat induction is specialized to `Nat` and rejects induction when local
   hypotheses depend on the induction variable.
+- `intro` rejects names that would shadow an existing local variable or
+  hypothesis.
 
 ## Debugging Failed Proofs
 
@@ -970,8 +1056,9 @@ When a proof fails:
 3. If a theorem reference cannot be instantiated, add explicit arguments.
 4. If a `rewrite` fails, remember that the target must contain the equality's
    right-hand side.
-5. If a `cases` or `induction` block behaves oddly, check indentation.
-6. Try replacing `exact theorem_name` with explicit steps using `intro`,
+5. Insert `show_goal` temporarily to see the current open goal.
+6. If a `cases` or `induction` block behaves oddly, check indentation.
+7. Try replacing `exact theorem_name` with explicit steps using `intro`,
    `apply`, `split`, and `cases`.
 
 ## Style Conventions
@@ -985,4 +1072,3 @@ The current examples and standard library follow these conventions:
 - Indent case and induction branch bodies by four spaces under the arm.
 - Prefer importing `std/prelude.ctea` in examples that use the library.
 - Use explicit theorem instantiation when it makes a proof more predictable.
-

@@ -118,11 +118,13 @@ pub enum Term {
     Zero,
     Succ(Box<Term>),
     Add(Box<Term>, Box<Term>),
+    Mul(Box<Term>, Box<Term>),
     EmptySet(Type),
     Singleton(Box<Term>),
     Union(Box<Term>, Box<Term>),
     Inter(Box<Term>, Box<Term>),
     Diff(Box<Term>, Box<Term>),
+    SetBuilder { var: Name, var_type: Type, body: Box<Formula> },
 }
 ```
 
@@ -361,9 +363,12 @@ pub struct Diagnostic {
 
 Current diagnostic design:
 
-- `SourceLocation` reports an optional path and a command line.
+- `SourceLocation` reports an optional path and a command or parse-error line.
 - `Span` exists but is not meaningfully populated yet.
-- The parser stores line numbers on top-level commands via `LocatedCommand`.
+- The parser stores line numbers on top-level commands via `LocatedCommand` and
+  on raw tactic lines while parsing theorem bodies.
+- Tactic execution errors attach the current open goal as the diagnostic target
+  note.
 - The CLI prints `path:line: message` when location information exists.
 
 This is a pragmatic halfway point. It helps users find failing declarations
@@ -408,7 +413,12 @@ Proof expressions are parsed separately. They support:
 - theorem or hypothesis names
 - explicit arguments in `{...}`
 - forall application with term arguments
+- implication application with proof arguments
 - `.left` and `.right` projections
+
+For theorem references with inline arguments, elaboration can infer schema
+arguments from supplied proof arguments before building the final `TheoremRef`.
+This supports expressions such as `rewrite eq_symm h`.
 
 ## Tactic Parsing
 
@@ -419,6 +429,7 @@ Simple tactic lines include:
 ```text
 intro h
 exact h
+trivial
 assumption
 apply h
 exists x
@@ -429,6 +440,7 @@ simp
 exfalso
 contradiction
 by_contra h
+show_goal
 ```
 
 Structured tactic blocks include:
@@ -545,7 +557,6 @@ Important validators:
 - `validate_type`
 - `validate_term`
 - `validate_formula`
-- `validate_formula_def_params`
 
 Validation checks:
 
@@ -566,12 +577,13 @@ before proof search.
 
 ## Definitional Equality and Normalization
 
-Cetacea has transparent formula definitions and a small amount of built-in
-computation.
+Cetacea has transparent formula and term definitions and a small amount of
+built-in computation.
 
 Important functions:
 
 - `normalize_formula_defs`
+- `normalize_term`
 - `normalize_term_compute`
 - formula/term substitution helpers
 - formula equality helpers
@@ -585,12 +597,23 @@ def HappyMother (x : Person) : Prop := Happy(mother(x))
 and then prove goals involving `HappyMother(alice)` by unfolding or simplifying
 to `Happy(mother(alice))`.
 
-Built-in term computation currently focuses on Nat addition:
+Term definitions support named set builders:
+
+```text
+def TallSet : Set Person := { x : Person | Tall(x) }
+```
+
+Built-in term computation currently focuses on Nat addition and multiplication:
 
 ```text
 add(0, n)         ==> n
 add(succ(n), m)  ==> succ(add(n, m))
+mul(0, n)         ==> 0
+mul(succ(n), m)  ==> add(m, mul(n, m))
 ```
+
+This computation is applied recursively to terms, including terms nested under
+function and predicate arguments.
 
 Set simplification is mostly formula-level. Membership in set constructors is
 expanded:
@@ -601,6 +624,7 @@ x in singleton(y)  ==> x = y
 x in union(A, B)   ==> x in A \/ x in B
 x in inter(A, B)   ==> x in A /\ x in B
 x in diff(A, B)    ==> x in A /\ not x in B
+x in { y : T | P(y) }  ==> P(x)
 ```
 
 Subset is expanded to a universal implication:
@@ -613,8 +637,8 @@ A subset B  ==>  forall x : T, x in A -> x in B
 
 The `simp` tactic is intentionally small. It normalizes the current goal using
 transparent formula definitions, set computation, subset expansion, and Nat
-computation. It rejects no-op calls so users notice when `simp` did not change
-anything.
+computation inside formula terms. It rejects no-op calls so users notice when
+`simp` did not change anything.
 
 Current design tradeoff:
 
@@ -655,8 +679,9 @@ theorem rewrite_happy
 The target contains `mother(alice)`, the right side of `h`, so the subgoal
 becomes `Happy(alice)`.
 
-The reverse direction can be obtained with an equality-symmetry lemma or an
-explicit reverse theorem such as the Nat library's `_rev` lemmas.
+Use `rewrite -> h` for the reverse tactic direction. Compound proof expressions
+such as `rewrite eq_symm h` are also accepted when schema arguments can be
+inferred from the supplied proof arguments.
 
 ## Natural-Number Induction
 
@@ -791,11 +816,11 @@ The upside is that nearly every feature is inspectable in one file.
 
 ## How To Add a New Built-In Term
 
-Suppose you wanted to add multiplication on Nat.
+Suppose you wanted to add a new Nat primitive, such as subtraction.
 
 Likely steps:
 
-1. Add a `Term::Mul(Box<Term>, Box<Term>)` variant.
+1. Add a `Term` variant for the primitive.
 2. Update `Display for Term`.
 3. Update term validation in `validate_term`.
 4. Update substitution and free-variable helpers for terms.
@@ -868,15 +893,16 @@ This would make library proofs shorter without changing the kernel.
 
 ## How To Improve Diagnostics
 
-The current diagnostics know command line numbers. They do not yet know exact
-token or tactic spans.
+The current diagnostics know command line numbers, and parse errors in tactic
+blocks know the offending tactic line. They do not yet know exact token spans
+or execution-time tactic spans.
 
 Useful next steps:
 
 1. Give parse tokens byte spans.
 2. Preserve spans in AST nodes.
 3. Store tactic line numbers inside `Tactic`.
-4. Report the failing tactic line, not just the theorem line.
+4. Report the failing execution-time tactic line, not just the theorem line.
 5. Include a compact proof state when tactic execution fails.
 
 The existing `Span` field in `Diagnostic` is a placeholder for this direction.
@@ -888,8 +914,8 @@ Important limitations to account for when extending the system:
 - Imports are global and unqualified.
 - There are no namespaces.
 - The parser is not a full grammar with spans.
-- Formula definitions are transparent and simple.
-- Formula definitions do not support proposition or predicate parameters.
+- Formula and term definitions are transparent and simple.
+- Term definitions do not support parameters.
 - Predicate schema arguments are names, not arbitrary predicates.
 - `simp` is not theorem-driven.
 - Nat induction is specialized and not fully generalized.
@@ -937,4 +963,3 @@ Recommended order:
 
 That path moves from user-facing behavior into internal machinery without
 starting in the densest part of the code.
-

@@ -5,10 +5,11 @@ Cetacea is a small tactic-based theorem prover following the design in
 
 The current implementation covers propositional logic, a first-order layer with
 typed variables, predicate applications, universal and existential
-quantification, equality, transparent formula definitions, typed sets, and a
-small natural-number layer with induction. Declarations and formula annotations
-are checked for known types, known predicates, predicate arity, function arity,
-definition arity, set element compatibility, and argument type compatibility.
+quantification, equality, transparent formula and term definitions, typed sets,
+and a small natural-number layer with induction. Declarations and formula
+annotations are checked for known types, known predicates, predicate arity,
+function arity, definition arity, set element compatibility, and argument type
+compatibility.
 
 ## Layout
 
@@ -42,8 +43,8 @@ cargo run -p cetacea_cli -- std/nat.ctea
 
 The CLI prints each accepted theorem or axiom from the root file and the
 strongest mode used by its checked proof object.
-Diagnostics for checked declarations include the file and command line when
-the checker has path information.
+Diagnostics for checked declarations and parse errors include the file and
+command or tactic line when the checker has path information.
 
 Import paths are resolved relative to the importing file first, then relative
 to the current working directory. A file imported more than once is checked and
@@ -53,20 +54,21 @@ loaded once.
 
 - `mode constructive` and `mode classical`
 - file imports with `import path/to/file.ctea`
-- `sort`, `const`, `func`, `pred`, formula `def`, and `axiom` declarations
-  with type and term parameters
+- `sort`, `const`, `func`, `pred`, formula and term `def`, and `axiom`
+  declarations
 - theorem declarations with proposition, predicate, type, and term parameters
-- built-in `Nat`, `Set T`, `0`, `succ(n)`, and `add(n, m)`
+- built-in `Nat`, `Set T`, `0`, `succ(n)`, `add(n, m)`, and `mul(n, m)`
 - typed set terms: `empty(T)`, `singleton(x)`, `union(A, B)`, `inter(A, B)`,
-  and `diff(A, B)`
+  `diff(A, B)`, and set builders `{ x : T | P(x) }`
 - formulas: `True`, `False`, atoms, equality, membership, subset, `not`, `/\`,
   `\/`, `->`, `<->`
-- first-order formulas: `forall x : T, P(x)` and `exists x : T, P(x)`
+- first-order formulas: `forall x : T, P(x)`, `exists x : T, P(x)`, and
+  same-type multi-binders such as `forall x y : T, R(x, y)`
 - validation for type names, predicate names, predicate arity, and predicate
   argument types
 - validation for function names, function arity, and function argument types
-- validation for transparent formula definitions, including definition arity and
-  inferred type parameters
+- validation for transparent formula definitions, including definition arity,
+  inferred type parameters, and proposition/predicate parameters
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
@@ -81,11 +83,13 @@ loaded once.
   disjunction, truth, falsehood, universal quantification, existential
   quantification, equality reflexivity, equality substitution, natural-number
   induction, theorem references, and classical rules
-- tactics: `intro`, `exact`, `assumption`, `apply`, `split`, `left`, `right`,
-  `cases`, `exists`, `refl`, `rewrite`, `unfold`, `simp`, `induction`,
-  `exfalso`, `contradiction`, `by_cases`, `by_contra`
+- tactics: `intro`, `exact`, `trivial`, `assumption`, `apply`, `split`,
+  `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `unfold`, `simp`,
+  `induction`, `exfalso`, `contradiction`, `by_cases`, `by_contra`,
+  `show_goal`
 - `simp` computation for transparent formula definitions, set membership,
-  subset expansion, and the left-recursive `add` equations
+  subset expansion, and the left-recursive `add` equations, including terms
+  nested under predicate and function arguments
 - kernel reporting of constructive versus classical proof use
 - command-level file and line reporting for checker diagnostics
 

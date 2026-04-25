@@ -29,11 +29,17 @@ pub enum Term {
     Zero,
     Succ(Box<Term>),
     Add(Box<Term>, Box<Term>),
+    Mul(Box<Term>, Box<Term>),
     EmptySet(Type),
     Singleton(Box<Term>),
     Union(Box<Term>, Box<Term>),
     Inter(Box<Term>, Box<Term>),
     Diff(Box<Term>, Box<Term>),
+    SetBuilder {
+        var: Name,
+        var_type: Type,
+        body: Box<Formula>,
+    },
 }
 
 impl fmt::Display for Term {
@@ -53,11 +59,17 @@ impl fmt::Display for Term {
             Term::Zero => write!(f, "0"),
             Term::Succ(term) => write!(f, "succ({term})"),
             Term::Add(left, right) => write!(f, "add({left}, {right})"),
+            Term::Mul(left, right) => write!(f, "mul({left}, {right})"),
             Term::EmptySet(ty) => write!(f, "empty({ty})"),
             Term::Singleton(term) => write!(f, "singleton({term})"),
             Term::Union(left, right) => write!(f, "union({left}, {right})"),
             Term::Inter(left, right) => write!(f, "inter({left}, {right})"),
             Term::Diff(left, right) => write!(f, "diff({left}, {right})"),
+            Term::SetBuilder {
+                var,
+                var_type,
+                body,
+            } => write!(f, "{{ {var} : {var_type} | {body} }}"),
         }
     }
 }
@@ -291,6 +303,12 @@ pub enum ClassicalRule {
     DoubleNegationElim,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RewriteDirection {
+    Backward,
+    Forward,
+}
+
 impl fmt::Display for ClassicalRule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -412,6 +430,13 @@ pub struct FormulaDef {
     pub body: Formula,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TermDef {
+    pub name: Name,
+    pub ty: Type,
+    pub body: Term,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Context {
     type_vars: Vec<Name>,
@@ -503,6 +528,7 @@ pub struct Env {
     funcs: HashMap<Name, FuncDecl>,
     preds: HashMap<Name, Vec<Type>>,
     defs: HashMap<Name, FormulaDef>,
+    term_defs: HashMap<Name, TermDef>,
     theorems: HashMap<Name, Theorem>,
 }
 
@@ -539,8 +565,16 @@ impl Env {
         self.defs.insert(def.name.clone(), def);
     }
 
+    pub fn add_term_def(&mut self, def: TermDef) {
+        self.term_defs.insert(def.name.clone(), def);
+    }
+
     fn formula_def(&self, name: &str) -> Option<&FormulaDef> {
         self.defs.get(name)
+    }
+
+    fn term_def(&self, name: &str) -> Option<&TermDef> {
+        self.term_defs.get(name)
     }
 
     fn has_sort(&self, name: &str) -> bool {
@@ -564,7 +598,7 @@ impl Env {
     }
 
     fn has_def(&self, name: &str) -> bool {
-        self.defs.contains_key(name)
+        self.defs.contains_key(name) || self.term_defs.contains_key(name)
     }
 
     fn has_top_level_name(&self, name: &str) -> bool {
@@ -581,7 +615,7 @@ impl Env {
 fn is_builtin_name(name: &str) -> bool {
     matches!(
         name,
-        "Nat" | "Set" | "succ" | "add" | "empty" | "singleton" | "union" | "inter" | "diff"
+        "Nat" | "Set" | "succ" | "add" | "mul" | "empty" | "singleton" | "union" | "inter" | "diff"
     )
 }
 
@@ -688,7 +722,9 @@ impl FileChecker {
         let file = match parse_file(source) {
             Ok(file) => file,
             Err(err) => {
-                self.result.diagnostics.push(Diagnostic::error(err.message));
+                self.result
+                    .diagnostics
+                    .push(parse_diagnostic(None, err, None));
                 return;
             }
         };
@@ -783,10 +819,11 @@ impl FileChecker {
         let file = match parse_file(&source) {
             Ok(file) => file,
             Err(err) => {
-                self.result.diagnostics.push(
-                    Diagnostic::error(format!("could not parse `{}`", path.display()))
-                        .with_note(err.message),
-                );
+                self.result.diagnostics.push(parse_diagnostic(
+                    Some(path.as_path()),
+                    err,
+                    Some(format!("could not parse `{}`", path.display())),
+                ));
                 return;
             }
         };
@@ -916,17 +953,6 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    if let Err(err) = validate_formula_def_params(&decl.params) {
-                        self.result.diagnostics.push(
-                            diagnostic_at(
-                                source_path,
-                                line,
-                                format!("definition `{}` has invalid parameters", decl.name),
-                            )
-                            .with_note(err.message),
-                        );
-                        continue;
-                    }
                     let def_ctx = match build_theorem_context(&self.env, &decl.params) {
                         Ok(ctx) => ctx,
                         Err(err) => {
@@ -941,23 +967,93 @@ impl FileChecker {
                             continue;
                         }
                     };
-                    if let Err(err) = validate_formula(&self.env, &def_ctx, &decl.body) {
-                        self.result.diagnostics.push(
-                            diagnostic_at(
-                                source_path,
-                                line,
-                                format!("definition `{}` has invalid body", decl.name),
-                            )
-                            .with_note(err.message)
-                            .with_note(format!("body: {}", decl.body)),
-                        );
-                        continue;
+                    match (decl.result, decl.body) {
+                        (DefResult::Formula, DefBody::Formula(body)) => {
+                            if let Err(err) = validate_formula(&self.env, &def_ctx, &body) {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!("definition `{}` has invalid body", decl.name),
+                                    )
+                                    .with_note(err.message)
+                                    .with_note(format!("body: {body}")),
+                                );
+                                continue;
+                            }
+                            self.env.add_def(FormulaDef {
+                                name: decl.name,
+                                params: decl.params,
+                                body,
+                            });
+                        }
+                        (DefResult::Term(ty), DefBody::Term(body)) => {
+                            if !decl.params.is_empty() {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!(
+                                            "definition `{}` has invalid parameters",
+                                            decl.name
+                                        ),
+                                    )
+                                    .with_note("term definitions currently do not take parameters"),
+                                );
+                                continue;
+                            }
+                            if let Err(err) = validate_type(&self.env, &def_ctx, &ty) {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!("definition `{}` has invalid type", decl.name),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                continue;
+                            }
+                            match validate_term(&self.env, &def_ctx, &body) {
+                                Ok(actual) if actual == ty => {
+                                    self.env.add_term_def(TermDef {
+                                        name: decl.name,
+                                        ty,
+                                        body,
+                                    });
+                                }
+                                Ok(actual) => {
+                                    self.result.diagnostics.push(
+                                        diagnostic_at(
+                                            source_path,
+                                            line,
+                                            format!("definition `{}` has invalid body", decl.name),
+                                        )
+                                        .with_note(format!(
+                                            "body has type `{actual}`, but expected `{ty}`"
+                                        ))
+                                        .with_note(format!("body: {body}")),
+                                    );
+                                    continue;
+                                }
+                                Err(err) => {
+                                    self.result.diagnostics.push(
+                                        diagnostic_at(
+                                            source_path,
+                                            line,
+                                            format!("definition `{}` has invalid body", decl.name),
+                                        )
+                                        .with_note(err.message)
+                                        .with_note(format!("body: {body}")),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+                        (DefResult::Formula, DefBody::Term(_))
+                        | (DefResult::Term(_), DefBody::Formula(_)) => {
+                            unreachable!("definition parser pairs result and body")
+                        }
                     }
-                    self.env.add_def(FormulaDef {
-                        name: decl.name,
-                        params: decl.params,
-                        body: decl.body,
-                    });
                 }
                 Command::Axiom(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
@@ -1054,13 +1150,14 @@ impl FileChecker {
                     ) {
                         Ok(proof) => proof,
                         Err(err) => {
+                            let target = err.target.as_ref().unwrap_or(&decl.statement);
                             self.result.diagnostics.push(
                                 diagnostic_at(
                                     source_path,
                                     line,
                                     format!("theorem `{}` failed: {}", decl.name, err.message),
                                 )
-                                .with_note(format!("target: {}", decl.statement)),
+                                .with_note(format!("target: {target}")),
                             );
                             continue;
                         }
@@ -1120,17 +1217,6 @@ impl FileChecker {
             }
         }
     }
-}
-
-fn validate_formula_def_params(params: &[Param]) -> Result<(), ValidationError> {
-    for param in params {
-        if matches!(param.kind, ParamKind::Prop | ParamKind::Predicate(_)) {
-            return Err(ValidationError::new(
-                "formula definitions currently support only type and term parameters",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn build_theorem_context(env: &Env, params: &[Param]) -> Result<Context, ValidationError> {
@@ -1381,7 +1467,9 @@ pub fn infer_proof(
                 return Err(KernelError::new("rewrite expected an equality proof"));
             };
             let checked_body = infer_proof(env, ctx, proof_body, allowed_mode)?;
-            if !formula_rewrite_matches(&checked_body.formula, target, &left, &right) {
+            if !formula_rewrite_matches(&checked_body.formula, target, &left, &right)
+                && !formula_rewrite_matches(&checked_body.formula, target, &right, &left)
+            {
                 return Err(KernelError::new(format!(
                     "cannot rewrite `{}` to `{target}` using `{left} = {right}`",
                     checked_body.formula
@@ -1702,6 +1790,7 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
         Term::Var(name) => ctx
             .lookup_term(name)
             .or_else(|| env.consts.get(name))
+            .or_else(|| env.term_def(name).map(|def| &def.ty))
             .cloned()
             .ok_or_else(|| ValidationError::new(format!("unknown term `{name}`"))),
         Term::App(name, args) => {
@@ -1749,6 +1838,18 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             }
             Ok(Type::Nat)
         }
+        Term::Mul(left, right) => {
+            for (idx, term) in [left.as_ref(), right.as_ref()].iter().enumerate() {
+                let actual = validate_term(env, ctx, term)?;
+                if actual != Type::Nat {
+                    return Err(ValidationError::new(format!(
+                        "argument {} of `mul` has type `{actual}`, but expected `Nat`",
+                        idx + 1
+                    )));
+                }
+            }
+            Ok(Type::Nat)
+        }
         Term::EmptySet(elem_ty) => {
             validate_type(env, ctx, elem_ty)?;
             Ok(Type::Set(Box::new(elem_ty.clone())))
@@ -1777,6 +1878,17 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                     "set operation combines `Set {left_elem}` with `Set {right_elem}`"
                 )))
             }
+        }
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            validate_type(env, ctx, var_type)?;
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            validate_formula(env, &body_ctx, body)?;
+            Ok(Type::Set(Box::new(var_type.clone())))
         }
     }
 }
@@ -1895,7 +2007,7 @@ fn instantiate_formula_def(
     let expected_args = def
         .params
         .iter()
-        .filter(|param| matches!(param.kind, ParamKind::Term(_)))
+        .filter(|param| !matches!(param.kind, ParamKind::Type))
         .count();
     if expected_args != args.len() {
         return Err(ValidationError::new(format!(
@@ -1913,6 +2025,50 @@ fn instantiate_formula_def(
     for param in &def.params {
         match &param.kind {
             ParamKind::Type => {}
+            ParamKind::Prop => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let formula = formula_def_prop_argument(arg)?;
+                validate_formula(env, ctx, &formula)?;
+                schema_subst
+                    .formula_args
+                    .insert(param.name.clone(), formula);
+                arg_idx += 1;
+            }
+            ParamKind::Predicate(param_args) => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let name = formula_def_predicate_argument(arg)?;
+                let Some(signature) = predicate_signature(env, ctx, &name) else {
+                    return Err(ValidationError::new(format!("unknown predicate `{name}`")));
+                };
+                if signature.len() != param_args.len() {
+                    return Err(ValidationError::new(format!(
+                        "predicate `{name}` expects {} argument(s), but definition parameter `{}` expects {}",
+                        signature.len(),
+                        param.name,
+                        param_args.len()
+                    )));
+                }
+                for (pattern, actual) in param_args.iter().zip(signature.iter()) {
+                    unify_type(pattern, actual, &def.params, &mut schema_subst).map_err(|_| {
+                        let expected = subst_type_schema(pattern, &schema_subst);
+                        ValidationError::new(format!(
+                            "predicate argument `{name}` has incompatible type `{actual}`, expected `{expected}`"
+                        ))
+                    })?;
+                }
+                schema_subst.predicate_args.insert(param.name.clone(), name);
+                arg_idx += 1;
+            }
             ParamKind::Term(ty) => {
                 let Some(arg) = args.next() else {
                     return Err(ValidationError::new(format!(
@@ -1932,11 +2088,6 @@ fn instantiate_formula_def(
                 term_subst.insert(param.name.clone(), arg.clone());
                 arg_idx += 1;
             }
-            ParamKind::Prop | ParamKind::Predicate(_) => {
-                return Err(ValidationError::new(
-                    "formula definitions currently support only type and term parameters",
-                ));
-            }
         }
     }
 
@@ -1954,6 +2105,24 @@ fn instantiate_formula_def(
     let body = subst_formula_terms(&subst_formula_schema(&def.body, &schema_subst), &term_subst);
     validate_formula(env, ctx, &body)?;
     Ok(body)
+}
+
+fn formula_def_prop_argument(arg: &Term) -> Result<Formula, ValidationError> {
+    match arg {
+        Term::Var(name) => Ok(Formula::Atom(name.clone())),
+        other => Err(ValidationError::new(format!(
+            "proposition definition argument must be a proposition name, got `{other}`"
+        ))),
+    }
+}
+
+fn formula_def_predicate_argument(arg: &Term) -> Result<Name, ValidationError> {
+    match arg {
+        Term::Var(name) => Ok(name.clone()),
+        other => Err(ValidationError::new(format!(
+            "predicate definition argument must be a predicate name, got `{other}`"
+        ))),
+    }
 }
 
 fn formulas_def_eq(
@@ -2015,22 +2184,32 @@ fn unfold_formula_defs(
                     return Ok((unfolded, true));
                 }
             }
+            if only.is_none() {
+                let simplified_args: Vec<Term> = args
+                    .iter()
+                    .map(|arg| normalize_term(env, ctx, arg))
+                    .collect::<Result<_, _>>()?;
+                let simplified = Formula::PredApp(name.clone(), simplified_args);
+                return Ok((simplified.clone(), &simplified != formula));
+            }
             Ok((formula.clone(), false))
         }
         Formula::Eq(left, right) => {
             if only.is_some() {
                 return Ok((formula.clone(), false));
             }
-            let simplified =
-                Formula::eq(normalize_term_compute(left), normalize_term_compute(right));
+            let simplified = Formula::eq(
+                normalize_term(env, ctx, left)?,
+                normalize_term(env, ctx, right)?,
+            );
             Ok((simplified.clone(), &simplified != formula))
         }
         Formula::In(elem, set) => {
             if only.is_some() {
                 return Ok((formula.clone(), false));
             }
-            let elem = normalize_term_compute(elem);
-            let set = normalize_term_compute(set);
+            let elem = normalize_term(env, ctx, elem)?;
+            let set = normalize_term(env, ctx, set)?;
             let simplified = match set {
                 Term::EmptySet(_) => Formula::False,
                 Term::Singleton(singleton_elem) => Formula::eq(elem, *singleton_elem),
@@ -2046,6 +2225,11 @@ fn unfold_formula_defs(
                     Formula::membership(elem.clone(), *left),
                     Formula::negate(Formula::membership(elem, *right)),
                 ),
+                Term::SetBuilder {
+                    var,
+                    var_type: _,
+                    body,
+                } => subst_formula_term(&body, &var, &elem),
                 other => Formula::membership(elem, other),
             };
             let changed = &simplified != formula;
@@ -2060,8 +2244,8 @@ fn unfold_formula_defs(
             if only.is_some() {
                 return Ok((formula.clone(), false));
             }
-            let left = normalize_term_compute(left);
-            let right = normalize_term_compute(right);
+            let left = normalize_term(env, ctx, left)?;
+            let right = normalize_term(env, ctx, right)?;
             let elem_ty = set_element_type(env, ctx, &left)?;
             let right_elem_ty = set_element_type(env, ctx, &right)?;
             if elem_ty != right_elem_ty {
@@ -2137,6 +2321,18 @@ fn normalize_term_compute(term: &Term) -> Term {
                 other => Term::Add(Box::new(other), Box::new(right)),
             }
         }
+        Term::Mul(left, right) => {
+            let left = normalize_term_compute(left);
+            let right = normalize_term_compute(right);
+            match left {
+                Term::Zero => Term::Zero,
+                Term::Succ(pred) => normalize_term_compute(&Term::Add(
+                    Box::new(right.clone()),
+                    Box::new(Term::Mul(pred, Box::new(right))),
+                )),
+                other => Term::Mul(Box::new(other), Box::new(right)),
+            }
+        }
         Term::Singleton(term) => Term::Singleton(Box::new(normalize_term_compute(term))),
         Term::Union(left, right) => Term::Union(
             Box::new(normalize_term_compute(left)),
@@ -2150,6 +2346,75 @@ fn normalize_term_compute(term: &Term) -> Term {
             Box::new(normalize_term_compute(left)),
             Box::new(normalize_term_compute(right)),
         ),
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => Term::SetBuilder {
+            var: var.clone(),
+            var_type: var_type.clone(),
+            body: body.clone(),
+        },
+    }
+}
+
+fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, ValidationError> {
+    match term {
+        Term::Var(name) => {
+            if let Some(def) = env.term_def(name) {
+                return normalize_term(env, ctx, &def.body);
+            }
+            Ok(term.clone())
+        }
+        Term::App(name, args) => Ok(Term::App(
+            name.clone(),
+            args.iter()
+                .map(|arg| normalize_term(env, ctx, arg))
+                .collect::<Result<_, _>>()?,
+        )),
+        Term::Zero | Term::EmptySet(_) => Ok(term.clone()),
+        Term::Succ(term) => Ok(Term::Succ(Box::new(normalize_term(env, ctx, term)?))),
+        Term::Add(left, right) => {
+            let computed = Term::Add(
+                Box::new(normalize_term(env, ctx, left)?),
+                Box::new(normalize_term(env, ctx, right)?),
+            );
+            Ok(normalize_term_compute(&computed))
+        }
+        Term::Mul(left, right) => {
+            let computed = Term::Mul(
+                Box::new(normalize_term(env, ctx, left)?),
+                Box::new(normalize_term(env, ctx, right)?),
+            );
+            Ok(normalize_term_compute(&computed))
+        }
+        Term::Singleton(term) => Ok(Term::Singleton(Box::new(normalize_term(env, ctx, term)?))),
+        Term::Union(left, right) => Ok(Term::Union(
+            Box::new(normalize_term(env, ctx, left)?),
+            Box::new(normalize_term(env, ctx, right)?),
+        )),
+        Term::Inter(left, right) => Ok(Term::Inter(
+            Box::new(normalize_term(env, ctx, left)?),
+            Box::new(normalize_term(env, ctx, right)?),
+        )),
+        Term::Diff(left, right) => Ok(Term::Diff(
+            Box::new(normalize_term(env, ctx, left)?),
+            Box::new(normalize_term(env, ctx, right)?),
+        )),
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            let (body, _) = unfold_formula_defs(env, &body_ctx, body, None)?;
+            Ok(Term::SetBuilder {
+                var: var.clone(),
+                var_type: var_type.clone(),
+                body: Box::new(body),
+            })
+        }
     }
 }
 
@@ -2223,6 +2488,10 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(left, subst)),
             Box::new(subst_term_schema(right, subst)),
         ),
+        Term::Mul(left, right) => Term::Mul(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
         Term::EmptySet(ty) => Term::EmptySet(subst_type_schema(ty, subst)),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term_schema(term, subst))),
         Term::Union(left, right) => Term::Union(
@@ -2237,6 +2506,18 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(left, subst)),
             Box::new(subst_term_schema(right, subst)),
         ),
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            let scoped = subst_without_term_arg(subst, var);
+            Term::SetBuilder {
+                var: var.clone(),
+                var_type: subst_type_schema(var_type, subst),
+                body: Box::new(subst_formula_schema(body, &scoped)),
+            }
+        }
     }
 }
 
@@ -2336,6 +2617,10 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(left, var, replacement)),
             Box::new(subst_term(right, var, replacement)),
         ),
+        Term::Mul(left, right) => Term::Mul(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term(term, var, replacement))),
         Term::Union(left, right) => Term::Union(
@@ -2350,6 +2635,24 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(left, var, replacement)),
             Box::new(subst_term(right, var, replacement)),
         ),
+        Term::SetBuilder {
+            var: bound,
+            var_type,
+            body,
+        } if bound == var => Term::SetBuilder {
+            var: bound.clone(),
+            var_type: var_type.clone(),
+            body: body.clone(),
+        },
+        Term::SetBuilder {
+            var: bound,
+            var_type,
+            body,
+        } => Term::SetBuilder {
+            var: bound.clone(),
+            var_type: var_type.clone(),
+            body: Box::new(subst_formula_term(body, var, replacement)),
+        },
     }
 }
 
@@ -2426,11 +2729,14 @@ fn term_has_free_var(term: &Term, name: &str) -> bool {
         Term::Zero | Term::EmptySet(_) => false,
         Term::Succ(term) | Term::Singleton(term) => term_has_free_var(term, name),
         Term::Add(left, right)
+        | Term::Mul(left, right)
         | Term::Union(left, right)
         | Term::Inter(left, right)
         | Term::Diff(left, right) => {
             term_has_free_var(left, name) || term_has_free_var(right, name)
         }
+        Term::SetBuilder { var, body, .. } if var == name => false,
+        Term::SetBuilder { body, .. } => formula_has_free_term(body, name),
     }
 }
 
@@ -2483,6 +2789,14 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
                 results.push(Term::Add(left.clone(), Box::new(replaced)));
             }
         }
+        Term::Mul(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::Mul(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::Mul(left.clone(), Box::new(replaced)));
+            }
+        }
         Term::Singleton(inner) => {
             for replaced in replace_term_once(inner, from, to) {
                 results.push(Term::Singleton(Box::new(replaced)));
@@ -2510,6 +2824,21 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
             }
             for replaced in replace_term_once(right, from, to) {
                 results.push(Term::Diff(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            if !term_has_free_var(from, var) && !term_has_free_var(to, var) {
+                for replaced_body in replace_formula_once(body, from, to) {
+                    results.push(Term::SetBuilder {
+                        var: var.clone(),
+                        var_type: var_type.clone(),
+                        body: Box::new(replaced_body),
+                    });
+                }
             }
         }
         Term::Var(_) | Term::App(_, _) | Term::Zero | Term::EmptySet(_) => {}
@@ -2624,8 +2953,8 @@ fn formula_rewrite_matches(source: &Formula, target: &Formula, from: &Term, to: 
         .any(|rewritten| &rewritten == target)
 }
 
-fn formula_rewrite_sources(target: &Formula, from: &Term, to: &Term) -> Vec<Formula> {
-    replace_formula_once(target, to, from)
+fn formula_rewrite_sources(target: &Formula, needle: &Term, replacement: &Term) -> Vec<Formula> {
+    replace_formula_once(target, needle, replacement)
 }
 
 fn rewrite_source_score(formula: &Formula) -> usize {
@@ -2657,9 +2986,11 @@ fn term_size(term: &Term) -> usize {
         Term::App(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
         Term::Succ(term) | Term::Singleton(term) => 1 + term_size(term),
         Term::Add(left, right)
+        | Term::Mul(left, right)
         | Term::Union(left, right)
         | Term::Inter(left, right)
         | Term::Diff(left, right) => 1 + term_size(left) + term_size(right),
+        Term::SetBuilder { body, .. } => 1 + formula_size(body),
     }
 }
 
@@ -2675,7 +3006,20 @@ struct TheoremDecl {
 struct DefDecl {
     name: Name,
     params: Vec<Param>,
-    body: Formula,
+    result: DefResult,
+    body: DefBody,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DefResult {
+    Formula,
+    Term(Type),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DefBody {
+    Formula(Formula),
+    Term(Term),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2710,16 +3054,43 @@ struct LocatedCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct RawTacticLine {
+    line: usize,
+    text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct ParseError {
     message: String,
+    line: Option<usize>,
 }
 
 impl ParseError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            line: None,
         }
     }
+
+    fn with_line(mut self, line: usize) -> Self {
+        if self.line.is_none() {
+            self.line = Some(line);
+        }
+        self
+    }
+}
+
+fn parse_diagnostic(path: Option<&Path>, err: ParseError, message: Option<String>) -> Diagnostic {
+    let has_context = message.is_some();
+    let mut diagnostic = Diagnostic::error(message.unwrap_or_else(|| err.message.clone()));
+    if let Some(line) = err.line {
+        diagnostic = diagnostic.with_location(path, line);
+    }
+    if has_context {
+        diagnostic = diagnostic.with_note(err.message);
+    }
+    diagnostic
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2743,11 +3114,21 @@ struct ExplicitArg {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ProofStep {
-    Arg(Term),
+    Arg(String),
+    Projection(Projection),
+}
+
+enum PendingProofStep {
+    ForallArg(Term),
+    ImpArg(Proof),
     Projection(Projection),
 }
 
 impl ProofExpr {
+    fn is_true_intro(&self) -> bool {
+        self.base == "True" && self.explicit_args.is_empty() && self.steps.is_empty()
+    }
+
     fn is_bare_theorem_ref(&self, env: &Env, ctx: &Context) -> bool {
         self.steps.is_empty()
             && ctx.lookup(&self.base).is_none()
@@ -2758,30 +3139,216 @@ impl ProofExpr {
         !self.explicit_args.is_empty()
     }
 
-    fn to_proof(&self, env: &Env, ctx: &Context) -> Proof {
-        let mut proof = if ctx.lookup(&self.base).is_some() {
-            Proof::Hyp(self.base.clone())
-        } else if env.theorem(&self.base).is_some() {
-            Proof::TheoremRef {
-                name: self.base.clone(),
-                subst: SchemaSubst::default(),
+    fn base_proof(&self, env: &Env, ctx: &Context) -> Result<Proof, TacticError> {
+        if self.is_true_intro() {
+            return Ok(Proof::TrueIntro);
+        }
+        if ctx.lookup(&self.base).is_some() {
+            if self.has_explicit_args() {
+                return Err(TacticError::new(
+                    "explicit theorem arguments can only be used with theorem references",
+                ));
             }
+            Ok(Proof::Hyp(self.base.clone()))
+        } else if let Some(theorem) = env.theorem(&self.base) {
+            let subst = if self.has_explicit_args() {
+                let subst = explicit_schema_subst(env, ctx, theorem, &self.explicit_args)?;
+                ensure_schema_subst_complete(&theorem.params, &subst)?;
+                subst
+            } else {
+                SchemaSubst::default()
+            };
+            Ok(Proof::TheoremRef {
+                name: self.base.clone(),
+                subst,
+            })
         } else {
-            Proof::Hyp(self.base.clone())
-        };
+            if self.has_explicit_args() {
+                return Err(TacticError::new(
+                    "explicit theorem arguments can only be used with theorem references",
+                ));
+            }
+            Ok(Proof::Hyp(self.base.clone()))
+        }
+    }
+
+    fn to_proof(
+        &self,
+        env: &Env,
+        ctx: &Context,
+        allowed_mode: LogicMode,
+    ) -> Result<Proof, TacticError> {
+        if ctx.lookup(&self.base).is_none() {
+            if let Some(theorem) = env.theorem(&self.base) {
+                if !self.steps.is_empty() {
+                    return self.theorem_application_to_proof(env, ctx, theorem, allowed_mode);
+                }
+            }
+        }
+
+        let mut proof = self.base_proof(env, ctx)?;
 
         for step in &self.steps {
             proof = match step {
-                ProofStep::Arg(arg) => Proof::ForallElim {
-                    proof_forall: Box::new(proof),
-                    arg: arg.clone(),
-                },
+                ProofStep::Arg(arg) => {
+                    let checked = infer_proof(env, ctx, &proof, allowed_mode).map_err(|err| {
+                        TacticError::new(format!(
+                            "cannot apply proof expression `{}`: {}",
+                            self.base, err.message
+                        ))
+                    })?;
+                    let formula = normalize_formula_defs(env, ctx, &checked.formula)
+                        .map_err(|err| TacticError::new(err.message))?;
+                    match formula {
+                        Formula::Forall { .. } => {
+                            let term = parse_term_str(arg)
+                                .map_err(|err| TacticError::new(err.message))?;
+                            Proof::ForallElim {
+                                proof_forall: Box::new(proof),
+                                arg: term,
+                            }
+                        }
+                        Formula::Implies(_, _) => {
+                            let arg_expr = parse_proof_expr(arg)
+                                .map_err(|err| TacticError::new(err.message))?;
+                            let proof_arg =
+                                proof_expr_for_inferred(env, ctx, &arg_expr, allowed_mode)?;
+                            Proof::ImpElim {
+                                proof_imp: Box::new(proof),
+                                proof_arg: Box::new(proof_arg),
+                            }
+                        }
+                        other => {
+                            return Err(TacticError::new(format!(
+                                "proof application expects a universal or implication proof, got `{other}`"
+                            )))
+                        }
+                    }
+                }
                 ProofStep::Projection(Projection::Left) => Proof::AndElimLeft(Box::new(proof)),
                 ProofStep::Projection(Projection::Right) => Proof::AndElimRight(Box::new(proof)),
             };
         }
 
-        proof
+        Ok(proof)
+    }
+
+    fn theorem_application_to_proof(
+        &self,
+        env: &Env,
+        ctx: &Context,
+        theorem: &Theorem,
+        allowed_mode: LogicMode,
+    ) -> Result<Proof, TacticError> {
+        let mut schema_subst = explicit_schema_subst(env, ctx, theorem, &self.explicit_args)?;
+        let mut term_subst = HashMap::new();
+        let mut cursor = theorem.statement.clone();
+        let mut pending = Vec::new();
+
+        for step in &self.steps {
+            match step {
+                ProofStep::Arg(arg) => {
+                    let cursor_inst = subst_formula_terms(
+                        &subst_formula_schema(&cursor, &schema_subst),
+                        &term_subst,
+                    );
+                    let cursor_norm = normalize_formula_defs(env, ctx, &cursor_inst)
+                        .map_err(|err| TacticError::new(err.message))?;
+                    match cursor_norm {
+                        Formula::Forall {
+                            var,
+                            var_type,
+                            body,
+                        } => {
+                            let term = parse_term_str(arg)
+                                .map_err(|err| TacticError::new(err.message))?;
+                            let actual =
+                                validate_term(env, ctx, &term).map_err(|err| TacticError::new(err.message))?;
+                            unify_type(&var_type, &actual, &theorem.params, &mut schema_subst)
+                                .map_err(|_| {
+                                    let expected = subst_type_schema(&var_type, &schema_subst);
+                                    TacticError::new(format!(
+                                        "term `{term}` has type `{actual}`, but expected `{expected}`"
+                                    ))
+                                })?;
+                            term_subst.insert(var, term.clone());
+                            pending.push(PendingProofStep::ForallArg(term));
+                            cursor = *body;
+                        }
+                        Formula::Implies(premise, conclusion) => {
+                            let arg_expr = parse_proof_expr(arg)
+                                .map_err(|err| TacticError::new(err.message))?;
+                            let proof_arg =
+                                proof_expr_for_inferred(env, ctx, &arg_expr, allowed_mode)?;
+                            let checked_arg =
+                                infer_proof(env, ctx, &proof_arg, allowed_mode).map_err(|err| {
+                                    TacticError::new(format!(
+                                        "cannot apply theorem `{}`: {}",
+                                        theorem.name, err.message
+                                    ))
+                                })?;
+                            let arg_formula = normalize_formula_defs(env, ctx, &checked_arg.formula)
+                                .map_err(|err| TacticError::new(err.message))?;
+                            let premise_pattern =
+                                subst_formula_terms(&premise, &term_subst);
+                            {
+                                let mut ignored_term_subst = HashMap::new();
+                                let mut unify = UnifyState {
+                                    env,
+                                    ctx,
+                                    term_metas: &[],
+                                    schema_params: &theorem.params,
+                                    term_subst: &mut ignored_term_subst,
+                                    schema_subst: &mut schema_subst,
+                                };
+                                unify_formula(&premise_pattern, &arg_formula, &mut unify)
+                                    .map_err(|_| {
+                                        TacticError::new(format!(
+                                            "proof argument has type `{}`, but expected `{}`",
+                                            checked_arg.formula, premise_pattern
+                                        ))
+                                    })?;
+                            }
+                            pending.push(PendingProofStep::ImpArg(proof_arg));
+                            cursor = *conclusion;
+                        }
+                        other => {
+                            return Err(TacticError::new(format!(
+                                "theorem application expects a universal or implication proof, got `{other}`"
+                            )))
+                        }
+                    }
+                }
+                ProofStep::Projection(projection) => {
+                    pending.push(PendingProofStep::Projection(projection.clone()));
+                }
+            }
+        }
+
+        ensure_schema_subst_complete(&theorem.params, &schema_subst)?;
+        let mut proof = Proof::TheoremRef {
+            name: theorem.name.clone(),
+            subst: schema_subst,
+        };
+        for step in pending {
+            proof = match step {
+                PendingProofStep::ForallArg(arg) => Proof::ForallElim {
+                    proof_forall: Box::new(proof),
+                    arg,
+                },
+                PendingProofStep::ImpArg(proof_arg) => Proof::ImpElim {
+                    proof_imp: Box::new(proof),
+                    proof_arg: Box::new(proof_arg),
+                },
+                PendingProofStep::Projection(Projection::Left) => {
+                    Proof::AndElimLeft(Box::new(proof))
+                }
+                PendingProofStep::Projection(Projection::Right) => {
+                    Proof::AndElimRight(Box::new(proof))
+                }
+            };
+        }
+        Ok(proof)
     }
 }
 
@@ -2789,6 +3356,7 @@ impl ProofExpr {
 enum Tactic {
     Intro(Name),
     Exact(ProofExpr),
+    Trivial,
     Assumption,
     Apply(ProofExpr),
     Split,
@@ -2809,7 +3377,10 @@ enum Tactic {
     },
     Exists(Term),
     Refl,
-    Rewrite(ProofExpr),
+    Rewrite {
+        expr: ProofExpr,
+        direction: RewriteDirection,
+    },
     Unfold(Name),
     Simp,
     Induction {
@@ -2826,6 +3397,7 @@ enum Tactic {
         formula: Formula,
     },
     ByContra(Name),
+    ShowGoal,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2974,6 +3546,19 @@ impl Tokens {
         if self.eat_sym("0") {
             return Ok(Term::Zero);
         }
+        if self.eat_sym("{") {
+            let var = self.expect_ident()?;
+            self.expect_sym(":")?;
+            let var_type = self.parse_type()?;
+            self.expect_sym("|")?;
+            let body = self.parse_formula()?;
+            self.expect_sym("}")?;
+            return Ok(Term::SetBuilder {
+                var,
+                var_type,
+                body: Box::new(body),
+            });
+        }
         let name = self.expect_ident()?;
         if self.eat_sym("(") {
             if name == "empty" {
@@ -2996,6 +3581,9 @@ impl Tokens {
                 ("add", [left, right]) => {
                     Ok(Term::Add(Box::new(left.clone()), Box::new(right.clone())))
                 }
+                ("mul", [left, right]) => {
+                    Ok(Term::Mul(Box::new(left.clone()), Box::new(right.clone())))
+                }
                 ("singleton", [arg]) => Ok(Term::Singleton(Box::new(arg.clone()))),
                 ("union", [left, right]) => {
                     Ok(Term::Union(Box::new(left.clone()), Box::new(right.clone())))
@@ -3009,7 +3597,7 @@ impl Tokens {
                 ("succ" | "singleton", _) => Err(ParseError::new(format!(
                     "`{name}` expects exactly one argument"
                 ))),
-                ("add" | "union" | "inter" | "diff", _) => Err(ParseError::new(format!(
+                ("add" | "mul" | "union" | "inter" | "diff", _) => Err(ParseError::new(format!(
                     "`{name}` expects exactly two arguments"
                 ))),
                 _ => Ok(Term::App(name, args)),
@@ -3059,20 +3647,26 @@ impl Tokens {
 
     fn parse_unary(&mut self) -> Result<Formula, ParseError> {
         if self.eat_ident("forall") {
-            let var = self.expect_ident()?;
+            let vars = self.parse_binder_names()?;
             self.expect_sym(":")?;
             let var_type = self.parse_type()?;
             self.expect_sym(",")?;
-            let body = self.parse_formula()?;
-            return Ok(Formula::forall(var, var_type, body));
+            let mut body = self.parse_formula()?;
+            for var in vars.into_iter().rev() {
+                body = Formula::forall(var, var_type.clone(), body);
+            }
+            return Ok(body);
         }
         if self.eat_ident("exists") {
-            let var = self.expect_ident()?;
+            let vars = self.parse_binder_names()?;
             self.expect_sym(":")?;
             let var_type = self.parse_type()?;
             self.expect_sym(",")?;
-            let body = self.parse_formula()?;
-            return Ok(Formula::exists(var, var_type, body));
+            let mut body = self.parse_formula()?;
+            for var in vars.into_iter().rev() {
+                body = Formula::exists(var, var_type.clone(), body);
+            }
+            return Ok(body);
         }
         if self.eat_ident("not") {
             let formula = self.parse_unary()?;
@@ -3108,12 +3702,27 @@ impl Tokens {
             Term::Zero
             | Term::Succ(_)
             | Term::Add(_, _)
+            | Term::Mul(_, _)
             | Term::EmptySet(_)
             | Term::Singleton(_)
             | Term::Union(_, _)
             | Term::Inter(_, _)
-            | Term::Diff(_, _) => Err(ParseError::new(format!("term `{term}` is not a formula"))),
+            | Term::Diff(_, _)
+            | Term::SetBuilder { .. } => {
+                Err(ParseError::new(format!("term `{term}` is not a formula")))
+            }
         }
+    }
+
+    fn parse_binder_names(&mut self) -> Result<Vec<Name>, ParseError> {
+        let mut vars = Vec::new();
+        loop {
+            vars.push(self.expect_ident()?);
+            if matches!(self.peek(), TokenKind::Sym(sym) if sym == ":") {
+                break;
+            }
+        }
+        Ok(vars)
     }
 }
 
@@ -3166,6 +3775,9 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
                 ',' => Some(","),
                 '.' => Some("."),
                 '=' => Some("="),
+                '{' => Some("{"),
+                '}' => Some("}"),
+                '|' => Some("|"),
                 _ => None,
             }
         };
@@ -3201,7 +3813,9 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         if let Some(rest) = trimmed.strip_prefix("import ") {
             commands.push(located_command(
                 command_line,
-                Command::Import(parse_import_path(rest)?),
+                Command::Import(
+                    parse_import_path(rest).map_err(|err| err.with_line(command_line))?,
+                ),
             ));
             i += 1;
             continue;
@@ -3211,7 +3825,11 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             let mode = match rest.trim() {
                 "constructive" => LogicMode::Constructive,
                 "classical" => LogicMode::Classical,
-                other => return Err(ParseError::new(format!("unknown mode `{other}`"))),
+                other => {
+                    return Err(
+                        ParseError::new(format!("unknown mode `{other}`")).with_line(command_line)
+                    )
+                }
             };
             commands.push(located_command(command_line, Command::Mode(mode)));
             i += 1;
@@ -3221,7 +3839,9 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         if let Some(rest) = trimmed.strip_prefix("sort ") {
             let name = rest.trim();
             if name.is_empty() {
-                return Err(ParseError::new("sort declaration needs a name"));
+                return Err(
+                    ParseError::new("sort declaration needs a name").with_line(command_line)
+                );
             }
             commands.push(located_command(
                 command_line,
@@ -3233,11 +3853,15 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
 
         if let Some(rest) = trimmed.strip_prefix("const ") {
             let Some((name, ty)) = rest.split_once(':') else {
-                return Err(ParseError::new("const declaration expects `name : Type`"));
+                return Err(ParseError::new("const declaration expects `name : Type`")
+                    .with_line(command_line));
             };
             commands.push(located_command(
                 command_line,
-                Command::Const(name.trim().to_string(), parse_type_str(ty.trim())?),
+                Command::Const(
+                    name.trim().to_string(),
+                    parse_type_str(ty.trim()).map_err(|err| err.with_line(command_line))?,
+                ),
             ));
             i += 1;
             continue;
@@ -3245,9 +3869,11 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
 
         if let Some(rest) = trimmed.strip_prefix("func ") {
             let Some((name, ty)) = rest.split_once(':') else {
-                return Err(ParseError::new("func declaration expects `name : A -> B`"));
+                return Err(ParseError::new("func declaration expects `name : A -> B`")
+                    .with_line(command_line));
             };
-            let (args, result) = parse_function_type_str(ty.trim())?;
+            let (args, result) =
+                parse_function_type_str(ty.trim()).map_err(|err| err.with_line(command_line))?;
             commands.push(located_command(
                 command_line,
                 Command::Func(name.trim().to_string(), args, result),
@@ -3257,7 +3883,8 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         }
 
         if let Some(rest) = trimmed.strip_prefix("pred ") {
-            let (name, args) = parse_pred_decl(rest.trim())?;
+            let (name, args) =
+                parse_pred_decl(rest.trim()).map_err(|err| err.with_line(command_line))?;
             commands.push(located_command(command_line, Command::Pred(name, args)));
             i += 1;
             continue;
@@ -3268,22 +3895,32 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             while !header.contains(":=") {
                 i += 1;
                 if i >= lines.len() {
-                    return Err(ParseError::new("unterminated definition"));
+                    return Err(ParseError::new("unterminated definition").with_line(command_line));
                 }
                 header.push(' ');
                 header.push_str(strip_comment(lines[i]).trim());
             }
 
             let Some((header, body)) = header.split_once(":=") else {
-                return Err(ParseError::new("expected `:=` in definition"));
+                return Err(ParseError::new("expected `:=` in definition").with_line(command_line));
             };
-            let (name, params) = parse_def_header(header)?;
+            let (name, params, result) =
+                parse_def_header(header).map_err(|err| err.with_line(command_line))?;
+            let body = match &result {
+                DefResult::Formula => DefBody::Formula(
+                    parse_formula_str(body.trim()).map_err(|err| err.with_line(command_line))?,
+                ),
+                DefResult::Term(_) => DefBody::Term(
+                    parse_term_str(body.trim()).map_err(|err| err.with_line(command_line))?,
+                ),
+            };
             commands.push(located_command(
                 command_line,
                 Command::Def(DefDecl {
                     name,
                     params,
-                    body: parse_formula_str(body.trim())?,
+                    result,
+                    body,
                 }),
             ));
             i += 1;
@@ -3302,7 +3939,8 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 header.push_str(next);
                 i += 1;
             }
-            let (name, params, statement) = parse_axiom_header(&header)?;
+            let (name, params, statement) =
+                parse_axiom_header(&header).map_err(|err| err.with_line(command_line))?;
             commands.push(located_command(
                 command_line,
                 Command::Axiom(AxiomDecl {
@@ -3319,16 +3957,20 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             while !header.contains(":= by") {
                 i += 1;
                 if i >= lines.len() {
-                    return Err(ParseError::new("unterminated theorem header"));
+                    return Err(
+                        ParseError::new("unterminated theorem header").with_line(command_line)
+                    );
                 }
                 header.push(' ');
                 header.push_str(strip_comment(lines[i]).trim());
             }
 
             let Some((header, _)) = header.split_once(":= by") else {
-                return Err(ParseError::new("expected `:= by` in theorem declaration"));
+                return Err(ParseError::new("expected `:= by` in theorem declaration")
+                    .with_line(command_line));
             };
-            let (name, params, statement) = parse_theorem_header(header)?;
+            let (name, params, statement) =
+                parse_theorem_header(header).map_err(|err| err.with_line(command_line))?;
 
             i += 1;
             let mut tactic_lines = Vec::new();
@@ -3337,7 +3979,10 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 if is_command_start(next) {
                     break;
                 }
-                tactic_lines.push(strip_comment(lines[i]).to_string());
+                tactic_lines.push(RawTacticLine {
+                    line: i + 1,
+                    text: strip_comment(lines[i]).to_string(),
+                });
                 i += 1;
             }
 
@@ -3347,13 +3992,16 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                     name,
                     params,
                     statement,
-                    tactics: parse_tactic_lines(&tactic_lines)?,
+                    tactics: parse_tactic_lines(&tactic_lines)
+                        .map_err(|err| err.with_line(command_line))?,
                 }),
             ));
             continue;
         }
 
-        return Err(ParseError::new(format!("unsupported command `{trimmed}`")));
+        return Err(
+            ParseError::new(format!("unsupported command `{trimmed}`")).with_line(command_line)
+        );
     }
 
     Ok(File { commands })
@@ -3428,15 +4076,19 @@ fn parse_axiom_header(header: &str) -> Result<(Name, Vec<Param>, Formula), Parse
     Ok((name, params, statement))
 }
 
-fn parse_def_header(header: &str) -> Result<(Name, Vec<Param>), ParseError> {
+fn parse_def_header(header: &str) -> Result<(Name, Vec<Param>, DefResult), ParseError> {
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("def")?;
     let name = tokens.expect_ident()?;
     let params = parse_decl_params(&mut tokens)?;
     tokens.expect_sym(":")?;
-    tokens.expect_keyword("Prop")?;
+    let result = if tokens.eat_ident("Prop") {
+        DefResult::Formula
+    } else {
+        DefResult::Term(tokens.parse_type()?)
+    };
     tokens.expect_eof()?;
-    Ok((name, params))
+    Ok((name, params, result))
 }
 
 fn parse_decl_params(tokens: &mut Tokens) -> Result<Vec<Param>, ParseError> {
@@ -3510,18 +4162,19 @@ fn parse_pred_decl(input: &str) -> Result<(Name, Vec<Type>), ParseError> {
     Ok((name, args))
 }
 
-fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
+fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<Tactic>, ParseError> {
     let mut tactics = Vec::new();
     let mut i = 0;
 
     while i < lines.len() {
-        let trimmed = lines[i].trim();
+        let line_no = lines[i].line;
+        let trimmed = lines[i].text.trim();
         if trimmed.is_empty() {
             i += 1;
             continue;
         }
         if trimmed.starts_with('|') {
-            return Err(ParseError::new("case arm appeared outside `cases`"));
+            return Err(ParseError::new("case arm appeared outside `cases`").with_line(line_no));
         }
 
         if let Some(expr) = trimmed
@@ -3531,19 +4184,21 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             i += 1;
             i = skip_empty_tactic_lines(lines, i);
             if i >= lines.len() {
-                return Err(ParseError::new("expected case arm"));
+                return Err(ParseError::new("expected case arm").with_line(line_no));
             }
 
-            if lines[i].trim().starts_with("| intro ") {
-                let arm_indent = line_indent(&lines[i]);
-                let (witness_name, hyp_name) = parse_exists_case_arm(lines[i].trim())?;
+            if lines[i].text.trim().starts_with("| intro ") {
+                let arm_line = lines[i].line;
+                let arm_indent = line_indent(&lines[i].text);
+                let (witness_name, hyp_name) = parse_exists_case_arm(lines[i].text.trim())
+                    .map_err(|err| err.with_line(arm_line))?;
                 i += 1;
                 let body_end = case_body_end(lines, i, arm_indent);
                 let body_tactics = parse_tactic_lines(&lines[i..body_end])?;
                 i = body_end;
 
                 tactics.push(Tactic::CasesExists {
-                    expr: parse_proof_expr(expr.trim())?,
+                    expr: parse_proof_expr(expr.trim()).map_err(|err| err.with_line(line_no))?,
                     witness_name,
                     hyp_name,
                     body_tactics,
@@ -3551,19 +4206,23 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
                 continue;
             }
 
-            let left_indent = line_indent(&lines[i]);
-            let left_name = parse_case_arm(lines[i].trim(), "left")?;
+            let left_line = lines[i].line;
+            let left_indent = line_indent(&lines[i].text);
+            let left_name = parse_case_arm(lines[i].text.trim(), "left")
+                .map_err(|err| err.with_line(left_line))?;
             i += 1;
             let left_start = i;
             let left_end = case_body_end(lines, i, left_indent);
             i = skip_empty_tactic_lines(lines, left_end);
             if i >= lines.len() {
-                return Err(ParseError::new("expected right case arm"));
+                return Err(ParseError::new("expected right case arm").with_line(left_line));
             }
             let left_tactics = parse_tactic_lines(&lines[left_start..left_end])?;
 
-            let right_indent = line_indent(&lines[i]);
-            let right_name = parse_case_arm(lines[i].trim(), "right")?;
+            let right_line = lines[i].line;
+            let right_indent = line_indent(&lines[i].text);
+            let right_name = parse_case_arm(lines[i].text.trim(), "right")
+                .map_err(|err| err.with_line(right_line))?;
             i += 1;
             let right_start = i;
             let right_end = case_body_end(lines, i, right_indent);
@@ -3571,7 +4230,7 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             i = right_end;
 
             tactics.push(Tactic::CasesOr {
-                expr: parse_proof_expr(expr.trim())?,
+                expr: parse_proof_expr(expr.trim()).map_err(|err| err.with_line(line_no))?,
                 left_name,
                 left_tactics,
                 right_name,
@@ -3587,20 +4246,23 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             i += 1;
             i = skip_empty_tactic_lines(lines, i);
             if i >= lines.len() {
-                return Err(ParseError::new("expected zero case arm"));
+                return Err(ParseError::new("expected zero case arm").with_line(line_no));
             }
-            let zero_indent = line_indent(&lines[i]);
-            parse_zero_case_arm(lines[i].trim())?;
+            let zero_line = lines[i].line;
+            let zero_indent = line_indent(&lines[i].text);
+            parse_zero_case_arm(lines[i].text.trim()).map_err(|err| err.with_line(zero_line))?;
             i += 1;
             let zero_start = i;
             let zero_end = case_body_end(lines, i, zero_indent);
             i = skip_empty_tactic_lines(lines, zero_end);
             if i >= lines.len() {
-                return Err(ParseError::new("expected successor case arm"));
+                return Err(ParseError::new("expected successor case arm").with_line(zero_line));
             }
             let zero_tactics = parse_tactic_lines(&lines[zero_start..zero_end])?;
-            let step_indent = line_indent(&lines[i]);
-            let (step_var, ih_name) = parse_succ_case_arm(lines[i].trim())?;
+            let step_line = lines[i].line;
+            let step_indent = line_indent(&lines[i].text);
+            let (step_var, ih_name) = parse_succ_case_arm(lines[i].text.trim())
+                .map_err(|err| err.with_line(step_line))?;
             i += 1;
             let step_start = i;
             let step_end = case_body_end(lines, i, step_indent);
@@ -3608,7 +4270,8 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             i = step_end;
 
             tactics.push(Tactic::Induction {
-                var_name: expect_single_name(var_name, "induction")?,
+                var_name: expect_single_name(var_name, "induction")
+                    .map_err(|err| err.with_line(line_no))?,
                 zero_tactics,
                 step_var,
                 ih_name,
@@ -3617,24 +4280,24 @@ fn parse_tactic_lines(lines: &[String]) -> Result<Vec<Tactic>, ParseError> {
             continue;
         }
 
-        tactics.push(parse_tactic_line(trimmed)?);
+        tactics.push(parse_tactic_line(trimmed).map_err(|err| err.with_line(line_no))?);
         i += 1;
     }
 
     Ok(tactics)
 }
 
-fn skip_empty_tactic_lines(lines: &[String], mut i: usize) -> usize {
-    while i < lines.len() && lines[i].trim().is_empty() {
+fn skip_empty_tactic_lines(lines: &[RawTacticLine], mut i: usize) -> usize {
+    while i < lines.len() && lines[i].text.trim().is_empty() {
         i += 1;
     }
     i
 }
 
-fn case_body_end(lines: &[String], mut i: usize, arm_indent: usize) -> usize {
+fn case_body_end(lines: &[RawTacticLine], mut i: usize, arm_indent: usize) -> usize {
     while i < lines.len() {
-        let trimmed = lines[i].trim();
-        if !trimmed.is_empty() && line_indent(&lines[i]) <= arm_indent {
+        let trimmed = lines[i].text.trim();
+        if !trimmed.is_empty() && line_indent(&lines[i].text) <= arm_indent {
             break;
         }
         i += 1;
@@ -3708,6 +4371,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if let Some(rest) = line.strip_prefix("exact ") {
         return Ok(Tactic::Exact(parse_proof_expr(rest.trim())?));
     }
+    if line == "trivial" {
+        return Ok(Tactic::Trivial);
+    }
     if line == "assumption" {
         return Ok(Tactic::Assumption);
     }
@@ -3721,7 +4387,18 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         return Ok(Tactic::Refl);
     }
     if let Some(rest) = line.strip_prefix("rewrite ") {
-        return Ok(Tactic::Rewrite(parse_proof_expr(rest.trim())?));
+        let rest = rest.trim();
+        let (direction, expr) = if let Some(expr) = rest.strip_prefix("->") {
+            (RewriteDirection::Forward, expr.trim())
+        } else if let Some(expr) = rest.strip_prefix("<-") {
+            (RewriteDirection::Backward, expr.trim())
+        } else {
+            (RewriteDirection::Backward, rest)
+        };
+        return Ok(Tactic::Rewrite {
+            expr: parse_proof_expr(expr)?,
+            direction,
+        });
     }
     if let Some(rest) = line.strip_prefix("unfold ") {
         return Ok(Tactic::Unfold(expect_single_name(rest, "unfold")?));
@@ -3755,6 +4432,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     }
     if let Some(rest) = line.strip_prefix("by_contra ") {
         return Ok(Tactic::ByContra(expect_single_name(rest, "by_contra")?));
+    }
+    if line == "show_goal" || line == "print_state" {
+        return Ok(Tactic::ShowGoal);
     }
 
     Err(ParseError::new(format!("unknown tactic `{line}`")))
@@ -3791,7 +4471,7 @@ fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
     let (base, explicit_args, remaining) = parse_proof_expr_head(head)?;
     let mut steps = Vec::new();
     for word in remaining.split_whitespace() {
-        steps.push(ProofStep::Arg(parse_term_str(word)?));
+        steps.push(ProofStep::Arg(word.to_string()));
     }
 
     for part in parts {
@@ -3942,13 +4622,22 @@ fn append_projection_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), Pa
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TacticError {
     message: String,
+    target: Option<Formula>,
 }
 
 impl TacticError {
     fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            target: None,
         }
+    }
+
+    fn with_target(mut self, target: Formula) -> Self {
+        if self.target.is_none() {
+            self.target = Some(target);
+        }
+        self
     }
 }
 
@@ -4211,10 +4900,12 @@ fn prove(
 
         let goal = goals.remove(0);
         let goal_id = goal.id;
+        let goal_target = goal.target.clone();
         let StepResult {
             replacement,
             new_goals,
-        } = run_tactic(env, goal, tactic, allowed_mode, &mut next_goal_id)?;
+        } = run_tactic(env, goal, tactic, allowed_mode, &mut next_goal_id)
+            .map_err(|err| err.with_target(goal_target))?;
         if !root.replace_hole(goal_id, &replacement) {
             return Err(TacticError::new("internal error: missing proof hole"));
         }
@@ -4224,7 +4915,8 @@ fn prove(
     }
 
     if let Some(goal) = goals.first() {
-        return Err(TacticError::new(format!("unsolved goal `{}`", goal.target)));
+        return Err(TacticError::new(format!("unsolved goal `{}`", goal.target))
+            .with_target(goal.target.clone()));
     }
 
     root.complete()
@@ -4245,6 +4937,7 @@ fn run_tactic(
     match tactic {
         Tactic::Intro(name) => match goal.target {
             Formula::Implies(premise, conclusion) => {
+                ensure_intro_name_unused(&goal.context, name)?;
                 let mut context = goal.context;
                 context.add_proof(name.clone(), *premise.clone());
                 let body_id = fresh_goal(next_goal_id);
@@ -4266,6 +4959,7 @@ fn run_tactic(
                 var_type,
                 body,
             } => {
+                ensure_intro_name_unused(&goal.context, name)?;
                 let mut context = goal.context;
                 context.add_term(name.clone(), var_type.clone());
                 let body_id = fresh_goal(next_goal_id);
@@ -4288,7 +4982,8 @@ fn run_tactic(
             )),
         },
         Tactic::Exact(expr) => {
-            let proof = proof_expr_for_expected(env, &goal.context, expr, &goal.target)?;
+            let proof =
+                proof_expr_for_expected(env, &goal.context, expr, &goal.target, allowed_mode)?;
             check_proof(env, &goal.context, &proof, &goal.target, allowed_mode).map_err(|err| {
                 TacticError::new(format!(
                     "exact expression does not solve the goal: {}",
@@ -4297,6 +4992,20 @@ fn run_tactic(
             })?;
             Ok(StepResult {
                 replacement: PartialProof::Done(proof),
+                new_goals: Vec::new(),
+            })
+        }
+        Tactic::Trivial => {
+            if !formulas_def_eq(env, &goal.context, &goal.target, &Formula::True)
+                .map_err(|err| TacticError::new(err.message))?
+            {
+                return Err(TacticError::new(format!(
+                    "trivial expects a `True` goal, but target is `{}`",
+                    goal.target
+                )));
+            }
+            Ok(StepResult {
+                replacement: PartialProof::Done(Proof::TrueIntro),
                 new_goals: Vec::new(),
             })
         }
@@ -4415,7 +5124,7 @@ fn run_tactic(
             right_name,
             right_tactics,
         } => {
-            let proof_or = expr.to_proof(env, &goal.context);
+            let proof_or = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
             let checked = infer_proof(env, &goal.context, &proof_or, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot case split: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
@@ -4462,7 +5171,7 @@ fn run_tactic(
             hyp_name,
             body_tactics,
         } => {
-            let proof_exists = expr.to_proof(env, &goal.context);
+            let proof_exists = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
             let checked = infer_proof(env, &goal.context, &proof_exists, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot case split: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
@@ -4538,8 +5247,8 @@ fn run_tactic(
                 new_goals: Vec::new(),
             })
         }
-        Tactic::Rewrite(expr) => {
-            let eq_proof = proof_expr_for_inferred(env, &goal.context, expr)?;
+        Tactic::Rewrite { expr, direction } => {
+            let eq_proof = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
             let checked = infer_proof(env, &goal.context, &eq_proof, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot rewrite: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
@@ -4547,12 +5256,16 @@ fn run_tactic(
             let Formula::Eq(left, right) = formula else {
                 return Err(TacticError::new("rewrite expects an equality proof"));
             };
-            let Some(source_target) = formula_rewrite_sources(&goal.target, &left, &right)
+            let (needle, replacement) = match direction {
+                RewriteDirection::Backward => (&right, &left),
+                RewriteDirection::Forward => (&left, &right),
+            };
+            let Some(source_target) = formula_rewrite_sources(&goal.target, needle, replacement)
                 .into_iter()
                 .min_by_key(rewrite_source_score)
             else {
                 return Err(TacticError::new(format!(
-                    "rewrite could not find `{right}` in goal `{}`",
+                    "rewrite could not find `{needle}` in goal `{}`",
                     goal.target
                 )));
             };
@@ -4766,14 +5479,37 @@ fn run_tactic(
                 }],
             })
         }
+        Tactic::ShowGoal => Err(TacticError::new(format!(
+            "current goal is `{}`",
+            goal.target
+        ))),
     }
+}
+
+fn ensure_intro_name_unused(ctx: &Context, name: &str) -> Result<(), TacticError> {
+    if ctx.lookup(name).is_some() {
+        return Err(TacticError::new(format!(
+            "`intro` would shadow existing hypothesis `{name}`"
+        )));
+    }
+    if ctx.lookup_term(name).is_some() {
+        return Err(TacticError::new(format!(
+            "`intro` would shadow existing variable `{name}`"
+        )));
+    }
+    Ok(())
 }
 
 fn proof_expr_for_inferred(
     env: &Env,
     ctx: &Context,
     expr: &ProofExpr,
+    allowed_mode: LogicMode,
 ) -> Result<Proof, TacticError> {
+    if expr.is_true_intro() {
+        return Ok(Proof::TrueIntro);
+    }
+
     if expr.is_bare_theorem_ref(env, ctx) {
         let theorem = env
             .theorem(&expr.base)
@@ -4786,13 +5522,7 @@ fn proof_expr_for_inferred(
         });
     }
 
-    if expr.has_explicit_args() {
-        return Err(TacticError::new(
-            "explicit theorem arguments can only be used with theorem references",
-        ));
-    }
-
-    Ok(expr.to_proof(env, ctx))
+    expr.to_proof(env, ctx, allowed_mode)
 }
 
 fn explicit_schema_subst(
@@ -4877,7 +5607,12 @@ fn proof_expr_for_expected(
     ctx: &Context,
     expr: &ProofExpr,
     expected: &Formula,
+    allowed_mode: LogicMode,
 ) -> Result<Proof, TacticError> {
+    if expr.is_true_intro() {
+        return Ok(Proof::TrueIntro);
+    }
+
     if expr.is_bare_theorem_ref(env, ctx) {
         let theorem = env
             .theorem(&expr.base)
@@ -4897,13 +5632,7 @@ fn proof_expr_for_expected(
         });
     }
 
-    if expr.has_explicit_args() {
-        return Err(TacticError::new(
-            "explicit theorem arguments can only be used with theorem references",
-        ));
-    }
-
-    Ok(expr.to_proof(env, ctx))
+    expr.to_proof(env, ctx, allowed_mode)
 }
 
 fn proof_expr_for_apply(
@@ -4936,13 +5665,7 @@ fn proof_expr_for_apply(
         ));
     }
 
-    if expr.has_explicit_args() {
-        return Err(TacticError::new(
-            "explicit theorem arguments can only be used with theorem references",
-        ));
-    }
-
-    let proof = expr.to_proof(env, ctx);
+    let proof = expr.to_proof(env, ctx, allowed_mode)?;
     let checked = infer_proof(env, ctx, &proof, allowed_mode)
         .map_err(|err| TacticError::new(format!("cannot apply expression: {}", err.message)))?;
     let plan = apply_plan_for_goal(
@@ -4976,8 +5699,16 @@ fn apply_plan_for_goal(
     schema_params: &[Param],
     initial_schema_subst: SchemaSubst,
 ) -> Result<ApplyPlan, TacticError> {
-    let normalized_formula =
-        normalize_formula_defs(env, ctx, formula).map_err(|err| TacticError::new(err.message))?;
+    let schema_ctx;
+    let formula_ctx = if schema_params.is_empty() {
+        ctx
+    } else {
+        schema_ctx = build_theorem_context(env, schema_params)
+            .map_err(|err| TacticError::new(err.message))?;
+        &schema_ctx
+    };
+    let normalized_formula = normalize_formula_defs(env, formula_ctx, formula)
+        .map_err(|err| TacticError::new(err.message))?;
     let normalized_target =
         normalize_formula_defs(env, ctx, target).map_err(|err| TacticError::new(err.message))?;
 
@@ -5169,6 +5900,10 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
             Box::new(subst_term_terms(left, subst)),
             Box::new(subst_term_terms(right, subst)),
         ),
+        Term::Mul(left, right) => Term::Mul(
+            Box::new(subst_term_terms(left, subst)),
+            Box::new(subst_term_terms(right, subst)),
+        ),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term_terms(term, subst))),
         Term::Union(left, right) => Term::Union(
@@ -5183,6 +5918,19 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
             Box::new(subst_term_terms(left, subst)),
             Box::new(subst_term_terms(right, subst)),
         ),
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut scoped = subst.clone();
+            scoped.remove(var);
+            Term::SetBuilder {
+                var: var.clone(),
+                var_type: var_type.clone(),
+                body: Box::new(subst_formula_terms(body, &scoped)),
+            }
+        }
     }
 }
 
@@ -5358,6 +6106,13 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             unify_term(p_left, t_left, unify)?;
             unify_term(p_right, t_right, unify)
         }
+        Term::Mul(p_left, p_right) => {
+            let Term::Mul(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
         Term::EmptySet(pattern_ty) => {
             let Term::EmptySet(target_ty) = target else {
                 return Err(());
@@ -5395,6 +6150,23 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             };
             unify_term(p_left, t_left, unify)?;
             unify_term(p_right, t_right, unify)
+        }
+        Term::SetBuilder {
+            var: p_var,
+            var_type: p_ty,
+            body: p_body,
+        } => {
+            let Term::SetBuilder {
+                var: t_var,
+                var_type: t_ty,
+                body: t_body,
+            } = target
+            else {
+                return Err(());
+            };
+            let renamed = subst_formula_term(t_body, t_var, &Term::Var(p_var.clone()));
+            unify_type(p_ty, t_ty, unify.schema_params, unify.schema_subst)?;
+            unify_formula(p_body, &renamed, unify)
         }
     }
 }
@@ -5609,6 +6381,90 @@ theorem bad (P : Prop) : P := by
         assert_eq!(
             result.diagnostics[0].location.as_ref().map(|loc| loc.line),
             Some(4)
+        );
+    }
+
+    #[test]
+    fn parse_error_reports_tactic_line() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem bad (P : Prop) : P -> P := by
+  intro h
+  exatc h
+"#,
+        );
+        assert_eq!(
+            result.diagnostics[0].location.as_ref().map(|loc| loc.line),
+            Some(6)
+        );
+    }
+
+    #[test]
+    fn failed_tactic_reports_current_goal_as_target_note() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem bad (P Q : Prop) : P -> P /\ Q := by
+  intro hp
+  split
+  exact hp
+  exact hp
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert!(
+            result.diagnostics[0]
+                .notes
+                .iter()
+                .any(|note| note == "target: Q"),
+            "diagnostic notes were {:#?}",
+            result.diagnostics[0].notes
+        );
+    }
+
+    #[test]
+    fn show_goal_reports_current_goal() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad (P : Prop) : P := by
+  show_goal
+"#,
+            "current goal is `P`",
+        );
+    }
+
+    #[test]
+    fn intro_rejects_shadowing() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad (P Q : Prop) : P -> Q -> P := by
+  intro h
+  intro h
+  exact h
+"#,
+            "`intro` would shadow existing hypothesis `h`",
+        );
+    }
+
+    #[test]
+    fn true_goal_can_be_solved_directly() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem exact_true : True := by
+  exact True
+
+theorem trivial_true : True := by
+  trivial
+"#,
         );
     }
 
@@ -6038,6 +6894,49 @@ theorem forall_apply
     }
 
     #[test]
+    fn multi_binder_forall_parses_as_nested_foralls() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+pred R(Person, Person)
+
+theorem multi_forall
+  : (forall x y : Person, R(x, y)) -> forall x y : Person, R(x, y) := by
+  intro h
+  intro x
+  intro y
+  exact h x y
+
+theorem multi_exists
+  : (exists x y : Person, R(x, y)) -> exists x y : Person, R(x, y) := by
+  intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn exact_can_apply_implication_proofs_inline() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem imp_exact (P Q : Prop) : (P -> Q) -> P -> Q := by
+  intro h
+  intro hp
+  exact h hp
+
+theorem imp_projection (P Q R : Prop) : (P -> Q /\ R) -> P -> Q := by
+  intro h
+  intro hp
+  exact (h hp).left
+"#,
+        );
+    }
+
+    #[test]
     fn exact_instantiates_proposition_schema_theorem() {
         check_ok(
             r#"
@@ -6259,6 +7158,50 @@ theorem rewrite_equality
     }
 
     #[test]
+    fn rewrite_accepts_compound_symmetry_expression() {
+        let import = import_line("std/eq.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+theorem rewrite_with_symm
+  : alice = mother(alice) -> Happy(mother(alice)) -> Happy(alice) := by
+  intro h
+  intro hm
+  rewrite eq_symm h
+  exact hm
+"#
+        ));
+    }
+
+    #[test]
+    fn rewrite_forward_rewrites_left_to_right() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+theorem rewrite_forward
+  : alice = mother(alice) -> Happy(mother(alice)) -> Happy(alice) := by
+  intro h
+  intro hm
+  rewrite -> h
+  exact hm
+"#,
+        );
+    }
+
+    #[test]
     fn rewrite_can_descend_under_quantifier_without_capture() {
         check_ok(
             r#"
@@ -6355,6 +7298,55 @@ theorem def_elim : HappyMother(alice) -> Happy(mother(alice)) := by
 
 theorem def_intro : Happy(mother(alice)) -> HappyMother(alice) := by
   intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn formula_definition_accepts_prop_and_predicate_parameters() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+pred Likes(Person, Person)
+
+def ConjSelf (P : Prop) : Prop := P /\ P
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+
+theorem conj_self_left (P : Prop) : ConjSelf(P) -> P := by
+  intro h
+  exact h.left
+
+theorem reflexive_likes
+  : (forall x : Person, Likes(x, x)) -> Reflexive(Likes) := by
+  intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn set_builder_terms_simplify_membership() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+pred Tall(Person)
+
+def TallSet : Set Person := { x : Person | Tall(x) }
+
+theorem tall_member_named : Tall(alice) -> alice in TallSet := by
+  intro h
+  simp
+  exact h
+
+theorem tall_member_inline : Tall(alice) -> alice in { x : Person | Tall(x) } := by
+  intro h
+  simp
   exact h
 "#,
         );
@@ -6500,6 +7492,43 @@ theorem add_succ_left (n m : Nat) : add(succ(n), m) = succ(add(n, m)) := by
   refl
 
 theorem add_one_zero : add(succ(0), 0) = succ(0) := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn simp_computes_inside_predicate_arguments() {
+        check_ok(
+            r#"
+mode constructive
+
+pred Even(Nat)
+
+theorem even_zero_to_simplified_arg : Even(0) -> Even(add(0, 0)) := by
+  intro h
+  simp
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn nat_multiplication_computes_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem mul_zero_left (n : Nat) : mul(0, n) = 0 := by
+  simp
+  refl
+
+theorem mul_succ_left (n m : Nat) : mul(succ(n), m) = add(m, mul(n, m)) := by
+  simp
+  refl
+
+theorem mul_two_one : mul(succ(succ(0)), succ(0)) = succ(succ(0)) := by
   simp
   refl
 "#,
@@ -6670,6 +7699,51 @@ theorem inter_comm
   split
   exact hx.right
   exact hx.left
+"#,
+        );
+    }
+
+    #[test]
+    fn explicit_schema_args_work_when_names_overlap() {
+        let import = import_line("std/set.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem subsets_carry
+  (T : Type)
+  (A B S : Set T)
+  : A subset B -> S subset A -> S subset B := by
+  intro hAB
+  intro hSA
+  apply subset_trans {{T := T; A := S; B := A; C := B}}
+  exact hSA
+  exact hAB
+"#
+        ));
+    }
+
+    #[test]
+    fn explicit_schema_args_can_combine_with_forall_args() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+
+axiom all_subset_trans
+  (T : Type)
+  : forall A B C : Set T, A subset B -> B subset C -> A subset C
+
+theorem use_all_subset_trans
+  (X Y Z : Set Person)
+  : X subset Y -> Y subset Z -> X subset Z := by
+  intro hXY
+  intro hYZ
+  apply all_subset_trans {T := Person} X Y Z
+  exact hXY
+  exact hYZ
 "#,
         );
     }

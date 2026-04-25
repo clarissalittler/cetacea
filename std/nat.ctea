@@ -57,3 +57,20 @@ theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
       rewrite add_succ_right_rev {n := m; m := n0}
       rewrite ih
       refl
+
+theorem mul_zero_left (n : Nat) : mul(0, n) = 0 := by
+  simp
+  refl
+
+theorem mul_succ_left (n m : Nat) : mul(succ(n), m) = add(m, mul(n, m)) := by
+  simp
+  refl
+
+theorem mul_zero_right (n : Nat) : mul(n, 0) = 0 := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      exact ih
