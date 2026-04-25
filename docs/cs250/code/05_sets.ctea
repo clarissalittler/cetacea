@@ -1,0 +1,86 @@
+-- Companion file for docs/cs250/05_sets.md.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const alice : Person
+
+theorem alice_in_singleton : alice in singleton(alice) := by
+  simp
+  refl
+
+theorem subset_refl_demo
+  (T : Type)
+  (A : Set T)
+  : A subset A := by
+  simp
+  intro x
+  intro hx
+  exact hx
+
+theorem inter_comm_demo
+  (T : Type)
+  (A B : Set T)
+  : inter(A, B) = inter(B, A) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  split
+  exact hx.right
+  exact hx.left
+  intro hx
+  split
+  exact hx.right
+  exact hx.left
+
+-- Module 1 Exercise 8: distributivity.
+theorem inter_union_distrib
+  (T : Type)
+  (A B C : Set T)
+  : inter(A, union(B, C)) = union(inter(A, B), inter(A, C)) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  cases hx.right with
+  | left hxB =>
+      left
+      split
+      exact hx.left
+      exact hxB
+  | right hxC =>
+      right
+      split
+      exact hx.left
+      exact hxC
+  intro hx
+  cases hx with
+  | left hxAB =>
+      split
+      exact hxAB.left
+      left
+      exact hxAB.right
+  | right hxAC =>
+      split
+      exact hxAC.left
+      right
+      exact hxAC.right
+
+-- A finitary version of "A ⊆ B → 𝒫(A) ⊆ 𝒫(B)": every subset of A is
+-- also a subset of B. The cleanest way is to keep our local names the
+-- same as `subset_trans`'s schema names (A, B, C) so the explicit
+-- substitution is straightforward.
+theorem subsets_carry
+  (A B C : Set Person)
+  : A subset B -> C subset A -> C subset B := by
+  intro hAB
+  intro hCA
+  apply subset_trans {T := Person; A := C; B := A; C := B}
+  exact hCA
+  exact hAB

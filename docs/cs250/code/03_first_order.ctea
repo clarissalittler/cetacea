@@ -1,0 +1,103 @@
+-- Companion file for docs/cs250/03_first_order.md.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const alice : Person
+const bob : Person
+
+func mother : Person -> Person
+
+pred Student(Person)
+pred Knows(Person, Person)
+
+theorem use_forall
+  (P : Person -> Prop)
+  : (forall x : Person, P(x)) -> P(alice) := by
+  intro h
+  exact h alice
+
+theorem forall_self
+  (A : Type)
+  (P : A -> Prop)
+  : (forall x : A, P(x)) -> forall x : A, P(x) := by
+  intro h
+  intro x
+  exact h x
+
+theorem alice_exists : Student(alice) -> exists x : Person, Student(x) := by
+  intro h
+  exists alice
+  exact h
+
+theorem ex_proj
+  (P Q : Person -> Prop)
+  : (exists x : Person, P(x) /\ Q(x)) -> exists x : Person, P(x) := by
+  intro h
+  cases h with
+  | intro x hx =>
+      exists x
+      exact hx.left
+
+-- Equality
+theorem alice_eq_self : alice = alice := by
+  refl
+
+theorem rewrite_demo
+  (P : Person -> Prop)
+  : alice = bob -> P(alice) -> P(bob) := by
+  intro h
+  intro hp
+  rewrite h
+  exact hp
+
+-- For the reverse-direction rewrite we use eq_subst_left from std/eq.ctea
+-- directly. (You can also flip with eq_symm and rewrite, but the rewrite
+-- syntax doesn't accept a chained proof expression; using a helper
+-- theorem is easier.)
+theorem rewrite_back
+  (P : Person -> Prop)
+  : alice = bob -> P(bob) -> P(alice) := by
+  intro h
+  intro hp
+  apply eq_subst_left {A := Person; P := P; x := alice; y := bob}
+  exact h
+  exact hp
+
+-- Forall + Exists chaining: a flavor of Module 4 Exercise 6.
+-- "If for every x there is a witness y with R(x, y), and we know R is
+-- propagated by Q, then for every x there's a y with Q(x, y)."
+theorem forall_exists_chain
+  (A : Type)
+  (R Q : A -> A -> Prop)
+  : (forall x : A, exists y : A, R(x, y))
+    -> (forall x : A, forall y : A, R(x, y) -> Q(x, y))
+    -> forall x : A, exists y : A, Q(x, y) := by
+  intro hex
+  intro himp
+  intro x
+  cases hex x with
+  | intro y hxy =>
+      exists y
+      apply himp x y
+      exact hxy
+
+mode classical
+
+-- The "harder" direction of the de Morgan law for forall:
+-- not (forall x, P(x)) -> exists x, not P(x).
+theorem not_forall_to_exists_not
+  (A : Type)
+  (P : A -> Prop)
+  : not (forall x : A, P(x)) -> exists x : A, not P(x) := by
+  intro h
+  by_contra hn
+  apply h
+  intro x
+  by_contra hpx
+  apply hn
+  exists x
+  exact hpx

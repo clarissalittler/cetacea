@@ -119,6 +119,7 @@ pub enum Term {
     Succ(Box<Term>),
     Add(Box<Term>, Box<Term>),
     Mul(Box<Term>, Box<Term>),
+    Sub(Box<Term>, Box<Term>),
     EmptySet(Type),
     Singleton(Box<Term>),
     Union(Box<Term>, Box<Term>),
@@ -597,23 +598,39 @@ def HappyMother (x : Person) : Prop := Happy(mother(x))
 and then prove goals involving `HappyMother(alice)` by unfolding or simplifying
 to `Happy(mother(alice))`.
 
-Term definitions support named set builders:
+Term definitions support named and parameterized set builders:
 
 ```text
 def TallSet : Set Person := { x : Person | Tall(x) }
+def LikesSet (y : Person) : Set Person := { x : Person | Likes(x, y) }
+def TruthSet (T : Type) (P : T -> Prop) : Set T := { x : T | P(x) }
 ```
 
-Built-in term computation currently focuses on Nat addition and multiplication:
+Built-in term computation currently covers Nat addition, multiplication, and
+truncated subtraction:
 
 ```text
 add(0, n)         ==> n
 add(succ(n), m)  ==> succ(add(n, m))
 mul(0, n)         ==> 0
 mul(succ(n), m)  ==> add(m, mul(n, m))
+sub(n, 0)         ==> n
+sub(0, n)         ==> 0
+sub(succ(n), succ(m))  ==> sub(n, m)
 ```
 
 This computation is applied recursively to terms, including terms nested under
 function and predicate arguments.
+
+The built-in Nat comparison `le(n, m)` is represented as a predicate
+application with a reserved predicate signature `Nat, Nat`. Formula
+simplification computes:
+
+```text
+le(0, n)                 ==> True
+le(succ(n), 0)           ==> False
+le(succ(n), succ(m))     ==> le(n, m)
+```
 
 Set simplification is mostly formula-level. Membership in set constructors is
 expanded:
@@ -816,7 +833,7 @@ The upside is that nearly every feature is inspectable in one file.
 
 ## How To Add a New Built-In Term
 
-Suppose you wanted to add a new Nat primitive, such as subtraction.
+Suppose you wanted to add a new Nat primitive, such as maximum.
 
 Likely steps:
 
@@ -915,7 +932,6 @@ Important limitations to account for when extending the system:
 - There are no namespaces.
 - The parser is not a full grammar with spans.
 - Formula and term definitions are transparent and simple.
-- Term definitions do not support parameters.
 - Predicate schema arguments are names, not arbitrary predicates.
 - `simp` is not theorem-driven.
 - Nat induction is specialized and not fully generalized.

@@ -1,0 +1,84 @@
+-- Companion file for docs/cs250/02_proof_systems.md.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+theorem mp_apply (P Q : Prop) : P -> (P -> Q) -> Q := by
+  intro hp
+  intro hpq
+  apply hpq
+  exact hp
+
+theorem hypothetical_syllogism (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
+  intro hpq
+  intro hqr
+  intro hp
+  apply hqr
+  apply hpq
+  exact hp
+
+theorem disjunctive_syllogism_left (P Q : Prop) : P \/ Q -> not Q -> P := by
+  intro hpq
+  intro hnq
+  cases hpq with
+  | left hp =>
+      exact hp
+  | right hq =>
+      exfalso
+      apply hnq
+      exact hq
+
+theorem disjunctive_syllogism_right (P Q : Prop) : P \/ Q -> not P -> Q := by
+  intro hpq
+  intro hnp
+  cases hpq with
+  | left hp =>
+      exfalso
+      apply hnp
+      exact hp
+  | right hq =>
+      exact hq
+
+-- Module 3 Exercise 8: from p -> q and p -> r, derive p -> q /\ r.
+theorem mp_to_and (P Q R : Prop) : (P -> Q) -> (P -> R) -> P -> Q /\ R := by
+  intro hpq
+  intro hpr
+  intro hp
+  split
+  apply hpq
+  exact hp
+  apply hpr
+  exact hp
+
+-- Module 3 Exercise 9: from p \/ q, not p, q -> r, derive r.
+theorem ex9 (P Q R : Prop) : P \/ Q -> not P -> (Q -> R) -> R := by
+  intro hpq
+  intro hnp
+  intro hqr
+  cases hpq with
+  | left hp =>
+      exfalso
+      apply hnp
+      exact hp
+  | right hq =>
+      apply hqr
+      exact hq
+
+mode classical
+
+theorem dne_via_contra (P : Prop) : not not P -> P := by
+  intro hnn
+  by_contra hn
+  apply hnn
+  exact hn
+
+-- Module 3 §3.6: from P -> Q, classical proof of not P \/ Q.
+theorem imp_to_or_classical (P Q : Prop) : (P -> Q) -> not P \/ Q := by
+  intro hpq
+  by_cases h : P
+  right
+  apply hpq
+  exact h
+  left
+  exact h

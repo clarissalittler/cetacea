@@ -1,0 +1,76 @@
+-- Companion file for docs/cs250/06_relations.md.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Thing
+
+theorem refl_self
+  (A : Type)
+  (R : A -> A -> Prop)
+  (a : A)
+  : (forall x : A, R(x, x)) -> R(a, a) := by
+  intro hrefl
+  exact hrefl a
+
+theorem eq_is_refl (A : Type) (x : A) : x = x := by
+  refl
+
+-- "If R is symmetric and transitive AND there's some witness y with
+-- R(x, y), then R(x, x)." The flawed argument from Module 1 §6 is
+-- valid IF you know there's a witness.
+theorem refl_from_witness
+  (A : Type)
+  (R : A -> A -> Prop)
+  (x : A)
+  : (forall a : A, forall b : A, R(a, b) -> R(b, a))
+    -> (forall a : A, forall b : A, forall c : A,
+          R(a, b) -> R(b, c) -> R(a, c))
+    -> (exists y : A, R(x, y))
+    -> R(x, x) := by
+  intro hsym
+  intro htrans
+  intro hwit
+  cases hwit with
+  | intro y hxy =>
+      apply htrans x y x
+      exact hxy
+      apply hsym x y
+      exact hxy
+
+-- Equality as the canonical equivalence relation.
+theorem eq_refl_demo (A : Type) (x : A) : x = x := by
+  refl
+
+theorem eq_sym_demo (A : Type) (x y : A) : x = y -> y = x := by
+  exact eq_symm
+
+theorem eq_trans_demo (A : Type) (x y z : A)
+  : x = y -> y = z -> x = z := by
+  exact eq_trans
+
+-- An axiomatic equivalence relation: a sketch of how you'd handle
+-- something like modular congruence.
+sort Z
+
+pred Cong(Z, Z)
+
+axiom cong_refl  : forall x : Z, Cong(x, x)
+
+axiom cong_sym
+  : forall x : Z, forall y : Z, Cong(x, y) -> Cong(y, x)
+
+axiom cong_trans
+  : forall x : Z, forall y : Z, forall z : Z,
+      Cong(x, y) -> Cong(y, z) -> Cong(x, z)
+
+-- A small fact: Cong is a transitive symmetric relation, so it's
+-- "diagonal-closed": if R(x, y) and R(x, z) then R(y, z).
+theorem cong_diag (a b c : Z) : Cong(a, b) -> Cong(a, c) -> Cong(b, c) := by
+  intro hab
+  intro hac
+  apply cong_trans b a c
+  apply cong_sym a b
+  exact hab
+  exact hac

@@ -1,0 +1,126 @@
+-- Companion file for docs/cs250/01_propositional.md.
+-- Each theorem here corresponds to a snippet in the tutorial.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+theorem and_intro_demo (P Q : Prop) : P -> Q -> P /\ Q := by
+  intro hp
+  intro hq
+  split
+  exact hp
+  exact hq
+
+theorem and_elim_left_demo (P Q : Prop) : P /\ Q -> P := by
+  intro h
+  exact h.left
+
+theorem or_intro_left_demo (P Q : Prop) : P -> P \/ Q := by
+  intro hp
+  left
+  exact hp
+
+theorem or_elim_demo (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+  intro hpr
+  intro hqr
+  intro hpq
+  cases hpq with
+  | left hp =>
+      apply hpr
+      exact hp
+  | right hq =>
+      apply hqr
+      exact hq
+
+theorem imp_intro_demo (P Q : Prop) : P -> P -> Q -> P := by
+  intro hp1
+  intro hp2
+  intro hq
+  exact hp1
+
+theorem modus_tollens_demo (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+  intro hpq
+  intro hnq
+  intro hp
+  apply hnq
+  apply hpq
+  exact hp
+
+-- Easy direction of de Morgan: constructively provable.
+theorem demorgan_easy (P Q : Prop) : not P \/ not Q -> not (P /\ Q) := by
+  intro h
+  intro hpq
+  cases h with
+  | left hnp =>
+      apply hnp
+      exact hpq.left
+  | right hnq =>
+      apply hnq
+      exact hpq.right
+
+-- Easy direction of the OR de Morgan, also constructive.
+theorem demorgan_or (P Q : Prop) : not (P \/ Q) -> not P /\ not Q := by
+  intro h
+  split
+  intro hp
+  apply h
+  left
+  exact hp
+  intro hq
+  apply h
+  right
+  exact hq
+
+-- Module 2 Exercise 7: implication distributes over conjunction.
+-- A common stumble: `h hp` only works for forall-application, not for
+-- plain `->`. To use an implication you `apply` it (which leaves the
+-- antecedent as a subgoal) or you build the conjunct then project.
+theorem imp_dist_and_fwd (P Q R : Prop) : (P -> Q /\ R) -> (P -> Q) /\ (P -> R) := by
+  intro h
+  split
+  -- prove P -> Q
+  intro hp
+  -- get Q /\ R by applying h to hp, then take .left
+  -- We can't write `(h hp).left` directly; build the conjunct first.
+  apply and_left {P := Q; Q := R}
+  apply h
+  exact hp
+  -- prove P -> R
+  intro hp
+  apply and_right {P := Q; Q := R}
+  apply h
+  exact hp
+
+theorem imp_dist_and_bwd (P Q R : Prop) : (P -> Q) /\ (P -> R) -> P -> Q /\ R := by
+  intro h
+  intro hp
+  split
+  apply h.left
+  exact hp
+  apply h.right
+  exact hp
+
+mode classical
+
+-- Hard direction of de Morgan: needs classical logic.
+theorem demorgan_hard (P Q : Prop) : not (P /\ Q) -> not P \/ not Q := by
+  intro h
+  by_contra hn
+  apply h
+  split
+  by_contra hnp
+  apply hn
+  left
+  exact hnp
+  by_contra hnq
+  apply hn
+  right
+  exact hnq
+
+theorem em_demo (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h

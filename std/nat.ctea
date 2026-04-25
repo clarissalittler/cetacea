@@ -74,3 +74,52 @@ theorem mul_zero_right (n : Nat) : mul(n, 0) = 0 := by
   | succ k ih =>
       simp
       exact ih
+
+theorem sub_zero_right (n : Nat) : sub(n, 0) = n := by
+  simp
+  refl
+
+theorem sub_zero_left (n : Nat) : sub(0, n) = 0 := by
+  simp
+  refl
+
+theorem sub_succ_succ (n m : Nat) : sub(succ(n), succ(m)) = sub(n, m) := by
+  simp
+  refl
+
+theorem sub_self (n : Nat) : sub(n, n) = 0 := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      exact ih
+
+theorem zero_le (n : Nat) : le(0, n) := by
+  simp
+  trivial
+
+theorem succ_not_le_zero (n : Nat) : le(succ(n), 0) -> False := by
+  simp
+  intro h
+  exact h
+
+theorem le_succ_succ (n m : Nat) : le(succ(n), succ(m)) -> le(n, m) := by
+  simp
+  intro h
+  exact h
+
+theorem le_succ_succ_rev (n m : Nat) : le(n, m) -> le(succ(n), succ(m)) := by
+  simp
+  intro h
+  exact h
+
+theorem le_refl (n : Nat) : le(n, n) := by
+  induction n with
+  | zero =>
+      simp
+      trivial
+  | succ k ih =>
+      simp
+      exact ih

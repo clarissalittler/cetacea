@@ -57,7 +57,8 @@ loaded once.
 - `sort`, `const`, `func`, `pred`, formula and term `def`, and `axiom`
   declarations
 - theorem declarations with proposition, predicate, type, and term parameters
-- built-in `Nat`, `Set T`, `0`, `succ(n)`, `add(n, m)`, and `mul(n, m)`
+- built-in `Nat`, `Set T`, `0`, `succ(n)`, `add(n, m)`, `mul(n, m)`,
+  and `sub(n, m)`, plus Nat predicate `le(n, m)`
 - typed set terms: `empty(T)`, `singleton(x)`, `union(A, B)`, `inter(A, B)`,
   `diff(A, B)`, and set builders `{ x : T | P(x) }`
 - formulas: `True`, `False`, atoms, equality, membership, subset, `not`, `/\`,
@@ -67,8 +68,8 @@ loaded once.
 - validation for type names, predicate names, predicate arity, and predicate
   argument types
 - validation for function names, function arity, and function argument types
-- validation for transparent formula definitions, including definition arity,
-  inferred type parameters, and proposition/predicate parameters
+- validation for transparent formula and term definitions, including definition
+  arity, inferred type parameters, and proposition/predicate parameters
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
@@ -88,8 +89,8 @@ loaded once.
   `induction`, `exfalso`, `contradiction`, `by_cases`, `by_contra`,
   `show_goal`
 - `simp` computation for transparent formula definitions, set membership,
-  subset expansion, and the left-recursive `add` equations, including terms
-  nested under predicate and function arguments
+  subset expansion, Nat arithmetic and comparison, including terms nested under
+  predicate and function arguments
 - kernel reporting of constructive versus classical proof use
 - command-level file and line reporting for checker diagnostics
 

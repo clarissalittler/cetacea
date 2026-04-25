@@ -1,0 +1,22 @@
+-- INTENDED TO FAIL. This file demonstrates that Cetacea rejects the two
+-- famous fallacies from CS 250 Module 3. Run it with:
+--
+--   cargo run -p cetacea_cli -- docs/cs250/code/02_fallacies_negative.ctea
+--
+-- and read the error messages. Each "theorem" below is wrong.
+
+mode classical
+
+-- Converse error: from p -> q and q, conclude p. INVALID.
+theorem converse_error (P Q : Prop) : (P -> Q) -> Q -> P := by
+  intro hpq
+  intro hq
+  exact hq
+
+-- Inverse error: from p -> q and not p, conclude not q. INVALID.
+theorem inverse_error (P Q : Prop) : (P -> Q) -> not P -> not Q := by
+  intro hpq
+  intro hnp
+  intro hq
+  apply hnp
+  exact hq

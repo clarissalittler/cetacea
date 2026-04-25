@@ -213,12 +213,15 @@ Built-in Nat terms:
 succ(n)
 add(n, m)
 mul(n, m)
+sub(n, m)
 ```
 
 `add` computes by recursion on its first argument, so `add(0, n)` simplifies
 directly while facts such as `add(n, 0) = n` are proved by induction.
 `mul` follows the same convention: `mul(0, n)` simplifies directly, and
 `mul(n, 0) = 0` is proved by induction.
+`sub` is truncated subtraction: `sub(n, 0)`, `sub(0, n)`, and
+`sub(succ(n), succ(m))` simplify directly.
 
 Built-in set terms:
 
@@ -243,6 +246,7 @@ True
 False
 P
 Student(alice)
+le(n, m)
 x = y
 x in A
 A subset B
@@ -296,12 +300,20 @@ def Reflexive (T : Type) (R : T -> T -> Prop) : Prop :=
   forall x : T, R(x, x)
 ```
 
-Term definitions are also transparent. They currently do not take parameters.
+Term definitions are also transparent and can take type, term, proposition, and
+predicate parameters. This is useful for naming set-builder expressions.
 
 ```text
 def TallSet : Set Person := { x : Person | Tall(x) }
+def LikesSet (y : Person) : Set Person := { x : Person | Likes(x, y) }
+def TruthSet (T : Type) (P : T -> Prop) : Set T := { x : T | P(x) }
 
 theorem tall_member : Tall(alice) -> alice in TallSet := by
+  intro h
+  simp
+  exact h
+
+theorem likes_member : Likes(alice, bob) -> alice in LikesSet(bob) := by
   intro h
   simp
   exact h
@@ -619,8 +631,8 @@ It currently knows:
 - set membership in `empty`, `singleton`, `union`, `inter`, `diff`, and set
   builders
 - subset expansion
-- the left-recursive equations for `add` and `mul`, including inside predicate and
-  function arguments
+- the built-in equations for `add`, `mul`, `sub`, and `le`, including inside
+  predicate and function arguments
 
 Examples:
 
@@ -843,7 +855,7 @@ Includes equality lemmas:
 
 ### `std/nat.ctea`
 
-Includes basic Nat addition and multiplication lemmas:
+Includes basic Nat addition, multiplication, subtraction, and order lemmas:
 
 - `add_zero_left`
 - `add_succ_left`
@@ -856,6 +868,15 @@ Includes basic Nat addition and multiplication lemmas:
 - `mul_zero_left`
 - `mul_succ_left`
 - `mul_zero_right`
+- `sub_zero_right`
+- `sub_zero_left`
+- `sub_succ_succ`
+- `sub_self`
+- `zero_le`
+- `succ_not_le_zero`
+- `le_succ_succ`
+- `le_succ_succ_rev`
+- `le_refl`
 
 ### `std/set.ctea`
 
@@ -1040,8 +1061,8 @@ Cetacea is intentionally small. Important current limitations:
   yet use arbitrary imported rewrite lemmas.
 - Theorem instantiation is useful but incomplete. Some proofs still need
   explicit schema arguments.
-- Term definitions cannot currently take parameters.
-- Nat has addition and multiplication, but no built-in order or subtraction.
+- Nat has addition, multiplication, truncated subtraction, and `le`, but no
+  division, modular arithmetic, or decidable equality tactic.
 - Nat induction is specialized to `Nat` and rejects induction when local
   hypotheses depend on the induction variable.
 - `intro` rejects names that would shadow an existing local variable or

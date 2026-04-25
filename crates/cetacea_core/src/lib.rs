@@ -30,6 +30,7 @@ pub enum Term {
     Succ(Box<Term>),
     Add(Box<Term>, Box<Term>),
     Mul(Box<Term>, Box<Term>),
+    Sub(Box<Term>, Box<Term>),
     EmptySet(Type),
     Singleton(Box<Term>),
     Union(Box<Term>, Box<Term>),
@@ -60,6 +61,7 @@ impl fmt::Display for Term {
             Term::Succ(term) => write!(f, "succ({term})"),
             Term::Add(left, right) => write!(f, "add({left}, {right})"),
             Term::Mul(left, right) => write!(f, "mul({left}, {right})"),
+            Term::Sub(left, right) => write!(f, "sub({left}, {right})"),
             Term::EmptySet(ty) => write!(f, "empty({ty})"),
             Term::Singleton(term) => write!(f, "singleton({term})"),
             Term::Union(left, right) => write!(f, "union({left}, {right})"),
@@ -433,6 +435,7 @@ pub struct FormulaDef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TermDef {
     pub name: Name,
+    pub params: Vec<Param>,
     pub ty: Type,
     pub body: Term,
 }
@@ -615,9 +618,22 @@ impl Env {
 fn is_builtin_name(name: &str) -> bool {
     matches!(
         name,
-        "Nat" | "Set" | "succ" | "add" | "mul" | "empty" | "singleton" | "union" | "inter" | "diff"
+        "Nat"
+            | "Set"
+            | "succ"
+            | "add"
+            | "mul"
+            | "sub"
+            | "le"
+            | "empty"
+            | "singleton"
+            | "union"
+            | "inter"
+            | "diff"
     )
 }
+
+static BUILTIN_LE_SIGNATURE: [Type; 2] = [Type::Nat, Type::Nat];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Span {
@@ -988,20 +1004,6 @@ impl FileChecker {
                             });
                         }
                         (DefResult::Term(ty), DefBody::Term(body)) => {
-                            if !decl.params.is_empty() {
-                                self.result.diagnostics.push(
-                                    diagnostic_at(
-                                        source_path,
-                                        line,
-                                        format!(
-                                            "definition `{}` has invalid parameters",
-                                            decl.name
-                                        ),
-                                    )
-                                    .with_note("term definitions currently do not take parameters"),
-                                );
-                                continue;
-                            }
                             if let Err(err) = validate_type(&self.env, &def_ctx, &ty) {
                                 self.result.diagnostics.push(
                                     diagnostic_at(
@@ -1017,6 +1019,7 @@ impl FileChecker {
                                 Ok(actual) if actual == ty => {
                                     self.env.add_term_def(TermDef {
                                         name: decl.name,
+                                        params: decl.params,
                                         ty,
                                         body,
                                     });
@@ -1787,33 +1790,47 @@ fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationEr
 
 fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, ValidationError> {
     match term {
-        Term::Var(name) => ctx
-            .lookup_term(name)
-            .or_else(|| env.consts.get(name))
-            .or_else(|| env.term_def(name).map(|def| &def.ty))
-            .cloned()
-            .ok_or_else(|| ValidationError::new(format!("unknown term `{name}`"))),
-        Term::App(name, args) => {
-            let Some(func) = env.funcs.get(name) else {
-                return Err(ValidationError::new(format!("unknown function `{name}`")));
-            };
-            if func.args.len() != args.len() {
+        Term::Var(name) => {
+            if let Some(ty) = ctx.lookup_term(name).or_else(|| env.consts.get(name)) {
+                return Ok(ty.clone());
+            }
+            if let Some(def) = env.term_def(name) {
+                let expected = term_def_expected_args(def);
+                if expected == 0 {
+                    return Ok(def.ty.clone());
+                }
                 return Err(ValidationError::new(format!(
-                    "function `{name}` expects {} argument(s), but got {}",
-                    func.args.len(),
-                    args.len()
+                    "definition `{name}` expects {expected} argument(s), but got 0"
                 )));
             }
-            for (idx, (arg, expected)) in args.iter().zip(func.args.iter()).enumerate() {
-                let actual = validate_term(env, ctx, arg)?;
-                if &actual != expected {
+            Err(ValidationError::new(format!("unknown term `{name}`")))
+        }
+        Term::App(name, args) => {
+            if let Some(func) = env.funcs.get(name) {
+                if func.args.len() != args.len() {
                     return Err(ValidationError::new(format!(
-                        "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
-                        idx + 1
+                        "function `{name}` expects {} argument(s), but got {}",
+                        func.args.len(),
+                        args.len()
                     )));
                 }
+                for (idx, (arg, expected)) in args.iter().zip(func.args.iter()).enumerate() {
+                    let actual = validate_term(env, ctx, arg)?;
+                    if &actual != expected {
+                        return Err(ValidationError::new(format!(
+                            "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
+                            idx + 1
+                        )));
+                    }
+                }
+                return Ok(func.result.clone());
             }
-            Ok(func.result.clone())
+
+            let Some(def) = env.term_def(name) else {
+                return Err(ValidationError::new(format!("unknown function `{name}`")));
+            };
+            let (_, ty) = instantiate_term_def(env, ctx, def, args)?;
+            Ok(ty)
         }
         Term::Zero => Ok(Type::Nat),
         Term::Succ(term) => {
@@ -1826,24 +1843,18 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                 )))
             }
         }
-        Term::Add(left, right) => {
+        Term::Add(left, right) | Term::Mul(left, right) | Term::Sub(left, right) => {
+            let name = match term {
+                Term::Add(_, _) => "add",
+                Term::Mul(_, _) => "mul",
+                Term::Sub(_, _) => "sub",
+                _ => unreachable!("matched Nat binary term"),
+            };
             for (idx, term) in [left.as_ref(), right.as_ref()].iter().enumerate() {
                 let actual = validate_term(env, ctx, term)?;
                 if actual != Type::Nat {
                     return Err(ValidationError::new(format!(
-                        "argument {} of `add` has type `{actual}`, but expected `Nat`",
-                        idx + 1
-                    )));
-                }
-            }
-            Ok(Type::Nat)
-        }
-        Term::Mul(left, right) => {
-            for (idx, term) in [left.as_ref(), right.as_ref()].iter().enumerate() {
-                let actual = validate_term(env, ctx, term)?;
-                if actual != Type::Nat {
-                    return Err(ValidationError::new(format!(
-                        "argument {} of `mul` has type `{actual}`, but expected `Nat`",
+                        "argument {} of `{name}` has type `{actual}`, but expected `Nat`",
                         idx + 1
                     )));
                 }
@@ -1894,6 +1905,9 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
 }
 
 fn predicate_signature<'a>(env: &'a Env, ctx: &'a Context, name: &str) -> Option<&'a [Type]> {
+    if name == "le" {
+        return Some(&BUILTIN_LE_SIGNATURE);
+    }
     ctx.lookup_predicate_var(name)
         .or_else(|| env.preds.get(name).map(Vec::as_slice))
 }
@@ -2125,6 +2139,126 @@ fn formula_def_predicate_argument(arg: &Term) -> Result<Name, ValidationError> {
     }
 }
 
+fn term_def_expected_args(def: &TermDef) -> usize {
+    def.params
+        .iter()
+        .filter(|param| !matches!(param.kind, ParamKind::Type))
+        .count()
+}
+
+fn instantiate_term_def(
+    env: &Env,
+    ctx: &Context,
+    def: &TermDef,
+    args: &[Term],
+) -> Result<(Term, Type), ValidationError> {
+    let expected_args = term_def_expected_args(def);
+    if expected_args != args.len() {
+        return Err(ValidationError::new(format!(
+            "definition `{}` expects {expected_args} argument(s), but got {}",
+            def.name,
+            args.len()
+        )));
+    }
+
+    let mut schema_subst = SchemaSubst::default();
+    let mut term_subst = HashMap::new();
+    let mut args = args.iter();
+    let mut arg_idx = 0usize;
+
+    for param in &def.params {
+        match &param.kind {
+            ParamKind::Type => {}
+            ParamKind::Prop => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let formula = formula_def_prop_argument(arg)?;
+                validate_formula(env, ctx, &formula)?;
+                schema_subst
+                    .formula_args
+                    .insert(param.name.clone(), formula);
+                arg_idx += 1;
+            }
+            ParamKind::Predicate(param_args) => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let name = formula_def_predicate_argument(arg)?;
+                let Some(signature) = predicate_signature(env, ctx, &name) else {
+                    return Err(ValidationError::new(format!("unknown predicate `{name}`")));
+                };
+                if signature.len() != param_args.len() {
+                    return Err(ValidationError::new(format!(
+                        "predicate `{name}` expects {} argument(s), but definition parameter `{}` expects {}",
+                        signature.len(),
+                        param.name,
+                        param_args.len()
+                    )));
+                }
+                for (pattern, actual) in param_args.iter().zip(signature.iter()) {
+                    unify_type(pattern, actual, &def.params, &mut schema_subst).map_err(|_| {
+                        let expected = subst_type_schema(pattern, &schema_subst);
+                        ValidationError::new(format!(
+                            "predicate argument `{name}` has incompatible type `{actual}`, expected `{expected}`"
+                        ))
+                    })?;
+                }
+                schema_subst.predicate_args.insert(param.name.clone(), name);
+                arg_idx += 1;
+            }
+            ParamKind::Term(ty) => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let actual = validate_term(env, ctx, arg)?;
+                unify_type(ty, &actual, &def.params, &mut schema_subst).map_err(|_| {
+                    let expected = subst_type_schema(ty, &schema_subst);
+                    ValidationError::new(format!(
+                        "argument {} of definition `{}` has type `{actual}`, but expected `{expected}`",
+                        arg_idx + 1,
+                        def.name
+                    ))
+                })?;
+                term_subst.insert(param.name.clone(), arg.clone());
+                arg_idx += 1;
+            }
+        }
+    }
+
+    for param in &def.params {
+        if matches!(param.kind, ParamKind::Type)
+            && !schema_subst.type_args.contains_key(&param.name)
+        {
+            return Err(ValidationError::new(format!(
+                "cannot infer type argument `{}` for definition `{}`",
+                param.name, def.name
+            )));
+        }
+    }
+
+    let ty = subst_type_schema(&def.ty, &schema_subst);
+    validate_type(env, ctx, &ty)?;
+    let body = subst_term_terms(&subst_term_schema(&def.body, &schema_subst), &term_subst);
+    let actual = validate_term(env, ctx, &body)?;
+    if actual != ty {
+        return Err(ValidationError::new(format!(
+            "definition `{}` instantiated to type `{actual}`, but expected `{ty}`",
+            def.name
+        )));
+    }
+    Ok((body, ty))
+}
+
 fn formulas_def_eq(
     env: &Env,
     ctx: &Context,
@@ -2183,6 +2317,17 @@ fn unfold_formula_defs(
                     }
                     return Ok((unfolded, true));
                 }
+            }
+            if only.is_none() && name == "le" && args.len() == 2 {
+                let left = normalize_term(env, ctx, &args[0])?;
+                let right = normalize_term(env, ctx, &args[1])?;
+                let simplified = simplify_le_formula(left, right);
+                let changed = &simplified != formula;
+                if changed {
+                    let (simplified, _) = unfold_formula_defs(env, ctx, &simplified, only)?;
+                    return Ok((simplified, true));
+                }
+                return Ok((simplified, false));
             }
             if only.is_none() {
                 let simplified_args: Vec<Term> = args
@@ -2302,6 +2447,15 @@ fn unfold_formula_defs(
     }
 }
 
+fn simplify_le_formula(left: Term, right: Term) -> Formula {
+    match (left, right) {
+        (Term::Zero, _) => Formula::True,
+        (Term::Succ(_), Term::Zero) => Formula::False,
+        (Term::Succ(left), Term::Succ(right)) => simplify_le_formula(*left, *right),
+        (left, right) => Formula::PredApp("le".to_string(), vec![left, right]),
+    }
+}
+
 fn normalize_term_compute(term: &Term) -> Term {
     match term {
         Term::Var(_) | Term::Zero | Term::EmptySet(_) => term.clone(),
@@ -2333,6 +2487,18 @@ fn normalize_term_compute(term: &Term) -> Term {
                 other => Term::Mul(Box::new(other), Box::new(right)),
             }
         }
+        Term::Sub(left, right) => {
+            let left = normalize_term_compute(left);
+            let right = normalize_term_compute(right);
+            match (left, right) {
+                (left, Term::Zero) => left,
+                (Term::Zero, _) => Term::Zero,
+                (Term::Succ(left), Term::Succ(right)) => {
+                    normalize_term_compute(&Term::Sub(left, right))
+                }
+                (left, right) => Term::Sub(Box::new(left), Box::new(right)),
+            }
+        }
         Term::Singleton(term) => Term::Singleton(Box::new(normalize_term_compute(term))),
         Term::Union(left, right) => Term::Union(
             Box::new(normalize_term_compute(left)),
@@ -2362,16 +2528,23 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
     match term {
         Term::Var(name) => {
             if let Some(def) = env.term_def(name) {
-                return normalize_term(env, ctx, &def.body);
+                let (body, _) = instantiate_term_def(env, ctx, def, &[])?;
+                return normalize_term(env, ctx, &body);
             }
             Ok(term.clone())
         }
-        Term::App(name, args) => Ok(Term::App(
-            name.clone(),
-            args.iter()
-                .map(|arg| normalize_term(env, ctx, arg))
-                .collect::<Result<_, _>>()?,
-        )),
+        Term::App(name, args) => {
+            if let Some(def) = env.term_def(name) {
+                let (body, _) = instantiate_term_def(env, ctx, def, args)?;
+                return normalize_term(env, ctx, &body);
+            }
+            Ok(Term::App(
+                name.clone(),
+                args.iter()
+                    .map(|arg| normalize_term(env, ctx, arg))
+                    .collect::<Result<_, _>>()?,
+            ))
+        }
         Term::Zero | Term::EmptySet(_) => Ok(term.clone()),
         Term::Succ(term) => Ok(Term::Succ(Box::new(normalize_term(env, ctx, term)?))),
         Term::Add(left, right) => {
@@ -2383,6 +2556,13 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
         }
         Term::Mul(left, right) => {
             let computed = Term::Mul(
+                Box::new(normalize_term(env, ctx, left)?),
+                Box::new(normalize_term(env, ctx, right)?),
+            );
+            Ok(normalize_term_compute(&computed))
+        }
+        Term::Sub(left, right) => {
+            let computed = Term::Sub(
                 Box::new(normalize_term(env, ctx, left)?),
                 Box::new(normalize_term(env, ctx, right)?),
             );
@@ -2489,6 +2669,10 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(right, subst)),
         ),
         Term::Mul(left, right) => Term::Mul(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
+        Term::Sub(left, right) => Term::Sub(
             Box::new(subst_term_schema(left, subst)),
             Box::new(subst_term_schema(right, subst)),
         ),
@@ -2621,6 +2805,10 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(left, var, replacement)),
             Box::new(subst_term(right, var, replacement)),
         ),
+        Term::Sub(left, right) => Term::Sub(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term(term, var, replacement))),
         Term::Union(left, right) => Term::Union(
@@ -2730,6 +2918,7 @@ fn term_has_free_var(term: &Term, name: &str) -> bool {
         Term::Succ(term) | Term::Singleton(term) => term_has_free_var(term, name),
         Term::Add(left, right)
         | Term::Mul(left, right)
+        | Term::Sub(left, right)
         | Term::Union(left, right)
         | Term::Inter(left, right)
         | Term::Diff(left, right) => {
@@ -2795,6 +2984,14 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
             }
             for replaced in replace_term_once(right, from, to) {
                 results.push(Term::Mul(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::Sub(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::Sub(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::Sub(left.clone(), Box::new(replaced)));
             }
         }
         Term::Singleton(inner) => {
@@ -2987,6 +3184,7 @@ fn term_size(term: &Term) -> usize {
         Term::Succ(term) | Term::Singleton(term) => 1 + term_size(term),
         Term::Add(left, right)
         | Term::Mul(left, right)
+        | Term::Sub(left, right)
         | Term::Union(left, right)
         | Term::Inter(left, right)
         | Term::Diff(left, right) => 1 + term_size(left) + term_size(right),
@@ -3584,6 +3782,9 @@ impl Tokens {
                 ("mul", [left, right]) => {
                     Ok(Term::Mul(Box::new(left.clone()), Box::new(right.clone())))
                 }
+                ("sub", [left, right]) => {
+                    Ok(Term::Sub(Box::new(left.clone()), Box::new(right.clone())))
+                }
                 ("singleton", [arg]) => Ok(Term::Singleton(Box::new(arg.clone()))),
                 ("union", [left, right]) => {
                     Ok(Term::Union(Box::new(left.clone()), Box::new(right.clone())))
@@ -3597,9 +3798,9 @@ impl Tokens {
                 ("succ" | "singleton", _) => Err(ParseError::new(format!(
                     "`{name}` expects exactly one argument"
                 ))),
-                ("add" | "mul" | "union" | "inter" | "diff", _) => Err(ParseError::new(format!(
-                    "`{name}` expects exactly two arguments"
-                ))),
+                ("add" | "mul" | "sub" | "union" | "inter" | "diff", _) => Err(ParseError::new(
+                    format!("`{name}` expects exactly two arguments"),
+                )),
                 _ => Ok(Term::App(name, args)),
             };
         }
@@ -3703,6 +3904,7 @@ impl Tokens {
             | Term::Succ(_)
             | Term::Add(_, _)
             | Term::Mul(_, _)
+            | Term::Sub(_, _)
             | Term::EmptySet(_)
             | Term::Singleton(_)
             | Term::Union(_, _)
@@ -5904,6 +6106,10 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
             Box::new(subst_term_terms(left, subst)),
             Box::new(subst_term_terms(right, subst)),
         ),
+        Term::Sub(left, right) => Term::Sub(
+            Box::new(subst_term_terms(left, subst)),
+            Box::new(subst_term_terms(right, subst)),
+        ),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term_terms(term, subst))),
         Term::Union(left, right) => Term::Union(
@@ -6108,6 +6314,13 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
         }
         Term::Mul(p_left, p_right) => {
             let Term::Mul(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
+        Term::Sub(p_left, p_right) => {
+            let Term::Sub(t_left, t_right) = target else {
                 return Err(());
             };
             unify_term(p_left, t_left, unify)?;
@@ -7353,6 +7566,57 @@ theorem tall_member_inline : Tall(alice) -> alice in { x : Person | Tall(x) } :=
     }
 
     #[test]
+    fn parameterized_term_definitions_simplify_membership() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+const bob : Person
+pred Likes(Person, Person)
+pred Tall(Person)
+
+def LikesSet (y : Person) : Set Person := { x : Person | Likes(x, y) }
+def TruthSet (T : Type) (P : T -> Prop) : Set T := { x : T | P(x) }
+def One (T : Type) (x : T) : Set T := singleton(x)
+
+theorem likes_set_member : Likes(alice, bob) -> alice in LikesSet(bob) := by
+  intro h
+  simp
+  exact h
+
+theorem truth_set_member : Tall(alice) -> alice in TruthSet(Tall) := by
+  intro h
+  simp
+  exact h
+
+theorem one_member : alice in One(alice) := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn parameterized_term_definition_arity_mismatch_is_rejected() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+pred Tall(Person)
+
+def LikesSet (y : Person) : Set Person := { x : Person | Tall(x) }
+
+theorem bad : alice in LikesSet := by
+"#,
+            "definition `LikesSet` expects 1 argument(s), but got 0",
+        );
+    }
+
+    #[test]
     fn unfold_expands_definition_in_goal() {
         check_ok(
             r#"
@@ -7531,6 +7795,58 @@ theorem mul_succ_left (n m : Nat) : mul(succ(n), m) = add(m, mul(n, m)) := by
 theorem mul_two_one : mul(succ(succ(0)), succ(0)) = succ(succ(0)) := by
   simp
   refl
+"#,
+        );
+    }
+
+    #[test]
+    fn nat_subtraction_computes_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem sub_zero_right (n : Nat) : sub(n, 0) = n := by
+  simp
+  refl
+
+theorem sub_zero_left (n : Nat) : sub(0, n) = 0 := by
+  simp
+  refl
+
+theorem sub_succ_succ (n m : Nat) : sub(succ(n), succ(m)) = sub(n, m) := by
+  simp
+  refl
+
+theorem sub_two_one : sub(succ(succ(0)), succ(0)) = succ(0) := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn nat_le_computes_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem zero_le (n : Nat) : le(0, n) := by
+  simp
+  trivial
+
+theorem succ_not_le_zero (n : Nat) : le(succ(n), 0) -> False := by
+  simp
+  intro h
+  exact h
+
+theorem one_le_two : le(succ(0), succ(succ(0))) := by
+  simp
+  trivial
+
+theorem two_not_le_one : le(succ(succ(0)), succ(0)) -> False := by
+  simp
+  intro h
+  exact h
 "#,
         );
     }
