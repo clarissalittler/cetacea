@@ -664,6 +664,17 @@ It currently knows:
 - the built-in equations for `add`, `mul`, `sub`, and `le`, including inside
   predicate and function arguments
 
+You can also provide equality theorems explicitly as rewrite rules:
+
+```text
+axiom mother_alice : mother(alice) = alice
+
+theorem happy_mother : Happy(alice) -> Happy(mother(alice)) := by
+  intro h
+  simp [mother_alice]
+  exact h
+```
+
 Use `simp at h` to simplify a named hypothesis in the local context, or
 `simp at *` to simplify the current goal and all local hypotheses.
 
@@ -1108,8 +1119,8 @@ Cetacea is intentionally small. Important current limitations:
 - Parse diagnostics carry line-local token spans where possible, but checked
   declaration and tactic execution errors still report line numbers rather than
   exact AST spans.
-- `simp` uses built-in computation rules and formula definitions. It does not
-  yet use arbitrary imported rewrite lemmas.
+- `simp [lemma]` can use listed equality theorems as rewrite rules, but there
+  is not yet an attribute-based global simp set or iff/proposition rewriting.
 - Theorem instantiation is useful but incomplete. Some proofs still need
   explicit schema arguments.
 - Nat has addition, multiplication, truncated subtraction, and `le`, but no

@@ -4016,6 +4016,7 @@ enum Tactic {
     Simp,
     SimpAt(Name),
     SimpAll,
+    SimpWith(Vec<Name>),
     Induction {
         var_name: Name,
         zero_tactics: Vec<Tactic>,
@@ -5124,6 +5125,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if let Some(rest) = line.strip_prefix("simp at ") {
         return Ok(Tactic::SimpAt(expect_single_name(rest, "simp at")?));
     }
+    if let Some(rest) = line.strip_prefix("simp ") {
+        return Ok(Tactic::SimpWith(parse_simp_rule_names(rest.trim())?));
+    }
     if line == "split" {
         return Ok(Tactic::Split);
     }
@@ -5160,6 +5164,24 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     }
 
     Err(ParseError::new(format!("unknown tactic `{line}`")))
+}
+
+fn parse_simp_rule_names(input: &str) -> Result<Vec<Name>, ParseError> {
+    let Some(body) = input
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
+        return Err(ParseError::new("simp theorem rules use `[name, ...]`"));
+    };
+    let mut names = Vec::new();
+    for item in body.split(',') {
+        let name = item.trim();
+        if name.is_empty() {
+            return Err(ParseError::new("empty simp theorem name"));
+        }
+        names.push(name.to_string());
+    }
+    Ok(names)
 }
 
 fn expect_single_name(input: &str, tactic: &str) -> Result<Name, ParseError> {
@@ -6055,6 +6077,34 @@ fn run_tactic(
                 }],
             })
         }
+        Tactic::SimpWith(names) => {
+            let rules = collect_simp_rules(env, names)?;
+            let (builtin_target, builtin_changed) =
+                unfold_formula_defs(env, &goal.context, &goal.target, None)
+                    .map_err(|err| TacticError::new(format!("cannot simplify: {}", err.message)))?;
+            let (target, rewrites) =
+                rewrite_with_simp_rules(env, &goal.context, builtin_target, &rules)?;
+            if !builtin_changed && rewrites.is_empty() {
+                return Err(TacticError::new(format!(
+                    "simp made no progress on goal `{}`",
+                    goal.target
+                )));
+            }
+            let id = fresh_goal(next_goal_id);
+            Ok(StepResult {
+                replacement: build_simp_replacement(
+                    id,
+                    goal.target.clone(),
+                    builtin_changed,
+                    &rewrites,
+                ),
+                new_goals: vec![Goal {
+                    id,
+                    context: goal.context,
+                    target,
+                }],
+            })
+        }
         Tactic::SimpAt(name) => {
             let Some(formula) = goal.context.lookup(name).cloned() else {
                 return Err(TacticError::new(format!("unknown hypothesis `{name}`")));
@@ -6275,6 +6325,369 @@ fn ensure_intro_name_unused(ctx: &Context, name: &str) -> Result<(), TacticError
         )));
     }
     Ok(())
+}
+
+#[derive(Clone)]
+struct SimpRule {
+    theorem_name: Name,
+    params: Vec<Param>,
+    lhs: Term,
+    rhs: Term,
+}
+
+#[derive(Clone)]
+struct SimpRewrite {
+    before: Formula,
+    eq_proof: Proof,
+}
+
+fn collect_simp_rules(env: &Env, names: &[Name]) -> Result<Vec<SimpRule>, TacticError> {
+    let mut rules = Vec::new();
+    for name in names {
+        let Some(theorem) = env.theorem(name) else {
+            return Err(TacticError::new(format!("unknown theorem `{name}`")));
+        };
+        let Formula::Eq(lhs, rhs) = &theorem.statement else {
+            return Err(TacticError::new(format!(
+                "simp rule `{name}` must prove a term equality"
+            )));
+        };
+        rules.push(SimpRule {
+            theorem_name: name.clone(),
+            params: theorem.params.clone(),
+            lhs: lhs.clone(),
+            rhs: rhs.clone(),
+        });
+    }
+    Ok(rules)
+}
+
+fn build_simp_replacement(
+    id: usize,
+    original_target: Formula,
+    builtin_changed: bool,
+    rewrites: &[SimpRewrite],
+) -> PartialProof {
+    let mut replacement = PartialProof::Hole(id);
+    for rewrite in rewrites.iter().rev() {
+        replacement = PartialProof::EqSubst {
+            eq_proof: Box::new(PartialProof::Done(rewrite.eq_proof.clone())),
+            proof_body: Box::new(replacement),
+            target: rewrite.before.clone(),
+        };
+    }
+    if builtin_changed {
+        PartialProof::Convert {
+            proof_body: Box::new(replacement),
+            target: original_target,
+        }
+    } else {
+        replacement
+    }
+}
+
+fn rewrite_with_simp_rules(
+    env: &Env,
+    ctx: &Context,
+    mut formula: Formula,
+    rules: &[SimpRule],
+) -> Result<(Formula, Vec<SimpRewrite>), TacticError> {
+    let mut rewrites = Vec::new();
+    for _ in 0..32 {
+        let Some((next, eq_proof)) =
+            rewrite_formula_with_simp_rules_once(env, ctx, &formula, rules)?
+        else {
+            break;
+        };
+        let before = formula;
+        formula = next;
+        rewrites.push(SimpRewrite { before, eq_proof });
+    }
+    Ok((formula, rewrites))
+}
+
+fn rewrite_formula_with_simp_rules_once(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+    rules: &[SimpRule],
+) -> Result<Option<(Formula, Proof)>, TacticError> {
+    match formula {
+        Formula::True | Formula::False | Formula::Atom(_) => Ok(None),
+        Formula::Eq(left, right) => {
+            rewrite_binary_term_with_simp_rules(env, ctx, left, right, rules, Formula::eq)
+        }
+        Formula::In(left, right) => {
+            rewrite_binary_term_with_simp_rules(env, ctx, left, right, rules, Formula::membership)
+        }
+        Formula::Subset(left, right) => {
+            rewrite_binary_term_with_simp_rules(env, ctx, left, right, rules, Formula::subset)
+        }
+        Formula::PredApp(name, args) => {
+            for (idx, arg) in args.iter().enumerate() {
+                if let Some((rewritten, proof)) =
+                    rewrite_term_with_simp_rules_once(env, ctx, arg, rules)?
+                {
+                    let mut args = args.clone();
+                    args[idx] = rewritten;
+                    return Ok(Some((Formula::PredApp(name.clone(), args), proof)));
+                }
+            }
+            Ok(None)
+        }
+        Formula::And(left, right) => {
+            rewrite_binary_formula_with_simp_rules(env, ctx, left, right, rules, Formula::and)
+        }
+        Formula::Or(left, right) => {
+            rewrite_binary_formula_with_simp_rules(env, ctx, left, right, rules, Formula::or)
+        }
+        Formula::Implies(left, right) => {
+            rewrite_binary_formula_with_simp_rules(env, ctx, left, right, rules, Formula::implies)
+        }
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        } => {
+            if let Some((body, proof)) =
+                rewrite_formula_with_simp_rules_once(env, ctx, body, rules)?
+            {
+                Ok(Some((
+                    Formula::forall(var.clone(), var_type.clone(), body),
+                    proof,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+        Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            if let Some((body, proof)) =
+                rewrite_formula_with_simp_rules_once(env, ctx, body, rules)?
+            {
+                Ok(Some((
+                    Formula::exists(var.clone(), var_type.clone(), body),
+                    proof,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+fn rewrite_binary_formula_with_simp_rules(
+    env: &Env,
+    ctx: &Context,
+    left: &Formula,
+    right: &Formula,
+    rules: &[SimpRule],
+    rebuild: fn(Formula, Formula) -> Formula,
+) -> Result<Option<(Formula, Proof)>, TacticError> {
+    if let Some((new_left, proof)) = rewrite_formula_with_simp_rules_once(env, ctx, left, rules)? {
+        return Ok(Some((rebuild(new_left, right.clone()), proof)));
+    }
+    if let Some((new_right, proof)) = rewrite_formula_with_simp_rules_once(env, ctx, right, rules)?
+    {
+        return Ok(Some((rebuild(left.clone(), new_right), proof)));
+    }
+    Ok(None)
+}
+
+fn rewrite_binary_term_with_simp_rules(
+    env: &Env,
+    ctx: &Context,
+    left: &Term,
+    right: &Term,
+    rules: &[SimpRule],
+    rebuild: fn(Term, Term) -> Formula,
+) -> Result<Option<(Formula, Proof)>, TacticError> {
+    if let Some((new_left, proof)) = rewrite_term_with_simp_rules_once(env, ctx, left, rules)? {
+        return Ok(Some((rebuild(new_left, right.clone()), proof)));
+    }
+    if let Some((new_right, proof)) = rewrite_term_with_simp_rules_once(env, ctx, right, rules)? {
+        return Ok(Some((rebuild(left.clone(), new_right), proof)));
+    }
+    Ok(None)
+}
+
+fn rewrite_term_with_simp_rules_once(
+    env: &Env,
+    ctx: &Context,
+    term: &Term,
+    rules: &[SimpRule],
+) -> Result<Option<(Term, Proof)>, TacticError> {
+    for rule in rules {
+        if let Some((term, proof)) = apply_simp_rule_to_term(env, ctx, term, rule)? {
+            return Ok(Some((term, proof)));
+        }
+    }
+
+    match term {
+        Term::App(name, args) => {
+            for (idx, arg) in args.iter().enumerate() {
+                if let Some((rewritten, proof)) =
+                    rewrite_term_with_simp_rules_once(env, ctx, arg, rules)?
+                {
+                    let mut args = args.clone();
+                    args[idx] = rewritten;
+                    return Ok(Some((Term::App(name.clone(), args), proof)));
+                }
+            }
+            Ok(None)
+        }
+        Term::Succ(inner) => rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
+            Term::Succ(Box::new(inner))
+        }),
+        Term::Singleton(inner) => {
+            rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
+                Term::Singleton(Box::new(inner))
+            })
+        }
+        Term::Powerset(inner) => {
+            rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
+                Term::Powerset(Box::new(inner))
+            })
+        }
+        Term::Add(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::Add(Box::new(left), Box::new(right))
+            })
+        }
+        Term::Mul(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::Mul(Box::new(left), Box::new(right))
+            })
+        }
+        Term::Sub(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::Sub(Box::new(left), Box::new(right))
+            })
+        }
+        Term::Union(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::Union(Box::new(left), Box::new(right))
+            })
+        }
+        Term::Inter(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::Inter(Box::new(left), Box::new(right))
+            })
+        }
+        Term::Diff(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::Diff(Box::new(left), Box::new(right))
+            })
+        }
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            if let Some((body, proof)) =
+                rewrite_formula_with_simp_rules_once(env, ctx, body, rules)?
+            {
+                Ok(Some((
+                    Term::SetBuilder {
+                        var: var.clone(),
+                        var_type: var_type.clone(),
+                        body: Box::new(body),
+                    },
+                    proof,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+        Term::PredLambda { params, body } => {
+            if let Some((body, proof)) =
+                rewrite_formula_with_simp_rules_once(env, ctx, body, rules)?
+            {
+                Ok(Some((
+                    Term::PredLambda {
+                        params: params.clone(),
+                        body: Box::new(body),
+                    },
+                    proof,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) => Ok(None),
+    }
+}
+
+fn apply_simp_rule_to_term(
+    env: &Env,
+    ctx: &Context,
+    term: &Term,
+    rule: &SimpRule,
+) -> Result<Option<(Term, Proof)>, TacticError> {
+    let mut term_subst = HashMap::new();
+    let mut schema_subst = SchemaSubst::default();
+    {
+        let mut unify = UnifyState {
+            env,
+            ctx,
+            term_metas: &[],
+            schema_params: &rule.params,
+            term_subst: &mut term_subst,
+            schema_subst: &mut schema_subst,
+        };
+        if unify_term(&rule.lhs, term, &mut unify).is_err() {
+            return Ok(None);
+        }
+    }
+    if ensure_schema_subst_complete(&rule.params, &schema_subst, Some(&rule.theorem_name)).is_err()
+    {
+        return Ok(None);
+    }
+    let replacement = subst_term_schema(&rule.rhs, &schema_subst);
+    if &replacement == term {
+        return Ok(None);
+    }
+    Ok(Some((
+        replacement,
+        Proof::TheoremRef {
+            name: rule.theorem_name.clone(),
+            subst: schema_subst,
+        },
+    )))
+}
+
+fn rewrite_unary_term_with_simp_rules(
+    env: &Env,
+    ctx: &Context,
+    inner: &Term,
+    rules: &[SimpRule],
+    rebuild: fn(Term) -> Term,
+) -> Result<Option<(Term, Proof)>, TacticError> {
+    if let Some((inner, proof)) = rewrite_term_with_simp_rules_once(env, ctx, inner, rules)? {
+        Ok(Some((rebuild(inner), proof)))
+    } else {
+        Ok(None)
+    }
+}
+
+fn rewrite_binary_term_node_with_simp_rules(
+    env: &Env,
+    ctx: &Context,
+    left: &Term,
+    right: &Term,
+    rules: &[SimpRule],
+    rebuild: fn(Term, Term) -> Term,
+) -> Result<Option<(Term, Proof)>, TacticError> {
+    if let Some((left, proof)) = rewrite_term_with_simp_rules_once(env, ctx, left, rules)? {
+        return Ok(Some((rebuild(left, right.clone()), proof)));
+    }
+    if let Some((right, proof)) = rewrite_term_with_simp_rules_once(env, ctx, right, rules)? {
+        return Ok(Some((rebuild(left.clone(), right), proof)));
+    }
+    Ok(None)
 }
 
 fn simplify_hypotheses(env: &Env, ctx: &Context) -> Result<(Context, bool), TacticError> {
@@ -8537,6 +8950,63 @@ theorem simp_goal : Happy(mother(alice)) -> VeryHappyMother(alice) := by
   simp
   exact h
 "#,
+        );
+    }
+
+    #[test]
+    fn simp_uses_listed_equality_theorem_as_rewrite_rule() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+axiom mother_alice : mother(alice) = alice
+
+theorem happy_mother : Happy(alice) -> Happy(mother(alice)) := by
+  intro h
+  simp [mother_alice]
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn simp_rule_can_instantiate_schema_term_arguments() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func normalize : Person -> Person
+pred Happy(Person)
+
+axiom normalize_id (x : Person) : normalize(x) = x
+
+theorem happy_normalized : Happy(alice) -> Happy(normalize(alice)) := by
+  intro h
+  simp [normalize_id]
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn simp_rule_must_be_equality() {
+        check_err_contains(
+            r#"
+mode constructive
+
+axiom trusted : True
+
+theorem bad : True := by
+  simp [trusted]
+"#,
+            "simp rule `trusted` must prove a term equality",
         );
     }
 

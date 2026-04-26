@@ -24,17 +24,19 @@ Then the user still needs to provide an explicit schema argument.
 **Possible improvement:** add a more principled search procedure for
 underconstrained theorem parameters.
 
-### 2. `simp` is built-in, not theorem-driven
+### 2. `simp` has explicit theorem rules, not a global simp set
 
 `simp` knows transparent definitions, set membership, subset expansion,
 and built-in Nat computation. `simp at h` can simplify a named
 hypothesis, and `simp at *` simplifies the goal plus all hypotheses. It
-does not use arbitrary imported lemmas as rewrite rules.
+can also use listed equality theorems in the goal, as in `simp [h]`.
 
-For example, a goal may simplify cleanly while a matching hypothesis
-still needs an explicit `rewrite`, `exact`, or helper theorem.
+The remaining limitation is that there is no global or attribute-based
+simp-set, no automatic imported-lemma discovery, and no iff/proposition
+rewriting.
 
-**Possible improvement:** add a theorem-driven simplifier.
+**Possible improvement:** add `@[simp]`-style rule registration and a richer
+rewrite engine.
 
 ### 3. User-defined recursive functions are not available
 
@@ -152,6 +154,8 @@ are now implemented:
 - Built-in `add` and `mul` simplify the CS 250 textbook's
   right-recursive equations as well as the implementation's
   left-recursive equations.
+- `simp [lemma]` can use listed equality theorems as rewrite rules in
+  the goal.
 - `apply` can infer intermediate schema arguments for transitive lemmas
   such as `subset_trans` and `eq_trans` from matching local hypotheses.
 - `powerset(A)` is supported, with membership simplifying to subset.

@@ -664,15 +664,18 @@ A subset B  ==>  forall x : T, x in A -> x in B
 
 The `simp` tactic is intentionally small. It normalizes the current goal using
 transparent formula definitions, set computation, subset expansion, and Nat
-computation inside formula terms. `simp at h` applies the same normalization
-to a named hypothesis in the local proof state, and `simp at *` normalizes the
-goal plus all named hypotheses. All forms reject no-op calls so users notice
-when `simp` did not change anything.
+computation inside formula terms. `simp [lemma]` additionally uses listed term
+equality theorems as rewrite rules in the goal. `simp at h` applies built-in
+normalization to a named hypothesis in the local proof state, and `simp at *`
+normalizes the goal plus all named hypotheses. All forms reject no-op calls so
+users notice when `simp` did not change anything.
 
 Current design tradeoff:
 
 - `simp` is predictable and easy to inspect.
-- It is not yet a theorem-driven simplifier.
+- The theorem-driven part is explicit: users list equality rules in
+  `simp [rule]`.
+- There is no attribute-based global simp set or iff/proposition rewriting yet.
 - Hypothesis simplification is explicit: either one named hypothesis or all
   hypotheses with `simp at *`.
 
@@ -949,7 +952,7 @@ Important limitations to account for when extending the system:
 - Formula and term definitions are transparent and simple.
 - Predicate lambdas are intentionally first-order and are only accepted where a
   predicate argument is expected.
-- `simp` is not theorem-driven.
+- `simp` has explicit equality rewrite rules, but no global simp attribute set.
 - Nat induction is specialized and not fully generalized.
 - The standard library contains an explicit trusted set-extensionality axiom.
 
