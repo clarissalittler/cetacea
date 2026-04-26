@@ -1144,7 +1144,7 @@ Cetacea is intentionally small. Important current limitations:
 - The parser is line-oriented and intentionally simple.
 - Parse diagnostics carry line-local token spans where possible, but checked
   declaration and tactic execution errors still report line numbers rather than
-  exact AST spans.
+  exact AST spans. Runtime tactic failures report the failing tactic line.
 - `simp [lemma]` can use listed equality theorems as rewrite rules, but there
   is not yet an attribute-based global simp set or iff/proposition rewriting.
 - Theorem instantiation is useful but incomplete. Some proofs still need

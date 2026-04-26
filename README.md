@@ -96,7 +96,7 @@ loaded once.
   Nat definitions, set membership, subset expansion, Nat arithmetic and
   comparison, including terms nested under predicate and function arguments
 - kernel reporting of constructive versus classical proof use
-- command-level file and line reporting for checker diagnostics
+- command and tactic-line reporting for checker diagnostics
 
 ## Next Milestones
 

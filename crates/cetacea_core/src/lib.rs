@@ -1320,7 +1320,7 @@ impl FileChecker {
                             self.result.diagnostics.push(
                                 diagnostic_at(
                                     source_path,
-                                    line,
+                                    err.line.unwrap_or(line),
                                     format!("theorem `{}` failed: {}", decl.name, err.message),
                                 )
                                 .with_note(format!("target: {target}")),
@@ -3789,7 +3789,7 @@ struct TheoremDecl {
     name: Name,
     params: Vec<Param>,
     statement: Formula,
-    tactics: Vec<Tactic>,
+    tactics: Vec<LocatedTactic>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4185,15 +4185,15 @@ enum Tactic {
     CasesOr {
         expr: ProofExpr,
         left_name: Name,
-        left_tactics: Vec<Tactic>,
+        left_tactics: Vec<LocatedTactic>,
         right_name: Name,
-        right_tactics: Vec<Tactic>,
+        right_tactics: Vec<LocatedTactic>,
     },
     CasesExists {
         expr: ProofExpr,
         witness_name: Name,
         hyp_name: Name,
-        body_tactics: Vec<Tactic>,
+        body_tactics: Vec<LocatedTactic>,
     },
     Exists(Term),
     Refl,
@@ -4208,10 +4208,10 @@ enum Tactic {
     SimpWith(Vec<Name>),
     Induction {
         var_name: Name,
-        zero_tactics: Vec<Tactic>,
+        zero_tactics: Vec<LocatedTactic>,
         step_var: Name,
         ih_name: Name,
-        step_tactics: Vec<Tactic>,
+        step_tactics: Vec<LocatedTactic>,
     },
     Exfalso,
     Contradiction,
@@ -4221,6 +4221,12 @@ enum Tactic {
     },
     ByContra(Name),
     ShowGoal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LocatedTactic {
+    line: usize,
+    tactic: Tactic,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -5155,7 +5161,7 @@ fn parse_pred_decl(input: &str) -> Result<(Name, Vec<Type>), ParseError> {
     Ok((name, args))
 }
 
-fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<Tactic>, ParseError> {
+fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, ParseError> {
     let mut tactics = Vec::new();
     let mut i = 0;
 
@@ -5190,11 +5196,15 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<Tactic>, ParseError
                 let body_tactics = parse_tactic_lines(&lines[i..body_end])?;
                 i = body_end;
 
-                tactics.push(Tactic::CasesExists {
-                    expr: parse_proof_expr(expr.trim()).map_err(|err| err.with_line(line_no))?,
-                    witness_name,
-                    hyp_name,
-                    body_tactics,
+                tactics.push(LocatedTactic {
+                    line: line_no,
+                    tactic: Tactic::CasesExists {
+                        expr: parse_proof_expr(expr.trim())
+                            .map_err(|err| err.with_line(line_no))?,
+                        witness_name,
+                        hyp_name,
+                        body_tactics,
+                    },
                 });
                 continue;
             }
@@ -5222,12 +5232,15 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<Tactic>, ParseError
             let right_tactics = parse_tactic_lines(&lines[right_start..right_end])?;
             i = right_end;
 
-            tactics.push(Tactic::CasesOr {
-                expr: parse_proof_expr(expr.trim()).map_err(|err| err.with_line(line_no))?,
-                left_name,
-                left_tactics,
-                right_name,
-                right_tactics,
+            tactics.push(LocatedTactic {
+                line: line_no,
+                tactic: Tactic::CasesOr {
+                    expr: parse_proof_expr(expr.trim()).map_err(|err| err.with_line(line_no))?,
+                    left_name,
+                    left_tactics,
+                    right_name,
+                    right_tactics,
+                },
             });
             continue;
         }
@@ -5262,21 +5275,26 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<Tactic>, ParseError
             let step_tactics = parse_tactic_lines(&lines[step_start..step_end])?;
             i = step_end;
 
-            tactics.push(Tactic::Induction {
-                var_name: expect_single_name(var_name, "induction")
-                    .map_err(|err| err.with_line(line_no))?,
-                zero_tactics,
-                step_var,
-                ih_name,
-                step_tactics,
+            tactics.push(LocatedTactic {
+                line: line_no,
+                tactic: Tactic::Induction {
+                    var_name: expect_single_name(var_name, "induction")
+                        .map_err(|err| err.with_line(line_no))?,
+                    zero_tactics,
+                    step_var,
+                    ih_name,
+                    step_tactics,
+                },
             });
             continue;
         }
 
         let offset = lines[i].text.find(trimmed).unwrap_or(0);
-        tactics.push(
-            parse_tactic_line(trimmed).map_err(|err| err.with_offset(offset).with_line(line_no))?,
-        );
+        tactics.push(LocatedTactic {
+            line: line_no,
+            tactic: parse_tactic_line(trimmed)
+                .map_err(|err| err.with_offset(offset).with_line(line_no))?,
+        });
         i += 1;
     }
 
@@ -5663,6 +5681,7 @@ fn append_projection_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), Pa
 struct TacticError {
     message: String,
     target: Option<Formula>,
+    line: Option<usize>,
 }
 
 impl TacticError {
@@ -5670,12 +5689,20 @@ impl TacticError {
         Self {
             message: message.into(),
             target: None,
+            line: None,
         }
     }
 
     fn with_target(mut self, target: Formula) -> Self {
         if self.target.is_none() {
             self.target = Some(target);
+        }
+        self
+    }
+
+    fn with_line(mut self, line: usize) -> Self {
+        if self.line.is_none() {
+            self.line = Some(line);
         }
         self
     }
@@ -5920,7 +5947,7 @@ fn prove(
     env: &Env,
     context: Context,
     target: Formula,
-    tactics: &[Tactic],
+    tactics: &[LocatedTactic],
     allowed_mode: LogicMode,
 ) -> Result<Proof, TacticError> {
     let mut root = PartialProof::Hole(0);
@@ -5931,21 +5958,23 @@ fn prove(
     }];
     let mut next_goal_id = 1;
 
-    for tactic in tactics {
+    for located in tactics {
         if goals.is_empty() {
-            return Err(TacticError::new(
-                "tactic was provided after all goals were solved",
-            ));
+            return Err(
+                TacticError::new("tactic was provided after all goals were solved")
+                    .with_line(located.line),
+            );
         }
 
         let goal = goals.remove(0);
         let goal_id = goal.id;
         let goal_target = goal.target.clone();
+        let tactic = &located.tactic;
         let StepResult {
             replacement,
             new_goals,
         } = run_tactic(env, goal, tactic, allowed_mode, &mut next_goal_id)
-            .map_err(|err| err.with_target(goal_target))?;
+            .map_err(|err| err.with_target(goal_target).with_line(located.line))?;
         if !root.replace_hole(goal_id, &replacement) {
             return Err(TacticError::new("internal error: missing proof hole"));
         }
@@ -8054,7 +8083,7 @@ mod tests {
     }
 
     #[test]
-    fn theorem_diagnostic_reports_command_line() {
+    fn theorem_diagnostic_reports_failing_tactic_line() {
         let result = check_file(
             r#"
 mode constructive
@@ -8065,7 +8094,7 @@ theorem bad (P : Prop) : P := by
         );
         assert_eq!(
             result.diagnostics[0].location.as_ref().map(|loc| loc.line),
-            Some(4)
+            Some(5)
         );
     }
 
@@ -8117,11 +8146,45 @@ theorem bad (P Q : Prop) : P -> P /\ Q := by
 "#,
         );
         assert!(!result.diagnostics.is_empty());
+        assert_eq!(
+            result.diagnostics[0].location.as_ref().map(|loc| loc.line),
+            Some(8)
+        );
         assert!(
             result.diagnostics[0]
                 .notes
                 .iter()
                 .any(|note| note == "target: Q"),
+            "diagnostic notes were {:#?}",
+            result.diagnostics[0].notes
+        );
+    }
+
+    #[test]
+    fn failed_nested_tactic_reports_inner_tactic_line() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem bad (P Q R : Prop) : P \/ Q -> R := by
+  intro h
+  cases h with
+  | left hp =>
+      exact hp
+  | right hq =>
+      exact hq
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert_eq!(
+            result.diagnostics[0].location.as_ref().map(|loc| loc.line),
+            Some(8)
+        );
+        assert!(
+            result.diagnostics[0]
+                .notes
+                .iter()
+                .any(|note| note == "target: R"),
             "diagnostic notes were {:#?}",
             result.diagnostics[0].notes
         );

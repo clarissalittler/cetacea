@@ -101,8 +101,8 @@ Counting arguments and cardinality exercises do not.
 
 Parse errors now carry line-local token spans when the parser can identify the
 offending token. Checking errors report useful line numbers, and failed tactics
-report the current goal, but they still do not point at an exact AST or tactic
-span within the line.
+report the failing tactic line plus the current goal. They still do not point at
+an exact AST or tactic span within the line.
 
 That is good enough for short tutorial files but can still be vague in
 long theorem headers.
@@ -153,6 +153,8 @@ are now implemented:
 
 - `True` goals can be closed with `trivial` or `exact True`.
 - Failed tactics report the current open goal in the `target:` note.
+- Failed tactics report the failing tactic line, including inside nested
+  tactic blocks.
 - Parse errors report useful line numbers.
 - Formula and term definitions can take type, term, proposition, and
   predicate parameters.
