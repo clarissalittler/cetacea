@@ -1093,8 +1093,9 @@ Cetacea is intentionally small. Important current limitations:
 - There are no namespaces or qualified imports.
 - Imported declarations enter one global environment.
 - The parser is line-oriented and intentionally simple.
-- Precise source spans are not implemented yet. Diagnostics report line
-  numbers, not exact token spans.
+- Parse diagnostics carry line-local token spans where possible, but checked
+  declaration and tactic execution errors still report line numbers rather than
+  exact AST spans.
 - `simp` uses built-in computation rules and formula definitions. It does not
   yet use arbitrary imported rewrite lemmas.
 - Theorem instantiation is useful but incomplete. Some proofs still need

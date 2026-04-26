@@ -366,15 +366,16 @@ pub struct Diagnostic {
 Current diagnostic design:
 
 - `SourceLocation` reports an optional path and a command or parse-error line.
-- `Span` exists but is not meaningfully populated yet.
+- Parser errors carry line-local `Span` values when the parser can identify the
+  offending token.
 - The parser stores line numbers on top-level commands via `LocatedCommand` and
   on raw tactic lines while parsing theorem bodies.
 - Tactic execution errors attach the current open goal as the diagnostic target
   note.
 - The CLI prints `path:line: message` when location information exists.
 
-This is a pragmatic halfway point. It helps users find failing declarations
-without requiring a fully span-aware parser.
+This is a pragmatic halfway point. It helps users find failing declarations and
+parse tokens without requiring a fully span-aware checked AST.
 
 ## Parser Design
 
@@ -923,15 +924,16 @@ This would make library proofs shorter without changing the kernel.
 ## How To Improve Diagnostics
 
 The current diagnostics know command line numbers, and parse errors in tactic
-blocks know the offending tactic line. They do not yet know exact token spans
-or execution-time tactic spans.
+blocks know the offending tactic line. Parser errors carry token spans where
+possible. Checked declarations and execution-time tactic failures do not yet
+carry exact AST or tactic spans.
 
 Useful next steps:
 
-1. Give parse tokens byte spans.
-2. Preserve spans in AST nodes.
-3. Store tactic line numbers inside `Tactic`.
-4. Report the failing execution-time tactic line, not just the theorem line.
+1. Preserve spans in AST nodes.
+2. Store tactic line numbers inside `Tactic`.
+3. Report the failing execution-time tactic line, not just the theorem line.
+4. Render spans in the CLI with caret ranges.
 5. Include a compact proof state when tactic execution fails.
 
 The existing `Span` field in `Diagnostic` is a placeholder for this direction.

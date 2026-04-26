@@ -638,7 +638,7 @@ fn is_builtin_name(name: &str) -> bool {
 
 static BUILTIN_LE_SIGNATURE: [Type; 2] = [Type::Nat, Type::Nat];
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
@@ -3437,6 +3437,7 @@ struct RawTacticLine {
 struct ParseError {
     message: String,
     line: Option<usize>,
+    span: Option<Span>,
 }
 
 impl ParseError {
@@ -3444,6 +3445,7 @@ impl ParseError {
         Self {
             message: message.into(),
             line: None,
+            span: None,
         }
     }
 
@@ -3453,11 +3455,27 @@ impl ParseError {
         }
         self
     }
+
+    fn with_span(mut self, span: Span) -> Self {
+        if self.span.is_none() {
+            self.span = Some(span);
+        }
+        self
+    }
+
+    fn with_offset(mut self, offset: usize) -> Self {
+        if let Some(span) = &mut self.span {
+            span.start += offset;
+            span.end += offset;
+        }
+        self
+    }
 }
 
 fn parse_diagnostic(path: Option<&Path>, err: ParseError, message: Option<String>) -> Diagnostic {
     let has_context = message.is_some();
     let mut diagnostic = Diagnostic::error(message.unwrap_or_else(|| err.message.clone()));
+    diagnostic.span = err.span;
     if let Some(line) = err.line {
         diagnostic = diagnostic.with_location(path, line);
     }
@@ -3779,6 +3797,7 @@ enum Tactic {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Token {
     kind: TokenKind,
+    span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3805,6 +3824,10 @@ impl Tokens {
         &self.tokens[self.pos].kind
     }
 
+    fn current_span(&self) -> Span {
+        self.tokens[self.pos].span
+    }
+
     fn eat_sym(&mut self, sym: &str) -> bool {
         if matches!(self.peek(), TokenKind::Sym(actual) if actual == sym) {
             self.pos += 1;
@@ -3818,7 +3841,7 @@ impl Tokens {
         if self.eat_sym(sym) {
             Ok(())
         } else {
-            Err(ParseError::new(format!("expected `{sym}`")))
+            Err(ParseError::new(format!("expected `{sym}`")).with_span(self.current_span()))
         }
     }
 
@@ -3838,7 +3861,7 @@ impl Tokens {
                 self.pos += 1;
                 Ok(name)
             }
-            _ => Err(ParseError::new("expected identifier")),
+            _ => Err(ParseError::new("expected identifier").with_span(self.current_span())),
         }
     }
 
@@ -3846,7 +3869,7 @@ impl Tokens {
         if self.eat_ident(keyword) {
             Ok(())
         } else {
-            Err(ParseError::new(format!("expected `{keyword}`")))
+            Err(ParseError::new(format!("expected `{keyword}`")).with_span(self.current_span()))
         }
     }
 
@@ -3854,7 +3877,7 @@ impl Tokens {
         if matches!(self.peek(), TokenKind::Eof) {
             Ok(())
         } else {
-            Err(ParseError::new("unexpected trailing input"))
+            Err(ParseError::new("unexpected trailing input").with_span(self.current_span()))
         }
     }
 
@@ -4122,6 +4145,10 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
         if ch == '0' {
             tokens.push(Token {
                 kind: TokenKind::Sym("0".to_string()),
+                span: Span {
+                    start: i,
+                    end: i + 1,
+                },
             });
             i += 1;
             continue;
@@ -4134,6 +4161,7 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
             }
             tokens.push(Token {
                 kind: TokenKind::Ident(chars[start..i].iter().collect()),
+                span: Span { start, end: i },
             });
             continue;
         }
@@ -4165,16 +4193,29 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
         };
 
         let Some(sym) = sym else {
-            return Err(ParseError::new(format!("unexpected character `{ch}`")));
+            return Err(
+                ParseError::new(format!("unexpected character `{ch}`")).with_span(Span {
+                    start: i,
+                    end: i + 1,
+                }),
+            );
         };
         tokens.push(Token {
             kind: TokenKind::Sym(sym.to_string()),
+            span: Span {
+                start: i,
+                end: i + sym.chars().count(),
+            },
         });
         i += sym.chars().count();
     }
 
     tokens.push(Token {
         kind: TokenKind::Eof,
+        span: Span {
+            start: chars.len(),
+            end: chars.len(),
+        },
     });
     Ok(tokens)
 }
@@ -4662,7 +4703,10 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<Tactic>, ParseError
             continue;
         }
 
-        tactics.push(parse_tactic_line(trimmed).map_err(|err| err.with_line(line_no))?);
+        let offset = lines[i].text.find(trimmed).unwrap_or(0);
+        tactics.push(
+            parse_tactic_line(trimmed).map_err(|err| err.with_offset(offset).with_line(line_no))?,
+        );
         i += 1;
     }
 
@@ -4751,7 +4795,11 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         return Ok(Tactic::Intro(expect_single_name(rest, "intro")?));
     }
     if let Some(rest) = line.strip_prefix("exact ") {
-        return Ok(Tactic::Exact(parse_proof_expr(rest.trim())?));
+        let expr = rest.trim();
+        let offset = line.find(expr).unwrap_or(0);
+        return Ok(Tactic::Exact(
+            parse_proof_expr(expr).map_err(|err| err.with_offset(offset))?,
+        ));
     }
     if line == "trivial" {
         return Ok(Tactic::Trivial);
@@ -4760,10 +4808,18 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         return Ok(Tactic::Assumption);
     }
     if let Some(rest) = line.strip_prefix("apply ") {
-        return Ok(Tactic::Apply(parse_proof_expr(rest.trim())?));
+        let expr = rest.trim();
+        let offset = line.find(expr).unwrap_or(0);
+        return Ok(Tactic::Apply(
+            parse_proof_expr(expr).map_err(|err| err.with_offset(offset))?,
+        ));
     }
     if let Some(rest) = line.strip_prefix("exists ") {
-        return Ok(Tactic::Exists(parse_term_str(rest.trim())?));
+        let term = rest.trim();
+        let offset = line.find(term).unwrap_or(0);
+        return Ok(Tactic::Exists(
+            parse_term_str(term).map_err(|err| err.with_offset(offset))?,
+        ));
     }
     if line == "refl" {
         return Ok(Tactic::Refl);
@@ -4778,7 +4834,8 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
             (RewriteDirection::Backward, rest)
         };
         return Ok(Tactic::Rewrite {
-            expr: parse_proof_expr(expr)?,
+            expr: parse_proof_expr(expr)
+                .map_err(|err| err.with_offset(line.find(expr).unwrap_or(0)))?,
             direction,
         });
     }
@@ -4815,7 +4872,11 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         };
         return Ok(Tactic::ByCases {
             name: expect_single_name(name, "by_cases")?,
-            formula: parse_formula_str(formula.trim())?,
+            formula: {
+                let formula = formula.trim();
+                parse_formula_str(formula)
+                    .map_err(|err| err.with_offset(line.find(formula).unwrap_or(0)))?
+            },
         });
     }
     if let Some(rest) = line.strip_prefix("by_contra ") {
@@ -7007,6 +7068,23 @@ theorem bad (P : Prop) : P -> P := by
             result.diagnostics[0].location.as_ref().map(|loc| loc.line),
             Some(6)
         );
+    }
+
+    #[test]
+    fn parse_error_reports_token_span() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem bad : exists n : Nat, n = n := by
+  exists @
+"#,
+        );
+        assert_eq!(
+            result.diagnostics[0].location.as_ref().map(|loc| loc.line),
+            Some(5)
+        );
+        assert_eq!(result.diagnostics[0].span, Some(Span { start: 9, end: 10 }));
     }
 
     #[test]

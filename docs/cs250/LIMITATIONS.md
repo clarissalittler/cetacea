@@ -85,11 +85,12 @@ comprehension beyond predicate set builders.
 The Module 1 set-identity and powerset-monotonicity proofs fit well.
 Counting arguments and cardinality exercises do not.
 
-### 8. Diagnostics still have line granularity, not token spans
+### 8. Some diagnostics still have line granularity
 
-Parse and checking errors now report useful line numbers, and failed
-tactics report the current goal. They still do not point at an exact
-token span within the line.
+Parse errors now carry line-local token spans when the parser can identify the
+offending token. Checking errors report useful line numbers, and failed tactics
+report the current goal, but they still do not point at an exact AST or tactic
+span within the line.
 
 That is good enough for short tutorial files but can still be vague in
 long theorem headers.

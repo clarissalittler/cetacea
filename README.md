@@ -44,7 +44,9 @@ cargo run -p cetacea_cli -- std/nat.ctea
 The CLI prints each accepted theorem or axiom from the root file and the
 strongest mode used by its checked proof object.
 Diagnostics for checked declarations and parse errors include the file and
-command or tactic line when the checker has path information.
+command or tactic line when the checker has path information. Parser
+diagnostics also carry line-local token spans where the parser can identify the
+offending token.
 
 Import paths are resolved relative to the importing file first, then relative
 to the current working directory. A file imported more than once is checked and
