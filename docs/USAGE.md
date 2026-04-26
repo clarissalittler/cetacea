@@ -650,7 +650,7 @@ Here the target is `Happy(mother(alice))`, and `h` is
 Use `rewrite -> h` for the opposite direction, where the target contains the
 left side and the new subgoal contains the right side.
 
-For theorem schemas, explicit instantiation is sometimes needed:
+For theorems with parameters, explicit instantiation is sometimes needed:
 
 ```text
 rewrite add_zero_right {n := m}
@@ -882,7 +882,7 @@ values are parsed according to the parameter kind:
 - predicate parameters, such as `P := Student` or `P := fun x => x = x`
 - term parameters, such as `x := alice`
 
-Cetacea can infer many schema arguments from the goal, especially for bare
+Cetacea can infer many theorem parameters from the goal, especially for bare
 theorem references in `exact` and `apply`. When inference fails, use explicit
 arguments.
 
@@ -1148,7 +1148,7 @@ Cetacea is intentionally small. Important current limitations:
 - `simp [lemma]` can use listed equality theorems as rewrite rules, but there
   is not yet an attribute-based global simp set or iff/proposition rewriting.
 - Theorem instantiation is useful but incomplete. Some proofs still need
-  explicit schema arguments.
+  explicit theorem parameters.
 - Nat has addition, multiplication, truncated subtraction, and `le`, but no
   division, modular arithmetic, or decidable equality tactic.
 - Nat induction is specialized to `Nat` and rejects induction when local

@@ -3966,7 +3966,7 @@ impl ProofExpr {
         if ctx.lookup(&self.base).is_some() {
             if self.has_explicit_args() {
                 return Err(TacticError::new(
-                    "explicit theorem arguments can only be used with theorem references",
+                    "named arguments like `{P := ...}` can only be used with theorem or axiom names",
                 ));
             }
             Ok(Proof::Hyp(self.base.clone()))
@@ -3985,7 +3985,7 @@ impl ProofExpr {
         } else {
             if self.has_explicit_args() {
                 return Err(TacticError::new(
-                    "explicit theorem arguments can only be used with theorem references",
+                    "named arguments like `{P := ...}` can only be used with theorem or axiom names",
                 ));
             }
             Ok(Proof::Hyp(self.base.clone()))
@@ -4013,7 +4013,7 @@ impl ProofExpr {
                 ProofStep::Arg(arg) => {
                     let checked = infer_proof(env, ctx, &proof, allowed_mode).map_err(|err| {
                         TacticError::new(format!(
-                            "cannot apply proof expression `{}`: {}",
+                            "cannot use proof `{}` with an argument: {}",
                             self.base, err.message
                         ))
                     })?;
@@ -4040,7 +4040,7 @@ impl ProofExpr {
                         }
                         other => {
                             return Err(TacticError::new(format!(
-                                "proof application expects a universal or implication proof, got `{other}`"
+                                "this proof cannot take an argument because it proves `{other}`, not a forall or implication"
                             )))
                         }
                     }
@@ -4134,7 +4134,8 @@ impl ProofExpr {
                         }
                         other => {
                             return Err(TacticError::new(format!(
-                                "theorem application expects a universal or implication proof, got `{other}`"
+                                "theorem `{}` cannot take another argument here because the remaining statement is `{other}`",
+                                theorem.name
                             )))
                         }
                     }
@@ -6055,7 +6056,7 @@ fn run_tactic(
                 proof_expr_for_expected(env, &goal.context, expr, &goal.target, allowed_mode)?;
             check_proof(env, &goal.context, &proof, &goal.target, allowed_mode).map_err(|err| {
                 TacticError::new(format!(
-                    "exact expression does not solve the goal: {}",
+                    "exact proof does not solve the goal: {}",
                     err.message
                 ))
             })?;
@@ -7071,7 +7072,7 @@ fn explicit_schema_subst(
     for arg in explicit_args {
         if seen.iter().any(|name: &Name| name == &arg.name) {
             return Err(TacticError::new(format!(
-                "schema argument `{}` was provided more than once",
+                "theorem parameter `{}` was provided more than once",
                 arg.name
             )));
         }
@@ -7080,7 +7081,7 @@ fn explicit_schema_subst(
         let Some(param) = theorem.params.iter().find(|param| param.name == arg.name) else {
             let available = theorem_schema_arg_list(theorem);
             return Err(TacticError::new(format!(
-                "theorem `{}` has no schema argument `{}`; available schema arguments: {}",
+                "theorem `{}` has no parameter `{}`; available parameters: {}",
                 theorem.name, arg.name, available
             )));
         };
@@ -7137,7 +7138,7 @@ fn explicit_schema_arg_error(
     message: impl Into<String>,
 ) -> TacticError {
     TacticError::new(format!(
-        "invalid value for schema argument `{}` of theorem `{}`: {}",
+        "invalid value for theorem parameter `{}` in `{}`: {}",
         arg.name,
         theorem.name,
         message.into()
@@ -7233,8 +7234,9 @@ fn proof_expr_for_apply(
     }
 
     let proof = expr.to_proof(env, ctx, allowed_mode)?;
-    let checked = infer_proof(env, ctx, &proof, allowed_mode)
-        .map_err(|err| TacticError::new(format!("cannot apply expression: {}", err.message)))?;
+    let checked = infer_proof(env, ctx, &proof, allowed_mode).map_err(|err| {
+        TacticError::new(format!("cannot use proof with `apply`: {}", err.message))
+    })?;
     let plan = apply_plan_for_goal(
         env,
         ctx,
@@ -7312,8 +7314,11 @@ fn apply_plan_for_goal(
             schema_subst: &mut schema_subst,
         };
         unify_formula(cursor, &normalized_target, &mut unify).map_err(|_| {
+            let subject = theorem_name
+                .map(|name| format!("theorem `{name}`"))
+                .unwrap_or_else(|| "this proof".to_string());
             TacticError::new(format!(
-                "cannot apply expression with conclusion `{cursor}` to goal `{target}`"
+                "cannot use {subject} here: its conclusion `{cursor}` does not match goal `{target}`"
             ))
         })?;
     }
@@ -7332,7 +7337,7 @@ fn apply_plan_for_goal(
     for (var, _) in forall_vars {
         let Some(arg) = term_subst.get(&var) else {
             return Err(TacticError::new(format!(
-                "cannot infer instantiation for `{var}`"
+                "cannot infer the term for quantified variable `{var}`; provide the term explicitly"
             )));
         };
         forall_args.push(arg.clone());
@@ -7416,7 +7421,12 @@ fn infer_schema_subst_for_formula(
             schema_subst: &mut schema_subst,
         };
         unify_formula(pattern, target, &mut unify).map_err(|_| {
-            TacticError::new(format!("cannot instantiate theorem for goal `{target}`"))
+            let subject = theorem_name
+                .map(|name| format!("theorem `{name}`"))
+                .unwrap_or_else(|| "the theorem".to_string());
+            TacticError::new(format!(
+                "{subject} does not match goal `{target}`; add explicit arguments if this theorem is intended to apply"
+            ))
         })?;
     }
     ensure_schema_subst_complete(params, &schema_subst, theorem_name)?;
@@ -7441,7 +7451,7 @@ fn ensure_schema_subst_complete(
                 .map(|name| format!(" for theorem `{name}`"))
                 .unwrap_or_default();
             return Err(TacticError::new(format!(
-                "cannot infer schema argument `{}`{theorem} ({kind}); provide it explicitly with `{{{} := ...}}`",
+                "cannot infer theorem parameter `{}`{theorem} ({kind}); provide it explicitly with `{{{} := ...}}`",
                 param.name, param.name
             )));
         }
@@ -10131,7 +10141,7 @@ theorem bad : Student(red) := by
     }
 
     #[test]
-    fn schema_theorem_ref_that_cannot_be_instantiated_is_rejected() {
+    fn theorem_ref_that_does_not_match_goal_is_rejected() {
         check_err_contains(
             r#"
 mode constructive
@@ -10143,12 +10153,12 @@ theorem id (P : Prop) : P -> P := by
 theorem bad : True := by
   exact id
 "#,
-            "cannot instantiate theorem for goal `True`",
+            "theorem `id` does not match goal `True`",
         );
     }
 
     #[test]
-    fn unknown_explicit_schema_argument_is_rejected() {
+    fn unknown_explicit_theorem_parameter_is_rejected() {
         check_err_contains(
             r#"
 mode constructive
@@ -10160,12 +10170,12 @@ theorem id (P : Prop) : P -> P := by
 theorem bad (Q : Prop) : Q -> Q := by
   exact id {Missing := Q}
 "#,
-            "available schema arguments: `P`",
+            "available parameters: `P`",
         );
     }
 
     #[test]
-    fn invalid_explicit_schema_argument_value_names_the_argument() {
+    fn invalid_explicit_theorem_parameter_value_names_the_parameter() {
         check_err_contains(
             r#"
 mode constructive
@@ -10176,12 +10186,12 @@ theorem refl_arg (A : Type) (x : A) : x = x := by
 theorem bad (A : Type) (x : A) : x = x := by
   exact refl_arg {A := A; x := missing}
 "#,
-            "invalid value for schema argument `x` of theorem `refl_arg`: unknown term `missing`",
+            "invalid value for theorem parameter `x` in `refl_arg`: unknown term `missing`",
         );
     }
 
     #[test]
-    fn missing_schema_argument_reports_theorem_and_parameter_kind() {
+    fn missing_theorem_parameter_reports_theorem_and_parameter_kind() {
         check_err_contains(
             r#"
 mode constructive
@@ -10192,12 +10202,12 @@ theorem unused_type (A B : Type) (x : A) : x = x := by
 theorem bad (A : Type) (x : A) : x = x := by
   exact unused_type {A := A; x := x}
 "#,
-            "cannot infer schema argument `B` for theorem `unused_type` (type parameter); provide it explicitly with `{B := ...}`",
+            "cannot infer theorem parameter `B` for theorem `unused_type` (type parameter); provide it explicitly with `{B := ...}`",
         );
     }
 
     #[test]
-    fn duplicate_explicit_schema_argument_is_rejected() {
+    fn duplicate_explicit_theorem_parameter_is_rejected() {
         check_err_contains(
             r#"
 mode constructive

@@ -19,7 +19,7 @@ apply subset_trans
 
 The remaining rough edge is the genuinely underdetermined case where
 the intermediate object is not present in the goal or local hypotheses.
-Then the user still needs to provide an explicit schema argument.
+Then the user still needs to provide an explicit theorem parameter.
 
 **Possible improvement:** add a more principled search procedure for
 underconstrained theorem parameters.
@@ -140,11 +140,12 @@ The block parser accepts a range of indentation styles. The tutorials use
 one consistent style, but the accepted grammar is more permissive than
 the prose explains.
 
-### Error messages are still implementation-flavored
+### Some error messages are still terse
 
-The checker is much clearer than it was, but messages still mention
-schema arguments, target formulas, and proof expressions in terms that
-are more natural to implementers than first-time proof students.
+The checker is much clearer than it was, and theorem-instantiation
+messages now use student-facing "theorem parameter" wording. Some
+messages are still terse, especially when a proof expression has several
+parts or when a normalized target formula is large.
 
 ## Resolved since the first tutorial draft
 
@@ -170,7 +171,7 @@ are now implemented:
   `defrec`, and `simp` computes their zero and successor equations.
 - `simp [lemma]` can use listed equality theorems as rewrite rules in
   the goal.
-- `apply` can infer intermediate schema arguments for transitive lemmas
+- `apply` can infer intermediate theorem parameters for transitive lemmas
   such as `subset_trans` and `eq_trans` from matching local hypotheses.
 - `powerset(A)` is supported, with membership simplifying to subset.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
@@ -178,8 +179,8 @@ are now implemented:
 - Parenthesized proof expressions such as `exact (h hp).left` and
   `apply (htrans x y x)` parse.
 - Multi-binder `forall x y : T, ...` and `exists x y : T, ...` parse.
-- Explicit theorem schema arguments can be combined with ordinary
-  forall arguments.
+- Explicit theorem parameters can be combined with ordinary forall
+  arguments.
 - Nat has built-in `mul`, `sub`, and `le`.
 - `show_goal` reports the current goal.
 - `intro` rejects shadowing instead of silently replacing a local name.
