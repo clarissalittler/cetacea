@@ -211,12 +211,13 @@ pub struct SchemaSubst {
     pub type_args: HashMap<Name, Type>,
     pub term_args: HashMap<Name, Term>,
     pub formula_args: HashMap<Name, Formula>,
-    pub predicate_args: HashMap<Name, Name>,
+    pub predicate_args: HashMap<Name, PredicateArg>,
 }
 ```
 
-Predicate schema arguments currently map to predicate names, not arbitrary
-lambda expressions.
+Predicate schema arguments can be predicate names or inline predicate lambdas.
+Lambdas are validated against the expected predicate parameter type before
+their bodies are substituted at predicate applications.
 
 ## Proof Objects
 
@@ -944,9 +945,10 @@ Important limitations to account for when extending the system:
 
 - Imports are global and unqualified.
 - There are no namespaces.
-- The parser is not a full grammar with spans.
+- The parser is line-oriented and only parse errors carry token spans.
 - Formula and term definitions are transparent and simple.
-- Predicate schema arguments are names, not arbitrary predicates.
+- Predicate lambdas are intentionally first-order and are only accepted where a
+  predicate argument is expected.
 - `simp` is not theorem-driven.
 - Nat induction is specialized and not fully generalized.
 - The standard library contains an explicit trusted set-extensionality axiom.

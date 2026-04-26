@@ -206,6 +206,18 @@ theorem forall_mono
   ...
 ```
 
+Predicate arguments can be declared predicate names or inline lambdas. A typed
+lambda can infer a definition's type parameter:
+
+```text
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+
+theorem equality_reflexive : Reflexive(fun x y : Person => x = y) := by
+  simp
+  intro x
+  refl
+```
+
 Built-in Nat terms:
 
 ```text
@@ -830,7 +842,7 @@ values are parsed according to the parameter kind:
 
 - type parameters, such as `A := Person`
 - proposition parameters, such as `P := P /\ Q`
-- predicate parameters, such as `P := Student`
+- predicate parameters, such as `P := Student` or `P := fun x => x = x`
 - term parameters, such as `x := alice`
 
 Cetacea can infer many schema arguments from the goal, especially for bare

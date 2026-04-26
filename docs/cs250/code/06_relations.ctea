@@ -23,6 +23,11 @@ theorem refl_self
 theorem eq_is_refl (A : Type) (x : A) : x = x := by
   refl
 
+theorem equality_relation_reflexive : Reflexive(fun x y : Thing => x = y) := by
+  simp
+  intro x
+  refl
+
 -- "If R is symmetric and transitive AND there's some witness y with
 -- R(x, y), then R(x, x)." The flawed argument from Module 1 §6 is
 -- valid IF you know there's a witness.

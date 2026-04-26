@@ -104,7 +104,7 @@ and `le` cannot be reused for local functions or predicates.
 This is simple and readable at the current project size, but larger
 course libraries will eventually want namespaces.
 
-### 10. Predicate arguments must be names
+### 10. Predicate lambdas are intentionally small
 
 Definitions can take predicate parameters:
 
@@ -112,9 +112,13 @@ Definitions can take predicate parameters:
 def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
 ```
 
-But predicate arguments are still predicate names, not arbitrary lambda
-expressions. You can pass `Likes`, but not an inline predicate expression
-like "the relation `fun x y => x = y`".
+Predicate arguments can be declared predicate names such as `Likes` or inline
+lambdas such as `fun x y : Person => x = y`. This covers the common CS 250
+relation examples.
+
+The remaining limitation is that these lambdas are first-order predicate
+arguments only. They are not general function values, and they cannot be passed
+where a term is expected.
 
 ## Smaller gripes
 

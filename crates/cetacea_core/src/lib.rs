@@ -26,6 +26,10 @@ impl fmt::Display for Type {
 pub enum Term {
     Var(Name),
     App(Name, Vec<Term>),
+    PredLambda {
+        params: Vec<LambdaParam>,
+        body: Box<Formula>,
+    },
     Zero,
     Succ(Box<Term>),
     Add(Box<Term>, Box<Term>),
@@ -44,6 +48,12 @@ pub enum Term {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LambdaParam {
+    pub name: Name,
+    pub ty: Option<Type>,
+}
+
 impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -57,6 +67,19 @@ impl fmt::Display for Term {
                     write!(f, "{arg}")?;
                 }
                 write!(f, ")")
+            }
+            Term::PredLambda { params, body } => {
+                write!(f, "fun ")?;
+                for (idx, param) in params.iter().enumerate() {
+                    if idx > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", param.name)?;
+                }
+                if let Some(ty) = params.first().and_then(|param| param.ty.as_ref()) {
+                    write!(f, " : {ty}")?;
+                }
+                write!(f, " => {body}")
             }
             Term::Zero => write!(f, "0"),
             Term::Succ(term) => write!(f, "succ({term})"),
@@ -297,7 +320,16 @@ pub struct SchemaSubst {
     pub type_args: HashMap<Name, Type>,
     pub term_args: HashMap<Name, Term>,
     pub formula_args: HashMap<Name, Formula>,
-    pub predicate_args: HashMap<Name, Name>,
+    pub predicate_args: HashMap<Name, PredicateArg>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PredicateArg {
+    Named(Name),
+    Lambda {
+        params: Vec<LambdaParam>,
+        body: Formula,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1749,16 +1781,9 @@ fn instantiate_theorem(
                         param.name, theorem.name
                     )));
                 };
-                let Some(signature) = predicate_signature(env, ctx, arg) else {
-                    return Err(KernelError::new(format!("unknown predicate `{arg}`")));
-                };
                 let expected: Vec<Type> =
                     args.iter().map(|ty| subst_type_schema(ty, subst)).collect();
-                if signature != expected.as_slice() {
-                    return Err(KernelError::new(format!(
-                        "predicate `{arg}` does not match expected schema type"
-                    )));
-                }
+                validate_predicate_arg(env, ctx, arg, &expected)?;
             }
             ParamKind::Term(ty) => {
                 let Some(arg) = subst.term_args.get(&param.name) else {
@@ -1835,6 +1860,9 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             let (_, ty) = instantiate_term_def(env, ctx, def, args)?;
             Ok(ty)
         }
+        Term::PredLambda { .. } => Err(ValidationError::new(
+            "predicate lambda cannot be used as a first-order term",
+        )),
         Term::Zero => Ok(Type::Nat),
         Term::Succ(term) => {
             let actual = validate_term(env, ctx, term)?;
@@ -1922,6 +1950,59 @@ fn predicate_signature<'a>(env: &'a Env, ctx: &'a Context, name: &str) -> Option
     }
     ctx.lookup_predicate_var(name)
         .or_else(|| env.preds.get(name).map(Vec::as_slice))
+}
+
+fn validate_predicate_arg(
+    env: &Env,
+    ctx: &Context,
+    arg: &PredicateArg,
+    expected: &[Type],
+) -> Result<(), ValidationError> {
+    match arg {
+        PredicateArg::Named(name) => {
+            let Some(signature) = predicate_signature(env, ctx, name) else {
+                return Err(ValidationError::new(format!("unknown predicate `{name}`")));
+            };
+            if signature == expected {
+                Ok(())
+            } else {
+                Err(ValidationError::new(format!(
+                    "predicate `{name}` does not match expected type `{}`",
+                    predicate_type_display(expected)
+                )))
+            }
+        }
+        PredicateArg::Lambda { params, body } => {
+            if params.len() != expected.len() {
+                return Err(ValidationError::new(format!(
+                    "predicate lambda expects {} argument(s), but target predicate type has {}",
+                    params.len(),
+                    expected.len()
+                )));
+            }
+            let mut body_ctx = ctx.clone();
+            for (param, ty) in params.iter().zip(expected) {
+                if let Some(annotation) = &param.ty {
+                    validate_type(env, ctx, annotation)?;
+                    if annotation != ty {
+                        return Err(ValidationError::new(format!(
+                            "predicate lambda parameter `{}` has type `{annotation}`, but expected `{ty}`",
+                            param.name
+                        )));
+                    }
+                }
+                validate_type(env, ctx, ty)?;
+                body_ctx.add_term(param.name.clone(), ty.clone());
+            }
+            validate_formula(env, &body_ctx, body)
+        }
+    }
+}
+
+fn predicate_type_display(args: &[Type]) -> String {
+    let mut parts = args.iter().map(ToString::to_string).collect::<Vec<_>>();
+    parts.push("Prop".to_string());
+    parts.join(" -> ")
 }
 
 fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), ValidationError> {
@@ -2072,27 +2153,18 @@ fn instantiate_formula_def(
                         def.name
                     )));
                 };
-                let name = formula_def_predicate_argument(arg)?;
-                let Some(signature) = predicate_signature(env, ctx, &name) else {
-                    return Err(ValidationError::new(format!("unknown predicate `{name}`")));
-                };
-                if signature.len() != param_args.len() {
-                    return Err(ValidationError::new(format!(
-                        "predicate `{name}` expects {} argument(s), but definition parameter `{}` expects {}",
-                        signature.len(),
-                        param.name,
-                        param_args.len()
-                    )));
-                }
-                for (pattern, actual) in param_args.iter().zip(signature.iter()) {
-                    unify_type(pattern, actual, &def.params, &mut schema_subst).map_err(|_| {
-                        let expected = subst_type_schema(pattern, &schema_subst);
-                        ValidationError::new(format!(
-                            "predicate argument `{name}` has incompatible type `{actual}`, expected `{expected}`"
-                        ))
-                    })?;
-                }
-                schema_subst.predicate_args.insert(param.name.clone(), name);
+                let pred_arg = formula_def_predicate_argument(arg)?;
+                validate_predicate_schema_arg(
+                    env,
+                    ctx,
+                    &pred_arg,
+                    param_args,
+                    &def.params,
+                    &mut schema_subst,
+                )?;
+                schema_subst
+                    .predicate_args
+                    .insert(param.name.clone(), pred_arg);
                 arg_idx += 1;
             }
             ParamKind::Term(ty) => {
@@ -2142,12 +2214,75 @@ fn formula_def_prop_argument(arg: &Term) -> Result<Formula, ValidationError> {
     }
 }
 
-fn formula_def_predicate_argument(arg: &Term) -> Result<Name, ValidationError> {
+fn formula_def_predicate_argument(arg: &Term) -> Result<PredicateArg, ValidationError> {
     match arg {
-        Term::Var(name) => Ok(name.clone()),
+        Term::Var(name) => Ok(PredicateArg::Named(name.clone())),
+        Term::PredLambda { params, body } => Ok(PredicateArg::Lambda {
+            params: params.clone(),
+            body: *body.clone(),
+        }),
         other => Err(ValidationError::new(format!(
             "predicate definition argument must be a predicate name, got `{other}`"
         ))),
+    }
+}
+
+fn validate_predicate_schema_arg(
+    env: &Env,
+    ctx: &Context,
+    arg: &PredicateArg,
+    param_args: &[Type],
+    schema_params: &[Param],
+    schema_subst: &mut SchemaSubst,
+) -> Result<(), ValidationError> {
+    match arg {
+        PredicateArg::Named(name) => {
+            let Some(signature) = predicate_signature(env, ctx, name) else {
+                return Err(ValidationError::new(format!("unknown predicate `{name}`")));
+            };
+            if signature.len() != param_args.len() {
+                return Err(ValidationError::new(format!(
+                    "predicate `{name}` expects {} argument(s), but definition parameter expects {}",
+                    signature.len(),
+                    param_args.len()
+                )));
+            }
+            for (pattern, actual) in param_args.iter().zip(signature.iter()) {
+                unify_type(pattern, actual, schema_params, schema_subst).map_err(|_| {
+                    let expected = subst_type_schema(pattern, schema_subst);
+                    ValidationError::new(format!(
+                        "predicate argument `{name}` has incompatible type `{actual}`, expected `{expected}`"
+                    ))
+                })?;
+            }
+            Ok(())
+        }
+        PredicateArg::Lambda { params, body } => {
+            if params.len() != param_args.len() {
+                return Err(ValidationError::new(format!(
+                    "predicate lambda expects {} argument(s), but target predicate type has {}",
+                    params.len(),
+                    param_args.len()
+                )));
+            }
+            let mut body_ctx = ctx.clone();
+            for (param, pattern) in params.iter().zip(param_args) {
+                if let Some(annotation) = &param.ty {
+                    validate_type(env, ctx, annotation)?;
+                    unify_type(pattern, annotation, schema_params, schema_subst).map_err(|_| {
+                        let expected = subst_type_schema(pattern, schema_subst);
+                        ValidationError::new(format!(
+                            "predicate lambda parameter `{}` has type `{annotation}`, but expected `{expected}`",
+                            param.name
+                        ))
+                    })?;
+                }
+                let param_ty = subst_type_schema(pattern, schema_subst);
+                validate_type(env, ctx, &param_ty)?;
+                body_ctx.add_term(param.name.clone(), param_ty);
+            }
+            validate_formula(env, &body_ctx, body)
+        }
     }
 }
 
@@ -2202,27 +2337,18 @@ fn instantiate_term_def(
                         def.name
                     )));
                 };
-                let name = formula_def_predicate_argument(arg)?;
-                let Some(signature) = predicate_signature(env, ctx, &name) else {
-                    return Err(ValidationError::new(format!("unknown predicate `{name}`")));
-                };
-                if signature.len() != param_args.len() {
-                    return Err(ValidationError::new(format!(
-                        "predicate `{name}` expects {} argument(s), but definition parameter `{}` expects {}",
-                        signature.len(),
-                        param.name,
-                        param_args.len()
-                    )));
-                }
-                for (pattern, actual) in param_args.iter().zip(signature.iter()) {
-                    unify_type(pattern, actual, &def.params, &mut schema_subst).map_err(|_| {
-                        let expected = subst_type_schema(pattern, &schema_subst);
-                        ValidationError::new(format!(
-                            "predicate argument `{name}` has incompatible type `{actual}`, expected `{expected}`"
-                        ))
-                    })?;
-                }
-                schema_subst.predicate_args.insert(param.name.clone(), name);
+                let pred_arg = formula_def_predicate_argument(arg)?;
+                validate_predicate_schema_arg(
+                    env,
+                    ctx,
+                    &pred_arg,
+                    param_args,
+                    &def.params,
+                    &mut schema_subst,
+                )?;
+                schema_subst
+                    .predicate_args
+                    .insert(param.name.clone(), pred_arg);
                 arg_idx += 1;
             }
             ParamKind::Term(ty) => {
@@ -2339,6 +2465,16 @@ fn alpha_eq_term(left: &Term, right: &Term, env: &mut AlphaEnv) -> bool {
         (Term::App(left_name, left_args), Term::App(right_name, right_args)) => {
             left_name == right_name && alpha_eq_terms(left_args, right_args, env)
         }
+        (
+            Term::PredLambda {
+                params: left_params,
+                body: left_body,
+            },
+            Term::PredLambda {
+                params: right_params,
+                body: right_body,
+            },
+        ) => alpha_eq_predicate_lambda(left_params, left_body, right_params, right_body, env),
         (Term::Zero, Term::Zero) => true,
         (Term::Succ(left), Term::Succ(right)) => alpha_eq_term(left, right, env),
         (Term::Add(left_a, left_b), Term::Add(right_a, right_b))
@@ -2371,6 +2507,54 @@ fn alpha_eq_term(left: &Term, right: &Term, env: &mut AlphaEnv) -> bool {
         }
         _ => false,
     }
+}
+
+fn alpha_eq_predicate_lambda(
+    left_params: &[LambdaParam],
+    left_body: &Formula,
+    right_params: &[LambdaParam],
+    right_body: &Formula,
+    env: &mut AlphaEnv,
+) -> bool {
+    if left_params.len() != right_params.len()
+        || left_params
+            .iter()
+            .zip(right_params)
+            .any(|(left, right)| left.ty != right.ty)
+    {
+        return false;
+    }
+
+    fn bind_next(
+        idx: usize,
+        left_params: &[LambdaParam],
+        left_body: &Formula,
+        right_params: &[LambdaParam],
+        right_body: &Formula,
+        env: &mut AlphaEnv,
+    ) -> bool {
+        if idx == left_params.len() {
+            alpha_eq_formula_with(left_body, right_body, env)
+        } else {
+            with_alpha_binding(
+                env,
+                &left_params[idx].name,
+                &right_params[idx].name,
+                |env| {
+                    bind_next(
+                        idx + 1,
+                        left_params,
+                        left_body,
+                        right_params,
+                        right_body,
+                        env,
+                    )
+                },
+            )
+        }
+    }
+
+    bind_next(0, left_params, left_body, right_params, right_body, env)
 }
 
 fn alpha_eq_formula_with(left: &Formula, right: &Formula, env: &mut AlphaEnv) -> bool {
@@ -2620,6 +2804,7 @@ fn normalize_term_compute(term: &Term) -> Term {
             name.clone(),
             args.iter().map(normalize_term_compute).collect(),
         ),
+        Term::PredLambda { .. } => term.clone(),
         Term::Succ(term) => Term::Succ(Box::new(normalize_term_compute(term))),
         Term::Add(left, right) => {
             let left = normalize_term_compute(left);
@@ -2711,6 +2896,7 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
                     .collect::<Result<_, _>>()?,
             ))
         }
+        Term::PredLambda { .. } => Ok(term.clone()),
         Term::Zero | Term::EmptySet(_) => Ok(term.clone()),
         Term::Succ(term) => Ok(Term::Succ(Box::new(normalize_term(env, ctx, term)?))),
         Term::Add(left, right) => {
@@ -2829,6 +3015,22 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
                 .map(|arg| subst_term_schema(arg, subst))
                 .collect(),
         ),
+        Term::PredLambda { params, body } => {
+            let mut scoped = subst.clone();
+            for param in params {
+                scoped.term_args.remove(&param.name);
+            }
+            Term::PredLambda {
+                params: params
+                    .iter()
+                    .map(|param| LambdaParam {
+                        name: param.name.clone(),
+                        ty: param.ty.as_ref().map(|ty| subst_type_schema(ty, subst)),
+                    })
+                    .collect(),
+                body: Box::new(subst_formula_schema(body, &scoped)),
+            }
+        }
         Term::Zero => Term::Zero,
         Term::Succ(term) => Term::Succ(Box::new(subst_term_schema(term, subst))),
         Term::Add(left, right) => Term::Add(
@@ -2900,16 +3102,19 @@ fn subst_formula_schema(formula: &Formula, subst: &SchemaSubst) -> Formula {
             subst_term_schema(left, subst),
             subst_term_schema(right, subst),
         ),
-        Formula::PredApp(name, args) => Formula::PredApp(
-            subst
-                .predicate_args
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| name.clone()),
-            args.iter()
+        Formula::PredApp(name, args) => {
+            let args: Vec<Term> = args
+                .iter()
                 .map(|arg| subst_term_schema(arg, subst))
-                .collect(),
-        ),
+                .collect();
+            match subst.predicate_args.get(name) {
+                Some(PredicateArg::Named(name)) => Formula::PredApp(name.clone(), args),
+                Some(PredicateArg::Lambda { params, body }) => {
+                    apply_predicate_lambda(params, body, &args)
+                }
+                None => Formula::PredApp(name.clone(), args),
+            }
+        }
         Formula::And(left, right) => Formula::and(
             subst_formula_schema(left, subst),
             subst_formula_schema(right, subst),
@@ -2949,6 +3154,14 @@ fn subst_formula_schema(formula: &Formula, subst: &SchemaSubst) -> Formula {
     }
 }
 
+fn apply_predicate_lambda(params: &[LambdaParam], body: &Formula, args: &[Term]) -> Formula {
+    let mut formula = body.clone();
+    for (param, arg) in params.iter().zip(args) {
+        formula = subst_formula_term(&formula, &param.name, arg);
+    }
+    formula
+}
+
 fn term_type(env: &Env, ctx: &Context, term: &Term) -> Result<Type, KernelError> {
     validate_term(env, ctx, term).map_err(KernelError::from)
 }
@@ -2963,6 +3176,16 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
                 .map(|arg| subst_term(arg, var, replacement))
                 .collect(),
         ),
+        Term::PredLambda { params, body } if params.iter().any(|param| param.name == var) => {
+            Term::PredLambda {
+                params: params.clone(),
+                body: body.clone(),
+            }
+        }
+        Term::PredLambda { params, body } => Term::PredLambda {
+            params: params.clone(),
+            body: Box::new(subst_formula_term(body, var, replacement)),
+        },
         Term::Zero => Term::Zero,
         Term::Succ(term) => Term::Succ(Box::new(subst_term(term, var, replacement))),
         Term::Add(left, right) => Term::Add(
@@ -3083,6 +3306,9 @@ fn term_has_free_var(term: &Term, name: &str) -> bool {
     match term {
         Term::Var(var) => var == name,
         Term::App(_, args) => args.iter().any(|arg| term_has_free_var(arg, name)),
+        Term::PredLambda { params, body } => {
+            !params.iter().any(|param| param.name == name) && formula_has_free_term(body, name)
+        }
         Term::Zero | Term::EmptySet(_) => false,
         Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => {
             term_has_free_var(term, name)
@@ -3209,6 +3435,18 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
                     results.push(Term::SetBuilder {
                         var: var.clone(),
                         var_type: var_type.clone(),
+                        body: Box::new(replaced_body),
+                    });
+                }
+            }
+        }
+        Term::PredLambda { params, body } => {
+            if !params.iter().any(|param| {
+                term_has_free_var(from, &param.name) || term_has_free_var(to, &param.name)
+            }) {
+                for replaced_body in replace_formula_once(body, from, to) {
+                    results.push(Term::PredLambda {
+                        params: params.clone(),
                         body: Box::new(replaced_body),
                     });
                 }
@@ -3357,6 +3595,7 @@ fn term_size(term: &Term) -> usize {
     match term {
         Term::Var(_) | Term::Zero | Term::EmptySet(_) => 1,
         Term::App(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
+        Term::PredLambda { body, .. } => 1 + formula_size(body),
         Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => 1 + term_size(term),
         Term::Add(left, right)
         | Term::Mul(left, right)
@@ -3945,6 +4184,37 @@ impl Tokens {
         if self.eat_sym("0") {
             return Ok(Term::Zero);
         }
+        if self.eat_ident("fun") {
+            let mut names = Vec::new();
+            loop {
+                names.push(self.expect_ident()?);
+                if self.eat_sym("=>") {
+                    let body = self.parse_formula()?;
+                    return Ok(Term::PredLambda {
+                        params: names
+                            .into_iter()
+                            .map(|name| LambdaParam { name, ty: None })
+                            .collect(),
+                        body: Box::new(body),
+                    });
+                }
+                if self.eat_sym(":") {
+                    let ty = self.parse_type()?;
+                    self.expect_sym("=>")?;
+                    let body = self.parse_formula()?;
+                    return Ok(Term::PredLambda {
+                        params: names
+                            .into_iter()
+                            .map(|name| LambdaParam {
+                                name,
+                                ty: Some(ty.clone()),
+                            })
+                            .collect(),
+                        body: Box::new(body),
+                    });
+                }
+            }
+        }
         if self.eat_sym("{") {
             let var = self.expect_ident()?;
             self.expect_sym(":")?;
@@ -4113,6 +4383,7 @@ impl Tokens {
             | Term::Inter(_, _)
             | Term::Diff(_, _)
             | Term::Powerset(_)
+            | Term::PredLambda { .. }
             | Term::SetBuilder { .. } => {
                 Err(ParseError::new(format!("term `{term}` is not a formula")))
             }
@@ -4173,6 +4444,8 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
             Some("->")
         } else if rest.starts_with("<->") {
             Some("<->")
+        } else if rest.starts_with("=>") {
+            Some("=>")
         } else if rest.starts_with("/\\") {
             Some("/\\")
         } else if rest.starts_with("\\/") {
@@ -6090,16 +6363,9 @@ fn explicit_schema_subst(
                 subst.formula_args.insert(arg.name.clone(), formula);
             }
             ParamKind::Predicate(_) => {
-                let name = parse_predicate_arg_name(&arg.value)
+                let pred_arg = parse_predicate_arg(&arg.value)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
-                if predicate_signature(env, ctx, &name).is_none() {
-                    return Err(explicit_schema_arg_error(
-                        theorem,
-                        arg,
-                        format!("unknown predicate `{name}`"),
-                    ));
-                }
-                subst.predicate_args.insert(arg.name.clone(), name);
+                subst.predicate_args.insert(arg.name.clone(), pred_arg);
             }
             ParamKind::Term(_) => {
                 let term = parse_term_str(&arg.value)
@@ -6140,10 +6406,13 @@ fn explicit_schema_arg_error(
     ))
 }
 
-fn parse_predicate_arg_name(input: &str) -> Result<Name, TacticError> {
+fn parse_predicate_arg(input: &str) -> Result<PredicateArg, TacticError> {
     let input = input.trim();
     if input.is_empty() {
         return Err(TacticError::new("predicate argument cannot be empty"));
+    }
+    if let Ok(term) = parse_term_str(input) {
+        return formula_def_predicate_argument(&term).map_err(|err| TacticError::new(err.message));
     }
     if input.chars().enumerate().all(|(idx, ch)| {
         if idx == 0 {
@@ -6152,10 +6421,10 @@ fn parse_predicate_arg_name(input: &str) -> Result<Name, TacticError> {
             ch.is_ascii_alphanumeric() || ch == '_'
         }
     }) {
-        Ok(input.to_string())
+        Ok(PredicateArg::Named(input.to_string()))
     } else {
         Err(TacticError::new(format!(
-            "predicate argument `{input}` must be a predicate name"
+            "predicate argument `{input}` must be a predicate name or lambda"
         )))
     }
 }
@@ -6530,6 +6799,16 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
                 .map(|arg| subst_term_terms(arg, subst))
                 .collect(),
         ),
+        Term::PredLambda { params, body } => {
+            let mut scoped = subst.clone();
+            for param in params {
+                scoped.remove(&param.name);
+            }
+            Term::PredLambda {
+                params: params.clone(),
+                body: Box::new(subst_formula_terms(body, &scoped)),
+            }
+        }
         Term::Zero => Term::Zero,
         Term::Succ(term) => Term::Succ(Box::new(subst_term_terms(term, subst))),
         Term::Add(left, right) => Term::Add(
@@ -6715,6 +6994,32 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
                 Err(())
             }
         }
+        Term::PredLambda {
+            params: p_params,
+            body: p_body,
+        } => {
+            let Term::PredLambda {
+                params: t_params,
+                body: t_body,
+            } = target
+            else {
+                return Err(());
+            };
+            if p_params.len() != t_params.len()
+                || p_params
+                    .iter()
+                    .zip(t_params)
+                    .any(|(left, right)| left.ty != right.ty)
+            {
+                return Err(());
+            }
+            let mut renamed = *t_body.clone();
+            for (p_param, t_param) in p_params.iter().zip(t_params) {
+                renamed =
+                    subst_formula_term(&renamed, &t_param.name, &Term::Var(p_param.name.clone()));
+            }
+            unify_formula(p_body, &renamed, unify)
+        }
         Term::App(p_name, p_args) => {
             let Term::App(t_name, t_args) = target else {
                 return Err(());
@@ -6880,13 +7185,15 @@ fn unify_schema_predicate(
     schema_subst: &mut SchemaSubst,
 ) -> Result<(), ()> {
     if let Some(existing) = schema_subst.predicate_args.get(name) {
-        if existing != target_name {
-            return Err(());
+        match existing {
+            PredicateArg::Named(existing) if existing == target_name => {}
+            _ => return Err(()),
         }
     } else {
-        schema_subst
-            .predicate_args
-            .insert(name.to_string(), target_name.to_string());
+        schema_subst.predicate_args.insert(
+            name.to_string(),
+            PredicateArg::Named(target_name.to_string()),
+        );
     }
 
     let signature = predicate_signature(env, ctx, target_name).ok_or(())?;
@@ -8056,6 +8363,61 @@ theorem reflexive_likes
     }
 
     #[test]
+    fn formula_definition_accepts_predicate_lambda_argument() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+
+theorem reflexive_eq : Reflexive(fun x y : Person => x = y) := by
+  simp
+  intro x
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn predicate_lambda_argument_must_match_expected_type() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+
+def NatPred (P : Nat -> Prop) : Prop := forall n : Nat, P(n)
+
+theorem bad : NatPred(fun x : Person => x = x) := by
+"#,
+            "predicate lambda parameter `x` has type `Person`, but expected `Nat`",
+        );
+    }
+
+    #[test]
+    fn theorem_explicit_schema_accepts_predicate_lambda_argument() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem pred_id
+  (A : Type)
+  (P : A -> Prop)
+  (x : A)
+  : P(x) -> P(x) := by
+  intro h
+  exact h
+
+theorem use_pred_id (n : Nat) : n = n -> n = n := by
+  intro h
+  exact pred_id {A := Nat; P := fun x => x = x; x := n} h
+"#,
+        );
+    }
+
+    #[test]
     fn set_builder_terms_simplify_membership() {
         check_ok(
             r#"
@@ -8105,6 +8467,10 @@ theorem truth_set_member : Tall(alice) -> alice in TruthSet(Tall) := by
   intro h
   simp
   exact h
+
+theorem truth_set_lambda_member : alice in TruthSet(fun x : Person => x = alice) := by
+  simp
+  refl
 
 theorem one_member : alice in One(alice) := by
   simp

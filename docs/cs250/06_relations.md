@@ -25,7 +25,8 @@ def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, 
 ```
 
 When you use `Reflexive(R)`, the type parameter `A` is inferred from
-the predicate argument `R`.
+the predicate argument `R`. You can also pass a small inline predicate
+lambda, such as `Reflexive(fun x y : Person => x = y)`.
 
 ## Reflexivity, symmetry, transitivity inline
 
