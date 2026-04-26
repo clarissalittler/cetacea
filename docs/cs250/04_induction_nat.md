@@ -67,13 +67,32 @@ The full proof is also in `std/nat.ctea` as `add_comm`. The neat thing
 to notice: `simp` handles the recursive computation in each branch, and
 the induction hypothesis supplies the remaining algebraic step.
 
+## A custom unary recursive definition
+
+For recursion driven by one natural number, use `defrec`:
+
+```text
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+
+theorem double_succ_demo (n : Nat)
+  : double(succ(n)) = succ(succ(double(n))) := by
+  simp
+  refl
+```
+
+The successor arm receives the predecessor `k` and the recursive result
+`rec`, so the definition is structurally recursive. `simp` computes the
+zero case and the successor case.
+
 ## A custom right-recursive addition
 
 If you want a second addition-like operation with the textbook's
-right-recursive equations, you can axiomatize it. This is mostly an
-exercise, because Cetacea's built-in `add` already computes these
-equations. It still shows how to model a recursively specified function
-when the language has no user-defined recursion:
+right-recursive equations, you can axiomatize it. `defrec` handles
+unary recursion, but it does not define binary operations such as
+addition directly. This example is mostly an exercise, because Cetacea's
+built-in `add` already computes these equations:
 
 ```text
 mode constructive
@@ -99,11 +118,10 @@ theorem myadd_zero_n (n : Nat) : myadd(0, n) = n := by
       refl
 ```
 
-Notice we have to *axiomatize* the recursion equations rather than write
-a recursive function — Cetacea has no `Definition` for recursive
-functions over `Nat` outside the built-in `add`. For purposes of doing
-the textbook exercises in Cetacea, this is fine for short proofs but
-gets tedious; see `LIMITATIONS.md`.
+Notice we still have to *axiomatize* these binary recursion equations
+rather than write a binary recursive function. For purposes of doing the
+textbook exercises in Cetacea, this is fine for short proofs but gets
+tedious; see `LIMITATIONS.md`.
 
 ## Module 4 Exercise 11: `0 · n = 0`
 
@@ -169,6 +187,5 @@ symmetric $n \cdot 0 = 0$ falls out of the definition.
 - Prove `succ_inj_via_add : forall n m : Nat, succ(n) = succ(m) -> n = m`.
   This one is hard without a `succ` injectivity rule built in — see
   `LIMITATIONS.md`.
-- Define `double(n)` axiomatically as `add(n, n)` and prove
-  `double(succ(n)) = succ(succ(double(n)))`. This is a cleaner
-  variation on `add_succ_right`.
+- Define `triple(n)` with `defrec` and prove
+  `triple(succ(n)) = succ(succ(succ(triple(n))))`.

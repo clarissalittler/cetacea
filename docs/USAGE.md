@@ -235,6 +235,19 @@ the textbook right-recursive equations. In particular, `add(0, n)`,
 `sub` is truncated subtraction: `sub(n, 0)`, `sub(0, n)`, and
 `sub(succ(n), succ(m))` simplify directly.
 
+User-defined unary recursive functions over `Nat` use `defrec`:
+
+```text
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+```
+
+The zero arm gives the value at `0`. In the successor arm, `k` is the
+predecessor and `rec` is the already-computed recursive result for `k`.
+The simplifier reduces concrete calls such as `double(succ(succ(0)))` and
+symbolic successor calls such as `double(succ(n))`.
+
 Built-in set terms:
 
 ```text
@@ -332,6 +345,18 @@ theorem likes_member : Likes(alice, bob) -> alice in LikesSet(bob) := by
   intro h
   simp
   exact h
+```
+
+Primitive recursive Nat definitions are transparent to `simp`:
+
+```text
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+
+theorem double_succ (n : Nat) : double(succ(n)) = succ(succ(double(n))) := by
+  simp
+  refl
 ```
 
 ## Theorems
@@ -658,6 +683,7 @@ It currently knows:
 
 - formula definitions
 - transparent term definitions
+- primitive recursive Nat definitions declared with `defrec`
 - set membership in `empty`, `singleton`, `union`, `inter`, `diff`,
   `powerset`, and set builders
 - subset expansion

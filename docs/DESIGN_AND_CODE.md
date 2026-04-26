@@ -590,6 +590,7 @@ Important functions:
 
 - `normalize_formula_defs`
 - `normalize_term`
+- `normalize_rec_def`
 - `normalize_term_compute`
 - formula/term substitution helpers
 - formula equality helpers
@@ -610,6 +611,22 @@ def TallSet : Set Person := { x : Person | Tall(x) }
 def LikesSet (y : Person) : Set Person := { x : Person | Likes(x, y) }
 def TruthSet (T : Type) (P : T -> Prop) : Set T := { x : T | P(x) }
 ```
+
+Recursive definitions are deliberately narrower. `defrec` defines unary
+primitive recursion over `Nat`:
+
+```text
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+```
+
+The checker validates the zero case in an empty term context and validates the
+successor case with `k : Nat` and `rec : result_type`. The recursive definition
+is added to the environment only after both cases validate, so definitions are
+structural, non-mutual, and cannot make direct self-calls except through the
+provided `rec` value. During normalization, `normalize_rec_def` reduces
+applications at `0` and `succ(k)` and leaves calls on neutral arguments stuck.
 
 Built-in term computation currently covers Nat addition, multiplication, and
 truncated subtraction:
@@ -950,6 +967,7 @@ Important limitations to account for when extending the system:
 - There are no namespaces.
 - The parser is line-oriented and only parse errors carry token spans.
 - Formula and term definitions are transparent and simple.
+- Recursive definitions are limited to unary primitive recursion over `Nat`.
 - Predicate lambdas are intentionally first-order and are only accepted where a
   predicate argument is expected.
 - `simp` has explicit equality rewrite rules, but no global simp attribute set.

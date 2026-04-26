@@ -38,17 +38,27 @@ rewriting.
 **Possible improvement:** add `@[simp]`-style rule registration and a richer
 rewrite engine.
 
-### 3. User-defined recursive functions are not available
+### 3. User-defined recursion is intentionally narrow
 
-Cetacea has transparent non-recursive definitions, but no syntax for
-defining recursive functions over `Nat`. Built-in `add` and `mul` now
-simplify both the implementation's left-recursive equations and the CS
-250 textbook's right-recursive equations, but custom recursive examples
-must still be introduced as uninterpreted functions with axiomatized
-recursion equations.
+Cetacea now has `defrec` for unary primitive recursion over `Nat`:
 
-That is fine for short course examples, but it is not a replacement for
-a real recursive-function facility.
+```text
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+```
+
+The simplifier computes both concrete calls such as
+`double(succ(succ(0)))` and symbolic successor calls such as
+`double(succ(n))`.
+
+This addresses the common small examples where a single natural number
+drives the recursion. It is still not a general recursive-function
+facility: there is no binary recursion, mutual recursion, pattern
+matching beyond `0`/`succ`, or recursion over lists, trees, strings, and
+other inductive structures. Binary textbook-style operations that are
+not built in still need to be introduced as uninterpreted functions with
+axiomatized recursion equations.
 
 ### 4. Induction is `Nat`-only
 
@@ -154,6 +164,8 @@ are now implemented:
 - Built-in `add` and `mul` simplify the CS 250 textbook's
   right-recursive equations as well as the implementation's
   left-recursive equations.
+- Unary primitive recursive `Nat` functions can be declared with
+  `defrec`, and `simp` computes their zero and successor equations.
 - `simp [lemma]` can use listed equality theorems as rewrite rules in
   the goal.
 - `apply` can infer intermediate schema arguments for transitive lemmas

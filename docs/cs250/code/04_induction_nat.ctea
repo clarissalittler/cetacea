@@ -18,6 +18,15 @@ theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
       rewrite ih
       refl
 
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+
+theorem double_succ_demo (n : Nat)
+  : double(succ(n)) = succ(succ(double(n))) := by
+  simp
+  refl
+
 -- Same proof, but using the textbook's right-recursive `+`.
 func myadd : Nat -> Nat -> Nat
 

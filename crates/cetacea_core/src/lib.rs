@@ -474,6 +474,17 @@ pub struct TermDef {
     pub body: Term,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecDef {
+    pub name: Name,
+    pub param: Name,
+    pub result_type: Type,
+    pub zero_body: Term,
+    pub step_var: Name,
+    pub rec_name: Name,
+    pub succ_body: Term,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Context {
     type_vars: Vec<Name>,
@@ -566,6 +577,7 @@ pub struct Env {
     preds: HashMap<Name, Vec<Type>>,
     defs: HashMap<Name, FormulaDef>,
     term_defs: HashMap<Name, TermDef>,
+    rec_defs: HashMap<Name, RecDef>,
     theorems: HashMap<Name, Theorem>,
 }
 
@@ -606,12 +618,20 @@ impl Env {
         self.term_defs.insert(def.name.clone(), def);
     }
 
+    pub fn add_rec_def(&mut self, def: RecDef) {
+        self.rec_defs.insert(def.name.clone(), def);
+    }
+
     fn formula_def(&self, name: &str) -> Option<&FormulaDef> {
         self.defs.get(name)
     }
 
     fn term_def(&self, name: &str) -> Option<&TermDef> {
         self.term_defs.get(name)
+    }
+
+    fn rec_def(&self, name: &str) -> Option<&RecDef> {
+        self.rec_defs.get(name)
     }
 
     fn has_sort(&self, name: &str) -> bool {
@@ -635,7 +655,9 @@ impl Env {
     }
 
     fn has_def(&self, name: &str) -> bool {
-        self.defs.contains_key(name) || self.term_defs.contains_key(name)
+        self.defs.contains_key(name)
+            || self.term_defs.contains_key(name)
+            || self.rec_defs.contains_key(name)
     }
 
     fn has_top_level_name(&self, name: &str) -> bool {
@@ -1092,6 +1114,112 @@ impl FileChecker {
                             unreachable!("definition parser pairs result and body")
                         }
                     }
+                }
+                Command::RecDef(decl) => {
+                    if self.env.has_top_level_name(&decl.name) {
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{}` as a recursive definition", decl.name),
+                        ));
+                        continue;
+                    }
+                    if let Err(err) = validate_type(&self.env, &Context::new(), &decl.result_type) {
+                        self.result.diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "recursive definition `{}` has invalid result type",
+                                    decl.name
+                                ),
+                            )
+                            .with_note(err.message),
+                        );
+                        continue;
+                    }
+                    match validate_term(&self.env, &Context::new(), &decl.zero_body) {
+                        Ok(actual) if actual == decl.result_type => {}
+                        Ok(actual) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!(
+                                        "recursive definition `{}` has invalid zero case",
+                                        decl.name
+                                    ),
+                                )
+                                .with_note(format!(
+                                    "zero case has type `{actual}`, but expected `{}`",
+                                    decl.result_type
+                                )),
+                            );
+                            continue;
+                        }
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!(
+                                        "recursive definition `{}` has invalid zero case",
+                                        decl.name
+                                    ),
+                                )
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    }
+
+                    let mut step_ctx = Context::new();
+                    step_ctx.add_term(decl.step_var.clone(), Type::Nat);
+                    step_ctx.add_term(decl.rec_name.clone(), decl.result_type.clone());
+                    match validate_term(&self.env, &step_ctx, &decl.succ_body) {
+                        Ok(actual) if actual == decl.result_type => {}
+                        Ok(actual) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!(
+                                        "recursive definition `{}` has invalid successor case",
+                                        decl.name
+                                    ),
+                                )
+                                .with_note(format!(
+                                    "successor case has type `{actual}`, but expected `{}`",
+                                    decl.result_type
+                                )),
+                            );
+                            continue;
+                        }
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!(
+                                        "recursive definition `{}` has invalid successor case",
+                                        decl.name
+                                    ),
+                                )
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    }
+
+                    self.env.add_rec_def(RecDef {
+                        name: decl.name,
+                        param: decl.param,
+                        result_type: decl.result_type,
+                        zero_body: decl.zero_body,
+                        step_var: decl.step_var,
+                        rec_name: decl.rec_name,
+                        succ_body: decl.succ_body,
+                    });
                 }
                 Command::Axiom(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
@@ -1831,6 +1959,11 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                     "definition `{name}` expects {expected} argument(s), but got 0"
                 )));
             }
+            if env.rec_def(name).is_some() {
+                return Err(ValidationError::new(format!(
+                    "recursive definition `{name}` expects 1 argument(s), but got 0"
+                )));
+            }
             Err(ValidationError::new(format!("unknown term `{name}`")))
         }
         Term::App(name, args) => {
@@ -1855,6 +1988,21 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             }
 
             let Some(def) = env.term_def(name) else {
+                if let Some(def) = env.rec_def(name) {
+                    if args.len() != 1 {
+                        return Err(ValidationError::new(format!(
+                            "recursive definition `{name}` expects 1 argument(s), but got {}",
+                            args.len()
+                        )));
+                    }
+                    let actual = validate_term(env, ctx, &args[0])?;
+                    if actual != Type::Nat {
+                        return Err(ValidationError::new(format!(
+                            "argument 1 of `{name}` has type `{actual}`, but expected `Nat`"
+                        )));
+                    }
+                    return Ok(def.result_type.clone());
+                }
                 return Err(ValidationError::new(format!("unknown function `{name}`")));
             };
             let (_, ty) = instantiate_term_def(env, ctx, def, args)?;
@@ -2889,6 +3037,12 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
                 let (body, _) = instantiate_term_def(env, ctx, def, args)?;
                 return normalize_term(env, ctx, &body);
             }
+            if let Some(def) = env.rec_def(name) {
+                if args.len() == 1 {
+                    let arg = normalize_term(env, ctx, &args[0])?;
+                    return normalize_rec_def(env, ctx, def, arg);
+                }
+            }
             Ok(Term::App(
                 name.clone(),
                 args.iter()
@@ -2948,6 +3102,29 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
                 body: Box::new(body),
             })
         }
+    }
+}
+
+fn normalize_rec_def(
+    env: &Env,
+    ctx: &Context,
+    def: &RecDef,
+    arg: Term,
+) -> Result<Term, ValidationError> {
+    match arg {
+        Term::Zero => normalize_term(env, ctx, &def.zero_body),
+        Term::Succ(pred) => {
+            let pred_term = *pred;
+            let recursive = normalize_term(
+                env,
+                ctx,
+                &Term::App(def.name.clone(), vec![pred_term.clone()]),
+            )?;
+            let with_step = subst_term(&def.succ_body, &def.step_var, &pred_term);
+            let with_rec = subst_term(&with_step, &def.rec_name, &recursive);
+            normalize_term(env, ctx, &with_rec)
+        }
+        other => Ok(Term::App(def.name.clone(), vec![other])),
     }
 }
 
@@ -3624,6 +3801,17 @@ struct DefDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct RecDefDecl {
+    name: Name,
+    param: Name,
+    result_type: Type,
+    zero_body: Term,
+    step_var: Name,
+    rec_name: Name,
+    succ_body: Term,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum DefResult {
     Formula,
     Term(Type),
@@ -3651,6 +3839,7 @@ enum Command {
     Func(Name, Vec<Type>, Type),
     Pred(Name, Vec<Type>),
     Def(DefDecl),
+    RecDef(RecDefDecl),
     Axiom(AxiomDecl),
     Theorem(TheoremDecl),
 }
@@ -4587,6 +4776,53 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             continue;
         }
 
+        if trimmed.starts_with("defrec ") {
+            let (name, param, result_type) =
+                parse_defrec_header(trimmed).map_err(|err| err.with_line(command_line))?;
+
+            i += 1;
+            while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
+                i += 1;
+            }
+            if i >= lines.len() {
+                return Err(ParseError::new("recursive definition needs a zero case")
+                    .with_line(command_line));
+            }
+            let zero_line = i + 1;
+            let zero_body = parse_defrec_zero_arm(strip_comment(lines[i]).trim())
+                .map_err(|err| err.with_line(zero_line))?;
+
+            i += 1;
+            while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
+                i += 1;
+            }
+            if i >= lines.len() {
+                return Err(
+                    ParseError::new("recursive definition needs a successor case")
+                        .with_line(command_line),
+                );
+            }
+            let succ_line = i + 1;
+            let (step_var, rec_name, succ_body) =
+                parse_defrec_succ_arm(strip_comment(lines[i]).trim())
+                    .map_err(|err| err.with_line(succ_line))?;
+
+            commands.push(located_command(
+                command_line,
+                Command::RecDef(RecDefDecl {
+                    name,
+                    param,
+                    result_type,
+                    zero_body,
+                    step_var,
+                    rec_name,
+                    succ_body,
+                }),
+            ));
+            i += 1;
+            continue;
+        }
+
         if trimmed.starts_with("def ") {
             let mut header = String::from(trimmed);
             while !header.contains(":=") {
@@ -4722,6 +4958,7 @@ fn is_command_start(trimmed: &str) -> bool {
         || trimmed.starts_with("const ")
         || trimmed.starts_with("func ")
         || trimmed.starts_with("pred ")
+        || trimmed.starts_with("defrec ")
         || trimmed.starts_with("def ")
         || trimmed.starts_with("axiom ")
 }
@@ -4786,6 +5023,65 @@ fn parse_def_header(header: &str) -> Result<(Name, Vec<Param>, DefResult), Parse
     };
     tokens.expect_eof()?;
     Ok((name, params, result))
+}
+
+fn parse_defrec_header(header: &str) -> Result<(Name, Name, Type), ParseError> {
+    let mut tokens = Tokens::new(header)?;
+    tokens.expect_keyword("defrec")?;
+    let name = tokens.expect_ident()?;
+    tokens.expect_sym("(")?;
+    let param = tokens.expect_ident()?;
+    tokens.expect_sym(":")?;
+    let param_type = tokens.parse_type()?;
+    if param_type != Type::Nat {
+        return Err(
+            ParseError::new("recursive definition parameter must have type `Nat`")
+                .with_span(tokens.current_span()),
+        );
+    }
+    tokens.expect_sym(")")?;
+    tokens.expect_sym(":")?;
+    let result_type = tokens.parse_type()?;
+    tokens.expect_eof()?;
+    Ok((name, param, result_type))
+}
+
+fn parse_defrec_zero_arm(line: &str) -> Result<Term, ParseError> {
+    let Some(body) = line.strip_prefix("| zero =>") else {
+        return Err(ParseError::new(
+            "recursive definition zero case expects `| zero => term`",
+        ));
+    };
+    parse_term_str(body.trim())
+}
+
+fn parse_defrec_succ_arm(line: &str) -> Result<(Name, Name, Term), ParseError> {
+    let Some(rest) = line.strip_prefix("| succ ") else {
+        return Err(ParseError::new(
+            "recursive definition successor case expects `| succ k rec => term`",
+        ));
+    };
+    let Some((binders, body)) = rest.split_once("=>") else {
+        return Err(ParseError::new(
+            "recursive definition successor case expects `| succ k rec => term`",
+        ));
+    };
+    let binders: Vec<&str> = binders.split_whitespace().collect();
+    if binders.len() != 2 {
+        return Err(ParseError::new(
+            "recursive definition successor case expects exactly two binders",
+        ));
+    }
+    if binders[0] == binders[1] {
+        return Err(ParseError::new(
+            "recursive definition successor case binders must be distinct",
+        ));
+    }
+    Ok((
+        binders[0].to_string(),
+        binders[1].to_string(),
+        parse_term_str(body.trim())?,
+    ))
 }
 
 fn parse_decl_params(tokens: &mut Tokens) -> Result<Vec<Param>, ParseError> {
@@ -9118,6 +9414,79 @@ theorem add_one_zero : add(succ(0), 0) = succ(0) := by
   simp
   refl
 "#,
+        );
+    }
+
+    #[test]
+    fn primitive_nat_recursion_definitions_compute_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+
+theorem double_zero : double(0) = 0 := by
+  simp
+  refl
+
+theorem double_two : double(succ(succ(0))) = succ(succ(succ(succ(0)))) := by
+  simp
+  refl
+
+theorem double_succ (n : Nat) : double(succ(n)) = succ(succ(double(n))) := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn primitive_nat_recursion_rejects_non_nat_parameter() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+defrec bad (x : Person) : Nat
+| zero => 0
+| succ k rec => rec
+"#,
+            "recursive definition parameter must have type `Nat`",
+        );
+    }
+
+    #[test]
+    fn primitive_nat_recursion_checks_case_types() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+defrec bad (n : Nat) : Nat
+| zero => alice
+| succ k rec => rec
+"#,
+            "zero case has type `Person`, but expected `Nat`",
+        );
+    }
+
+    #[test]
+    fn primitive_nat_recursion_rejects_duplicate_successor_binders() {
+        check_err_contains(
+            r#"
+mode constructive
+
+defrec bad (n : Nat) : Nat
+| zero => 0
+| succ k k => k
+"#,
+            "recursive definition successor case binders must be distinct",
         );
     }
 

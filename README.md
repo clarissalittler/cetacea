@@ -6,10 +6,10 @@ Cetacea is a small tactic-based theorem prover following the design in
 The current implementation covers propositional logic, a first-order layer with
 typed variables, predicate applications, universal and existential
 quantification, equality, transparent formula and term definitions, typed sets,
-and a small natural-number layer with induction. Declarations and formula
-annotations are checked for known types, known predicates, predicate arity,
-function arity, definition arity, set element compatibility, and argument type
-compatibility.
+primitive recursive `Nat` definitions, and a small natural-number layer with
+induction. Declarations and formula annotations are checked for known types,
+known predicates, predicate arity, function arity, definition arity, set element
+compatibility, and argument type compatibility.
 
 ## Layout
 
@@ -56,7 +56,8 @@ loaded once.
 
 - `mode constructive` and `mode classical`
 - file imports with `import path/to/file.ctea`
-- `sort`, `const`, `func`, `pred`, formula and term `def`, and `axiom`
+- `sort`, `const`, `func`, `pred`, formula and term `def`, unary `Nat`
+  `defrec`, and `axiom`
   declarations
 - theorem declarations with proposition, predicate, type, and term parameters
 - built-in `Nat`, `Set T`, `0`, `succ(n)`, `add(n, m)`, `mul(n, m)`,
@@ -72,6 +73,7 @@ loaded once.
 - validation for function names, function arity, and function argument types
 - validation for transparent formula and term definitions, including definition
   arity, inferred type parameters, and proposition/predicate parameters
+- validation for unary primitive recursive `Nat` definitions
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
@@ -90,9 +92,9 @@ loaded once.
   `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `unfold`, `simp`,
   `induction`, `exfalso`, `contradiction`, `by_cases`, `by_contra`,
   `show_goal`
-- `simp` computation for transparent formula definitions, set membership,
-  subset expansion, Nat arithmetic and comparison, including terms nested under
-  predicate and function arguments
+- `simp` computation for transparent formula definitions, primitive recursive
+  Nat definitions, set membership, subset expansion, Nat arithmetic and
+  comparison, including terms nested under predicate and function arguments
 - kernel reporting of constructive versus classical proof use
 - command-level file and line reporting for checker diagnostics
 
