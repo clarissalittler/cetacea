@@ -184,8 +184,7 @@ symmetric $n \cdot 0 = 0$ falls out of the definition.
 - Prove `add_assoc(n, m, k) : add(add(n, m), k) = add(n, add(m, k))`.
   It's already in `std/nat.ctea`. Try writing it before reading the
   proof.
-- Prove `succ_inj_via_add : forall n m : Nat, succ(n) = succ(m) -> n = m`.
-  This one is hard without a `succ` injectivity rule built in — see
-  `LIMITATIONS.md`.
+- Read `succ_inj` in `std/nat.ctea`, then try proving it yourself from
+  `pred_succ`.
 - Define `triple(n)` with `defrec` and prove
   `triple(succ(n)) = succ(succ(succ(triple(n))))`.

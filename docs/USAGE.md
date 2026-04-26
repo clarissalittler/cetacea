@@ -222,11 +222,16 @@ Built-in Nat terms:
 
 ```text
 0
+1
+2
 succ(n)
 add(n, m)
 mul(n, m)
 sub(n, m)
 ```
+
+Decimal Nat literals parse as repeated successors, so `2` is the same term as
+`succ(succ(0))`.
 
 `add` and `mul` simplify using both the left-recursive built-in equations and
 the textbook right-recursive equations. In particular, `add(0, n)`,
@@ -946,6 +951,10 @@ Includes equality lemmas:
 
 Includes basic Nat addition, multiplication, subtraction, and order lemmas:
 
+- `pred_zero`
+- `pred_succ`
+- `nat_congr_pred`
+- `succ_inj`
 - `add_zero_left`
 - `add_succ_left`
 - `add_zero_right`

@@ -1,5 +1,33 @@
 mode constructive
 
+defrec pred (n : Nat) : Nat
+| zero => 0
+| succ k rec => k
+
+theorem pred_zero : pred(0) = 0 := by
+  simp
+  refl
+
+theorem pred_succ (n : Nat) : pred(succ(n)) = n := by
+  simp
+  refl
+
+theorem nat_congr_pred
+  (P : Nat -> Prop)
+  (x y : Nat)
+  : x = y -> P(x) -> P(y) := by
+  intro h
+  intro hp
+  rewrite h
+  exact hp
+
+theorem succ_inj (n m : Nat) : succ(n) = succ(m) -> n = m := by
+  intro h
+  apply nat_congr_pred {P := fun x => n = pred(x); x := succ(n); y := succ(m)}
+  exact h
+  simp
+  refl
+
 theorem add_zero_left (n : Nat) : add(0, n) = n := by
   simp
   refl

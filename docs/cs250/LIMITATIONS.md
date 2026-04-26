@@ -31,12 +31,17 @@ and built-in Nat computation. `simp at h` can simplify a named
 hypothesis, and `simp at *` simplifies the goal plus all hypotheses. It
 can also use listed equality theorems in the goal, as in `simp [h]`.
 
-The remaining limitation is that there is no global or attribute-based
-simp-set, no automatic imported-lemma discovery, and no iff/proposition
-rewriting.
+The remaining limitations are:
 
-**Possible improvement:** add `@[simp]`-style rule registration and a richer
-rewrite engine.
+- there is no global or attribute-based simp-set,
+- no automatic imported-lemma discovery,
+- no iff/proposition rewriting, and
+- `simp [lemma]` only applies to the goal — `simp [lemma] at h` and
+  `simp [lemma] at *` do not parse, so a hypothesis-targeted simp can
+  use only the built-in rule set.
+
+**Possible improvement:** add `@[simp]`-style rule registration, allow
+`simp [lemma] at h`, and add a richer rewrite engine.
 
 ### 3. User-defined recursion is intentionally narrow
 
@@ -48,8 +53,9 @@ defrec double (n : Nat) : Nat
 | succ k rec => succ(succ(rec))
 ```
 
-The simplifier computes both concrete calls such as
-`double(succ(succ(0)))` and symbolic successor calls such as
+The successor arm can refer to the predecessor `k`, the recursive
+result `rec`, both, or neither. The simplifier computes concrete calls
+such as `double(succ(succ(0)))` and symbolic successor calls such as
 `double(succ(n))`.
 
 This addresses the common small examples where a single natural number
@@ -59,6 +65,9 @@ matching beyond `0`/`succ`, or recursion over lists, trees, strings, and
 other inductive structures. Binary textbook-style operations that are
 not built in still need to be introduced as uninterpreted functions with
 axiomatized recursion equations.
+
+The standard library now includes `pred`, `pred_succ`, and `succ_inj`
+for the common successor-injectivity exercise.
 
 ### 4. Induction is `Nat`-only
 
@@ -87,6 +96,9 @@ decision procedure for arithmetic goals.
 CS 250 modular arithmetic examples should be modeled axiomatically if
 they are used in Cetacea at all.
 
+Numeric Nat literals such as `2` and `42` parse as repeated `succ`
+applications, so students can write small concrete examples directly.
+
 ### 7. Set theory is typed and finite in scope
 
 Cetacea has typed sets, set builders, union, intersection, difference,
@@ -97,7 +109,7 @@ comprehension beyond predicate set builders.
 The Module 1 set-identity and powerset-monotonicity proofs fit well.
 Counting arguments and cardinality exercises do not.
 
-### 8. Some diagnostics still have line granularity
+### 8. Some diagnostics still have line granularity, and a few parser quirks
 
 Parse errors now carry line-local token spans when the parser can identify the
 offending token. Checking errors report useful line numbers, and failed tactics
@@ -106,6 +118,15 @@ an exact AST or tactic span within the line.
 
 That is good enough for short tutorial files but can still be vague in
 long theorem headers.
+
+A handful of small parser limitations students may run into:
+
+- Explicit theorem-argument lists `{...}` must fit on a single line.
+  A wrapped `{ A := Nat;` newline `x := alice; ... }` does not parse.
+- When a predicate-lambda's bound variable names collide with the
+  names introduced by later `intro` tactics, the resulting goal can
+  surprise students. Picking distinct names in the lambda
+  (`fun a b => ...` rather than `fun x y => ...`) avoids the issue.
 
 ### 9. Imports and names are global
 
@@ -173,15 +194,21 @@ are now implemented:
   the goal.
 - `apply` can infer intermediate theorem parameters for transitive lemmas
   such as `subset_trans` and `eq_trans` from matching local hypotheses.
+- `apply` normalizes theorem conclusions after explicit theorem-parameter
+  substitution, so predicate-lambda examples such as successor injectivity
+  match the simplified goal shape.
 - `powerset(A)` is supported, with membership simplifying to subset.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
   compound proof expressions such as `rewrite eq_symm h`.
 - Parenthesized proof expressions such as `exact (h hp).left` and
   `apply (htrans x y x)` parse.
+- Parenthesized projections can take arguments, as in `exact (h.left) hp`.
 - Multi-binder `forall x y : T, ...` and `exists x y : T, ...` parse.
 - Explicit theorem parameters can be combined with ordinary forall
   arguments.
 - Nat has built-in `mul`, `sub`, and `le`.
+- Numeric Nat literals such as `2` parse as repeated successors.
+- The Nat standard library includes `pred`, `pred_succ`, and `succ_inj`.
 - `show_goal` reports the current goal.
 - `intro` rejects shadowing instead of silently replacing a local name.
 

@@ -4239,6 +4239,7 @@ struct Token {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum TokenKind {
     Ident(String),
+    Number(usize),
     Sym(String),
     Eof,
 }
@@ -4306,6 +4307,17 @@ impl Tokens {
             Ok(())
         } else {
             Err(ParseError::new(format!("expected `{keyword}`")).with_span(self.current_span()))
+        }
+    }
+
+    fn eat_number(&mut self) -> Option<usize> {
+        match self.peek() {
+            TokenKind::Number(value) => {
+                let value = *value;
+                self.pos += 1;
+                Some(value)
+            }
+            _ => None,
         }
     }
 
@@ -4378,8 +4390,8 @@ impl Tokens {
     }
 
     fn parse_term(&mut self) -> Result<Term, ParseError> {
-        if self.eat_sym("0") {
-            return Ok(Term::Zero);
+        if let Some(value) = self.eat_number() {
+            return Ok(nat_literal_term(value));
         }
         if self.eat_ident("fun") {
             let mut names = Vec::new();
@@ -4610,15 +4622,21 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
             i += 1;
             continue;
         }
-        if ch == '0' {
-            tokens.push(Token {
-                kind: TokenKind::Sym("0".to_string()),
-                span: Span {
-                    start: i,
-                    end: i + 1,
-                },
-            });
+        if ch.is_ascii_digit() {
+            let start = i;
             i += 1;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                i += 1;
+            }
+            let text: String = chars[start..i].iter().collect();
+            let value = text.parse::<usize>().map_err(|_| {
+                ParseError::new(format!("Nat literal `{text}` is too large"))
+                    .with_span(Span { start, end: i })
+            })?;
+            tokens.push(Token {
+                kind: TokenKind::Number(value),
+                span: Span { start, end: i },
+            });
             continue;
         }
         if ch.is_ascii_alphabetic() || ch == '_' {
@@ -4688,6 +4706,14 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
         },
     });
     Ok(tokens)
+}
+
+fn nat_literal_term(value: usize) -> Term {
+    let mut term = Term::Zero;
+    for _ in 0..value {
+        term = Term::Succ(Box::new(term));
+    }
+    term
 }
 
 fn parse_file(source: &str) -> Result<File, ParseError> {
@@ -5518,7 +5544,7 @@ fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
         let inner = &rest[..close];
         let suffix = rest[close + 1..].trim();
         let mut expr = parse_proof_expr(inner)?;
-        append_projection_suffix(&mut expr, suffix)?;
+        append_proof_expr_suffix(&mut expr, suffix)?;
         return Ok(expr);
     }
 
@@ -5657,25 +5683,41 @@ fn matching_close_brace(input_after_open: &str) -> Result<usize, ParseError> {
     Err(ParseError::new("unclosed theorem-instantiation block"))
 }
 
-fn append_projection_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), ParseError> {
-    if suffix.is_empty() {
-        return Ok(());
-    }
-    let Some(rest) = suffix.strip_prefix('.') else {
-        return Err(ParseError::new("unexpected text after proof expression"));
-    };
-    for part in rest.split('.') {
-        match part.trim() {
-            "left" => expr.steps.push(ProofStep::Projection(Projection::Left)),
-            "right" => expr.steps.push(ProofStep::Projection(Projection::Right)),
-            other => {
-                return Err(ParseError::new(format!(
-                    "unknown proof projection `.{other}`"
-                )))
+fn append_proof_expr_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), ParseError> {
+    let mut rest = suffix.trim();
+    while !rest.is_empty() {
+        if let Some(after_dot) = rest.strip_prefix('.') {
+            let (projection, after_projection) = split_first_projection(after_dot)?;
+            match projection {
+                "left" => expr.steps.push(ProofStep::Projection(Projection::Left)),
+                "right" => expr.steps.push(ProofStep::Projection(Projection::Right)),
+                other => {
+                    return Err(ParseError::new(format!(
+                        "unknown proof projection `.{other}`"
+                    )))
+                }
             }
+            rest = after_projection.trim();
+        } else {
+            let Some((arg, after_arg)) = split_first_word(rest) else {
+                return Err(ParseError::new("unexpected text after proof expression"));
+            };
+            expr.steps.push(ProofStep::Arg(arg.to_string()));
+            rest = after_arg.trim();
         }
     }
     Ok(())
+}
+
+fn split_first_projection(input: &str) -> Result<(&str, &str), ParseError> {
+    let input = input.trim_start();
+    if input.is_empty() {
+        return Err(ParseError::new("expected proof projection"));
+    }
+    let end = input
+        .find(|ch: char| ch == '.' || ch.is_whitespace())
+        .unwrap_or(input.len());
+    Ok((&input[..end], &input[end..]))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7305,28 +7347,37 @@ fn apply_plan_for_goal(
     let mut term_subst = HashMap::new();
     let mut schema_subst = initial_schema_subst;
     {
+        let cursor = subst_formula_schema(cursor, &schema_subst);
+        let normalized_cursor = normalize_formula_defs(env, formula_ctx, &cursor)
+            .map_err(|err| TacticError::new(err.message))?;
+        let unification_params = remaining_schema_params(schema_params, &schema_subst);
         let mut unify = UnifyState {
             env,
             ctx,
             term_metas: &quantified,
-            schema_params,
+            schema_params: &unification_params,
             term_subst: &mut term_subst,
             schema_subst: &mut schema_subst,
         };
-        unify_formula(cursor, &normalized_target, &mut unify).map_err(|_| {
+        unify_formula(&normalized_cursor, &normalized_target, &mut unify).map_err(|_| {
             let subject = theorem_name
                 .map(|name| format!("theorem `{name}`"))
                 .unwrap_or_else(|| "this proof".to_string());
             TacticError::new(format!(
-                "cannot use {subject} here: its conclusion `{cursor}` does not match goal `{target}`"
+                "cannot use {subject} here: its conclusion `{normalized_cursor}` does not match goal `{target}`"
             ))
         })?;
     }
+    let inference_params = remaining_schema_params(schema_params, &schema_subst);
+    let premises_for_inference = premises
+        .iter()
+        .map(|premise| subst_formula_schema(premise, &schema_subst))
+        .collect::<Vec<_>>();
     infer_apply_args_from_context(
         env,
         ctx,
-        &premises,
-        schema_params,
+        &premises_for_inference,
+        &inference_params,
         &quantified,
         &mut term_subst,
         &mut schema_subst,
@@ -7410,17 +7461,26 @@ fn infer_schema_subst_for_formula(
     theorem_name: Option<&str>,
 ) -> Result<SchemaSubst, TacticError> {
     let mut schema_subst = initial_schema_subst;
+    let pattern = subst_formula_schema(pattern, &schema_subst);
     let mut term_subst = HashMap::new();
+    let unification_params = remaining_schema_params(params, &schema_subst);
+    let normalize_pattern = schema_subst_uses_predicate_lambda(&schema_subst);
     {
         let mut unify = UnifyState {
             env,
             ctx,
             term_metas: &[],
-            schema_params: params,
+            schema_params: &unification_params,
             term_subst: &mut term_subst,
             schema_subst: &mut schema_subst,
         };
-        unify_formula(pattern, target, &mut unify).map_err(|_| {
+        let pattern = if normalize_pattern {
+            normalize_formula_defs(env, ctx, &pattern)
+                .map_err(|err| TacticError::new(err.message))?
+        } else {
+            pattern
+        };
+        unify_formula(&pattern, target, &mut unify).map_err(|_| {
             let subject = theorem_name
                 .map(|name| format!("theorem `{name}`"))
                 .unwrap_or_else(|| "the theorem".to_string());
@@ -7431,6 +7491,36 @@ fn infer_schema_subst_for_formula(
     }
     ensure_schema_subst_complete(params, &schema_subst, theorem_name)?;
     Ok(schema_subst)
+}
+
+fn remaining_schema_params(params: &[Param], subst: &SchemaSubst) -> Vec<Param> {
+    params
+        .iter()
+        .filter_map(|param| match &param.kind {
+            ParamKind::Type if !subst.type_args.contains_key(&param.name) => Some(param.clone()),
+            ParamKind::Prop if !subst.formula_args.contains_key(&param.name) => Some(param.clone()),
+            ParamKind::Predicate(args) if !subst.predicate_args.contains_key(&param.name) => {
+                Some(Param {
+                    name: param.name.clone(),
+                    kind: ParamKind::Predicate(
+                        args.iter().map(|ty| subst_type_schema(ty, subst)).collect(),
+                    ),
+                })
+            }
+            ParamKind::Term(ty) if !subst.term_args.contains_key(&param.name) => Some(Param {
+                name: param.name.clone(),
+                kind: ParamKind::Term(subst_type_schema(ty, subst)),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn schema_subst_uses_predicate_lambda(subst: &SchemaSubst) -> bool {
+    subst
+        .predicate_args
+        .values()
+        .any(|arg| matches!(arg, PredicateArg::Lambda { .. }))
 }
 
 fn ensure_schema_subst_complete(
@@ -8555,6 +8645,20 @@ theorem forall_and_left
     }
 
     #[test]
+    fn parenthesized_projection_can_take_argument() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem projection_apply (P Q R : Prop) : ((P -> Q) /\ (P -> R)) -> P -> Q := by
+  intro h
+  intro hp
+  exact (h.left) hp
+"#,
+        );
+    }
+
+    #[test]
     fn generic_type_parameter_succeeds_constructively() {
         check_ok(
             r#"
@@ -9484,6 +9588,49 @@ theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
   refl
 
 theorem add_one_zero : add(succ(0), 0) = succ(0) := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn nat_numeric_literals_compute_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem two_plus_one : add(2, 1) = 3 := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn apply_normalizes_explicit_predicate_lambda_conclusion() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem congr_pred
+  (A : Type)
+  (P : A -> Prop)
+  (x y : A)
+  : x = y -> P(x) -> P(y) := by
+  intro h
+  intro hp
+  rewrite h
+  exact hp
+
+defrec pred (n : Nat) : Nat
+| zero => 0
+| succ k rec => k
+
+theorem succ_inj_like (n m : Nat) : succ(n) = succ(m) -> n = m := by
+  intro h
+  apply congr_pred {A := Nat; P := fun x => n = pred(x); x := succ(n); y := succ(m)}
+  exact h
   simp
   refl
 "#,
