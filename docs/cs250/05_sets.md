@@ -2,11 +2,12 @@
 
 Cetacea has a typed set theory: `Set T` is a type for any sort `T`, and
 the basic constructors are `empty(T)`, `singleton(x)`, `union(A, B)`,
-`inter(A, B)`, `diff(A, B)`, and `powerset(A)`. You can also write
-nonempty finite sets as `{alice, bob}`. Membership is `x in A`, subset
-is `A subset B`, equality of sets is plain `=`. Set extensionality is
-an axiom (`set_ext` in `std/set.ctea`). The standard library proves a
-small algebra of set-theoretic identities.
+`inter(A, B)`, `diff(A, B)`, `compl(A)`, `univ(T)`, and
+`powerset(A)`. You can also write nonempty finite sets as
+`{alice, bob}`. Membership is `x in A`, subset is `A subset B`, equality
+of sets is plain `=`. Set extensionality is an axiom (`set_ext` in
+`std/set.ctea`). The standard library proves a small algebra of
+set-theoretic identities.
 
 Set-builder notation is supported:
 
@@ -52,6 +53,17 @@ theorem bob_in_pair : bob in {alice, bob} := by
   simp
   right
   refl
+```
+
+Complements are typed relative to the element type's universal set:
+
+```text
+theorem complement_intro_demo
+  (A : Set Person)
+  : (alice in A -> False) -> alice in compl(A) := by
+  intro h
+  simp
+  exact h
 ```
 
 Set builders reduce by substituting the element into the defining

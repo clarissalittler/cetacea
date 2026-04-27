@@ -19,6 +19,13 @@ theorem bob_in_pair : bob in {alice, bob} := by
   right
   refl
 
+theorem complement_intro_demo
+  (A : Set Person)
+  : (alice in A -> False) -> alice in compl(A) := by
+  intro h
+  simp
+  exact h
+
 def TallSet : Set Person := { x : Person | Tall(x) }
 
 theorem alice_in_tall_set : Tall(alice) -> alice in TallSet := by

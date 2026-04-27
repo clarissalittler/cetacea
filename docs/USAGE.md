@@ -261,11 +261,13 @@ Built-in set terms:
 
 ```text
 empty(T)
+univ(T)
 singleton(x)
 {x, y, z}
 union(A, B)
 inter(A, B)
 diff(A, B)
+compl(A)
 powerset(A)
 { x : T | P(x) }
 ```
@@ -276,6 +278,9 @@ element type is ambiguous; use `empty(T)` instead.
 
 `powerset(A)` has type `Set (Set T)` when `A : Set T`; membership
 `B in powerset(A)` simplifies to `B subset A`.
+`univ(T)` has type `Set T`, and `compl(A)` is the complement of `A`
+inside its element type's universe. `complement(A)` is accepted as an
+alias for `compl(A)`.
 
 The checker validates arities and types for functions, predicates, membership,
 subset, and set operations.
@@ -698,8 +703,8 @@ It currently knows:
 - formula definitions
 - transparent term definitions
 - primitive recursive Nat definitions declared with `defrec`
-- set membership in `empty`, `singleton`, `union`, `inter`, `diff`,
-  `powerset`, and set builders
+- set membership in `empty`, `univ`, `singleton`, `union`, `inter`,
+  `diff`, `compl`, `powerset`, and set builders
 - subset expansion
 - the built-in equations for `add`, `mul`, `sub`, and `le`, including inside
   predicate and function arguments
@@ -1002,6 +1007,7 @@ Includes set extensionality as an axiom plus set lemmas:
 - `powerset_mono`
 - `subset_antisymm`
 - `empty_subset`
+- `subset_univ`
 - `inter_subset_left`
 - `inter_subset_right`
 - `subset_union_left`
@@ -1009,6 +1015,11 @@ Includes set extensionality as an axiom plus set lemmas:
 - `union_subset`
 - `diff_subset_left`
 - `diff_disjoint_right`
+- `compl_intro`
+- `compl_elim`
+- `inter_univ_right`
+- `inter_univ_left`
+- `inter_compl_empty`
 - `union_comm`
 - `union_assoc_left`
 - `union_empty_left`

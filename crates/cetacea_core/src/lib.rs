@@ -36,10 +36,12 @@ pub enum Term {
     Mul(Box<Term>, Box<Term>),
     Sub(Box<Term>, Box<Term>),
     EmptySet(Type),
+    Universe(Type),
     Singleton(Box<Term>),
     Union(Box<Term>, Box<Term>),
     Inter(Box<Term>, Box<Term>),
     Diff(Box<Term>, Box<Term>),
+    Complement(Box<Term>),
     Powerset(Box<Term>),
     SetBuilder {
         var: Name,
@@ -87,10 +89,12 @@ impl fmt::Display for Term {
             Term::Mul(left, right) => write!(f, "mul({left}, {right})"),
             Term::Sub(left, right) => write!(f, "sub({left}, {right})"),
             Term::EmptySet(ty) => write!(f, "empty({ty})"),
+            Term::Universe(ty) => write!(f, "univ({ty})"),
             Term::Singleton(term) => write!(f, "singleton({term})"),
             Term::Union(left, right) => write!(f, "union({left}, {right})"),
             Term::Inter(left, right) => write!(f, "inter({left}, {right})"),
             Term::Diff(left, right) => write!(f, "diff({left}, {right})"),
+            Term::Complement(term) => write!(f, "compl({term})"),
             Term::Powerset(term) => write!(f, "powerset({term})"),
             Term::SetBuilder {
                 var,
@@ -2093,9 +2097,22 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             validate_type(env, ctx, elem_ty)?;
             Ok(Type::Set(Box::new(elem_ty.clone())))
         }
+        Term::Universe(elem_ty) => {
+            validate_type(env, ctx, elem_ty)?;
+            Ok(Type::Set(Box::new(elem_ty.clone())))
+        }
         Term::Singleton(elem) => {
             let elem_ty = validate_term(env, ctx, elem)?;
             Ok(Type::Set(Box::new(elem_ty)))
+        }
+        Term::Complement(set) => {
+            let set_ty = validate_term(env, ctx, set)?;
+            let Type::Set(elem_ty) = set_ty else {
+                return Err(ValidationError::new(format!(
+                    "complement argument has type `{set_ty}`, but expected a set"
+                )));
+            };
+            Ok(Type::Set(elem_ty))
         }
         Term::Powerset(set) => {
             let set_ty = validate_term(env, ctx, set)?;
@@ -2697,8 +2714,10 @@ fn alpha_eq_term(left: &Term, right: &Term, env: &mut AlphaEnv) -> bool {
         | (Term::Diff(left_a, left_b), Term::Diff(right_a, right_b)) => {
             alpha_eq_term(left_a, right_a, env) && alpha_eq_term(left_b, right_b, env)
         }
-        (Term::EmptySet(left_ty), Term::EmptySet(right_ty)) => left_ty == right_ty,
+        (Term::EmptySet(left_ty), Term::EmptySet(right_ty))
+        | (Term::Universe(left_ty), Term::Universe(right_ty)) => left_ty == right_ty,
         (Term::Singleton(left), Term::Singleton(right))
+        | (Term::Complement(left), Term::Complement(right))
         | (Term::Powerset(left), Term::Powerset(right)) => alpha_eq_term(left, right, env),
         (
             Term::SetBuilder {
@@ -2909,6 +2928,7 @@ fn unfold_formula_defs(
             let set = normalize_term(env, ctx, set)?;
             let simplified = match set {
                 Term::EmptySet(_) => Formula::False,
+                Term::Universe(_) => Formula::True,
                 Term::Singleton(singleton_elem) => Formula::eq(elem, *singleton_elem),
                 Term::Union(left, right) => Formula::or(
                     Formula::membership(elem.clone(), *left),
@@ -2922,6 +2942,7 @@ fn unfold_formula_defs(
                     Formula::membership(elem.clone(), *left),
                     Formula::negate(Formula::membership(elem, *right)),
                 ),
+                Term::Complement(base) => Formula::negate(Formula::membership(elem, *base)),
                 Term::Powerset(base) => Formula::subset(elem, *base),
                 Term::SetBuilder {
                     var,
@@ -3011,7 +3032,7 @@ fn simplify_le_formula(left: Term, right: Term) -> Formula {
 
 fn normalize_term_compute(term: &Term) -> Term {
     match term {
-        Term::Var(_) | Term::Zero | Term::EmptySet(_) => term.clone(),
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => term.clone(),
         Term::App(name, args) => Term::App(
             name.clone(),
             args.iter().map(normalize_term_compute).collect(),
@@ -3074,6 +3095,7 @@ fn normalize_term_compute(term: &Term) -> Term {
             Box::new(normalize_term_compute(left)),
             Box::new(normalize_term_compute(right)),
         ),
+        Term::Complement(term) => Term::Complement(Box::new(normalize_term_compute(term))),
         Term::Powerset(term) => Term::Powerset(Box::new(normalize_term_compute(term))),
         Term::SetBuilder {
             var,
@@ -3115,7 +3137,7 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
             ))
         }
         Term::PredLambda { .. } => Ok(term.clone()),
-        Term::Zero | Term::EmptySet(_) => Ok(term.clone()),
+        Term::Zero | Term::EmptySet(_) | Term::Universe(_) => Ok(term.clone()),
         Term::Succ(term) => Ok(Term::Succ(Box::new(normalize_term(env, ctx, term)?))),
         Term::Add(left, right) => {
             let computed = Term::Add(
@@ -3151,6 +3173,7 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
             Box::new(normalize_term(env, ctx, left)?),
             Box::new(normalize_term(env, ctx, right)?),
         )),
+        Term::Complement(term) => Ok(Term::Complement(Box::new(normalize_term(env, ctx, term)?))),
         Term::Powerset(term) => Ok(Term::Powerset(Box::new(normalize_term(env, ctx, term)?))),
         Term::SetBuilder {
             var,
@@ -3287,6 +3310,7 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(right, subst)),
         ),
         Term::EmptySet(ty) => Term::EmptySet(subst_type_schema(ty, subst)),
+        Term::Universe(ty) => Term::Universe(subst_type_schema(ty, subst)),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term_schema(term, subst))),
         Term::Union(left, right) => Term::Union(
             Box::new(subst_term_schema(left, subst)),
@@ -3300,6 +3324,7 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(left, subst)),
             Box::new(subst_term_schema(right, subst)),
         ),
+        Term::Complement(term) => Term::Complement(Box::new(subst_term_schema(term, subst))),
         Term::Powerset(term) => Term::Powerset(Box::new(subst_term_schema(term, subst))),
         Term::SetBuilder {
             var,
@@ -3443,6 +3468,7 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(right, var, replacement)),
         ),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
+        Term::Universe(ty) => Term::Universe(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term(term, var, replacement))),
         Term::Union(left, right) => Term::Union(
             Box::new(subst_term(left, var, replacement)),
@@ -3456,6 +3482,7 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(left, var, replacement)),
             Box::new(subst_term(right, var, replacement)),
         ),
+        Term::Complement(term) => Term::Complement(Box::new(subst_term(term, var, replacement))),
         Term::Powerset(term) => Term::Powerset(Box::new(subst_term(term, var, replacement))),
         Term::SetBuilder {
             var: bound,
@@ -3551,10 +3578,11 @@ fn term_has_free_var(term: &Term, name: &str) -> bool {
         Term::PredLambda { params, body } => {
             !params.iter().any(|param| param.name == name) && formula_has_free_term(body, name)
         }
-        Term::Zero | Term::EmptySet(_) => false,
-        Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => {
-            term_has_free_var(term, name)
-        }
+        Term::Zero | Term::EmptySet(_) | Term::Universe(_) => false,
+        Term::Succ(term)
+        | Term::Singleton(term)
+        | Term::Complement(term)
+        | Term::Powerset(term) => term_has_free_var(term, name),
         Term::Add(left, right)
         | Term::Mul(left, right)
         | Term::Sub(left, right)
@@ -3662,6 +3690,11 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
                 results.push(Term::Diff(left.clone(), Box::new(replaced)));
             }
         }
+        Term::Complement(inner) => {
+            for replaced in replace_term_once(inner, from, to) {
+                results.push(Term::Complement(Box::new(replaced)));
+            }
+        }
         Term::Powerset(inner) => {
             for replaced in replace_term_once(inner, from, to) {
                 results.push(Term::Powerset(Box::new(replaced)));
@@ -3694,7 +3727,7 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
                 }
             }
         }
-        Term::Var(_) | Term::App(_, _) | Term::Zero | Term::EmptySet(_) => {}
+        Term::Var(_) | Term::App(_, _) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => {}
     }
 
     results
@@ -3835,10 +3868,13 @@ fn formula_size(formula: &Formula) -> usize {
 
 fn term_size(term: &Term) -> usize {
     match term {
-        Term::Var(_) | Term::Zero | Term::EmptySet(_) => 1,
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => 1,
         Term::App(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
         Term::PredLambda { body, .. } => 1 + formula_size(body),
-        Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => 1 + term_size(term),
+        Term::Succ(term)
+        | Term::Singleton(term)
+        | Term::Complement(term)
+        | Term::Powerset(term) => 1 + term_size(term),
         Term::Add(left, right)
         | Term::Mul(left, right)
         | Term::Sub(left, right)
@@ -4538,10 +4574,14 @@ impl Tokens {
         }
         let name = self.expect_ident()?;
         if self.eat_sym("(") {
-            if name == "empty" {
+            if name == "empty" || name == "univ" {
                 let ty = self.parse_type()?;
                 self.expect_sym(")")?;
-                return Ok(Term::EmptySet(ty));
+                return if name == "empty" {
+                    Ok(Term::EmptySet(ty))
+                } else {
+                    Ok(Term::Universe(ty))
+                };
             }
             let mut args = Vec::new();
             if !self.eat_sym(")") {
@@ -4574,10 +4614,11 @@ impl Tokens {
                 ("diff", [left, right]) => {
                     Ok(Term::Diff(Box::new(left.clone()), Box::new(right.clone())))
                 }
+                ("compl" | "complement", [arg]) => Ok(Term::Complement(Box::new(arg.clone()))),
                 ("powerset", [arg]) => Ok(Term::Powerset(Box::new(arg.clone()))),
-                ("succ" | "singleton" | "powerset", _) => Err(ParseError::new(format!(
-                    "`{name}` expects exactly one argument"
-                ))),
+                ("succ" | "singleton" | "compl" | "complement" | "powerset", _) => Err(
+                    ParseError::new(format!("`{name}` expects exactly one argument")),
+                ),
                 ("add" | "mul" | "sub" | "union" | "inter" | "diff", _) => Err(ParseError::new(
                     format!("`{name}` expects exactly two arguments"),
                 )),
@@ -4686,10 +4727,12 @@ impl Tokens {
             | Term::Mul(_, _)
             | Term::Sub(_, _)
             | Term::EmptySet(_)
+            | Term::Universe(_)
             | Term::Singleton(_)
             | Term::Union(_, _)
             | Term::Inter(_, _)
             | Term::Diff(_, _)
+            | Term::Complement(_)
             | Term::Powerset(_)
             | Term::PredLambda { .. }
             | Term::SetBuilder { .. } => {
@@ -7211,6 +7254,11 @@ fn rewrite_term_with_simp_rules_once(
                 Term::Powerset(Box::new(inner))
             })
         }
+        Term::Complement(inner) => {
+            rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
+                Term::Complement(Box::new(inner))
+            })
+        }
         Term::Add(left, right) => {
             rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
                 Term::Add(Box::new(left), Box::new(right))
@@ -7276,7 +7324,7 @@ fn rewrite_term_with_simp_rules_once(
                 Ok(None)
             }
         }
-        Term::Var(_) | Term::Zero | Term::EmptySet(_) => Ok(None),
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => Ok(None),
     }
 }
 
@@ -8014,6 +8062,7 @@ fn subst_term_terms_with(
             Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
+        Term::Universe(ty) => Term::Universe(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term_terms_with(
             term,
             subst,
@@ -8031,6 +8080,11 @@ fn subst_term_terms_with(
             Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
             Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
+        Term::Complement(term) => Term::Complement(Box::new(subst_term_terms_with(
+            term,
+            subst,
+            replacement_free_vars,
+        ))),
         Term::Powerset(term) => Term::Powerset(Box::new(subst_term_terms_with(
             term,
             subst,
@@ -8176,8 +8230,11 @@ fn collect_free_term_vars(term: &Term, bound: &mut Vec<Name>, vars: &mut HashSet
                 bound.pop();
             }
         }
-        Term::Zero | Term::EmptySet(_) => {}
-        Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => {
+        Term::Zero | Term::EmptySet(_) | Term::Universe(_) => {}
+        Term::Succ(term)
+        | Term::Singleton(term)
+        | Term::Complement(term)
+        | Term::Powerset(term) => {
             collect_free_term_vars(term, bound, vars);
         }
         Term::Add(left, right)
@@ -8430,6 +8487,17 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
                 unify.schema_subst,
             )
         }
+        Term::Universe(pattern_ty) => {
+            let Term::Universe(target_ty) = target else {
+                return Err(());
+            };
+            unify_type(
+                pattern_ty,
+                target_ty,
+                unify.schema_params,
+                unify.schema_subst,
+            )
+        }
         Term::Singleton(pattern) => {
             let Term::Singleton(target) = target else {
                 return Err(());
@@ -8456,6 +8524,12 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             };
             unify_term(p_left, t_left, unify)?;
             unify_term(p_right, t_right, unify)
+        }
+        Term::Complement(pattern) => {
+            let Term::Complement(target) = target else {
+                return Err(());
+            };
+            unify_term(pattern, target, unify)
         }
         Term::Powerset(pattern) => {
             let Term::Powerset(target) = target else {
@@ -10593,6 +10667,37 @@ theorem finite_set_literal_right : bob in {alice, bob} := by
     }
 
     #[test]
+    fn universe_and_complement_compute_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+theorem universal_set_member : alice in univ(Person) := by
+  simp
+  trivial
+
+theorem complement_intro_demo
+  (A : Set Person)
+  : (alice in A -> False) -> alice in compl(A) := by
+  intro h
+  simp
+  exact h
+
+theorem complement_elim_demo
+  (A : Set Person)
+  : alice in complement(A) -> alice in A -> False := by
+  intro hnot
+  simp at hnot
+  intro hA
+  exact hnot hA
+"#,
+        );
+    }
+
+    #[test]
     fn empty_set_literal_requires_element_type() {
         check_err_contains(
             r#"
@@ -10931,6 +11036,21 @@ const red : Color
 theorem bad : alice in {red} := by
 "#,
             "membership compares `alice` of type `Person` with a set of `Color`",
+        );
+    }
+
+    #[test]
+    fn complement_argument_must_be_a_set() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+theorem bad (n : Nat) : alice in compl(n) := by
+"#,
+            "complement argument has type `Nat`, but expected a set",
         );
     }
 

@@ -121,10 +121,12 @@ pub enum Term {
     Mul(Box<Term>, Box<Term>),
     Sub(Box<Term>, Box<Term>),
     EmptySet(Type),
+    Universe(Type),
     Singleton(Box<Term>),
     Union(Box<Term>, Box<Term>),
     Inter(Box<Term>, Box<Term>),
     Diff(Box<Term>, Box<Term>),
+    Complement(Box<Term>),
     Powerset(Box<Term>),
     SetBuilder { var: Name, var_type: Type, body: Box<Formula> },
 }
@@ -669,10 +671,12 @@ expanded:
 
 ```text
 x in empty(T)      ==> False
+x in univ(T)       ==> True
 x in singleton(y)  ==> x = y
 x in union(A, B)   ==> x in A \/ x in B
 x in inter(A, B)   ==> x in A /\ x in B
 x in diff(A, B)    ==> x in A /\ not x in B
+x in compl(A)      ==> not x in A
 x in powerset(A)   ==> x subset A
 x in { y : T | P(y) }  ==> P(x)
 ```

@@ -82,6 +82,15 @@ theorem empty_subset
   intro hx
   contradiction
 
+theorem subset_univ
+  (T : Type)
+  (A : Set T)
+  : A subset univ(T) := by
+  simp
+  intro x
+  intro hx
+  trivial
+
 theorem inter_subset_left
   (T : Type)
   (A B : Set T)
@@ -155,6 +164,69 @@ theorem diff_disjoint_right
   intro hx
   apply hx.left.right
   exact hx.right
+
+theorem compl_intro
+  (T : Type)
+  (A : Set T)
+  (x : T)
+  : (x in A -> False) -> x in compl(A) := by
+  intro h
+  simp
+  exact h
+
+theorem compl_elim
+  (T : Type)
+  (A : Set T)
+  (x : T)
+  : x in compl(A) -> x in A -> False := by
+  intro hnot
+  simp at hnot
+  intro hx
+  exact hnot hx
+
+theorem inter_univ_right
+  (T : Type)
+  (A : Set T)
+  : inter(A, univ(T)) = A := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  exact hx.left
+  intro hx
+  split
+  exact hx
+  trivial
+
+theorem inter_univ_left
+  (T : Type)
+  (A : Set T)
+  : inter(univ(T), A) = A := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  exact hx.right
+  intro hx
+  split
+  trivial
+  exact hx
+
+theorem inter_compl_empty
+  (T : Type)
+  (A : Set T)
+  : inter(A, compl(A)) = empty(T) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro hx
+  apply hx.right
+  exact hx.left
+  intro hfalse
+  contradiction
 
 theorem union_comm
   (T : Type)
