@@ -218,6 +218,10 @@ theorem equality_reflexive : Reflexive(fun x y : Person => x = y) := by
   refl
 ```
 
+Lambda parameters must be distinct. They are substituted simultaneously, so
+using names such as `x` and `y` in both the lambda and the surrounding theorem
+is safe.
+
 Built-in Nat terms:
 
 ```text
@@ -707,7 +711,9 @@ theorem happy_mother : Happy(alice) -> Happy(mother(alice)) := by
 ```
 
 Use `simp at h` to simplify a named hypothesis in the local context, or
-`simp at *` to simplify the current goal and all local hypotheses.
+`simp at *` to simplify the current goal and all local hypotheses. Listed
+equality rules can also target hypotheses: `simp [mother_alice] at h` and
+`simp [mother_alice] at *`.
 
 Examples:
 
@@ -879,8 +885,9 @@ exact forall_mono {A := Person; P := Student; Q := Enrolled}
 rewrite add_zero_right {n := m}
 ```
 
-Explicit arguments are written in braces and separated by semicolons. The
-values are parsed according to the parameter kind:
+Explicit arguments are written in braces and separated by semicolons. They can
+stay on one line or be wrapped across several tactic lines. The values are
+parsed according to the parameter kind:
 
 - type parameters, such as `A := Person`
 - proposition parameters, such as `P := P /\ Q`
@@ -1154,8 +1161,9 @@ Cetacea is intentionally small. Important current limitations:
 - Parse diagnostics carry line-local token spans where possible, but checked
   declaration and tactic execution errors still report line numbers rather than
   exact AST spans. Runtime tactic failures report the failing tactic line.
-- `simp [lemma]` can use listed equality theorems as rewrite rules, but there
-  is not yet an attribute-based global simp set or iff/proposition rewriting.
+- `simp [lemma]` can use listed equality theorems as rewrite rules, including
+  in hypotheses with `simp [lemma] at h` or `simp [lemma] at *`, but there is
+  not yet an attribute-based global simp set or iff/proposition rewriting.
 - Theorem instantiation is useful but incomplete. Some proofs still need
   explicit theorem parameters.
 - Nat has addition, multiplication, truncated subtraction, and `le`, but no

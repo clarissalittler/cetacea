@@ -29,19 +29,17 @@ underconstrained theorem parameters.
 `simp` knows transparent definitions, set membership, subset expansion,
 and built-in Nat computation. `simp at h` can simplify a named
 hypothesis, and `simp at *` simplifies the goal plus all hypotheses. It
-can also use listed equality theorems in the goal, as in `simp [h]`.
+can also use listed equality theorems in the goal or in hypotheses, as
+in `simp [lemma]`, `simp [lemma] at h`, and `simp [lemma] at *`.
 
 The remaining limitations are:
 
 - there is no global or attribute-based simp-set,
-- no automatic imported-lemma discovery,
-- no iff/proposition rewriting, and
-- `simp [lemma]` only applies to the goal — `simp [lemma] at h` and
-  `simp [lemma] at *` do not parse, so a hypothesis-targeted simp can
-  use only the built-in rule set.
+- no automatic imported-lemma discovery, and
+- no iff/proposition rewriting.
 
-**Possible improvement:** add `@[simp]`-style rule registration, allow
-`simp [lemma] at h`, and add a richer rewrite engine.
+**Possible improvement:** add `@[simp]`-style rule registration and a
+richer rewrite engine.
 
 ### 3. User-defined recursion is intentionally narrow
 
@@ -119,14 +117,9 @@ an exact AST or tactic span within the line.
 That is good enough for short tutorial files but can still be vague in
 long theorem headers.
 
-A handful of small parser limitations students may run into:
-
-- Explicit theorem-argument lists `{...}` must fit on a single line.
-  A wrapped `{ A := Nat;` newline `x := alice; ... }` does not parse.
-- When a predicate-lambda's bound variable names collide with the
-  names introduced by later `intro` tactics, the resulting goal can
-  surprise students. Picking distinct names in the lambda
-  (`fun a b => ...` rather than `fun x y => ...`) avoids the issue.
+The parser now handles the most common tutorial shapes, including
+wrapped explicit theorem-argument lists and inline predicate lambdas
+whose binder names overlap with names introduced later in the proof.
 
 ### 9. Imports and names are global
 
@@ -192,6 +185,8 @@ are now implemented:
   `defrec`, and `simp` computes their zero and successor equations.
 - `simp [lemma]` can use listed equality theorems as rewrite rules in
   the goal.
+- `simp [lemma] at h` and `simp [lemma] at *` can use listed equality
+  theorems as rewrite rules in hypotheses.
 - `apply` can infer intermediate theorem parameters for transitive lemmas
   such as `subset_trans` and `eq_trans` from matching local hypotheses.
 - `apply` normalizes theorem conclusions after explicit theorem-parameter
@@ -203,12 +198,17 @@ are now implemented:
 - Parenthesized proof expressions such as `exact (h hp).left` and
   `apply (htrans x y x)` parse.
 - Parenthesized projections can take arguments, as in `exact (h.left) hp`.
+- Explicit theorem-argument lists `{...}` can be wrapped across several
+  tactic lines.
 - Multi-binder `forall x y : T, ...` and `exists x y : T, ...` parse.
 - Explicit theorem parameters can be combined with ordinary forall
   arguments.
 - Nat has built-in `mul`, `sub`, and `le`.
 - Numeric Nat literals such as `2` parse as repeated successors.
 - The Nat standard library includes `pred`, `pred_succ`, and `succ_inj`.
+- Predicate-lambda substitution is simultaneous and capture-avoiding, so
+  examples such as `fun x y => x = y` work even when the surrounding
+  theorem introduces variables named `x` and `y`.
 - `show_goal` reports the current goal.
 - `intro` rejects shadowing instead of silently replacing a local name.
 

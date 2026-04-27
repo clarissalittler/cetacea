@@ -492,6 +492,8 @@ pub struct Context {
     pred_vars: HashMap<Name, Vec<Type>>,
     term_vars: Vec<TermBinding>,
     proof_vars: Vec<ProofBinding>,
+    proof_terms: Vec<Proof>,
+    proof_kernel_formulas: Vec<Formula>,
 }
 
 impl Context {
@@ -500,7 +502,24 @@ impl Context {
     }
 
     pub fn add_proof(&mut self, name: Name, formula: Formula) {
+        let proof = Proof::Hyp(name.clone());
+        self.add_proof_with_witness(name, formula, proof);
+    }
+
+    fn add_proof_with_witness(&mut self, name: Name, formula: Formula, proof: Proof) {
+        self.add_proof_with_kernel(name, formula.clone(), proof, formula);
+    }
+
+    fn add_proof_with_kernel(
+        &mut self,
+        name: Name,
+        formula: Formula,
+        proof: Proof,
+        kernel_formula: Formula,
+    ) {
         self.proof_vars.push(ProofBinding { name, formula });
+        self.proof_terms.push(proof);
+        self.proof_kernel_formulas.push(kernel_formula);
     }
 
     pub fn add_type_var(&mut self, name: Name) {
@@ -547,8 +566,38 @@ impl Context {
             .map(|binding| &binding.formula)
     }
 
+    fn lookup_proof(&self, name: &str) -> Option<&Proof> {
+        self.proof_vars
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, binding)| binding.name == name)
+            .map(|(idx, _)| &self.proof_terms[idx])
+    }
+
+    fn lookup_kernel_formula(&self, name: &str) -> Option<&Formula> {
+        self.proof_vars
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, binding)| binding.name == name)
+            .map(|(idx, _)| &self.proof_kernel_formulas[idx])
+    }
+
     fn proofs(&self) -> &[ProofBinding] {
         &self.proof_vars
+    }
+
+    fn proof_bindings(&self) -> impl DoubleEndedIterator<Item = (&ProofBinding, &Proof)> {
+        self.proof_vars.iter().zip(self.proof_terms.iter())
+    }
+
+    fn proof_entries(&self) -> impl DoubleEndedIterator<Item = (&ProofBinding, &Proof, &Formula)> {
+        self.proof_vars
+            .iter()
+            .zip(self.proof_terms.iter())
+            .zip(self.proof_kernel_formulas.iter())
+            .map(|((binding, proof), kernel_formula)| (binding, proof, kernel_formula))
     }
 
     fn has_schema_name(&self, name: &str) -> bool {
@@ -1479,7 +1528,7 @@ pub fn infer_proof(
 ) -> Result<CheckedProof, KernelError> {
     match proof {
         Proof::Hyp(name) => {
-            let Some(formula) = ctx.lookup(name) else {
+            let Some(formula) = ctx.lookup_kernel_formula(name) else {
                 return Err(KernelError::new(format!("unknown hypothesis `{name}`")));
             };
             Ok(CheckedProof {
@@ -2100,6 +2149,19 @@ fn predicate_signature<'a>(env: &'a Env, ctx: &'a Context, name: &str) -> Option
         .or_else(|| env.preds.get(name).map(Vec::as_slice))
 }
 
+fn validate_distinct_lambda_params(params: &[LambdaParam]) -> Result<(), ValidationError> {
+    let mut seen = HashSet::new();
+    for param in params {
+        if !seen.insert(param.name.as_str()) {
+            return Err(ValidationError::new(format!(
+                "predicate lambda parameter `{}` is repeated",
+                param.name
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn validate_predicate_arg(
     env: &Env,
     ctx: &Context,
@@ -2121,6 +2183,7 @@ fn validate_predicate_arg(
             }
         }
         PredicateArg::Lambda { params, body } => {
+            validate_distinct_lambda_params(params)?;
             if params.len() != expected.len() {
                 return Err(ValidationError::new(format!(
                     "predicate lambda expects {} argument(s), but target predicate type has {}",
@@ -2406,6 +2469,7 @@ fn validate_predicate_schema_arg(
             Ok(())
         }
         PredicateArg::Lambda { params, body } => {
+            validate_distinct_lambda_params(params)?;
             if params.len() != param_args.len() {
                 return Err(ValidationError::new(format!(
                     "predicate lambda expects {} argument(s), but target predicate type has {}",
@@ -3332,11 +3396,12 @@ fn subst_formula_schema(formula: &Formula, subst: &SchemaSubst) -> Formula {
 }
 
 fn apply_predicate_lambda(params: &[LambdaParam], body: &Formula, args: &[Term]) -> Formula {
-    let mut formula = body.clone();
-    for (param, arg) in params.iter().zip(args) {
-        formula = subst_formula_term(&formula, &param.name, arg);
-    }
-    formula
+    let subst = params
+        .iter()
+        .zip(args)
+        .map(|(param, arg)| (param.name.clone(), arg.clone()))
+        .collect();
+    subst_formula_terms(body, &subst)
 }
 
 fn term_type(env: &Env, ctx: &Context, term: &Term) -> Result<Type, KernelError> {
@@ -3963,13 +4028,13 @@ impl ProofExpr {
         if self.is_true_intro() {
             return Ok(Proof::TrueIntro);
         }
-        if ctx.lookup(&self.base).is_some() {
+        if let Some(proof) = ctx.lookup_proof(&self.base) {
             if self.has_explicit_args() {
                 return Err(TacticError::new(
                     "named arguments like `{P := ...}` can only be used with theorem or axiom names",
                 ));
             }
-            Ok(Proof::Hyp(self.base.clone()))
+            Ok(proof.clone())
         } else if let Some(theorem) = env.theorem(&self.base) {
             let subst = if self.has_explicit_args() {
                 let subst = explicit_schema_subst(env, ctx, theorem, &self.explicit_args)?;
@@ -4207,6 +4272,10 @@ enum Tactic {
     SimpAt(Name),
     SimpAll,
     SimpWith(Vec<Name>),
+    SimpWithAt {
+        names: Vec<Name>,
+        target: SimpTarget,
+    },
     Induction {
         var_name: Name,
         zero_tactics: Vec<LocatedTactic>,
@@ -4222,6 +4291,12 @@ enum Tactic {
     },
     ByContra(Name),
     ShowGoal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SimpTarget {
+    Hyp(Name),
+    All,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -5316,16 +5391,52 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, Par
             continue;
         }
 
+        let (tactic_text, next_i) =
+            collect_continued_tactic_line(lines, i).map_err(|err| err.with_line(line_no))?;
         let offset = lines[i].text.find(trimmed).unwrap_or(0);
         tactics.push(LocatedTactic {
             line: line_no,
-            tactic: parse_tactic_line(trimmed)
+            tactic: parse_tactic_line(&tactic_text)
                 .map_err(|err| err.with_offset(offset).with_line(line_no))?,
         });
-        i += 1;
+        i = next_i;
     }
 
     Ok(tactics)
+}
+
+fn collect_continued_tactic_line(
+    lines: &[RawTacticLine],
+    start: usize,
+) -> Result<(String, usize), ParseError> {
+    let mut text = lines[start].text.trim().to_string();
+    let mut depth = brace_continuation_depth(0, &text);
+    let mut i = start + 1;
+    while depth > 0 {
+        if i >= lines.len() {
+            return Err(ParseError::new("unclosed theorem-instantiation block"));
+        }
+        let next = lines[i].text.trim();
+        if next.starts_with('|') {
+            return Err(ParseError::new("unclosed theorem-instantiation block"));
+        }
+        text.push(' ');
+        text.push_str(next);
+        depth = brace_continuation_depth(depth, next);
+        i += 1;
+    }
+    Ok((text, i))
+}
+
+fn brace_continuation_depth(mut depth: usize, input: &str) -> usize {
+    for ch in input.chars() {
+        match ch {
+            '{' => depth += 1,
+            '}' if depth > 0 => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
 }
 
 fn skip_empty_tactic_lines(lines: &[RawTacticLine], mut i: usize) -> usize {
@@ -5457,17 +5568,8 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if let Some(rest) = line.strip_prefix("unfold ") {
         return Ok(Tactic::Unfold(expect_single_name(rest, "unfold")?));
     }
-    if line == "simp" {
-        return Ok(Tactic::Simp);
-    }
-    if line == "simp at *" {
-        return Ok(Tactic::SimpAll);
-    }
-    if let Some(rest) = line.strip_prefix("simp at ") {
-        return Ok(Tactic::SimpAt(expect_single_name(rest, "simp at")?));
-    }
-    if let Some(rest) = line.strip_prefix("simp ") {
-        return Ok(Tactic::SimpWith(parse_simp_rule_names(rest.trim())?));
+    if let Some(tactic) = parse_simp_tactic(line)? {
+        return Ok(tactic);
     }
     if line == "split" {
         return Ok(Tactic::Split);
@@ -5505,6 +5607,45 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     }
 
     Err(ParseError::new(format!("unknown tactic `{line}`")))
+}
+
+fn parse_simp_tactic(line: &str) -> Result<Option<Tactic>, ParseError> {
+    let Some(rest) = line.strip_prefix("simp") else {
+        return Ok(None);
+    };
+    if !rest.is_empty() && !rest.chars().next().is_some_and(char::is_whitespace) {
+        return Ok(None);
+    }
+
+    let mut rest = rest.trim_start();
+    let mut names = None;
+    if rest.starts_with('[') {
+        let Some(close) = rest.find(']') else {
+            return Err(ParseError::new("simp theorem rules use `[name, ...]`"));
+        };
+        names = Some(parse_simp_rule_names(&rest[..=close])?);
+        rest = rest[close + 1..].trim_start();
+    }
+
+    let target = if rest.is_empty() {
+        None
+    } else if rest == "at *" {
+        Some(SimpTarget::All)
+    } else if let Some(name) = rest.strip_prefix("at ") {
+        Some(SimpTarget::Hyp(expect_single_name(name, "simp at")?))
+    } else {
+        return Err(ParseError::new(
+            "simp expects optional `[name, ...]` and optional `at h` or `at *`",
+        ));
+    };
+
+    Ok(Some(match (names, target) {
+        (None, None) => Tactic::Simp,
+        (None, Some(SimpTarget::Hyp(name))) => Tactic::SimpAt(name),
+        (None, Some(SimpTarget::All)) => Tactic::SimpAll,
+        (Some(names), None) => Tactic::SimpWith(names),
+        (Some(names), Some(target)) => Tactic::SimpWithAt { names, target },
+    }))
 }
 
 fn parse_simp_rule_names(input: &str) -> Result<Vec<Name>, ParseError> {
@@ -6123,19 +6264,19 @@ fn run_tactic(
         }
         Tactic::Assumption => {
             let mut matched = None;
-            for binding in goal.context.proofs().iter().rev() {
+            for (binding, proof) in goal.context.proof_bindings().rev() {
                 if formulas_def_eq(env, &goal.context, &binding.formula, &goal.target)
                     .map_err(|err| TacticError::new(err.message))?
                 {
-                    matched = Some(binding);
+                    matched = Some(proof);
                     break;
                 }
             }
-            let Some(binding) = matched else {
+            let Some(proof) = matched else {
                 return Err(TacticError::new("no matching assumption found"));
             };
             Ok(StepResult {
-                replacement: PartialProof::Done(Proof::Hyp(binding.name.clone())),
+                replacement: PartialProof::Done(proof.clone()),
                 new_goals: Vec::new(),
             })
         }
@@ -6447,11 +6588,9 @@ fn run_tactic(
         }
         Tactic::SimpWith(names) => {
             let rules = collect_simp_rules(env, names)?;
-            let (builtin_target, builtin_changed) =
-                unfold_formula_defs(env, &goal.context, &goal.target, None)
+            let (target, _builtin_target, builtin_changed, rewrites) =
+                simplify_formula_with_rules(env, &goal.context, &goal.target, &rules)
                     .map_err(|err| TacticError::new(format!("cannot simplify: {}", err.message)))?;
-            let (target, rewrites) =
-                rewrite_with_simp_rules(env, &goal.context, builtin_target, &rules)?;
             if !builtin_changed && rewrites.is_empty() {
                 return Err(TacticError::new(format!(
                     "simp made no progress on goal `{}`",
@@ -6474,20 +6613,13 @@ fn run_tactic(
             })
         }
         Tactic::SimpAt(name) => {
-            let Some(formula) = goal.context.lookup(name).cloned() else {
-                return Err(TacticError::new(format!("unknown hypothesis `{name}`")));
-            };
-            let (formula, changed) = unfold_formula_defs(env, &goal.context, &formula, None)
-                .map_err(|err| {
-                    TacticError::new(format!("cannot simplify `{name}`: {}", err.message))
-                })?;
+            let (context, changed) =
+                simplify_named_hypothesis_with_rules(env, &goal.context, name, &[])?;
             if !changed {
                 return Err(TacticError::new(format!(
                     "simp made no progress on hypothesis `{name}`"
                 )));
             }
-            let mut context = goal.context;
-            context.add_proof(name.clone(), formula);
             let id = fresh_goal(next_goal_id);
             Ok(StepResult {
                 replacement: PartialProof::Hole(id),
@@ -6499,7 +6631,8 @@ fn run_tactic(
             })
         }
         Tactic::SimpAll => {
-            let (context, hypotheses_changed) = simplify_hypotheses(env, &goal.context)?;
+            let (context, hypotheses_changed) =
+                simplify_hypotheses_with_rules(env, &goal.context, &[])?;
             let (target, target_changed) = unfold_formula_defs(env, &context, &goal.target, None)
                 .map_err(|err| {
                 TacticError::new(format!("cannot simplify goal: {}", err.message))
@@ -6527,6 +6660,60 @@ fn run_tactic(
                     target,
                 }],
             })
+        }
+        Tactic::SimpWithAt { names, target } => {
+            let rules = collect_simp_rules(env, names)?;
+            match target {
+                SimpTarget::Hyp(name) => {
+                    let (context, changed) =
+                        simplify_named_hypothesis_with_rules(env, &goal.context, name, &rules)?;
+                    if !changed {
+                        return Err(TacticError::new(format!(
+                            "simp made no progress on hypothesis `{name}`"
+                        )));
+                    }
+                    let id = fresh_goal(next_goal_id);
+                    Ok(StepResult {
+                        replacement: PartialProof::Hole(id),
+                        new_goals: vec![Goal {
+                            id,
+                            context,
+                            target: goal.target,
+                        }],
+                    })
+                }
+                SimpTarget::All => {
+                    let (context, hypotheses_changed) =
+                        simplify_hypotheses_with_rules(env, &goal.context, &rules)?;
+                    let (target, _builtin_target, target_builtin_changed, target_rewrites) =
+                        simplify_formula_with_rules(env, &context, &goal.target, &rules).map_err(
+                            |err| {
+                                TacticError::new(format!("cannot simplify goal: {}", err.message))
+                            },
+                        )?;
+                    if !hypotheses_changed && !target_builtin_changed && target_rewrites.is_empty()
+                    {
+                        return Err(TacticError::new(format!(
+                            "simp made no progress on goal or hypotheses for `{}`",
+                            goal.target
+                        )));
+                    }
+                    let id = fresh_goal(next_goal_id);
+                    Ok(StepResult {
+                        replacement: build_simp_replacement(
+                            id,
+                            goal.target.clone(),
+                            target_builtin_changed,
+                            &target_rewrites,
+                        ),
+                        new_goals: vec![Goal {
+                            id,
+                            context,
+                            target,
+                        }],
+                    })
+                }
+            }
         }
         Tactic::Induction {
             var_name,
@@ -6706,6 +6893,7 @@ struct SimpRule {
 #[derive(Clone)]
 struct SimpRewrite {
     before: Formula,
+    after: Formula,
     eq_proof: Proof,
 }
 
@@ -6754,6 +6942,71 @@ fn build_simp_replacement(
     }
 }
 
+fn build_simp_hypothesis_proof(
+    original_proof: Proof,
+    builtin_target: &Formula,
+    builtin_changed: bool,
+    rewrites: &[SimpRewrite],
+) -> Proof {
+    let mut proof = original_proof;
+    if builtin_changed {
+        proof = Proof::Convert {
+            proof_body: Box::new(proof),
+            target: builtin_target.clone(),
+        };
+    }
+    for rewrite in rewrites {
+        proof = Proof::EqSubst {
+            eq_proof: Box::new(rewrite.eq_proof.clone()),
+            proof_body: Box::new(proof),
+            target: rewrite.after.clone(),
+        };
+    }
+    proof
+}
+
+fn simplify_formula_with_rules(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+    rules: &[SimpRule],
+) -> Result<(Formula, Formula, bool, Vec<SimpRewrite>), TacticError> {
+    let (builtin_formula, builtin_changed) = unfold_formula_defs(env, ctx, formula, None)
+        .map_err(|err| TacticError::new(err.message))?;
+    let (formula, rewrites) = rewrite_with_simp_rules(env, ctx, builtin_formula.clone(), rules)?;
+    Ok((formula, builtin_formula, builtin_changed, rewrites))
+}
+
+fn simplify_named_hypothesis_with_rules(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    rules: &[SimpRule],
+) -> Result<(Context, bool), TacticError> {
+    let Some(formula) = ctx.lookup(name).cloned() else {
+        return Err(TacticError::new(format!("unknown hypothesis `{name}`")));
+    };
+    let proof = ctx
+        .lookup_proof(name)
+        .cloned()
+        .unwrap_or_else(|| Proof::Hyp(name.to_string()));
+    let kernel_formula = ctx
+        .lookup_kernel_formula(name)
+        .cloned()
+        .unwrap_or_else(|| formula.clone());
+    let (formula, builtin_formula, builtin_changed, rewrites) =
+        simplify_formula_with_rules(env, ctx, &formula, rules).map_err(|err| {
+            TacticError::new(format!("cannot simplify `{name}`: {}", err.message))
+        })?;
+    if !builtin_changed && rewrites.is_empty() {
+        return Ok((ctx.clone(), false));
+    }
+    let proof = build_simp_hypothesis_proof(proof, &builtin_formula, builtin_changed, &rewrites);
+    let mut context = ctx.clone();
+    context.add_proof_with_kernel(name.to_string(), formula, proof, kernel_formula);
+    Ok((context, true))
+}
+
 fn rewrite_with_simp_rules(
     env: &Env,
     ctx: &Context,
@@ -6769,7 +7022,11 @@ fn rewrite_with_simp_rules(
         };
         let before = formula;
         formula = next;
-        rewrites.push(SimpRewrite { before, eq_proof });
+        rewrites.push(SimpRewrite {
+            before,
+            after: formula.clone(),
+            eq_proof,
+        });
     }
     Ok((formula, rewrites))
 }
@@ -7058,19 +7315,34 @@ fn rewrite_binary_term_node_with_simp_rules(
     Ok(None)
 }
 
-fn simplify_hypotheses(env: &Env, ctx: &Context) -> Result<(Context, bool), TacticError> {
+fn simplify_hypotheses_with_rules(
+    env: &Env,
+    ctx: &Context,
+    rules: &[SimpRule],
+) -> Result<(Context, bool), TacticError> {
     let mut context = ctx.clone();
     let mut changed = false;
-    for binding in ctx.proofs() {
-        let (formula, binding_changed) = unfold_formula_defs(env, ctx, &binding.formula, None)
-            .map_err(|err| {
+    for (binding, proof, kernel_formula) in ctx.proof_entries() {
+        let (formula, builtin_formula, builtin_changed, rewrites) =
+            simplify_formula_with_rules(env, ctx, &binding.formula, rules).map_err(|err| {
                 TacticError::new(format!(
                     "cannot simplify `{}`: {}",
                     binding.name, err.message
                 ))
             })?;
-        if binding_changed {
-            context.add_proof(binding.name.clone(), formula);
+        if builtin_changed || !rewrites.is_empty() {
+            let proof = build_simp_hypothesis_proof(
+                proof.clone(),
+                &builtin_formula,
+                builtin_changed,
+                &rewrites,
+            );
+            context.add_proof_with_kernel(
+                binding.name.clone(),
+                formula,
+                proof,
+                kernel_formula.clone(),
+            );
             changed = true;
         }
     }
@@ -7563,38 +7835,48 @@ fn schema_param_description(param: &Param) -> String {
 }
 
 fn subst_formula_terms(formula: &Formula, subst: &HashMap<Name, Term>) -> Formula {
+    let replacement_free_vars = substitution_free_vars(subst);
+    subst_formula_terms_with(formula, subst, &replacement_free_vars)
+}
+
+fn subst_formula_terms_with(
+    formula: &Formula,
+    subst: &HashMap<Name, Term>,
+    replacement_free_vars: &HashSet<Name>,
+) -> Formula {
     match formula {
         Formula::True => Formula::True,
         Formula::False => Formula::False,
         Formula::Atom(name) => Formula::Atom(name.clone()),
         Formula::Eq(left, right) => Formula::eq(
-            subst_term_terms(left, subst),
-            subst_term_terms(right, subst),
+            subst_term_terms_with(left, subst, replacement_free_vars),
+            subst_term_terms_with(right, subst, replacement_free_vars),
         ),
-        Formula::In(elem, set) => {
-            Formula::membership(subst_term_terms(elem, subst), subst_term_terms(set, subst))
-        }
+        Formula::In(elem, set) => Formula::membership(
+            subst_term_terms_with(elem, subst, replacement_free_vars),
+            subst_term_terms_with(set, subst, replacement_free_vars),
+        ),
         Formula::Subset(left, right) => Formula::subset(
-            subst_term_terms(left, subst),
-            subst_term_terms(right, subst),
+            subst_term_terms_with(left, subst, replacement_free_vars),
+            subst_term_terms_with(right, subst, replacement_free_vars),
         ),
         Formula::PredApp(name, args) => Formula::PredApp(
             name.clone(),
             args.iter()
-                .map(|arg| subst_term_terms(arg, subst))
+                .map(|arg| subst_term_terms_with(arg, subst, replacement_free_vars))
                 .collect(),
         ),
         Formula::And(left, right) => Formula::and(
-            subst_formula_terms(left, subst),
-            subst_formula_terms(right, subst),
+            subst_formula_terms_with(left, subst, replacement_free_vars),
+            subst_formula_terms_with(right, subst, replacement_free_vars),
         ),
         Formula::Or(left, right) => Formula::or(
-            subst_formula_terms(left, subst),
-            subst_formula_terms(right, subst),
+            subst_formula_terms_with(left, subst, replacement_free_vars),
+            subst_formula_terms_with(right, subst, replacement_free_vars),
         ),
         Formula::Implies(left, right) => Formula::implies(
-            subst_formula_terms(left, subst),
-            subst_formula_terms(right, subst),
+            subst_formula_terms_with(left, subst, replacement_free_vars),
+            subst_formula_terms_with(right, subst, replacement_free_vars),
         ),
         Formula::Forall {
             var,
@@ -7603,10 +7885,12 @@ fn subst_formula_terms(formula: &Formula, subst: &HashMap<Name, Term>) -> Formul
         } => {
             let mut scoped = subst.clone();
             scoped.remove(var);
+            let (var, body) =
+                rename_formula_binder_if_needed(var, body, &scoped, replacement_free_vars);
             Formula::forall(
-                var.clone(),
+                var,
                 var_type.clone(),
-                subst_formula_terms(body, &scoped),
+                subst_formula_terms_with(&body, &scoped, replacement_free_vars),
             )
         }
         Formula::Exists {
@@ -7616,16 +7900,27 @@ fn subst_formula_terms(formula: &Formula, subst: &HashMap<Name, Term>) -> Formul
         } => {
             let mut scoped = subst.clone();
             scoped.remove(var);
+            let (var, body) =
+                rename_formula_binder_if_needed(var, body, &scoped, replacement_free_vars);
             Formula::exists(
-                var.clone(),
+                var,
                 var_type.clone(),
-                subst_formula_terms(body, &scoped),
+                subst_formula_terms_with(&body, &scoped, replacement_free_vars),
             )
         }
     }
 }
 
 fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
+    let replacement_free_vars = substitution_free_vars(subst);
+    subst_term_terms_with(term, subst, &replacement_free_vars)
+}
+
+fn subst_term_terms_with(
+    term: &Term,
+    subst: &HashMap<Name, Term>,
+    replacement_free_vars: &HashSet<Name>,
+) -> Term {
     match term {
         Term::Var(name) => subst
             .get(name)
@@ -7634,7 +7929,7 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
         Term::App(name, args) => Term::App(
             name.clone(),
             args.iter()
-                .map(|arg| subst_term_terms(arg, subst))
+                .map(|arg| subst_term_terms_with(arg, subst, replacement_free_vars))
                 .collect(),
         ),
         Term::PredLambda { params, body } => {
@@ -7642,40 +7937,58 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
             for param in params {
                 scoped.remove(&param.name);
             }
+            let (params, body) =
+                rename_lambda_binders_if_needed(params, body, &scoped, replacement_free_vars);
             Term::PredLambda {
-                params: params.clone(),
-                body: Box::new(subst_formula_terms(body, &scoped)),
+                params,
+                body: Box::new(subst_formula_terms_with(
+                    &body,
+                    &scoped,
+                    replacement_free_vars,
+                )),
             }
         }
         Term::Zero => Term::Zero,
-        Term::Succ(term) => Term::Succ(Box::new(subst_term_terms(term, subst))),
+        Term::Succ(term) => Term::Succ(Box::new(subst_term_terms_with(
+            term,
+            subst,
+            replacement_free_vars,
+        ))),
         Term::Add(left, right) => Term::Add(
-            Box::new(subst_term_terms(left, subst)),
-            Box::new(subst_term_terms(right, subst)),
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
         Term::Mul(left, right) => Term::Mul(
-            Box::new(subst_term_terms(left, subst)),
-            Box::new(subst_term_terms(right, subst)),
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
         Term::Sub(left, right) => Term::Sub(
-            Box::new(subst_term_terms(left, subst)),
-            Box::new(subst_term_terms(right, subst)),
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
-        Term::Singleton(term) => Term::Singleton(Box::new(subst_term_terms(term, subst))),
+        Term::Singleton(term) => Term::Singleton(Box::new(subst_term_terms_with(
+            term,
+            subst,
+            replacement_free_vars,
+        ))),
         Term::Union(left, right) => Term::Union(
-            Box::new(subst_term_terms(left, subst)),
-            Box::new(subst_term_terms(right, subst)),
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
         Term::Inter(left, right) => Term::Inter(
-            Box::new(subst_term_terms(left, subst)),
-            Box::new(subst_term_terms(right, subst)),
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
         Term::Diff(left, right) => Term::Diff(
-            Box::new(subst_term_terms(left, subst)),
-            Box::new(subst_term_terms(right, subst)),
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
-        Term::Powerset(term) => Term::Powerset(Box::new(subst_term_terms(term, subst))),
+        Term::Powerset(term) => Term::Powerset(Box::new(subst_term_terms_with(
+            term,
+            subst,
+            replacement_free_vars,
+        ))),
         Term::SetBuilder {
             var,
             var_type,
@@ -7683,13 +7996,168 @@ fn subst_term_terms(term: &Term, subst: &HashMap<Name, Term>) -> Term {
         } => {
             let mut scoped = subst.clone();
             scoped.remove(var);
+            let (var, body) =
+                rename_formula_binder_if_needed(var, body, &scoped, replacement_free_vars);
             Term::SetBuilder {
-                var: var.clone(),
+                var,
                 var_type: var_type.clone(),
-                body: Box::new(subst_formula_terms(body, &scoped)),
+                body: Box::new(subst_formula_terms_with(
+                    &body,
+                    &scoped,
+                    replacement_free_vars,
+                )),
             }
         }
     }
+}
+
+fn rename_formula_binder_if_needed(
+    var: &str,
+    body: &Formula,
+    subst: &HashMap<Name, Term>,
+    replacement_free_vars: &HashSet<Name>,
+) -> (Name, Formula) {
+    if !replacement_free_vars.contains(var) || !formula_mentions_substitution_key(body, subst) {
+        return (var.to_string(), body.clone());
+    }
+
+    let mut avoid = free_term_vars_in_formula(body);
+    extend_substitution_avoid_set(&mut avoid, subst);
+    let fresh = fresh_bound_name(var, &avoid);
+    let body = subst_formula_term(body, var, &Term::Var(fresh.clone()));
+    (fresh, body)
+}
+
+fn rename_lambda_binders_if_needed(
+    params: &[LambdaParam],
+    body: &Formula,
+    subst: &HashMap<Name, Term>,
+    replacement_free_vars: &HashSet<Name>,
+) -> (Vec<LambdaParam>, Formula) {
+    if !formula_mentions_substitution_key(body, subst) {
+        return (params.to_vec(), body.clone());
+    }
+
+    let mut params = params.to_vec();
+    let mut body = body.clone();
+    let mut avoid = free_term_vars_in_formula(&body);
+    extend_substitution_avoid_set(&mut avoid, subst);
+    for param in &params {
+        avoid.insert(param.name.clone());
+    }
+
+    for param in &mut params {
+        if !replacement_free_vars.contains(&param.name) {
+            continue;
+        }
+        let fresh = fresh_bound_name(&param.name, &avoid);
+        body = subst_formula_term(&body, &param.name, &Term::Var(fresh.clone()));
+        avoid.insert(fresh.clone());
+        param.name = fresh;
+    }
+
+    (params, body)
+}
+
+fn formula_mentions_substitution_key(formula: &Formula, subst: &HashMap<Name, Term>) -> bool {
+    subst
+        .keys()
+        .any(|name| formula_has_free_term(formula, name))
+}
+
+fn extend_substitution_avoid_set(avoid: &mut HashSet<Name>, subst: &HashMap<Name, Term>) {
+    avoid.extend(subst.keys().cloned());
+    avoid.extend(substitution_free_vars(subst));
+}
+
+fn substitution_free_vars(subst: &HashMap<Name, Term>) -> HashSet<Name> {
+    let mut vars = HashSet::new();
+    for term in subst.values() {
+        collect_free_term_vars(term, &mut Vec::new(), &mut vars);
+    }
+    vars
+}
+
+fn free_term_vars_in_formula(formula: &Formula) -> HashSet<Name> {
+    let mut vars = HashSet::new();
+    collect_free_formula_vars(formula, &mut Vec::new(), &mut vars);
+    vars
+}
+
+fn collect_free_formula_vars(formula: &Formula, bound: &mut Vec<Name>, vars: &mut HashSet<Name>) {
+    match formula {
+        Formula::True | Formula::False | Formula::Atom(_) => {}
+        Formula::Eq(left, right) | Formula::In(left, right) | Formula::Subset(left, right) => {
+            collect_free_term_vars(left, bound, vars);
+            collect_free_term_vars(right, bound, vars);
+        }
+        Formula::PredApp(_, args) => {
+            for arg in args {
+                collect_free_term_vars(arg, bound, vars);
+            }
+        }
+        Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
+            collect_free_formula_vars(left, bound, vars);
+            collect_free_formula_vars(right, bound, vars);
+        }
+        Formula::Forall { var, body, .. } | Formula::Exists { var, body, .. } => {
+            bound.push(var.clone());
+            collect_free_formula_vars(body, bound, vars);
+            bound.pop();
+        }
+    }
+}
+
+fn collect_free_term_vars(term: &Term, bound: &mut Vec<Name>, vars: &mut HashSet<Name>) {
+    match term {
+        Term::Var(name) => {
+            if !bound.contains(name) {
+                vars.insert(name.clone());
+            }
+        }
+        Term::App(_, args) => {
+            for arg in args {
+                collect_free_term_vars(arg, bound, vars);
+            }
+        }
+        Term::PredLambda { params, body } => {
+            for param in params {
+                bound.push(param.name.clone());
+            }
+            collect_free_formula_vars(body, bound, vars);
+            for _ in params {
+                bound.pop();
+            }
+        }
+        Term::Zero | Term::EmptySet(_) => {}
+        Term::Succ(term) | Term::Singleton(term) | Term::Powerset(term) => {
+            collect_free_term_vars(term, bound, vars);
+        }
+        Term::Add(left, right)
+        | Term::Mul(left, right)
+        | Term::Sub(left, right)
+        | Term::Union(left, right)
+        | Term::Inter(left, right)
+        | Term::Diff(left, right) => {
+            collect_free_term_vars(left, bound, vars);
+            collect_free_term_vars(right, bound, vars);
+        }
+        Term::SetBuilder { var, body, .. } => {
+            bound.push(var.clone());
+            collect_free_formula_vars(body, bound, vars);
+            bound.pop();
+        }
+    }
+}
+
+fn fresh_bound_name(base: &str, avoid: &HashSet<Name>) -> Name {
+    for idx in 1.. {
+        let candidate = format!("{base}_{idx}");
+        if !avoid.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded fresh-name search should always return")
 }
 
 struct UnifyState<'a> {
@@ -8080,7 +8548,7 @@ fn unify_type(
 }
 
 fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> {
-    for binding in goal.context.proofs().iter().rev() {
+    for (binding, proof) in goal.context.proof_bindings().rev() {
         if !formulas_def_eq(env, &goal.context, &binding.formula, &Formula::False)
             .map_err(|err| TacticError::new(err.message))?
         {
@@ -8088,14 +8556,14 @@ fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> 
         }
         return Ok(StepResult {
             replacement: PartialProof::FalseElim {
-                proof_false: Box::new(PartialProof::Done(Proof::Hyp(binding.name.clone()))),
+                proof_false: Box::new(PartialProof::Done(proof.clone())),
                 target: goal.target,
             },
             new_goals: Vec::new(),
         });
     }
 
-    for neg in goal.context.proofs() {
+    for (neg, neg_proof) in goal.context.proof_bindings() {
         let Formula::Implies(premise, conclusion) = &neg.formula else {
             continue;
         };
@@ -8103,20 +8571,20 @@ fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> 
             continue;
         }
         let mut pos = None;
-        for binding in goal.context.proofs() {
+        for (binding, proof) in goal.context.proof_bindings() {
             if formulas_def_eq(env, &goal.context, &binding.formula, premise)
                 .map_err(|err| TacticError::new(err.message))?
             {
-                pos = Some(binding);
+                pos = Some(proof);
                 break;
             }
         }
-        if let Some(pos) = pos {
+        if let Some(pos_proof) = pos {
             return Ok(StepResult {
                 replacement: PartialProof::FalseElim {
                     proof_false: Box::new(PartialProof::Done(Proof::ImpElim {
-                        proof_imp: Box::new(Proof::Hyp(neg.name.clone())),
-                        proof_arg: Box::new(Proof::Hyp(pos.name.clone())),
+                        proof_imp: Box::new(neg_proof.clone()),
+                        proof_arg: Box::new(pos_proof.clone()),
                     })),
                     target: goal.target,
                 },
@@ -9267,6 +9735,41 @@ theorem reflexive_eq : Reflexive(fun x y : Person => x = y) := by
     }
 
     #[test]
+    fn predicate_lambda_substitution_is_simultaneous() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+
+def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
+
+theorem equality_symmetric : Symmetric(fun x y : Person => x = y) := by
+  simp
+  intro x
+  intro y
+  intro h
+  rewrite h
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn predicate_lambda_rejects_duplicate_parameters() {
+        check_err_contains(
+            r#"
+mode constructive
+
+def BinaryNat (R : Nat -> Nat -> Prop) : Prop := R(0, 0)
+
+theorem bad : BinaryNat(fun x x => x = x) := by
+"#,
+            "predicate lambda parameter `x` is repeated",
+        );
+    }
+
+    #[test]
     fn predicate_lambda_argument_must_match_expected_type() {
         check_err_contains(
             r#"
@@ -9745,6 +10248,27 @@ theorem inter_hyp_right
     }
 
     #[test]
+    fn simp_with_rules_at_simplifies_named_hypothesis() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+axiom mother_alice : mother(alice) = alice
+
+theorem happy_mother_to_happy : Happy(mother(alice)) -> Happy(alice) := by
+  intro h
+  simp [mother_alice] at h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
     fn simp_at_rejects_no_progress() {
         check_err_contains(
             r#"
@@ -9753,6 +10277,29 @@ mode constructive
 theorem bad (P : Prop) : P -> P := by
   intro h
   simp at h
+  exact h
+"#,
+            "simp made no progress on hypothesis `h`",
+        );
+    }
+
+    #[test]
+    fn simp_with_rules_at_rejects_no_progress() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+const bob : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+axiom mother_alice : mother(alice) = alice
+
+theorem bad : Happy(bob) -> Happy(bob) := by
+  intro h
+  simp [mother_alice] at h
   exact h
 "#,
             "simp made no progress on hypothesis `h`",
@@ -9775,6 +10322,27 @@ theorem inter_hyp_and_goal
   split
   exact h.right
   exact h.right
+"#,
+        );
+    }
+
+    #[test]
+    fn simp_with_rules_at_star_simplifies_goal_and_hypotheses() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+axiom mother_alice : mother(alice) = alice
+
+theorem happy_mother_identity : Happy(mother(alice)) -> Happy(mother(alice)) := by
+  intro h
+  simp [mother_alice] at *
+  exact h
 "#,
         );
     }
@@ -10094,6 +10662,32 @@ theorem subsets_carry
   intro hAB
   intro hSA
   apply subset_trans {{T := T; A := S; B := A; C := B}}
+  exact hSA
+  exact hAB
+"#
+        ));
+    }
+
+    #[test]
+    fn explicit_schema_args_can_span_lines() {
+        let import = import_line("std/set.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem subsets_carry_wrapped
+  (T : Type)
+  (A B S : Set T)
+  : A subset B -> S subset A -> S subset B := by
+  intro hAB
+  intro hSA
+  apply subset_trans {{
+    T := T;
+    A := S;
+    B := A;
+    C := B
+  }}
   exact hSA
   exact hAB
 "#

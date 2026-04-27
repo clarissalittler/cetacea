@@ -217,7 +217,9 @@ pub struct SchemaSubst {
 
 Predicate schema arguments can be predicate names or inline predicate lambdas.
 Lambdas are validated against the expected predicate parameter type before
-their bodies are substituted at predicate applications.
+their bodies are substituted at predicate applications. Lambda application uses
+simultaneous, capture-avoiding substitution so lambda binder names may overlap
+with surrounding theorem variables.
 
 ## Proof Objects
 
@@ -416,7 +418,7 @@ The formula parser handles precedence:
 Proof expressions are parsed separately. They support:
 
 - theorem or hypothesis names
-- explicit arguments in `{...}`
+- explicit arguments in `{...}`, including wrapped tactic-line continuations
 - forall application with term arguments
 - implication application with proof arguments
 - `.left` and `.right` projections
@@ -683,10 +685,11 @@ A subset B  ==>  forall x : T, x in A -> x in B
 The `simp` tactic is intentionally small. It normalizes the current goal using
 transparent formula definitions, set computation, subset expansion, and Nat
 computation inside formula terms. `simp [lemma]` additionally uses listed term
-equality theorems as rewrite rules in the goal. `simp at h` applies built-in
-normalization to a named hypothesis in the local proof state, and `simp at *`
-normalizes the goal plus all named hypotheses. All forms reject no-op calls so
-users notice when `simp` did not change anything.
+equality theorems as rewrite rules in the goal or in hypothesis-targeted forms
+such as `simp [lemma] at h` and `simp [lemma] at *`. `simp at h` applies
+built-in normalization to a named hypothesis in the local proof state, and
+`simp at *` normalizes the goal plus all named hypotheses. All forms reject
+no-op calls so users notice when `simp` did not change anything.
 
 Current design tradeoff:
 
@@ -695,7 +698,7 @@ Current design tradeoff:
   `simp [rule]`.
 - There is no attribute-based global simp set or iff/proposition rewriting yet.
 - Hypothesis simplification is explicit: either one named hypothesis or all
-  hypotheses with `simp at *`.
+  hypotheses with `simp at *`, optionally with listed equality rules.
 
 This keeps the implementation simple while still supporting useful examples.
 
