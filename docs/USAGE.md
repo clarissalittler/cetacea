@@ -262,12 +262,17 @@ Built-in set terms:
 ```text
 empty(T)
 singleton(x)
+{x, y, z}
 union(A, B)
 inter(A, B)
 diff(A, B)
 powerset(A)
 { x : T | P(x) }
 ```
+
+Finite set literals such as `{x, y, z}` are shorthand for nested unions
+of singletons. Empty finite-set literals are not supported because their
+element type is ambiguous; use `empty(T)` instead.
 
 `powerset(A)` has type `Set (Set T)` when `A : Set T`; membership
 `B in powerset(A)` simplifies to `B subset A`.

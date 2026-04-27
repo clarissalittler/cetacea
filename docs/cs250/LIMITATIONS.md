@@ -106,8 +106,10 @@ applications, so students can write small concrete examples directly.
 
 Cetacea has typed sets, set builders, union, intersection, difference,
 powersets, subset, and extensionality. It does not have Cartesian
-products as set objects, cardinalities, finite-set enumeration, or
-comprehension beyond predicate set builders.
+products as set objects, cardinalities, or comprehension beyond
+predicate set builders. Nonempty finite sets can be written as
+`{x, y, z}`; empty sets still need an explicit element type with
+`empty(T)`.
 
 The Module 1 set-identity and powerset-monotonicity proofs fit well.
 Counting arguments and cardinality exercises do not.
@@ -200,6 +202,8 @@ are now implemented:
   substitution, so predicate-lambda examples such as successor injectivity
   match the simplified goal shape.
 - `powerset(A)` is supported, with membership simplifying to subset.
+- Nonempty finite set literals such as `{x, y}` parse as nested unions
+  of singletons.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
   compound proof expressions such as `rewrite eq_symm h`.
 - Parenthesized proof expressions such as `exact (h hp).left` and

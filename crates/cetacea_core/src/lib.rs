@@ -4336,6 +4336,10 @@ impl Tokens {
         &self.tokens[self.pos].kind
     }
 
+    fn peek_at(&self, offset: usize) -> &TokenKind {
+        &self.tokens[self.pos + offset].kind
+    }
+
     fn current_span(&self) -> Span {
         self.tokens[self.pos].span
     }
@@ -4500,17 +4504,37 @@ impl Tokens {
             }
         }
         if self.eat_sym("{") {
-            let var = self.expect_ident()?;
-            self.expect_sym(":")?;
-            let var_type = self.parse_type()?;
-            self.expect_sym("|")?;
-            let body = self.parse_formula()?;
-            self.expect_sym("}")?;
-            return Ok(Term::SetBuilder {
-                var,
-                var_type,
-                body: Box::new(body),
-            });
+            if matches!(self.peek(), TokenKind::Sym(sym) if sym == "}") {
+                return Err(ParseError::new(
+                    "empty set literal needs an element type; use `empty(T)`",
+                )
+                .with_span(self.current_span()));
+            }
+            if matches!(self.peek(), TokenKind::Ident(_))
+                && matches!(self.peek_at(1), TokenKind::Sym(sym) if sym == ":")
+            {
+                let var = self.expect_ident()?;
+                self.expect_sym(":")?;
+                let var_type = self.parse_type()?;
+                self.expect_sym("|")?;
+                let body = self.parse_formula()?;
+                self.expect_sym("}")?;
+                return Ok(Term::SetBuilder {
+                    var,
+                    var_type,
+                    body: Box::new(body),
+                });
+            }
+
+            let mut elems = Vec::new();
+            loop {
+                elems.push(self.parse_term()?);
+                if self.eat_sym("}") {
+                    break;
+                }
+                self.expect_sym(",")?;
+            }
+            return Ok(finite_set_literal_term(elems));
         }
         let name = self.expect_ident()?;
         if self.eat_sym("(") {
@@ -4789,6 +4813,16 @@ fn nat_literal_term(value: usize) -> Term {
         term = Term::Succ(Box::new(term));
     }
     term
+}
+
+fn finite_set_literal_term(elems: Vec<Term>) -> Term {
+    let mut sets = elems
+        .into_iter()
+        .map(|elem| Term::Singleton(Box::new(elem)));
+    let first = sets
+        .next()
+        .expect("finite set literal parser rejects empty literals");
+    sets.fold(first, |acc, set| Term::Union(Box::new(acc), Box::new(set)))
 }
 
 fn parse_file(source: &str) -> Result<File, ParseError> {
@@ -10536,6 +10570,44 @@ theorem empty_member_implies_false : alice in empty(Person) -> False := by
     }
 
     #[test]
+    fn finite_set_literals_compute_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+const bob : Person
+
+theorem finite_set_literal_left : alice in {alice, bob} := by
+  simp
+  left
+  refl
+
+theorem finite_set_literal_right : bob in {alice, bob} := by
+  simp
+  right
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn empty_set_literal_requires_element_type() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+axiom bad : alice in {}
+"#,
+            "empty set literal needs an element type; use `empty(T)`",
+        );
+    }
+
+    #[test]
     fn subset_computes_under_simp() {
         check_ok(
             r#"
@@ -10840,6 +10912,23 @@ const alice : Person
 const red : Color
 
 theorem bad : alice in singleton(red) := by
+"#,
+            "membership compares `alice` of type `Person` with a set of `Color`",
+        );
+    }
+
+    #[test]
+    fn finite_set_literal_type_mismatch_is_rejected() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+sort Color
+const alice : Person
+const red : Color
+
+theorem bad : alice in {red} := by
 "#,
             "membership compares `alice` of type `Person` with a set of `Color`",
         );

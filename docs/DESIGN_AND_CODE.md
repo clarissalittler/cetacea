@@ -138,6 +138,9 @@ Design notes:
   functions.
 - `empty(T)` carries an explicit type because the element type cannot always be
   inferred from context.
+- Nonempty finite set literals such as `{x, y}` parse as nested `union` terms
+  over `singleton` terms, so they reuse the ordinary set validation and
+  simplification paths.
 
 ### Formulas
 
@@ -673,6 +676,9 @@ x in diff(A, B)    ==> x in A /\ not x in B
 x in powerset(A)   ==> x subset A
 x in { y : T | P(y) }  ==> P(x)
 ```
+
+Finite literals are lowered before validation, so `x in {a, b}` follows the
+same `union` and `singleton` rules.
 
 Subset is expanded to a universal implication:
 
