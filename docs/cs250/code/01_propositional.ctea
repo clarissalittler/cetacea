@@ -73,22 +73,19 @@ theorem demorgan_or (P Q : Prop) : not (P \/ Q) -> not P /\ not Q := by
   exact hq
 
 -- Module 2 Exercise 7: implication distributes over conjunction.
--- A common stumble: `h hp` only works for forall-application, not for
--- plain `->`. To use an implication you `apply` it (which leaves the
--- antecedent as a subgoal) or you build the conjunct then project.
+-- Applying `and_left`/`and_right` leaves the conjunction as a subgoal.
+-- Cetacea infers the hidden theorem parameters from `h`'s conclusion.
 theorem imp_dist_and_fwd (P Q R : Prop) : (P -> Q /\ R) -> (P -> Q) /\ (P -> R) := by
   intro h
   split
   -- prove P -> Q
   intro hp
-  -- get Q /\ R by applying h to hp, then take .left
-  -- We can't write `(h hp).left` directly; build the conjunct first.
-  apply and_left {P := Q; Q := R}
+  apply and_left
   apply h
   exact hp
   -- prove P -> R
   intro hp
-  apply and_right {P := Q; Q := R}
+  apply and_right
   apply h
   exact hp
 

@@ -895,8 +895,9 @@ parsed according to the parameter kind:
 - term parameters, such as `x := alice`
 
 Cetacea can infer many theorem parameters from the goal, especially for bare
-theorem references in `exact` and `apply`. When inference fails, use explicit
-arguments.
+theorem references in `exact` and `apply`. For `apply`, it also uses local
+hypotheses and simple implication/conjunction consequences of those hypotheses
+to fill missing parameters. When inference fails, use explicit arguments.
 
 ## Standard Library
 
@@ -1164,8 +1165,8 @@ Cetacea is intentionally small. Important current limitations:
 - `simp [lemma]` can use listed equality theorems as rewrite rules, including
   in hypotheses with `simp [lemma] at h` or `simp [lemma] at *`, but there is
   not yet an attribute-based global simp set or iff/proposition rewriting.
-- Theorem instantiation is useful but incomplete. Some proofs still need
-  explicit theorem parameters.
+- Theorem instantiation is useful but incomplete. Some underdetermined proofs
+  still need explicit theorem parameters.
 - Nat has addition, multiplication, truncated subtraction, and `le`, but no
   division, modular arithmetic, or decidable equality tactic.
 - Nat induction is specialized to `Nat` and rejects induction when local

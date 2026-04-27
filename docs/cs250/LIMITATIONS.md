@@ -17,9 +17,14 @@ infer it:
 apply subset_trans
 ```
 
+`apply` also looks through simple consequences of local hypotheses, so a
+local hypothesis such as `h : P -> Q /\ R` can guide `apply and_left`
+or `apply and_right` without explicit `{P := ...; Q := ...}` arguments.
+
 The remaining rough edge is the genuinely underdetermined case where
-the intermediate object is not present in the goal or local hypotheses.
-Then the user still needs to provide an explicit theorem parameter.
+the missing object is not present in the goal, local hypotheses, or a
+simple implication/conjunction consequence of a local hypothesis. Then
+the user still needs to provide an explicit theorem parameter.
 
 **Possible improvement:** add a more principled search procedure for
 underconstrained theorem parameters.
@@ -189,6 +194,8 @@ are now implemented:
   theorems as rewrite rules in hypotheses.
 - `apply` can infer intermediate theorem parameters for transitive lemmas
   such as `subset_trans` and `eq_trans` from matching local hypotheses.
+- `apply` can infer missing theorem parameters from simple implication
+  and conjunction consequences of local hypotheses.
 - `apply` normalizes theorem conclusions after explicit theorem-parameter
   substitution, so predicate-lambda examples such as successor injectivity
   match the simplified goal shape.

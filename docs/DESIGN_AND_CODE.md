@@ -932,9 +932,10 @@ Good tactic design in Cetacea means:
 ## How To Improve Theorem Instantiation
 
 The current system supports both inferred and explicit schema substitution.
-Inference uses the expected goal and, for `apply`, matching local hypotheses.
-It is still intentionally limited. Improving it further likely means working
-in the schema-matching and theorem-reference code rather than the parser.
+Inference uses the expected goal and, for `apply`, matching local hypotheses
+plus simple implication/conjunction consequences of those hypotheses. It is
+still intentionally limited. Improving it further likely means working in the
+schema-matching and theorem-reference code rather than the parser.
 
 Useful future improvements:
 

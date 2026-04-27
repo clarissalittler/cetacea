@@ -7640,16 +7640,11 @@ fn apply_plan_for_goal(
             ))
         })?;
     }
-    let inference_params = remaining_schema_params(schema_params, &schema_subst);
-    let premises_for_inference = premises
-        .iter()
-        .map(|premise| subst_formula_schema(premise, &schema_subst))
-        .collect::<Vec<_>>();
     infer_apply_args_from_context(
         env,
         ctx,
-        &premises_for_inference,
-        &inference_params,
+        &premises,
+        schema_params,
         &quantified,
         &mut term_subst,
         &mut schema_subst,
@@ -7693,34 +7688,52 @@ fn infer_apply_args_from_context(
         return Ok(());
     }
 
-    let mut normalized_hypotheses = Vec::new();
+    let mut candidates_by_hypothesis = Vec::new();
     for binding in ctx.proofs() {
         let formula = normalize_formula_defs(env, ctx, &binding.formula)
             .map_err(|err| TacticError::new(err.message))?;
-        normalized_hypotheses.push(formula);
+        let mut candidates = Vec::new();
+        collect_apply_inference_candidates(&formula, &mut candidates);
+        candidates_by_hypothesis.push(candidates);
     }
 
     for premise in premises {
-        for hypothesis in normalized_hypotheses.iter().rev() {
-            let mut candidate_term_subst = term_subst.clone();
-            let mut candidate_schema_subst = schema_subst.clone();
-            let mut unify = UnifyState {
-                env,
-                ctx,
-                term_metas,
-                schema_params,
-                term_subst: &mut candidate_term_subst,
-                schema_subst: &mut candidate_schema_subst,
-            };
-            if unify_formula(premise, hypothesis, &mut unify).is_ok() {
-                *term_subst = candidate_term_subst;
-                *schema_subst = candidate_schema_subst;
-                break;
+        'hypotheses: for candidates in candidates_by_hypothesis.iter().rev() {
+            for candidate in candidates {
+                let mut candidate_term_subst = term_subst.clone();
+                let mut candidate_schema_subst = schema_subst.clone();
+                let mut unify = UnifyState {
+                    env,
+                    ctx,
+                    term_metas,
+                    schema_params,
+                    term_subst: &mut candidate_term_subst,
+                    schema_subst: &mut candidate_schema_subst,
+                };
+                if unify_formula(premise, candidate, &mut unify).is_ok() {
+                    *term_subst = candidate_term_subst;
+                    *schema_subst = candidate_schema_subst;
+                    break 'hypotheses;
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn collect_apply_inference_candidates(formula: &Formula, candidates: &mut Vec<Formula>) {
+    candidates.push(formula.clone());
+    match formula {
+        Formula::Implies(_, conclusion) => {
+            collect_apply_inference_candidates(conclusion, candidates);
+        }
+        Formula::And(left, right) => {
+            collect_apply_inference_candidates(left, candidates);
+            collect_apply_inference_candidates(right, candidates);
+        }
+        _ => {}
+    }
 }
 
 fn infer_schema_subst_for_formula(
@@ -10711,6 +10724,31 @@ theorem subsets_carry_without_explicit_middle
   apply subset_trans
   exact hSA
   exact hAB
+"#
+        ));
+    }
+
+    #[test]
+    fn apply_infers_schema_argument_from_implication_conclusion() {
+        let import = import_line("std/prop.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem imp_dist_and_fwd_without_projection_args
+  (P Q R : Prop)
+  : (P -> Q /\ R) -> (P -> Q) /\ (P -> R) := by
+  intro h
+  split
+  intro hp
+  apply and_left
+  apply h
+  exact hp
+  intro hp
+  apply and_right
+  apply h
+  exact hp
 "#
         ));
     }
