@@ -268,6 +268,7 @@ union(A, B)
 inter(A, B)
 diff(A, B)
 compl(A)
+prod(A, B)
 powerset(A)
 { x : T | P(x) }
 ```
@@ -281,6 +282,9 @@ element type is ambiguous; use `empty(T)` instead.
 `univ(T)` has type `Set T`, and `compl(A)` is the complement of `A`
 inside its element type's universe. `complement(A)` is accepted as an
 alias for `compl(A)`.
+Cartesian products use ordered pairs: `pair(x, y)` has type `Prod T U`
+when `x : T` and `y : U`; `fst(p)` and `snd(p)` project a pair; and
+`prod(A, B)` has type `Set (Prod T U)` when `A : Set T` and `B : Set U`.
 
 The checker validates arities and types for functions, predicates, membership,
 subset, and set operations.
@@ -704,7 +708,7 @@ It currently knows:
 - transparent term definitions
 - primitive recursive Nat definitions declared with `defrec`
 - set membership in `empty`, `univ`, `singleton`, `union`, `inter`,
-  `diff`, `compl`, `powerset`, and set builders
+  `diff`, `compl`, `prod`, `powerset`, and set builders
 - subset expansion
 - the built-in equations for `add`, `mul`, `sub`, and `le`, including inside
   predicate and function arguments
@@ -1015,6 +1019,12 @@ Includes set extensionality as an axiom plus set lemmas:
 - `union_subset`
 - `diff_subset_left`
 - `diff_disjoint_right`
+- `prod_member_intro`
+- `prod_member_left`
+- `prod_member_right`
+- `prod_mono`
+- `prod_empty_left`
+- `prod_empty_right`
 - `compl_intro`
 - `compl_elim`
 - `inter_univ_right`

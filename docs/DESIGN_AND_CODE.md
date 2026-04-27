@@ -92,6 +92,7 @@ objects programmatically.
 pub enum Type {
     Named(Name),
     Nat,
+    Prod(Box<Type>, Box<Type>),
     Set(Box<Type>),
 }
 ```
@@ -101,6 +102,7 @@ Design notes:
 - `Named` is for user-declared sorts and type parameters.
 - `Nat` is built in because natural-number induction and computation are built
   into the language.
+- `Prod(T, U)` is built in for ordered pairs and Cartesian products.
 - `Set(T)` is built in because set membership, subset, and set operations have
   special validation and simplification rules.
 
@@ -120,6 +122,9 @@ pub enum Term {
     Add(Box<Term>, Box<Term>),
     Mul(Box<Term>, Box<Term>),
     Sub(Box<Term>, Box<Term>),
+    Pair(Box<Term>, Box<Term>),
+    Fst(Box<Term>),
+    Snd(Box<Term>),
     EmptySet(Type),
     Universe(Type),
     Singleton(Box<Term>),
@@ -127,6 +132,7 @@ pub enum Term {
     Inter(Box<Term>, Box<Term>),
     Diff(Box<Term>, Box<Term>),
     Complement(Box<Term>),
+    CartProd(Box<Term>, Box<Term>),
     Powerset(Box<Term>),
     SetBuilder { var: Name, var_type: Type, body: Box<Formula> },
 }
@@ -677,6 +683,7 @@ x in union(A, B)   ==> x in A \/ x in B
 x in inter(A, B)   ==> x in A /\ x in B
 x in diff(A, B)    ==> x in A /\ not x in B
 x in compl(A)      ==> not x in A
+x in prod(A, B)    ==> fst(x) in A /\ snd(x) in B
 x in powerset(A)   ==> x subset A
 x in { y : T | P(y) }  ==> P(x)
 ```

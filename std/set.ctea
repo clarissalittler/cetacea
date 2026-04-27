@@ -165,6 +165,84 @@ theorem diff_disjoint_right
   apply hx.left.right
   exact hx.right
 
+theorem prod_member_intro
+  (T U : Type)
+  (A : Set T)
+  (B : Set U)
+  (x : T)
+  (y : U)
+  : x in A -> y in B -> pair(x, y) in prod(A, B) := by
+  intro hx
+  intro hy
+  simp
+  split
+  exact hx
+  exact hy
+
+theorem prod_member_left
+  (T U : Type)
+  (A : Set T)
+  (B : Set U)
+  (x : T)
+  (y : U)
+  : pair(x, y) in prod(A, B) -> x in A := by
+  intro hp
+  simp at hp
+  exact hp.left
+
+theorem prod_member_right
+  (T U : Type)
+  (A : Set T)
+  (B : Set U)
+  (x : T)
+  (y : U)
+  : pair(x, y) in prod(A, B) -> y in B := by
+  intro hp
+  simp at hp
+  exact hp.right
+
+theorem prod_mono
+  (T U : Type)
+  (A C : Set T)
+  (B D : Set U)
+  : A subset C -> B subset D -> prod(A, B) subset prod(C, D) := by
+  intro hAC
+  intro hBD
+  simp
+  intro p
+  intro hp
+  split
+  apply hAC
+  exact hp.left
+  apply hBD
+  exact hp.right
+
+theorem prod_empty_left
+  (T U : Type)
+  (B : Set U)
+  : prod(empty(T), B) = empty(Prod T U) := by
+  apply set_ext
+  intro p
+  simp
+  split
+  intro hp
+  exact hp.left
+  intro hfalse
+  contradiction
+
+theorem prod_empty_right
+  (T U : Type)
+  (A : Set T)
+  : prod(A, empty(U)) = empty(Prod T U) := by
+  apply set_ext
+  intro p
+  simp
+  split
+  intro hp
+  exact hp.right
+  intro hfalse
+  contradiction
+
 theorem compl_intro
   (T : Type)
   (A : Set T)

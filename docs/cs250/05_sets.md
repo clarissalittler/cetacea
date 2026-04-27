@@ -3,11 +3,12 @@
 Cetacea has a typed set theory: `Set T` is a type for any sort `T`, and
 the basic constructors are `empty(T)`, `singleton(x)`, `union(A, B)`,
 `inter(A, B)`, `diff(A, B)`, `compl(A)`, `univ(T)`, and
-`powerset(A)`. You can also write nonempty finite sets as
-`{alice, bob}`. Membership is `x in A`, subset is `A subset B`, equality
-of sets is plain `=`. Set extensionality is an axiom (`set_ext` in
-`std/set.ctea`). The standard library proves a small algebra of
-set-theoretic identities.
+`powerset(A)`. Cartesian products are `prod(A, B)`, with ordered pairs
+written `pair(x, y)`. You can also write nonempty finite sets as
+`{alice, bob}`. Membership is `x in A`, subset is `A subset B`,
+equality of sets is plain `=`. Set extensionality is an axiom
+(`set_ext` in `std/set.ctea`). The standard library proves a small
+algebra of set-theoretic identities.
 
 Set-builder notation is supported:
 
@@ -17,11 +18,11 @@ Set-builder notation is supported:
 
 so you can name predicate-defined sets with transparent term
 definitions. What Cetacea still does not have is cardinalities,
-Cartesian products as set objects, or empty finite-set literals without
-an explicit element type. Use `empty(T)` for the empty set and the course
-Python tools for counting exercises; Cetacea is the right tool here for
-proving identities about set operations, powersets, finite sets, and
-predicate-defined sets.
+or empty finite-set literals without an explicit element type. Use
+`empty(T)` for the empty set and the course Python tools for counting
+exercises; Cetacea is the right tool here for proving identities about
+set operations, powersets, products, finite sets, and predicate-defined
+sets.
 
 ## Subset, union, intersection
 
@@ -33,9 +34,11 @@ import ../../../std/prelude.ctea
 mode constructive
 
 sort Person
+sort Color
 
 const alice : Person
 const bob : Person
+const red : Color
 pred Tall(Person)
 
 theorem alice_in_singleton : alice in singleton(alice) := by
@@ -64,6 +67,17 @@ theorem complement_intro_demo
   intro h
   simp
   exact h
+```
+
+Cartesian products use pair terms and projections:
+
+```text
+theorem pair_in_product
+  : pair(alice, red) in prod(singleton(alice), singleton(red)) := by
+  simp
+  split
+  refl
+  refl
 ```
 
 Set builders reduce by substituting the element into the defining

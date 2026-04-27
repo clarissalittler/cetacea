@@ -9,6 +9,7 @@ pub type Name = String;
 pub enum Type {
     Named(Name),
     Nat,
+    Prod(Box<Type>, Box<Type>),
     Set(Box<Type>),
 }
 
@@ -17,6 +18,7 @@ impl fmt::Display for Type {
         match self {
             Type::Named(name) => write!(f, "{name}"),
             Type::Nat => write!(f, "Nat"),
+            Type::Prod(left, right) => write!(f, "Prod {left} {right}"),
             Type::Set(elem) => write!(f, "Set {elem}"),
         }
     }
@@ -35,6 +37,9 @@ pub enum Term {
     Add(Box<Term>, Box<Term>),
     Mul(Box<Term>, Box<Term>),
     Sub(Box<Term>, Box<Term>),
+    Pair(Box<Term>, Box<Term>),
+    Fst(Box<Term>),
+    Snd(Box<Term>),
     EmptySet(Type),
     Universe(Type),
     Singleton(Box<Term>),
@@ -42,6 +47,7 @@ pub enum Term {
     Inter(Box<Term>, Box<Term>),
     Diff(Box<Term>, Box<Term>),
     Complement(Box<Term>),
+    CartProd(Box<Term>, Box<Term>),
     Powerset(Box<Term>),
     SetBuilder {
         var: Name,
@@ -88,6 +94,9 @@ impl fmt::Display for Term {
             Term::Add(left, right) => write!(f, "add({left}, {right})"),
             Term::Mul(left, right) => write!(f, "mul({left}, {right})"),
             Term::Sub(left, right) => write!(f, "sub({left}, {right})"),
+            Term::Pair(left, right) => write!(f, "pair({left}, {right})"),
+            Term::Fst(term) => write!(f, "fst({term})"),
+            Term::Snd(term) => write!(f, "snd({term})"),
             Term::EmptySet(ty) => write!(f, "empty({ty})"),
             Term::Universe(ty) => write!(f, "univ({ty})"),
             Term::Singleton(term) => write!(f, "singleton({term})"),
@@ -95,6 +104,7 @@ impl fmt::Display for Term {
             Term::Inter(left, right) => write!(f, "inter({left}, {right})"),
             Term::Diff(left, right) => write!(f, "diff({left}, {right})"),
             Term::Complement(term) => write!(f, "compl({term})"),
+            Term::CartProd(left, right) => write!(f, "prod({left}, {right})"),
             Term::Powerset(term) => write!(f, "powerset({term})"),
             Term::SetBuilder {
                 var,
@@ -1991,6 +2001,10 @@ fn instantiate_theorem(
 fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationError> {
     match ty {
         Type::Nat => Ok(()),
+        Type::Prod(left, right) => {
+            validate_type(env, ctx, left)?;
+            validate_type(env, ctx, right)
+        }
         Type::Set(elem) => validate_type(env, ctx, elem),
         Type::Named(name) if env.has_sort(name) || ctx.has_type_var(name) => Ok(()),
         Type::Named(name) => Err(ValidationError::new(format!("unknown type `{name}`"))),
@@ -2093,6 +2107,29 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             }
             Ok(Type::Nat)
         }
+        Term::Pair(left, right) => {
+            let left_ty = validate_term(env, ctx, left)?;
+            let right_ty = validate_term(env, ctx, right)?;
+            Ok(Type::Prod(Box::new(left_ty), Box::new(right_ty)))
+        }
+        Term::Fst(pair) => {
+            let pair_ty = validate_term(env, ctx, pair)?;
+            let Type::Prod(left_ty, _) = pair_ty else {
+                return Err(ValidationError::new(format!(
+                    "`fst` argument has type `{pair_ty}`, but expected a product"
+                )));
+            };
+            Ok(*left_ty)
+        }
+        Term::Snd(pair) => {
+            let pair_ty = validate_term(env, ctx, pair)?;
+            let Type::Prod(_, right_ty) = pair_ty else {
+                return Err(ValidationError::new(format!(
+                    "`snd` argument has type `{pair_ty}`, but expected a product"
+                )));
+            };
+            Ok(*right_ty)
+        }
         Term::EmptySet(elem_ty) => {
             validate_type(env, ctx, elem_ty)?;
             Ok(Type::Set(Box::new(elem_ty.clone())))
@@ -2113,6 +2150,21 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                 )));
             };
             Ok(Type::Set(elem_ty))
+        }
+        Term::CartProd(left, right) => {
+            let left_ty = validate_term(env, ctx, left)?;
+            let right_ty = validate_term(env, ctx, right)?;
+            let Type::Set(left_elem) = left_ty else {
+                return Err(ValidationError::new(format!(
+                    "Cartesian product argument 1 has type `{left_ty}`, but expected a set"
+                )));
+            };
+            let Type::Set(right_elem) = right_ty else {
+                return Err(ValidationError::new(format!(
+                    "Cartesian product argument 2 has type `{right_ty}`, but expected a set"
+                )));
+            };
+            Ok(Type::Set(Box::new(Type::Prod(left_elem, right_elem))))
         }
         Term::Powerset(set) => {
             let set_ty = validate_term(env, ctx, set)?;
@@ -2711,12 +2763,16 @@ fn alpha_eq_term(left: &Term, right: &Term, env: &mut AlphaEnv) -> bool {
         | (Term::Sub(left_a, left_b), Term::Sub(right_a, right_b))
         | (Term::Union(left_a, left_b), Term::Union(right_a, right_b))
         | (Term::Inter(left_a, left_b), Term::Inter(right_a, right_b))
-        | (Term::Diff(left_a, left_b), Term::Diff(right_a, right_b)) => {
+        | (Term::Diff(left_a, left_b), Term::Diff(right_a, right_b))
+        | (Term::Pair(left_a, left_b), Term::Pair(right_a, right_b))
+        | (Term::CartProd(left_a, left_b), Term::CartProd(right_a, right_b)) => {
             alpha_eq_term(left_a, right_a, env) && alpha_eq_term(left_b, right_b, env)
         }
         (Term::EmptySet(left_ty), Term::EmptySet(right_ty))
         | (Term::Universe(left_ty), Term::Universe(right_ty)) => left_ty == right_ty,
         (Term::Singleton(left), Term::Singleton(right))
+        | (Term::Fst(left), Term::Fst(right))
+        | (Term::Snd(left), Term::Snd(right))
         | (Term::Complement(left), Term::Complement(right))
         | (Term::Powerset(left), Term::Powerset(right)) => alpha_eq_term(left, right, env),
         (
@@ -2943,6 +2999,10 @@ fn unfold_formula_defs(
                     Formula::negate(Formula::membership(elem, *right)),
                 ),
                 Term::Complement(base) => Formula::negate(Formula::membership(elem, *base)),
+                Term::CartProd(left, right) => Formula::and(
+                    Formula::membership(Term::Fst(Box::new(elem.clone())), *left),
+                    Formula::membership(Term::Snd(Box::new(elem)), *right),
+                ),
                 Term::Powerset(base) => Formula::subset(elem, *base),
                 Term::SetBuilder {
                     var,
@@ -3082,6 +3142,24 @@ fn normalize_term_compute(term: &Term) -> Term {
                 (left, right) => Term::Sub(Box::new(left), Box::new(right)),
             }
         }
+        Term::Pair(left, right) => Term::Pair(
+            Box::new(normalize_term_compute(left)),
+            Box::new(normalize_term_compute(right)),
+        ),
+        Term::Fst(term) => {
+            let term = normalize_term_compute(term);
+            match term {
+                Term::Pair(left, _) => *left,
+                other => Term::Fst(Box::new(other)),
+            }
+        }
+        Term::Snd(term) => {
+            let term = normalize_term_compute(term);
+            match term {
+                Term::Pair(_, right) => *right,
+                other => Term::Snd(Box::new(other)),
+            }
+        }
         Term::Singleton(term) => Term::Singleton(Box::new(normalize_term_compute(term))),
         Term::Union(left, right) => Term::Union(
             Box::new(normalize_term_compute(left)),
@@ -3096,6 +3174,10 @@ fn normalize_term_compute(term: &Term) -> Term {
             Box::new(normalize_term_compute(right)),
         ),
         Term::Complement(term) => Term::Complement(Box::new(normalize_term_compute(term))),
+        Term::CartProd(left, right) => Term::CartProd(
+            Box::new(normalize_term_compute(left)),
+            Box::new(normalize_term_compute(right)),
+        ),
         Term::Powerset(term) => Term::Powerset(Box::new(normalize_term_compute(term))),
         Term::SetBuilder {
             var,
@@ -3160,6 +3242,18 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
             );
             Ok(normalize_term_compute(&computed))
         }
+        Term::Pair(left, right) => Ok(Term::Pair(
+            Box::new(normalize_term(env, ctx, left)?),
+            Box::new(normalize_term(env, ctx, right)?),
+        )),
+        Term::Fst(term) => {
+            let computed = Term::Fst(Box::new(normalize_term(env, ctx, term)?));
+            Ok(normalize_term_compute(&computed))
+        }
+        Term::Snd(term) => {
+            let computed = Term::Snd(Box::new(normalize_term(env, ctx, term)?));
+            Ok(normalize_term_compute(&computed))
+        }
         Term::Singleton(term) => Ok(Term::Singleton(Box::new(normalize_term(env, ctx, term)?))),
         Term::Union(left, right) => Ok(Term::Union(
             Box::new(normalize_term(env, ctx, left)?),
@@ -3174,6 +3268,10 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
             Box::new(normalize_term(env, ctx, right)?),
         )),
         Term::Complement(term) => Ok(Term::Complement(Box::new(normalize_term(env, ctx, term)?))),
+        Term::CartProd(left, right) => Ok(Term::CartProd(
+            Box::new(normalize_term(env, ctx, left)?),
+            Box::new(normalize_term(env, ctx, right)?),
+        )),
         Term::Powerset(term) => Ok(Term::Powerset(Box::new(normalize_term(env, ctx, term)?))),
         Term::SetBuilder {
             var,
@@ -3257,6 +3355,10 @@ fn unfold_binary_formula(
 fn subst_type_schema(ty: &Type, subst: &SchemaSubst) -> Type {
     match ty {
         Type::Nat => Type::Nat,
+        Type::Prod(left, right) => Type::Prod(
+            Box::new(subst_type_schema(left, subst)),
+            Box::new(subst_type_schema(right, subst)),
+        ),
         Type::Set(elem) => Type::Set(Box::new(subst_type_schema(elem, subst))),
         Type::Named(name) => subst
             .type_args
@@ -3309,6 +3411,12 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(left, subst)),
             Box::new(subst_term_schema(right, subst)),
         ),
+        Term::Pair(left, right) => Term::Pair(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
+        Term::Fst(term) => Term::Fst(Box::new(subst_term_schema(term, subst))),
+        Term::Snd(term) => Term::Snd(Box::new(subst_term_schema(term, subst))),
         Term::EmptySet(ty) => Term::EmptySet(subst_type_schema(ty, subst)),
         Term::Universe(ty) => Term::Universe(subst_type_schema(ty, subst)),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term_schema(term, subst))),
@@ -3325,6 +3433,10 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             Box::new(subst_term_schema(right, subst)),
         ),
         Term::Complement(term) => Term::Complement(Box::new(subst_term_schema(term, subst))),
+        Term::CartProd(left, right) => Term::CartProd(
+            Box::new(subst_term_schema(left, subst)),
+            Box::new(subst_term_schema(right, subst)),
+        ),
         Term::Powerset(term) => Term::Powerset(Box::new(subst_term_schema(term, subst))),
         Term::SetBuilder {
             var,
@@ -3467,6 +3579,12 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(left, var, replacement)),
             Box::new(subst_term(right, var, replacement)),
         ),
+        Term::Pair(left, right) => Term::Pair(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
+        Term::Fst(term) => Term::Fst(Box::new(subst_term(term, var, replacement))),
+        Term::Snd(term) => Term::Snd(Box::new(subst_term(term, var, replacement))),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
         Term::Universe(ty) => Term::Universe(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term(term, var, replacement))),
@@ -3483,6 +3601,10 @@ fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
             Box::new(subst_term(right, var, replacement)),
         ),
         Term::Complement(term) => Term::Complement(Box::new(subst_term(term, var, replacement))),
+        Term::CartProd(left, right) => Term::CartProd(
+            Box::new(subst_term(left, var, replacement)),
+            Box::new(subst_term(right, var, replacement)),
+        ),
         Term::Powerset(term) => Term::Powerset(Box::new(subst_term(term, var, replacement))),
         Term::SetBuilder {
             var: bound,
@@ -3581,14 +3703,18 @@ fn term_has_free_var(term: &Term, name: &str) -> bool {
         Term::Zero | Term::EmptySet(_) | Term::Universe(_) => false,
         Term::Succ(term)
         | Term::Singleton(term)
+        | Term::Fst(term)
+        | Term::Snd(term)
         | Term::Complement(term)
         | Term::Powerset(term) => term_has_free_var(term, name),
         Term::Add(left, right)
         | Term::Mul(left, right)
         | Term::Sub(left, right)
+        | Term::Pair(left, right)
         | Term::Union(left, right)
         | Term::Inter(left, right)
-        | Term::Diff(left, right) => {
+        | Term::Diff(left, right)
+        | Term::CartProd(left, right) => {
             term_has_free_var(left, name) || term_has_free_var(right, name)
         }
         Term::SetBuilder { var, body, .. } if var == name => false,
@@ -3661,6 +3787,24 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
                 results.push(Term::Sub(left.clone(), Box::new(replaced)));
             }
         }
+        Term::Pair(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::Pair(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::Pair(left.clone(), Box::new(replaced)));
+            }
+        }
+        Term::Fst(inner) => {
+            for replaced in replace_term_once(inner, from, to) {
+                results.push(Term::Fst(Box::new(replaced)));
+            }
+        }
+        Term::Snd(inner) => {
+            for replaced in replace_term_once(inner, from, to) {
+                results.push(Term::Snd(Box::new(replaced)));
+            }
+        }
         Term::Singleton(inner) => {
             for replaced in replace_term_once(inner, from, to) {
                 results.push(Term::Singleton(Box::new(replaced)));
@@ -3693,6 +3837,14 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
         Term::Complement(inner) => {
             for replaced in replace_term_once(inner, from, to) {
                 results.push(Term::Complement(Box::new(replaced)));
+            }
+        }
+        Term::CartProd(left, right) => {
+            for replaced in replace_term_once(left, from, to) {
+                results.push(Term::CartProd(Box::new(replaced), right.clone()));
+            }
+            for replaced in replace_term_once(right, from, to) {
+                results.push(Term::CartProd(left.clone(), Box::new(replaced)));
             }
         }
         Term::Powerset(inner) => {
@@ -3873,14 +4025,18 @@ fn term_size(term: &Term) -> usize {
         Term::PredLambda { body, .. } => 1 + formula_size(body),
         Term::Succ(term)
         | Term::Singleton(term)
+        | Term::Fst(term)
+        | Term::Snd(term)
         | Term::Complement(term)
         | Term::Powerset(term) => 1 + term_size(term),
         Term::Add(left, right)
         | Term::Mul(left, right)
         | Term::Sub(left, right)
+        | Term::Pair(left, right)
         | Term::Union(left, right)
         | Term::Inter(left, right)
-        | Term::Diff(left, right) => 1 + term_size(left) + term_size(right),
+        | Term::Diff(left, right)
+        | Term::CartProd(left, right) => 1 + term_size(left) + term_size(right),
         Term::SetBuilder { body, .. } => 1 + formula_size(body),
     }
 }
@@ -4455,6 +4611,11 @@ impl Tokens {
                 "`{name}` is not a first-order type"
             ))),
             "Nat" => Ok(Type::Nat),
+            "Prod" => {
+                let left = self.parse_type()?;
+                let right = self.parse_type()?;
+                Ok(Type::Prod(Box::new(left), Box::new(right)))
+            }
             "Set" => Ok(Type::Set(Box::new(self.parse_type()?))),
             _ => Ok(Type::Named(name)),
         }
@@ -4604,6 +4765,11 @@ impl Tokens {
                 ("sub", [left, right]) => {
                     Ok(Term::Sub(Box::new(left.clone()), Box::new(right.clone())))
                 }
+                ("pair", [left, right]) => {
+                    Ok(Term::Pair(Box::new(left.clone()), Box::new(right.clone())))
+                }
+                ("fst", [arg]) => Ok(Term::Fst(Box::new(arg.clone()))),
+                ("snd", [arg]) => Ok(Term::Snd(Box::new(arg.clone()))),
                 ("singleton", [arg]) => Ok(Term::Singleton(Box::new(arg.clone()))),
                 ("union", [left, right]) => {
                     Ok(Term::Union(Box::new(left.clone()), Box::new(right.clone())))
@@ -4615,13 +4781,19 @@ impl Tokens {
                     Ok(Term::Diff(Box::new(left.clone()), Box::new(right.clone())))
                 }
                 ("compl" | "complement", [arg]) => Ok(Term::Complement(Box::new(arg.clone()))),
-                ("powerset", [arg]) => Ok(Term::Powerset(Box::new(arg.clone()))),
-                ("succ" | "singleton" | "compl" | "complement" | "powerset", _) => Err(
-                    ParseError::new(format!("`{name}` expects exactly one argument")),
-                ),
-                ("add" | "mul" | "sub" | "union" | "inter" | "diff", _) => Err(ParseError::new(
-                    format!("`{name}` expects exactly two arguments"),
+                ("prod", [left, right]) => Ok(Term::CartProd(
+                    Box::new(left.clone()),
+                    Box::new(right.clone()),
                 )),
+                ("powerset", [arg]) => Ok(Term::Powerset(Box::new(arg.clone()))),
+                ("succ" | "fst" | "snd" | "singleton" | "compl" | "complement" | "powerset", _) => {
+                    Err(ParseError::new(format!(
+                        "`{name}` expects exactly one argument"
+                    )))
+                }
+                ("add" | "mul" | "sub" | "pair" | "union" | "inter" | "diff" | "prod", _) => Err(
+                    ParseError::new(format!("`{name}` expects exactly two arguments")),
+                ),
                 _ => Ok(Term::App(name, args)),
             };
         }
@@ -4726,6 +4898,9 @@ impl Tokens {
             | Term::Add(_, _)
             | Term::Mul(_, _)
             | Term::Sub(_, _)
+            | Term::Pair(_, _)
+            | Term::Fst(_)
+            | Term::Snd(_)
             | Term::EmptySet(_)
             | Term::Universe(_)
             | Term::Singleton(_)
@@ -4733,6 +4908,7 @@ impl Tokens {
             | Term::Inter(_, _)
             | Term::Diff(_, _)
             | Term::Complement(_)
+            | Term::CartProd(_, _)
             | Term::Powerset(_)
             | Term::PredLambda { .. }
             | Term::SetBuilder { .. } => {
@@ -7244,6 +7420,12 @@ fn rewrite_term_with_simp_rules_once(
         Term::Succ(inner) => rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
             Term::Succ(Box::new(inner))
         }),
+        Term::Fst(inner) => rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
+            Term::Fst(Box::new(inner))
+        }),
+        Term::Snd(inner) => rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
+            Term::Snd(Box::new(inner))
+        }),
         Term::Singleton(inner) => {
             rewrite_unary_term_with_simp_rules(env, ctx, inner, rules, |inner| {
                 Term::Singleton(Box::new(inner))
@@ -7274,6 +7456,11 @@ fn rewrite_term_with_simp_rules_once(
                 Term::Sub(Box::new(left), Box::new(right))
             })
         }
+        Term::Pair(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::Pair(Box::new(left), Box::new(right))
+            })
+        }
         Term::Union(left, right) => {
             rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
                 Term::Union(Box::new(left), Box::new(right))
@@ -7287,6 +7474,11 @@ fn rewrite_term_with_simp_rules_once(
         Term::Diff(left, right) => {
             rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
                 Term::Diff(Box::new(left), Box::new(right))
+            })
+        }
+        Term::CartProd(left, right) => {
+            rewrite_binary_term_node_with_simp_rules(env, ctx, left, right, rules, |left, right| {
+                Term::CartProd(Box::new(left), Box::new(right))
             })
         }
         Term::SetBuilder {
@@ -8061,6 +8253,20 @@ fn subst_term_terms_with(
             Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
             Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
         ),
+        Term::Pair(left, right) => Term::Pair(
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
+        ),
+        Term::Fst(term) => Term::Fst(Box::new(subst_term_terms_with(
+            term,
+            subst,
+            replacement_free_vars,
+        ))),
+        Term::Snd(term) => Term::Snd(Box::new(subst_term_terms_with(
+            term,
+            subst,
+            replacement_free_vars,
+        ))),
         Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
         Term::Universe(ty) => Term::Universe(ty.clone()),
         Term::Singleton(term) => Term::Singleton(Box::new(subst_term_terms_with(
@@ -8085,6 +8291,10 @@ fn subst_term_terms_with(
             subst,
             replacement_free_vars,
         ))),
+        Term::CartProd(left, right) => Term::CartProd(
+            Box::new(subst_term_terms_with(left, subst, replacement_free_vars)),
+            Box::new(subst_term_terms_with(right, subst, replacement_free_vars)),
+        ),
         Term::Powerset(term) => Term::Powerset(Box::new(subst_term_terms_with(
             term,
             subst,
@@ -8233,6 +8443,8 @@ fn collect_free_term_vars(term: &Term, bound: &mut Vec<Name>, vars: &mut HashSet
         Term::Zero | Term::EmptySet(_) | Term::Universe(_) => {}
         Term::Succ(term)
         | Term::Singleton(term)
+        | Term::Fst(term)
+        | Term::Snd(term)
         | Term::Complement(term)
         | Term::Powerset(term) => {
             collect_free_term_vars(term, bound, vars);
@@ -8240,9 +8452,11 @@ fn collect_free_term_vars(term: &Term, bound: &mut Vec<Name>, vars: &mut HashSet
         Term::Add(left, right)
         | Term::Mul(left, right)
         | Term::Sub(left, right)
+        | Term::Pair(left, right)
         | Term::Union(left, right)
         | Term::Inter(left, right)
-        | Term::Diff(left, right) => {
+        | Term::Diff(left, right)
+        | Term::CartProd(left, right) => {
             collect_free_term_vars(left, bound, vars);
             collect_free_term_vars(right, bound, vars);
         }
@@ -8476,6 +8690,25 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             unify_term(p_left, t_left, unify)?;
             unify_term(p_right, t_right, unify)
         }
+        Term::Pair(p_left, p_right) => {
+            let Term::Pair(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
+        }
+        Term::Fst(pattern) => {
+            let Term::Fst(target) = target else {
+                return Err(());
+            };
+            unify_term(pattern, target, unify)
+        }
+        Term::Snd(pattern) => {
+            let Term::Snd(target) = target else {
+                return Err(());
+            };
+            unify_term(pattern, target, unify)
+        }
         Term::EmptySet(pattern_ty) => {
             let Term::EmptySet(target_ty) = target else {
                 return Err(());
@@ -8530,6 +8763,13 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
                 return Err(());
             };
             unify_term(pattern, target, unify)
+        }
+        Term::CartProd(p_left, p_right) => {
+            let Term::CartProd(t_left, t_right) = target else {
+                return Err(());
+            };
+            unify_term(p_left, t_left, unify)?;
+            unify_term(p_right, t_right, unify)
         }
         Term::Powerset(pattern) => {
             let Term::Powerset(target) = target else {
@@ -8640,6 +8880,13 @@ fn unify_type(
     schema_subst: &mut SchemaSubst,
 ) -> Result<(), ()> {
     match pattern {
+        Type::Prod(pattern_left, pattern_right) => {
+            let Type::Prod(target_left, target_right) = target else {
+                return Err(());
+            };
+            unify_type(pattern_left, target_left, schema_params, schema_subst)?;
+            unify_type(pattern_right, target_right, schema_params, schema_subst)
+        }
         Type::Set(pattern_elem) => {
             let Type::Set(target_elem) = target else {
                 return Err(());
@@ -10698,6 +10945,44 @@ theorem complement_elim_demo
     }
 
     #[test]
+    fn cartesian_products_compute_under_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+sort Color
+const alice : Person
+const red : Color
+
+theorem pair_projection_left : fst(pair(alice, red)) = alice := by
+  simp
+  refl
+
+theorem pair_projection_right : snd(pair(alice, red)) = red := by
+  simp
+  refl
+
+theorem pair_in_product
+  : pair(alice, red) in prod(singleton(alice), singleton(red)) := by
+  simp
+  split
+  refl
+  refl
+
+theorem product_member_left
+  (A : Set Person)
+  (B : Set Color)
+  (p : Prod Person Color)
+  : p in prod(A, B) -> fst(p) in A := by
+  intro hp
+  simp at hp
+  exact hp.left
+"#,
+        );
+    }
+
+    #[test]
     fn empty_set_literal_requires_element_type() {
         check_err_contains(
             r#"
@@ -11051,6 +11336,21 @@ const alice : Person
 theorem bad (n : Nat) : alice in compl(n) := by
 "#,
             "complement argument has type `Nat`, but expected a set",
+        );
+    }
+
+    #[test]
+    fn cartesian_product_argument_must_be_a_set() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+
+theorem bad (n : Nat) : pair(alice, n) in prod(singleton(alice), n) := by
+"#,
+            "Cartesian product argument 2 has type `Nat`, but expected a set",
         );
     }
 

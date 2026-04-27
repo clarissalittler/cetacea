@@ -5,9 +5,11 @@ import ../../../std/prelude.ctea
 mode constructive
 
 sort Person
+sort Color
 
 const alice : Person
 const bob : Person
+const red : Color
 pred Tall(Person)
 
 theorem alice_in_singleton : alice in singleton(alice) := by
@@ -25,6 +27,13 @@ theorem complement_intro_demo
   intro h
   simp
   exact h
+
+theorem pair_in_product
+  : pair(alice, red) in prod(singleton(alice), singleton(red)) := by
+  simp
+  split
+  refl
+  refl
 
 def TallSet : Set Person := { x : Person | Tall(x) }
 
