@@ -702,11 +702,12 @@ A subset B  ==>  forall x : T, x in A -> x in B
 The `simp` tactic is intentionally small. It normalizes the current goal using
 transparent formula definitions, set computation, subset expansion, and Nat
 computation inside formula terms. `simp [lemma]` additionally uses listed term
-equality theorems as rewrite rules in the goal or in hypothesis-targeted forms
-such as `simp [lemma] at h` and `simp [lemma] at *`. `simp at h` applies
-built-in normalization to a named hypothesis in the local proof state, and
-`simp at *` normalizes the goal plus all named hypotheses. All forms reject
-no-op calls so users notice when `simp` did not change anything.
+equality theorems or local equality hypotheses as rewrite rules in the goal or
+in hypothesis-targeted forms such as `simp [lemma] at h` and
+`simp [local_eq] at *`. `simp at h` applies built-in normalization to a named
+hypothesis in the local proof state, and `simp at *` normalizes the goal plus
+all named hypotheses. All forms reject no-op calls so users notice when `simp`
+did not change anything.
 
 Current design tradeoff:
 

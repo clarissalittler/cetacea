@@ -727,7 +727,8 @@ theorem happy_mother : Happy(alice) -> Happy(mother(alice)) := by
 Use `simp at h` to simplify a named hypothesis in the local context, or
 `simp at *` to simplify the current goal and all local hypotheses. Listed
 equality rules can also target hypotheses: `simp [mother_alice] at h` and
-`simp [mother_alice] at *`.
+`simp [mother_alice] at *`. The names in `simp [...]` may be top-level
+equality theorems or local equality hypotheses introduced in the proof.
 
 Examples:
 
@@ -1188,9 +1189,10 @@ Cetacea is intentionally small. Important current limitations:
 - Parse diagnostics carry line-local token spans where possible, but checked
   declaration and tactic execution errors still report line numbers rather than
   exact AST spans. Runtime tactic failures report the failing tactic line.
-- `simp [lemma]` can use listed equality theorems as rewrite rules, including
-  in hypotheses with `simp [lemma] at h` or `simp [lemma] at *`, but there is
-  not yet an attribute-based global simp set or iff/proposition rewriting.
+- `simp [lemma]` and `simp [h]` can use listed equality theorems or local
+  equality hypotheses as rewrite rules, including in hypotheses with
+  `simp [lemma] at h` or `simp [lemma] at *`, but there is not yet an
+  attribute-based global simp set or iff/proposition rewriting.
 - Theorem instantiation is useful but incomplete. Some underdetermined proofs
   still need explicit theorem parameters.
 - Nat has addition, multiplication, truncated subtraction, and `le`, but no

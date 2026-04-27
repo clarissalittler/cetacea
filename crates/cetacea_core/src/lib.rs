@@ -4822,21 +4822,21 @@ impl Tokens {
     }
 
     fn parse_or(&mut self) -> Result<Formula, ParseError> {
-        let mut formula = self.parse_and()?;
-        while self.eat_sym("\\/") {
-            let right = self.parse_and()?;
-            formula = Formula::or(formula, right);
+        let left = self.parse_and()?;
+        if self.eat_sym("\\/") {
+            let right = self.parse_or()?;
+            return Ok(Formula::or(left, right));
         }
-        Ok(formula)
+        Ok(left)
     }
 
     fn parse_and(&mut self) -> Result<Formula, ParseError> {
-        let mut formula = self.parse_unary()?;
-        while self.eat_sym("/\\") {
-            let right = self.parse_unary()?;
-            formula = Formula::and(formula, right);
+        let left = self.parse_unary()?;
+        if self.eat_sym("/\\") {
+            let right = self.parse_and()?;
+            return Ok(Formula::and(left, right));
         }
-        Ok(formula)
+        Ok(left)
     }
 
     fn parse_unary(&mut self) -> Result<Formula, ParseError> {
@@ -5035,13 +5035,16 @@ fn nat_literal_term(value: usize) -> Term {
 }
 
 fn finite_set_literal_term(elems: Vec<Term>) -> Term {
-    let mut sets = elems
+    let mut sets: Vec<_> = elems
         .into_iter()
-        .map(|elem| Term::Singleton(Box::new(elem)));
-    let first = sets
-        .next()
+        .map(|elem| Term::Singleton(Box::new(elem)))
+        .collect();
+    let last = sets
+        .pop()
         .expect("finite set literal parser rejects empty literals");
-    sets.fold(first, |acc, set| Term::Union(Box::new(acc), Box::new(set)))
+    sets.into_iter()
+        .rev()
+        .fold(last, |acc, set| Term::Union(Box::new(set), Box::new(acc)))
 }
 
 fn parse_file(source: &str) -> Result<File, ParseError> {
@@ -6840,7 +6843,7 @@ fn run_tactic(
             })
         }
         Tactic::SimpWith(names) => {
-            let rules = collect_simp_rules(env, names)?;
+            let rules = collect_simp_rules(env, &goal.context, names)?;
             let (target, _builtin_target, builtin_changed, rewrites) =
                 simplify_formula_with_rules(env, &goal.context, &goal.target, &rules)
                     .map_err(|err| TacticError::new(format!("cannot simplify: {}", err.message)))?;
@@ -6915,7 +6918,7 @@ fn run_tactic(
             })
         }
         Tactic::SimpWithAt { names, target } => {
-            let rules = collect_simp_rules(env, names)?;
+            let rules = collect_simp_rules(env, &goal.context, names)?;
             match target {
                 SimpTarget::Hyp(name) => {
                     let (context, changed) =
@@ -7137,10 +7140,17 @@ fn ensure_intro_name_unused(ctx: &Context, name: &str) -> Result<(), TacticError
 
 #[derive(Clone)]
 struct SimpRule {
-    theorem_name: Name,
+    name: Name,
+    proof: SimpRuleProof,
     params: Vec<Param>,
     lhs: Term,
     rhs: Term,
+}
+
+#[derive(Clone)]
+enum SimpRuleProof {
+    Theorem,
+    Local(Proof),
 }
 
 #[derive(Clone)]
@@ -7150,22 +7160,52 @@ struct SimpRewrite {
     eq_proof: Proof,
 }
 
-fn collect_simp_rules(env: &Env, names: &[Name]) -> Result<Vec<SimpRule>, TacticError> {
+fn collect_simp_rules(
+    env: &Env,
+    ctx: &Context,
+    names: &[Name],
+) -> Result<Vec<SimpRule>, TacticError> {
     let mut rules = Vec::new();
     for name in names {
-        let Some(theorem) = env.theorem(name) else {
-            return Err(TacticError::new(format!("unknown theorem `{name}`")));
+        if let Some(theorem) = env.theorem(name) {
+            let Formula::Eq(lhs, rhs) = &theorem.statement else {
+                return Err(TacticError::new(format!(
+                    "simp rule `{name}` must prove a term equality"
+                )));
+            };
+            rules.push(SimpRule {
+                name: name.clone(),
+                proof: SimpRuleProof::Theorem,
+                params: theorem.params.clone(),
+                lhs: lhs.clone(),
+                rhs: rhs.clone(),
+            });
+            continue;
+        }
+
+        let Some(formula) = ctx.lookup(name) else {
+            return Err(TacticError::new(format!(
+                "unknown theorem or hypothesis `{name}`"
+            )));
         };
-        let Formula::Eq(lhs, rhs) = &theorem.statement else {
+        let formula = normalize_formula_defs(env, ctx, formula).map_err(|err| {
+            TacticError::new(format!("cannot use `{name}` as simp rule: {}", err.message))
+        })?;
+        let Formula::Eq(lhs, rhs) = formula else {
             return Err(TacticError::new(format!(
                 "simp rule `{name}` must prove a term equality"
             )));
         };
+        let proof = ctx
+            .lookup_proof(name)
+            .cloned()
+            .unwrap_or_else(|| Proof::Hyp(name.clone()));
         rules.push(SimpRule {
-            theorem_name: name.clone(),
-            params: theorem.params.clone(),
-            lhs: lhs.clone(),
-            rhs: rhs.clone(),
+            name: name.clone(),
+            proof: SimpRuleProof::Local(proof),
+            params: Vec::new(),
+            lhs,
+            rhs,
         });
     }
     Ok(rules)
@@ -7541,21 +7581,21 @@ fn apply_simp_rule_to_term(
             return Ok(None);
         }
     }
-    if ensure_schema_subst_complete(&rule.params, &schema_subst, Some(&rule.theorem_name)).is_err()
-    {
+    if ensure_schema_subst_complete(&rule.params, &schema_subst, Some(&rule.name)).is_err() {
         return Ok(None);
     }
     let replacement = subst_term_schema(&rule.rhs, &schema_subst);
     if &replacement == term {
         return Ok(None);
     }
-    Ok(Some((
-        replacement,
-        Proof::TheoremRef {
-            name: rule.theorem_name.clone(),
+    let eq_proof = match &rule.proof {
+        SimpRuleProof::Theorem => Proof::TheoremRef {
+            name: rule.name.clone(),
             subst: schema_subst,
         },
-    )))
+        SimpRuleProof::Local(proof) => proof.clone(),
+    };
+    Ok(Some((replacement, eq_proof)))
 }
 
 fn rewrite_unary_term_with_simp_rules(
@@ -9361,6 +9401,36 @@ theorem and_comm (P Q : Prop) : P /\ Q -> Q /\ P := by
     }
 
     #[test]
+    fn and_or_parse_right_associatively() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem or_first_needs_one_left (P Q R : Prop) : P -> P \/ Q \/ R := by
+  intro hp
+  left
+  exact hp
+
+theorem or_third_needs_two_rights (P Q R : Prop) : R -> P \/ Q \/ R := by
+  intro hr
+  right
+  right
+  exact hr
+
+theorem and_first_splits_first (P Q R : Prop) : P -> Q -> R -> P /\ Q /\ R := by
+  intro hp
+  intro hq
+  intro hr
+  split
+  exact hp
+  split
+  exact hq
+  exact hr
+"#,
+        );
+    }
+
+    #[test]
     fn imp_trans_succeeds_constructively() {
         check_ok(
             r#"
@@ -10319,6 +10389,41 @@ theorem happy_mother : Happy(alice) -> Happy(mother(alice)) := by
     }
 
     #[test]
+    fn simp_uses_local_equality_hypothesis_as_rewrite_rule() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+const bob : Person
+pred Related(Person, Person)
+
+theorem local_simp_rewrites_goal
+  : alice = bob -> Related(bob, bob) -> Related(alice, alice) := by
+  intro h
+  intro hr
+  simp [h]
+  exact hr
+
+theorem local_simp_rewrites_hypothesis
+  : alice = bob -> Related(alice, alice) -> Related(bob, bob) := by
+  intro h
+  intro hr
+  simp [h] at hr
+  exact hr
+
+theorem local_simp_rewrites_all
+  : alice = bob -> Related(alice, alice) -> Related(bob, bob) := by
+  intro h
+  intro hr
+  simp [h] at *
+  exact hr
+"#,
+        );
+    }
+
+    #[test]
     fn simp_rule_can_instantiate_schema_term_arguments() {
         check_ok(
             r#"
@@ -10899,6 +11004,7 @@ mode constructive
 sort Person
 const alice : Person
 const bob : Person
+const carol : Person
 
 theorem finite_set_literal_left : alice in {alice, bob} := by
   simp
@@ -10907,6 +11013,17 @@ theorem finite_set_literal_left : alice in {alice, bob} := by
 
 theorem finite_set_literal_right : bob in {alice, bob} := by
   simp
+  right
+  refl
+
+theorem finite_set_literal_first_of_three : alice in {alice, bob, carol} := by
+  simp
+  left
+  refl
+
+theorem finite_set_literal_third_of_three : carol in {alice, bob, carol} := by
+  simp
+  right
   right
   refl
 "#,

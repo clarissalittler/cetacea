@@ -34,13 +34,14 @@ underconstrained theorem parameters.
 `simp` knows transparent definitions, set membership, subset expansion,
 and built-in Nat computation. `simp at h` can simplify a named
 hypothesis, and `simp at *` simplifies the goal plus all hypotheses. It
-can also use listed equality theorems in the goal or in hypotheses, as
-in `simp [lemma]`, `simp [lemma] at h`, and `simp [lemma] at *`.
+can also use listed equality theorems or local equality hypotheses in
+the goal or in hypotheses, as in `simp [lemma]`, `simp [h]`,
+`simp [lemma] at h`, and `simp [lemma] at *`.
 
 The remaining limitations are:
 
 - there is no global or attribute-based simp-set,
-- no automatic imported-lemma discovery, and
+- no automatic imported-lemma discovery,
 - no iff/proposition rewriting.
 
 **Possible improvement:** add `@[simp]`-style rule registration and a
@@ -128,7 +129,31 @@ The parser now handles the most common tutorial shapes, including
 wrapped explicit theorem-argument lists and inline predicate lambdas
 whose binder names overlap with names introduced later in the proof.
 
-### 9. Imports and names are global
+### 9. `rewrite h` rewrites a single occurrence at a time
+
+When the goal contains several copies of an equality's right-hand
+side, a single `rewrite h` only changes the first match. Students who
+expect substitution to act "everywhere at once" have to call
+`rewrite h` repeatedly:
+
+```text
+theorem subst_two_args
+  : a = b -> R(a, a) -> R(b, b) := by
+  intro h
+  intro hr
+  rewrite h
+  rewrite h    -- second occurrence still requires another rewrite
+  exact hr
+```
+
+`simp [theorem_name]` will rewrite all occurrences in one step, but
+students may not know to use it. Local equality hypotheses work too:
+`simp [h]` rewrites all matching occurrences using a freshly introduced
+`h : a = b`.
+
+**Possible improvement:** add a "rewrite all occurrences" form.
+
+### 10. Imports and names are global
 
 There are no namespaces or qualified imports. Imported declarations enter
 one global environment, and built-in names such as `add`, `mul`, `sub`,
@@ -137,7 +162,7 @@ and `le` cannot be reused for local functions or predicates.
 This is simple and readable at the current project size, but larger
 course libraries will eventually want namespaces.
 
-### 10. Predicate lambdas are intentionally small
+### 11. Predicate lambdas are intentionally small
 
 Definitions can take predicate parameters:
 
@@ -194,6 +219,10 @@ are now implemented:
   the goal.
 - `simp [lemma] at h` and `simp [lemma] at *` can use listed equality
   theorems as rewrite rules in hypotheses.
+- `simp [h]` can use local equality hypotheses as rewrite rules in the
+  goal or in hypotheses.
+- `\/` and `/\` parse right-associatively, matching textbook "Big And /
+  Big Or" convention.
 - `apply` can infer intermediate theorem parameters for transitive lemmas
   such as `subset_trans` and `eq_trans` from matching local hypotheses.
 - `apply` can infer missing theorem parameters from simple implication
@@ -231,11 +260,23 @@ are now implemented:
 
 - **Module 3** proof systems are a strong fit: intro and elimination
   rules line up directly with tactics, and fallacies become visibly
-  rejected proof scripts.
+  rejected proof scripts. The textbook's two famous fallacies — converse
+  error and inverse error — both fail with student-readable diagnostics
+  ("proof has type `q`, but expected `p`"), and the misuse of
+  `\/`-elimination that the textbook flags as common is structurally
+  prevented because `cases` requires both arms.
 - **Module 4** quantifier reasoning works well, with useful standard
-  library support.
+  library support, including the textbook's quantifier-negation rules
+  in both directions and the "order matters" example for nested
+  quantifiers.
+- **Constructive vs classical separation** is enforced and gives an
+  educational error: an attempted proof of double-negation elimination
+  in constructive mode reports `by_contra introduces a classical proof
+  of P`, which directly motivates the classical/constructive
+  distinction.
 - **Set algebra** goes through cleanly with typed sets, set builders,
-  subset expansion, and set extensionality.
+  subset expansion, set extensionality, complement, universal sets,
+  Cartesian products, finite literals, and powersets.
 - **Relations** can be represented as predicate parameters, so
   reflexive/symmetric/transitive definitions can be written directly.
 - **Equality and rewriting** cover the usual course needs:
