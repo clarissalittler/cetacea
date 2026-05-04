@@ -22,7 +22,10 @@
 
     <main class="workspace">
       <section class="editor-pane" aria-label="Source editor">
-        <textarea id="sourceEditor" spellcheck="false"></textarea>
+        <div class="editor-shell">
+          <pre id="sourceHighlights" aria-hidden="true"></pre>
+          <textarea id="sourceEditor" spellcheck="false"></textarea>
+        </div>
       </section>
 
       <aside class="side-pane" aria-label="Proof state">
@@ -36,6 +39,11 @@
           <h2>Goals</h2>
           <div id="goalMeta" class="meta"></div>
           <div id="goals"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Tactics</h2>
+          <div id="tactics"></div>
         </section>
 
         <section class="panel">

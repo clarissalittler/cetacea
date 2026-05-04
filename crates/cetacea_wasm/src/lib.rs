@@ -187,11 +187,25 @@ fn outline_json(outline: &SourceOutline) -> String {
         .theorems
         .iter()
         .map(|theorem| {
+            let tactics = theorem
+                .tactics
+                .iter()
+                .map(|tactic| {
+                    format!(
+                        r#"{{"index":{},"line":{},"text":{}}}"#,
+                        tactic.index,
+                        tactic.line,
+                        json_string(&tactic.text)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
             format!(
-                r#"{{"name":{},"line":{},"tactic_count":{}}}"#,
+                r#"{{"name":{},"line":{},"tactic_count":{},"tactics":[{}]}}"#,
                 json_string(&theorem.name),
                 theorem.line,
-                theorem.tactic_count
+                theorem.tactic_count,
+                tactics
             )
         })
         .collect::<Vec<_>>()

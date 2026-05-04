@@ -25,6 +25,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 const editor = document.querySelector("#sourceEditor");
+const sourceHighlights = document.querySelector("#sourceHighlights");
 const checkButton = document.querySelector("#checkButton");
 const cursorGoalsButton = document.querySelector("#cursorGoalsButton");
 const resetButton = document.querySelector("#resetButton");
@@ -33,13 +34,17 @@ const theoremSelect = document.querySelector("#theoremSelect");
 const statusEl = document.querySelector("#status");
 const goalMetaEl = document.querySelector("#goalMeta");
 const goalsEl = document.querySelector("#goals");
+const tacticsEl = document.querySelector("#tactics");
 const diagnosticsEl = document.querySelector("#diagnostics");
 const acceptedEl = document.querySelector("#accepted");
 
 let wasm = null;
 let stepIndex = -1;
+let activeGoalResult = null;
+let cursorSyncTimer = 0;
 
 editor.value = sampleSource;
+renderSourceHighlights();
 setControls(false);
 loadWasm();
 
@@ -50,12 +55,7 @@ checkButton.addEventListener("click", () => {
 });
 
 cursorGoalsButton.addEventListener("click", () => {
-  if (!wasm) return;
-  const position = cursorPosition(editor);
-  const result = callGoalsAt(editor.value, position.line, position.column);
-  if (result.theorem) theoremSelect.value = result.theorem;
-  stepIndex = result.next_tactic_index - 1;
-  renderGoals(result);
+  syncCursorGoals();
 });
 
 resetButton.addEventListener("click", () => {
@@ -88,8 +88,16 @@ theoremSelect.addEventListener("change", () => {
 editor.addEventListener("input", () => {
   if (!wasm) return;
   stepIndex = -1;
+  activeGoalResult = null;
   refreshOutline();
+  renderTactics(null);
+  renderSourceHighlights(null);
+  scheduleCursorSync();
 });
+editor.addEventListener("click", scheduleCursorSync);
+editor.addEventListener("keyup", scheduleCursorSync);
+editor.addEventListener("select", scheduleCursorSync);
+editor.addEventListener("scroll", syncHighlightScroll);
 
 async function loadWasm() {
   let lastError = null;
@@ -124,6 +132,7 @@ function setControls(enabled) {
 }
 
 function refreshOutline() {
+  const previous = theoremSelect.value;
   const result = callSource("cetacea_outline", editor.value);
   theoremSelect.replaceChildren();
   for (const theorem of result.theorems ?? []) {
@@ -133,6 +142,9 @@ function refreshOutline() {
     theoremSelect.append(option);
   }
   theoremSelect.dataset.outline = JSON.stringify(result.theorems ?? []);
+  if ((result.theorems ?? []).some((item) => item.name === previous)) {
+    theoremSelect.value = previous;
+  }
   renderDiagnostics(result.diagnostics ?? []);
 }
 
@@ -197,6 +209,21 @@ function cursorPosition(textarea) {
   };
 }
 
+function syncCursorGoals() {
+  if (!wasm) return;
+  window.clearTimeout(cursorSyncTimer);
+  const position = cursorPosition(editor);
+  const result = callGoalsAt(editor.value, position.line, position.column);
+  stepIndex = result.next_tactic_index - 1;
+  renderGoals(result);
+}
+
+function scheduleCursorSync() {
+  if (!wasm) return;
+  window.clearTimeout(cursorSyncTimer);
+  cursorSyncTimer = window.setTimeout(syncCursorGoals, 120);
+}
+
 function renderCheck(result) {
   renderDiagnostics(result.diagnostics ?? []);
   const theorems = result.theorems ?? [];
@@ -214,7 +241,11 @@ function renderCheck(result) {
 }
 
 function renderGoals(result) {
+  activeGoalResult = result;
+  if (result.theorem) theoremSelect.value = result.theorem;
   renderDiagnostics(result.diagnostics ?? []);
+  renderTactics(result);
+  renderSourceHighlights(result);
   goalsEl.replaceChildren();
   goalMetaEl.textContent = result.theorem
     ? `${result.theorem} - ${result.next_tactic_index}/${result.tactic_count}`
@@ -242,6 +273,90 @@ function renderGoals(result) {
     item.append(context, target);
     goalsEl.append(item);
   }
+}
+
+function renderTactics(result) {
+  tacticsEl.replaceChildren();
+  const theoremName = result?.theorem ?? theoremSelect.value;
+  const theorem = currentOutline().find((item) => item.name === theoremName);
+  if (!theorem || (theorem.tactics ?? []).length === 0) {
+    tacticsEl.append(empty("No tactics"));
+    return;
+  }
+
+  const nextIndex = result?.theorem === theorem.name ? result.next_tactic_index : -1;
+  const currentIndex = nextIndex - 1;
+  for (const tactic of theorem.tactics) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "tactic-item";
+    if (tactic.index < nextIndex) item.classList.add("is-done");
+    if (tactic.index === currentIndex) item.classList.add("is-current");
+    if (tactic.index === nextIndex && !result?.completed) item.classList.add("is-next");
+    item.setAttribute(
+      "aria-label",
+      `line ${tactic.line}, tactic ${tactic.index + 1}: ${tactic.text}`,
+    );
+    item.addEventListener("click", () => {
+      moveCursorToLineEnd(tactic.line);
+      syncCursorGoals();
+    });
+
+    const line = document.createElement("span");
+    line.className = "tactic-line";
+    line.textContent = tactic.line;
+    const text = document.createElement("span");
+    text.className = "tactic-text";
+    text.textContent = tactic.text;
+    item.append(line, text);
+    tacticsEl.append(item);
+  }
+}
+
+function renderSourceHighlights(result = activeGoalResult) {
+  sourceHighlights.replaceChildren();
+  const lines = editor.value.split("\n");
+  const highlight = highlightedLines(result);
+  for (const [index, line] of lines.entries()) {
+    const lineNumber = index + 1;
+    const element = document.createElement("span");
+    element.className = "source-line";
+    if (lineNumber === highlight.current) element.classList.add("is-current");
+    if (lineNumber === highlight.next) element.classList.add("is-next");
+    element.textContent = line || " ";
+    sourceHighlights.append(element);
+  }
+  syncHighlightScroll();
+}
+
+function highlightedLines(result) {
+  if (!result?.theorem) return { current: null, next: null };
+  const theorem = currentOutline().find((item) => item.name === result.theorem);
+  if (!theorem) return { current: null, next: null };
+  const current = (theorem.tactics ?? []).find(
+    (tactic) => tactic.index === result.next_tactic_index - 1,
+  );
+  const next = (theorem.tactics ?? []).find(
+    (tactic) => tactic.index === result.next_tactic_index,
+  );
+  return {
+    current: current?.line ?? null,
+    next: result.completed ? null : (next?.line ?? null),
+  };
+}
+
+function syncHighlightScroll() {
+  sourceHighlights.scrollTop = editor.scrollTop;
+  sourceHighlights.scrollLeft = editor.scrollLeft;
+}
+
+function moveCursorToLineEnd(lineNumber) {
+  const lines = editor.value.split("\n");
+  const before = lines.slice(0, Math.max(0, lineNumber - 1)).join("\n");
+  const line = lines[lineNumber - 1] ?? "";
+  const offset = (before ? before.length + 1 : 0) + line.length;
+  editor.focus();
+  editor.setSelectionRange(offset, offset);
 }
 
 function renderDiagnostics(diagnostics) {

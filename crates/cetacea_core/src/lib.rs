@@ -834,10 +834,18 @@ pub struct VirtualFile {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceTactic {
+    pub index: usize,
+    pub line: usize,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceTheorem {
     pub name: Name,
     pub line: usize,
     pub tactic_count: usize,
+    pub tactics: Vec<SourceTactic>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -883,6 +891,7 @@ pub fn check_file_with_imports(source: &str, imports: &[VirtualFile]) -> CheckRe
 }
 
 pub fn outline(source: &str) -> SourceOutline {
+    let source_lines: Vec<_> = source.lines().collect();
     match parse_file(source) {
         Ok(file) => SourceOutline {
             theorems: file
@@ -893,6 +902,19 @@ pub fn outline(source: &str) -> SourceOutline {
                         name: decl.name.clone(),
                         line: located.line,
                         tactic_count: decl.tactics.len(),
+                        tactics: decl
+                            .tactics
+                            .iter()
+                            .enumerate()
+                            .map(|(index, tactic)| SourceTactic {
+                                index,
+                                line: tactic.line,
+                                text: source_lines
+                                    .get(tactic.line.saturating_sub(1))
+                                    .map(|line| line.trim().to_string())
+                                    .unwrap_or_default(),
+                            })
+                            .collect(),
                     }),
                     _ => None,
                 })
@@ -915,6 +937,7 @@ pub fn goals_at_with_imports(
     position: Position,
     imports: &[VirtualFile],
 ) -> GoalStepResult {
+    let source_lines: Vec<_> = source.lines().collect();
     let file = match parse_file(source) {
         Ok(file) => file,
         Err(err) => {
@@ -942,7 +965,7 @@ pub fn goals_at_with_imports(
     let tactic_count = decl
         .tactics
         .iter()
-        .take_while(|tactic| tactic.line < position.line)
+        .take_while(|tactic| tactic_is_before_position(&source_lines, tactic, position))
         .count();
     goals_for_theorem_prefix(file, theorem_index, tactic_count, imports)
 }
@@ -1761,6 +1784,29 @@ fn mode_before_command(commands: &[LocatedCommand], command_index: usize) -> Log
         }
     }
     mode
+}
+
+fn tactic_is_before_position(
+    source_lines: &[&str],
+    tactic: &LocatedTactic,
+    position: Position,
+) -> bool {
+    if tactic.line < position.line {
+        return true;
+    }
+    if tactic.line > position.line {
+        return false;
+    }
+
+    let first_text_column = source_lines
+        .get(tactic.line.saturating_sub(1))
+        .and_then(|line| {
+            line.char_indices()
+                .find(|(_, ch)| !ch.is_whitespace())
+                .map(|(idx, _)| line[..idx].chars().count() + 1)
+        })
+        .unwrap_or(1);
+    position.column > first_text_column
 }
 
 fn goals_for_theorem_prefix(
@@ -9795,27 +9841,42 @@ theorem id (P : Prop) : P -> P := by
                 name: "id".to_string(),
                 line: 3,
                 tactic_count: 2,
+                tactics: vec![
+                    SourceTactic {
+                        index: 0,
+                        line: 4,
+                        text: "intro h".to_string(),
+                    },
+                    SourceTactic {
+                        index: 1,
+                        line: 5,
+                        text: "exact h".to_string(),
+                    },
+                ],
             }]
         );
     }
 
     #[test]
     fn goals_at_reports_state_before_cursor_line() {
-        let result = goals_at(
-            r#"mode constructive
+        let source = r#"mode constructive
 
 theorem id (P : Prop) : P -> P := by
   intro h
   exact h
-"#,
-            Position { line: 5, column: 1 },
-        );
+"#;
+        let result = goals_at(source, Position { line: 5, column: 1 });
         assert!(result.diagnostics.is_empty());
         assert_eq!(result.theorem.as_deref(), Some("id"));
         assert_eq!(result.next_tactic_index, 1);
         assert_eq!(result.goals.len(), 1);
         assert_eq!(result.goals[0].target, "P");
         assert!(result.goals[0].context.iter().any(|entry| entry == "h : P"));
+
+        let after_exact = goals_at(source, Position { line: 5, column: 5 });
+        assert!(after_exact.diagnostics.is_empty());
+        assert_eq!(after_exact.next_tactic_index, 2);
+        assert!(after_exact.completed);
     }
 
     #[test]

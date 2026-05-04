@@ -7,6 +7,7 @@
   --panel: #ffffff;
   --accent: #0f766e;
   --accent-strong: #0b5f59;
+  --next: #b45309;
   --error: #b42318;
   --code-bg: #101820;
   --code-ink: #f4f7fb;
@@ -114,20 +115,70 @@ button:disabled {
   padding: 16px;
 }
 
-#sourceEditor {
+.editor-shell {
+  position: relative;
   width: 100%;
   height: calc(100vh - 88px);
-  resize: none;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--code-bg);
-  color: var(--code-ink);
+  overflow: hidden;
+}
+
+#sourceEditor,
+#sourceHighlights {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   line-height: 1.45;
   padding: 16px;
   tab-size: 2;
   font-family:
     "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#sourceEditor {
+  resize: none;
+  border: 0;
+  background: transparent;
+  color: var(--code-ink);
+  caret-color: var(--code-ink);
+}
+
+#sourceEditor:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: -2px;
+}
+
+#sourceHighlights {
+  pointer-events: none;
+  color: transparent;
+  overflow: auto;
+}
+
+#sourceHighlights::-webkit-scrollbar {
+  display: none;
+}
+
+.source-line {
+  display: block;
+  min-height: 1.45em;
+  margin: 0 -16px;
+  padding: 0 16px;
+}
+
+.source-line.is-current {
+  background: rgba(20, 184, 166, 0.24);
+}
+
+.source-line.is-next {
+  background: rgba(245, 158, 11, 0.14);
+  box-shadow: inset 3px 0 0 var(--next);
 }
 
 .side-pane {
@@ -204,6 +255,54 @@ select {
   font-weight: 650;
 }
 
+.tactic-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-height: 36px;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.tactic-item:hover {
+  border-color: var(--accent);
+}
+
+.tactic-item.is-done {
+  color: var(--muted);
+  background: #f8fafc;
+}
+
+.tactic-item.is-current {
+  border-color: var(--accent);
+  background: #e7f6f3;
+  box-shadow: inset 3px 0 0 var(--accent);
+  color: var(--ink);
+}
+
+.tactic-item.is-next {
+  border-color: #f59e0b;
+  background: #fff8eb;
+  color: var(--ink);
+}
+
+.tactic-line {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tactic-text {
+  min-width: 0;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
 code,
 pre {
   font-family:
@@ -261,7 +360,7 @@ pre {
     border-top: 1px solid var(--line);
   }
 
-  #sourceEditor {
+  .editor-shell {
     height: 54vh;
   }
 }
