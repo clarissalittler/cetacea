@@ -2,6 +2,6 @@
 members = [
     "crates/cetacea_core",
     "crates/cetacea_cli",
+    "crates/cetacea_wasm",
 ]
 resolver = "2"
-

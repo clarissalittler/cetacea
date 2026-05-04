@@ -129,31 +129,7 @@ The parser now handles the most common tutorial shapes, including
 wrapped explicit theorem-argument lists and inline predicate lambdas
 whose binder names overlap with names introduced later in the proof.
 
-### 9. `rewrite h` rewrites a single occurrence at a time
-
-When the goal contains several copies of an equality's right-hand
-side, a single `rewrite h` only changes the first match. Students who
-expect substitution to act "everywhere at once" have to call
-`rewrite h` repeatedly:
-
-```text
-theorem subst_two_args
-  : a = b -> R(a, a) -> R(b, b) := by
-  intro h
-  intro hr
-  rewrite h
-  rewrite h    -- second occurrence still requires another rewrite
-  exact hr
-```
-
-`simp [theorem_name]` will rewrite all occurrences in one step, but
-students may not know to use it. Local equality hypotheses work too:
-`simp [h]` rewrites all matching occurrences using a freshly introduced
-`h : a = b`.
-
-**Possible improvement:** add a "rewrite all occurrences" form.
-
-### 10. Imports and names are global
+### 9. Imports and names are global
 
 There are no namespaces or qualified imports. Imported declarations enter
 one global environment, and built-in names such as `add`, `mul`, `sub`,
@@ -162,7 +138,7 @@ and `le` cannot be reused for local functions or predicates.
 This is simple and readable at the current project size, but larger
 course libraries will eventually want namespaces.
 
-### 11. Predicate lambdas are intentionally small
+### 10. Predicate lambdas are intentionally small
 
 Definitions can take predicate parameters:
 
@@ -239,6 +215,7 @@ are now implemented:
   `prod(A, B)` are supported.
 - `rewrite -> h` supports the forward direction, and `rewrite` accepts
   compound proof expressions such as `rewrite eq_symm h`.
+- `rewrite all h` rewrites all matching occurrences in the target.
 - Parenthesized proof expressions such as `exact (h hp).left` and
   `apply (htrans x y x)` parse.
 - Parenthesized projections can take arguments, as in `exact (h.left) hp`.

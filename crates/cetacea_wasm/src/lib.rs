@@ -1,0 +1,305 @@
+use cetacea_core::{
+    check_file_with_imports, goals_at_with_imports, outline, run_tactic_with_imports, CheckResult,
+    Diagnostic, GoalStepResult, LogicMode, Position, SourceOutline, VirtualFile,
+};
+
+#[no_mangle]
+pub extern "C" fn cetacea_alloc(len: usize) -> *mut u8 {
+    let mut buf = Vec::<u8>::with_capacity(len);
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+/// Frees memory allocated by `cetacea_alloc` or returned by another export.
+///
+/// # Safety
+///
+/// `ptr` and `len` must match a live allocation returned by this module. The
+/// same allocation must not be freed more than once.
+#[no_mangle]
+pub unsafe extern "C" fn cetacea_free(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() {
+        drop(Vec::from_raw_parts(ptr, 0, len));
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn cetacea_version() -> *mut u8 {
+    response_json(r#"{"version":"0.1.0"}"#.to_string())
+}
+
+/// Checks a Cetacea source string and returns a length-prefixed JSON response.
+///
+/// # Safety
+///
+/// `source_ptr` must point to `source_len` bytes of readable UTF-8 memory
+/// allocated in this wasm instance.
+#[no_mangle]
+pub unsafe extern "C" fn cetacea_check(source_ptr: *const u8, source_len: usize) -> *mut u8 {
+    match read_input(source_ptr, source_len) {
+        Ok(source) => response_json(check_result_json(&check_file_with_imports(
+            &source,
+            &standard_imports(),
+        ))),
+        Err(err) => response_json(error_json(&err)),
+    }
+}
+
+/// Returns a parsed theorem outline as a length-prefixed JSON response.
+///
+/// # Safety
+///
+/// `source_ptr` must point to `source_len` bytes of readable UTF-8 memory
+/// allocated in this wasm instance.
+#[no_mangle]
+pub unsafe extern "C" fn cetacea_outline(source_ptr: *const u8, source_len: usize) -> *mut u8 {
+    match read_input(source_ptr, source_len) {
+        Ok(source) => response_json(outline_json(&outline(&source))),
+        Err(err) => response_json(error_json(&err)),
+    }
+}
+
+/// Returns the proof goals at a source position as a length-prefixed JSON response.
+///
+/// # Safety
+///
+/// `source_ptr` must point to `source_len` bytes of readable UTF-8 memory
+/// allocated in this wasm instance.
+#[no_mangle]
+pub unsafe extern "C" fn cetacea_goals_at(
+    source_ptr: *const u8,
+    source_len: usize,
+    line: usize,
+    column: usize,
+) -> *mut u8 {
+    match read_input(source_ptr, source_len) {
+        Ok(source) => response_json(goal_result_json(&goals_at_with_imports(
+            &source,
+            Position { line, column },
+            &standard_imports(),
+        ))),
+        Err(err) => response_json(error_json(&err)),
+    }
+}
+
+/// Runs a named theorem through the given tactic index and returns JSON.
+///
+/// # Safety
+///
+/// `source_ptr` and `theorem_ptr` must point to readable UTF-8 memory ranges of
+/// their corresponding lengths, allocated in this wasm instance.
+#[no_mangle]
+pub unsafe extern "C" fn cetacea_run_tactic(
+    source_ptr: *const u8,
+    source_len: usize,
+    theorem_ptr: *const u8,
+    theorem_len: usize,
+    tactic_index: usize,
+) -> *mut u8 {
+    let source = match read_input(source_ptr, source_len) {
+        Ok(source) => source,
+        Err(err) => return response_json(error_json(&err)),
+    };
+    let theorem = match read_input(theorem_ptr, theorem_len) {
+        Ok(theorem) => theorem,
+        Err(err) => return response_json(error_json(&err)),
+    };
+    response_json(goal_result_json(&run_tactic_with_imports(
+        &source,
+        &theorem,
+        tactic_index,
+        &standard_imports(),
+    )))
+}
+
+fn standard_imports() -> Vec<VirtualFile> {
+    [
+        (
+            "std/prelude.ctea",
+            include_str!("../../../std/prelude.ctea"),
+        ),
+        ("std/prop.ctea", include_str!("../../../std/prop.ctea")),
+        ("std/fol.ctea", include_str!("../../../std/fol.ctea")),
+        ("std/eq.ctea", include_str!("../../../std/eq.ctea")),
+        ("std/nat.ctea", include_str!("../../../std/nat.ctea")),
+        ("std/set.ctea", include_str!("../../../std/set.ctea")),
+    ]
+    .into_iter()
+    .map(|(path, source)| VirtualFile {
+        path: path.to_string(),
+        source: source.to_string(),
+    })
+    .collect()
+}
+
+unsafe fn read_input(ptr: *const u8, len: usize) -> Result<String, String> {
+    if ptr.is_null() && len > 0 {
+        return Err("input pointer was null".to_string());
+    }
+    let bytes = std::slice::from_raw_parts(ptr, len);
+    String::from_utf8(bytes.to_vec()).map_err(|err| format!("input was not UTF-8: {err}"))
+}
+
+fn response_json(json: String) -> *mut u8 {
+    let bytes = json.into_bytes();
+    let len = bytes.len().min(u32::MAX as usize);
+    let mut out = Vec::with_capacity(len + 4);
+    out.extend_from_slice(&(len as u32).to_le_bytes());
+    out.extend_from_slice(&bytes[..len]);
+    let ptr = out.as_mut_ptr();
+    std::mem::forget(out);
+    ptr
+}
+
+fn error_json(message: &str) -> String {
+    format!(
+        r#"{{"ok":false,"error":{},"diagnostics":[]}}"#,
+        json_string(message)
+    )
+}
+
+fn check_result_json(result: &CheckResult) -> String {
+    let theorems = result
+        .theorems
+        .iter()
+        .map(|theorem| {
+            format!(
+                r#"{{"name":{},"mode":{},"is_axiom":{},"is_imported":{}}}"#,
+                json_string(&theorem.name),
+                json_string(&theorem.mode_used.to_string()),
+                theorem.is_axiom,
+                theorem.is_imported
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"ok":{},"theorems":[{}],"diagnostics":[{}]}}"#,
+        result.diagnostics.is_empty(),
+        theorems,
+        diagnostics_json(&result.diagnostics)
+    )
+}
+
+fn outline_json(outline: &SourceOutline) -> String {
+    let theorems = outline
+        .theorems
+        .iter()
+        .map(|theorem| {
+            format!(
+                r#"{{"name":{},"line":{},"tactic_count":{}}}"#,
+                json_string(&theorem.name),
+                theorem.line,
+                theorem.tactic_count
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"ok":{},"theorems":[{}],"diagnostics":[{}]}}"#,
+        outline.diagnostics.is_empty(),
+        theorems,
+        diagnostics_json(&outline.diagnostics)
+    )
+}
+
+fn goal_result_json(result: &GoalStepResult) -> String {
+    let goals = result
+        .goals
+        .iter()
+        .map(|goal| {
+            let context = goal
+                .context
+                .iter()
+                .map(|entry| json_string(entry))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                r#"{{"id":{},"context":[{}],"target":{}}}"#,
+                goal.id,
+                context,
+                json_string(&goal.target)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"ok":{},"theorem":{},"mode":{},"next_tactic_index":{},"tactic_count":{},"completed":{},"goals":[{}],"diagnostics":[{}]}}"#,
+        result.diagnostics.is_empty(),
+        option_string_json(result.theorem.as_deref()),
+        mode_json(result.mode),
+        result.next_tactic_index,
+        result.tactic_count,
+        result.completed,
+        goals,
+        diagnostics_json(&result.diagnostics)
+    )
+}
+
+fn diagnostics_json(diagnostics: &[Diagnostic]) -> String {
+    diagnostics
+        .iter()
+        .map(diagnostic_json)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn diagnostic_json(diagnostic: &Diagnostic) -> String {
+    let location = diagnostic
+        .location
+        .as_ref()
+        .map(|location| {
+            format!(
+                r#"{{"path":{},"line":{}}}"#,
+                option_string_json(location.path.as_deref()),
+                location.line
+            )
+        })
+        .unwrap_or_else(|| "null".to_string());
+    let span = diagnostic
+        .span
+        .as_ref()
+        .map(|span| format!(r#"{{"start":{},"end":{}}}"#, span.start, span.end))
+        .unwrap_or_else(|| "null".to_string());
+    let notes = diagnostic
+        .notes
+        .iter()
+        .map(|note| json_string(note))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"message":{},"location":{},"span":{},"notes":[{}]}}"#,
+        json_string(&diagnostic.message),
+        location,
+        span,
+        notes
+    )
+}
+
+fn mode_json(mode: Option<LogicMode>) -> String {
+    mode.map(|mode| json_string(&mode.to_string()))
+        .unwrap_or_else(|| "null".to_string())
+}
+
+fn option_string_json(value: Option<&str>) -> String {
+    value.map(json_string).unwrap_or_else(|| "null".to_string())
+}
+
+fn json_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}

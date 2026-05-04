@@ -821,6 +821,49 @@ pub struct CheckResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Position {
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VirtualFile {
+    pub path: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceTheorem {
+    pub name: Name,
+    pub line: usize,
+    pub tactic_count: usize,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SourceOutline {
+    pub theorems: Vec<SourceTheorem>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GoalSnapshot {
+    pub id: usize,
+    pub context: Vec<String>,
+    pub target: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GoalStepResult {
+    pub theorem: Option<Name>,
+    pub mode: Option<LogicMode>,
+    pub next_tactic_index: usize,
+    pub tactic_count: usize,
+    pub completed: bool,
+    pub goals: Vec<GoalSnapshot>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 pub fn check_file(source: &str) -> CheckResult {
     let mut checker = FileChecker::new();
     checker.check_source(source, None);
@@ -833,11 +876,173 @@ pub fn check_file_at_path(path: impl AsRef<Path>) -> CheckResult {
     checker.finish()
 }
 
+pub fn check_file_with_imports(source: &str, imports: &[VirtualFile]) -> CheckResult {
+    let mut checker = FileChecker::with_virtual_files(imports);
+    checker.check_source(source, None);
+    checker.finish()
+}
+
+pub fn outline(source: &str) -> SourceOutline {
+    match parse_file(source) {
+        Ok(file) => SourceOutline {
+            theorems: file
+                .commands
+                .iter()
+                .filter_map(|located| match &located.command {
+                    Command::Theorem(decl) => Some(SourceTheorem {
+                        name: decl.name.clone(),
+                        line: located.line,
+                        tactic_count: decl.tactics.len(),
+                    }),
+                    _ => None,
+                })
+                .collect(),
+            diagnostics: Vec::new(),
+        },
+        Err(err) => SourceOutline {
+            theorems: Vec::new(),
+            diagnostics: vec![parse_diagnostic(None, err, None)],
+        },
+    }
+}
+
+pub fn goals_at(source: &str, position: Position) -> GoalStepResult {
+    goals_at_with_imports(source, position, &[])
+}
+
+pub fn goals_at_with_imports(
+    source: &str,
+    position: Position,
+    imports: &[VirtualFile],
+) -> GoalStepResult {
+    let file = match parse_file(source) {
+        Ok(file) => file,
+        Err(err) => {
+            return GoalStepResult {
+                diagnostics: vec![parse_diagnostic(None, err, None)],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+
+    let Some(theorem_index) = theorem_index_at_position(&file.commands, position) else {
+        return GoalStepResult {
+            diagnostics: vec![diagnostic_at(
+                None,
+                position.line,
+                "no theorem contains the requested position",
+            )],
+            ..GoalStepResult::default()
+        };
+    };
+
+    let Command::Theorem(decl) = &file.commands[theorem_index].command else {
+        unreachable!("theorem_index_at_position only returns theorem commands");
+    };
+    let tactic_count = decl
+        .tactics
+        .iter()
+        .take_while(|tactic| tactic.line < position.line)
+        .count();
+    goals_for_theorem_prefix(file, theorem_index, tactic_count, imports)
+}
+
+pub fn run_tactic(source: &str, theorem_name: &str, tactic_index: usize) -> GoalStepResult {
+    run_tactic_with_imports(source, theorem_name, tactic_index, &[])
+}
+
+pub fn run_tactic_with_imports(
+    source: &str,
+    theorem_name: &str,
+    tactic_index: usize,
+    imports: &[VirtualFile],
+) -> GoalStepResult {
+    let file = match parse_file(source) {
+        Ok(file) => file,
+        Err(err) => {
+            return GoalStepResult {
+                diagnostics: vec![parse_diagnostic(None, err, None)],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+
+    let Some(theorem_index) = theorem_index_by_name(&file.commands, theorem_name) else {
+        return GoalStepResult {
+            theorem: Some(theorem_name.to_string()),
+            diagnostics: vec![Diagnostic::error(format!(
+                "unknown theorem `{theorem_name}`"
+            ))],
+            ..GoalStepResult::default()
+        };
+    };
+    let Command::Theorem(decl) = &file.commands[theorem_index].command else {
+        unreachable!("theorem_index_by_name only returns theorem commands");
+    };
+    if tactic_index >= decl.tactics.len() {
+        return GoalStepResult {
+            theorem: Some(theorem_name.to_string()),
+            tactic_count: decl.tactics.len(),
+            diagnostics: vec![diagnostic_at(
+                None,
+                decl.tactics
+                    .last()
+                    .map(|tactic| tactic.line)
+                    .unwrap_or(file.commands[theorem_index].line),
+                format!("tactic index {tactic_index} is out of range for theorem `{theorem_name}`"),
+            )],
+            ..GoalStepResult::default()
+        };
+    }
+
+    goals_for_theorem_prefix(file, theorem_index, tactic_index + 1, imports)
+}
+
 struct FileChecker {
     env: Env,
     result: CheckResult,
     loaded_files: HashSet<PathBuf>,
     import_stack: Vec<PathBuf>,
+    virtual_files: HashMap<String, String>,
+    loaded_virtual_files: HashSet<String>,
+    virtual_import_stack: Vec<String>,
+}
+
+enum ResolvedImport {
+    File(PathBuf),
+    Virtual(String),
+}
+
+fn virtual_import_candidates(import_path: &str, virtual_base: Option<&str>) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if let Some(base) = virtual_base {
+        candidates.push(normalize_virtual_path(&format!("{base}/{import_path}")));
+    }
+    candidates.push(normalize_virtual_path(import_path));
+    candidates.dedup();
+    candidates
+}
+
+fn normalize_virtual_path(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    let mut parts = Vec::new();
+    for part in path.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            part => parts.push(part),
+        }
+    }
+    parts.join("/")
+}
+
+fn virtual_parent(path: &str) -> Option<String> {
+    normalize_virtual_path(path)
+        .rsplit_once('/')
+        .map(|(parent, _)| parent.to_string())
+        .filter(|parent| !parent.is_empty())
 }
 
 impl FileChecker {
@@ -847,7 +1052,20 @@ impl FileChecker {
             result: CheckResult::default(),
             loaded_files: HashSet::new(),
             import_stack: Vec::new(),
+            virtual_files: HashMap::new(),
+            loaded_virtual_files: HashSet::new(),
+            virtual_import_stack: Vec::new(),
         }
+    }
+
+    fn with_virtual_files(files: &[VirtualFile]) -> Self {
+        let mut checker = Self::new();
+        for file in files {
+            checker
+                .virtual_files
+                .insert(normalize_virtual_path(&file.path), file.source.clone());
+        }
+        checker
     }
 
     fn finish(self) -> CheckResult {
@@ -864,7 +1082,7 @@ impl FileChecker {
                 return;
             }
         };
-        self.check_commands(file.commands, base_dir, false, None);
+        self.check_commands(file.commands, base_dir, None, false, None);
     }
 
     fn check_path(&mut self, path: &Path) {
@@ -881,29 +1099,18 @@ impl FileChecker {
         self.check_canonical_path(canonical_path, false);
     }
 
-    fn check_import(
-        &mut self,
-        import_path: &str,
-        base_dir: Option<&Path>,
-        source_path: Option<&Path>,
-        line: usize,
-    ) {
-        let canonical_path = match self.resolve_import_path(import_path, base_dir) {
-            Ok(path) => path,
-            Err(mut diagnostic) => {
-                diagnostic = diagnostic.with_location(source_path, line);
-                self.result.diagnostics.push(diagnostic);
-                return;
-            }
-        };
-        self.check_canonical_path(canonical_path, true);
-    }
-
     fn resolve_import_path(
         &self,
         import_path: &str,
         base_dir: Option<&Path>,
-    ) -> Result<PathBuf, Diagnostic> {
+        virtual_base: Option<&str>,
+    ) -> Result<ResolvedImport, Diagnostic> {
+        for candidate in virtual_import_candidates(import_path, virtual_base) {
+            if self.virtual_files.contains_key(&candidate) {
+                return Ok(ResolvedImport::Virtual(candidate));
+            }
+        }
+
         let raw = Path::new(import_path);
         let mut candidates = Vec::new();
         if raw.is_absolute() {
@@ -918,7 +1125,7 @@ impl FileChecker {
         let mut last_error = None;
         for candidate in candidates {
             match candidate.canonicalize() {
-                Ok(path) => return Ok(path),
+                Ok(path) => return Ok(ResolvedImport::File(path)),
                 Err(err) => last_error = Some((candidate, err)),
             }
         }
@@ -928,6 +1135,13 @@ impl FileChecker {
             diagnostic = diagnostic.with_note(format!("{}: {err}", candidate.display()));
         }
         Err(diagnostic)
+    }
+
+    fn check_resolved_import(&mut self, import: ResolvedImport, is_imported: bool) {
+        match import {
+            ResolvedImport::File(path) => self.check_canonical_path(path, is_imported),
+            ResolvedImport::Virtual(path) => self.check_virtual_path(&path, is_imported),
+        }
     }
 
     fn check_canonical_path(&mut self, path: PathBuf, is_imported: bool) {
@@ -969,6 +1183,7 @@ impl FileChecker {
         self.check_commands(
             file.commands,
             base_dir.as_deref(),
+            None,
             is_imported,
             Some(path.as_path()),
         );
@@ -976,10 +1191,57 @@ impl FileChecker {
         self.loaded_files.insert(path);
     }
 
+    fn check_virtual_path(&mut self, path: &str, is_imported: bool) {
+        if self.loaded_virtual_files.contains(path) {
+            return;
+        }
+        if self
+            .virtual_import_stack
+            .iter()
+            .any(|stacked| stacked == path)
+        {
+            self.result.diagnostics.push(Diagnostic::error(format!(
+                "import cycle involving `{path}`"
+            )));
+            return;
+        }
+
+        let Some(source) = self.virtual_files.get(path).cloned() else {
+            self.result
+                .diagnostics
+                .push(Diagnostic::error(format!("could not read import `{path}`")));
+            return;
+        };
+        let file = match parse_file(&source) {
+            Ok(file) => file,
+            Err(err) => {
+                self.result.diagnostics.push(parse_diagnostic(
+                    None,
+                    err,
+                    Some(format!("could not parse `{path}`")),
+                ));
+                return;
+            }
+        };
+
+        self.virtual_import_stack.push(path.to_string());
+        let virtual_base = virtual_parent(path);
+        self.check_commands(
+            file.commands,
+            None,
+            virtual_base.as_deref(),
+            is_imported,
+            None,
+        );
+        self.virtual_import_stack.pop();
+        self.loaded_virtual_files.insert(path.to_string());
+    }
+
     fn check_commands(
         &mut self,
         commands: Vec<LocatedCommand>,
         base_dir: Option<&Path>,
+        virtual_base: Option<&str>,
         is_imported: bool,
         source_path: Option<&Path>,
     ) {
@@ -989,7 +1251,18 @@ impl FileChecker {
             let line = located.line;
             let command = located.command;
             match command {
-                Command::Import(path) => self.check_import(&path, base_dir, source_path, line),
+                Command::Import(path) => {
+                    let resolved_path =
+                        match self.resolve_import_path(&path, base_dir, virtual_base) {
+                            Ok(path) => path,
+                            Err(mut diagnostic) => {
+                                diagnostic = diagnostic.with_location(source_path, line);
+                                self.result.diagnostics.push(diagnostic);
+                                continue;
+                            }
+                        };
+                    self.check_resolved_import(resolved_path, true);
+                }
                 Command::Mode(next_mode) => mode = next_mode,
                 Command::Sort(name) => {
                     if self.env.has_top_level_name(&name) {
@@ -1379,7 +1652,7 @@ impl FileChecker {
                     ) {
                         Ok(proof) => proof,
                         Err(err) => {
-                            let target = err.target.as_ref().unwrap_or(&decl.statement);
+                            let target = err.target.as_deref().unwrap_or(&decl.statement);
                             self.result.diagnostics.push(
                                 diagnostic_at(
                                     source_path,
@@ -1445,6 +1718,204 @@ impl FileChecker {
                 }
             }
         }
+    }
+}
+
+fn theorem_index_at_position(commands: &[LocatedCommand], position: Position) -> Option<usize> {
+    commands
+        .iter()
+        .enumerate()
+        .find_map(|(idx, located)| match &located.command {
+            Command::Theorem(_) => {
+                let next_command_line = commands
+                    .iter()
+                    .skip(idx + 1)
+                    .map(|next| next.line)
+                    .next()
+                    .unwrap_or(usize::MAX);
+                if position.line >= located.line && position.line < next_command_line {
+                    Some(idx)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+}
+
+fn theorem_index_by_name(commands: &[LocatedCommand], name: &str) -> Option<usize> {
+    commands
+        .iter()
+        .enumerate()
+        .find_map(|(idx, located)| match &located.command {
+            Command::Theorem(decl) if decl.name == name => Some(idx),
+            _ => None,
+        })
+}
+
+fn mode_before_command(commands: &[LocatedCommand], command_index: usize) -> LogicMode {
+    let mut mode = LogicMode::Constructive;
+    for located in commands.iter().take(command_index) {
+        if let Command::Mode(next_mode) = located.command {
+            mode = next_mode;
+        }
+    }
+    mode
+}
+
+fn goals_for_theorem_prefix(
+    file: File,
+    theorem_index: usize,
+    tactic_count: usize,
+    imports: &[VirtualFile],
+) -> GoalStepResult {
+    let located = file.commands[theorem_index].clone();
+    let Command::Theorem(decl) = located.command else {
+        unreachable!("goal stepping is only available for theorem commands");
+    };
+    let mode = mode_before_command(&file.commands, theorem_index);
+    let tactic_count = tactic_count.min(decl.tactics.len());
+
+    let mut checker = FileChecker::with_virtual_files(imports);
+    checker.check_commands(
+        file.commands[..theorem_index].to_vec(),
+        None,
+        None,
+        false,
+        None,
+    );
+    if !checker.result.diagnostics.is_empty() {
+        return GoalStepResult {
+            theorem: Some(decl.name),
+            mode: Some(mode),
+            tactic_count: decl.tactics.len(),
+            diagnostics: checker.result.diagnostics,
+            ..GoalStepResult::default()
+        };
+    }
+
+    let theorem_ctx = match build_theorem_context(&checker.env, &decl.params) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            return GoalStepResult {
+                theorem: Some(decl.name.clone()),
+                mode: Some(mode),
+                tactic_count: decl.tactics.len(),
+                diagnostics: vec![diagnostic_at(
+                    None,
+                    located.line,
+                    format!("theorem `{}` has invalid parameters", decl.name),
+                )
+                .with_note(err.message)],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+    if let Err(err) = validate_formula(&checker.env, &theorem_ctx, &decl.statement) {
+        return GoalStepResult {
+            theorem: Some(decl.name.clone()),
+            mode: Some(mode),
+            tactic_count: decl.tactics.len(),
+            diagnostics: vec![diagnostic_at(
+                None,
+                located.line,
+                format!("theorem `{}` has invalid statement", decl.name),
+            )
+            .with_note(err.message)
+            .with_note(format!("target: {}", decl.statement))],
+            ..GoalStepResult::default()
+        };
+    }
+
+    let mut session = ProofSession::new(theorem_ctx.clone(), decl.statement.clone());
+    for tactic in decl.tactics.iter().take(tactic_count) {
+        if let Err(err) = session.step(&checker.env, tactic, mode) {
+            let target = err.target.as_deref().unwrap_or(&decl.statement);
+            return GoalStepResult {
+                theorem: Some(decl.name.clone()),
+                mode: Some(mode),
+                next_tactic_index: tactic_count,
+                tactic_count: decl.tactics.len(),
+                completed: session.goals.is_empty(),
+                goals: session.goals.iter().map(snapshot_goal).collect(),
+                diagnostics: vec![diagnostic_at(
+                    None,
+                    err.line.unwrap_or(tactic.line),
+                    format!("theorem `{}` failed: {}", decl.name, err.message),
+                )
+                .with_note(format!("target: {target}"))],
+            };
+        }
+    }
+
+    let mut diagnostics = Vec::new();
+    if session.goals.is_empty() && tactic_count == decl.tactics.len() {
+        match session.root.clone().complete() {
+            Ok(proof) => {
+                if let Err(err) =
+                    check_proof(&checker.env, &theorem_ctx, &proof, &decl.statement, mode)
+                {
+                    diagnostics.push(
+                        diagnostic_at(
+                            None,
+                            located.line,
+                            format!(
+                                "theorem `{}` was rejected by the kernel: {}",
+                                decl.name, err.message
+                            ),
+                        )
+                        .with_note(format!("target: {}", decl.statement)),
+                    );
+                }
+            }
+            Err(err) => {
+                diagnostics.push(
+                    diagnostic_at(
+                        None,
+                        err.line.unwrap_or(located.line),
+                        format!("theorem `{}` failed: {}", decl.name, err.message),
+                    )
+                    .with_note(format!("target: {}", decl.statement)),
+                );
+            }
+        }
+    }
+
+    GoalStepResult {
+        theorem: Some(decl.name),
+        mode: Some(mode),
+        next_tactic_index: tactic_count,
+        tactic_count: decl.tactics.len(),
+        completed: session.goals.is_empty() && diagnostics.is_empty(),
+        goals: session.goals.iter().map(snapshot_goal).collect(),
+        diagnostics,
+    }
+}
+
+fn snapshot_goal(goal: &Goal) -> GoalSnapshot {
+    let mut context = Vec::new();
+    for name in &goal.context.type_vars {
+        context.push(format!("{name} : Type"));
+    }
+    for name in &goal.context.prop_vars {
+        context.push(format!("{name} : Prop"));
+    }
+    let mut predicate_vars: Vec<_> = goal.context.pred_vars.iter().collect();
+    predicate_vars.sort_by_key(|(name, _)| *name);
+    for (name, args) in predicate_vars {
+        context.push(format!("{name} : {}", predicate_type_display(args)));
+    }
+    for binding in &goal.context.term_vars {
+        context.push(format!("{} : {}", binding.name, binding.ty));
+    }
+    for binding in &goal.context.proof_vars {
+        context.push(format!("{} : {}", binding.name, binding.formula));
+    }
+
+    GoalSnapshot {
+        id: goal.id,
+        context,
+        target: goal.target.to_string(),
     }
 }
 
@@ -3741,6 +4212,51 @@ fn formula_has_free_term(formula: &Formula, name: &str) -> bool {
     }
 }
 
+fn term_contains_subterm(term: &Term, needle: &Term) -> bool {
+    if term == needle {
+        return true;
+    }
+    match term {
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => false,
+        Term::App(_, args) => args.iter().any(|arg| term_contains_subterm(arg, needle)),
+        Term::PredLambda { body, .. } | Term::SetBuilder { body, .. } => {
+            formula_contains_subterm(body, needle)
+        }
+        Term::Succ(term)
+        | Term::Singleton(term)
+        | Term::Fst(term)
+        | Term::Snd(term)
+        | Term::Complement(term)
+        | Term::Powerset(term) => term_contains_subterm(term, needle),
+        Term::Add(left, right)
+        | Term::Mul(left, right)
+        | Term::Sub(left, right)
+        | Term::Pair(left, right)
+        | Term::Union(left, right)
+        | Term::Inter(left, right)
+        | Term::Diff(left, right)
+        | Term::CartProd(left, right) => {
+            term_contains_subterm(left, needle) || term_contains_subterm(right, needle)
+        }
+    }
+}
+
+fn formula_contains_subterm(formula: &Formula, needle: &Term) -> bool {
+    match formula {
+        Formula::True | Formula::False | Formula::Atom(_) => false,
+        Formula::Eq(left, right) | Formula::In(left, right) | Formula::Subset(left, right) => {
+            term_contains_subterm(left, needle) || term_contains_subterm(right, needle)
+        }
+        Formula::PredApp(_, args) => args.iter().any(|arg| term_contains_subterm(arg, needle)),
+        Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
+            formula_contains_subterm(left, needle) || formula_contains_subterm(right, needle)
+        }
+        Formula::Forall { body, .. } | Formula::Exists { body, .. } => {
+            formula_contains_subterm(body, needle)
+        }
+    }
+}
+
 fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
     let mut results = Vec::new();
     if term == from {
@@ -4458,6 +4974,7 @@ enum Tactic {
     Rewrite {
         expr: ProofExpr,
         direction: RewriteDirection,
+        all: bool,
     },
     Unfold(Name),
     Simp,
@@ -5807,7 +6324,17 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         return Ok(Tactic::Refl);
     }
     if let Some(rest) = line.strip_prefix("rewrite ") {
-        let rest = rest.trim();
+        let mut rest = rest.trim();
+        let all = if let Some(after_all) = rest.strip_prefix("all") {
+            if after_all.is_empty() || after_all.chars().next().is_some_and(char::is_whitespace) {
+                rest = after_all.trim_start();
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         let (direction, expr) = if let Some(expr) = rest.strip_prefix("->") {
             (RewriteDirection::Forward, expr.trim())
         } else if let Some(expr) = rest.strip_prefix("<-") {
@@ -5819,6 +6346,7 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
             expr: parse_proof_expr(expr)
                 .map_err(|err| err.with_offset(line.find(expr).unwrap_or(0)))?,
             direction,
+            all,
         });
     }
     if let Some(rest) = line.strip_prefix("unfold ") {
@@ -6120,7 +6648,7 @@ fn split_first_projection(input: &str) -> Result<(&str, &str), ParseError> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TacticError {
     message: String,
-    target: Option<Formula>,
+    target: Option<Box<Formula>>,
     line: Option<usize>,
 }
 
@@ -6135,7 +6663,7 @@ impl TacticError {
 
     fn with_target(mut self, target: Formula) -> Self {
         if self.target.is_none() {
-            self.target = Some(target);
+            self.target = Some(Box::new(target));
         }
         self
     }
@@ -6153,6 +6681,71 @@ struct Goal {
     id: usize,
     context: Context,
     target: Formula,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProofSession {
+    root: PartialProof,
+    goals: Vec<Goal>,
+    next_goal_id: usize,
+}
+
+impl ProofSession {
+    fn new(context: Context, target: Formula) -> Self {
+        Self {
+            root: PartialProof::Hole(0),
+            goals: vec![Goal {
+                id: 0,
+                context,
+                target,
+            }],
+            next_goal_id: 1,
+        }
+    }
+
+    fn step(
+        &mut self,
+        env: &Env,
+        located: &LocatedTactic,
+        allowed_mode: LogicMode,
+    ) -> Result<(), TacticError> {
+        if self.goals.is_empty() {
+            return Err(
+                TacticError::new("tactic was provided after all goals were solved")
+                    .with_line(located.line),
+            );
+        }
+
+        let goal = self.goals.remove(0);
+        let goal_id = goal.id;
+        let goal_target = goal.target.clone();
+        let StepResult {
+            replacement,
+            new_goals,
+        } = run_tactic_step(
+            env,
+            goal,
+            &located.tactic,
+            allowed_mode,
+            &mut self.next_goal_id,
+        )
+        .map_err(|err| err.with_target(goal_target).with_line(located.line))?;
+        if !self.root.replace_hole(goal_id, &replacement) {
+            return Err(TacticError::new("internal error: missing proof hole"));
+        }
+        for new_goal in new_goals.into_iter().rev() {
+            self.goals.insert(0, new_goal);
+        }
+        Ok(())
+    }
+
+    fn complete(self) -> Result<Proof, TacticError> {
+        if let Some(goal) = self.goals.first() {
+            return Err(TacticError::new(format!("unsolved goal `{}`", goal.target))
+                .with_target(goal.target.clone()));
+        }
+        self.root.complete()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6390,45 +6983,11 @@ fn prove(
     tactics: &[LocatedTactic],
     allowed_mode: LogicMode,
 ) -> Result<Proof, TacticError> {
-    let mut root = PartialProof::Hole(0);
-    let mut goals = vec![Goal {
-        id: 0,
-        context,
-        target,
-    }];
-    let mut next_goal_id = 1;
-
+    let mut session = ProofSession::new(context, target);
     for located in tactics {
-        if goals.is_empty() {
-            return Err(
-                TacticError::new("tactic was provided after all goals were solved")
-                    .with_line(located.line),
-            );
-        }
-
-        let goal = goals.remove(0);
-        let goal_id = goal.id;
-        let goal_target = goal.target.clone();
-        let tactic = &located.tactic;
-        let StepResult {
-            replacement,
-            new_goals,
-        } = run_tactic(env, goal, tactic, allowed_mode, &mut next_goal_id)
-            .map_err(|err| err.with_target(goal_target).with_line(located.line))?;
-        if !root.replace_hole(goal_id, &replacement) {
-            return Err(TacticError::new("internal error: missing proof hole"));
-        }
-        for new_goal in new_goals.into_iter().rev() {
-            goals.insert(0, new_goal);
-        }
+        session.step(env, located, allowed_mode)?;
     }
-
-    if let Some(goal) = goals.first() {
-        return Err(TacticError::new(format!("unsolved goal `{}`", goal.target))
-            .with_target(goal.target.clone()));
-    }
-
-    root.complete()
+    session.complete()
 }
 
 struct StepResult {
@@ -6436,7 +6995,7 @@ struct StepResult {
     new_goals: Vec<Goal>,
 }
 
-fn run_tactic(
+fn run_tactic_step(
     env: &Env,
     goal: Goal,
     tactic: &Tactic,
@@ -6756,7 +7315,11 @@ fn run_tactic(
                 new_goals: Vec::new(),
             })
         }
-        Tactic::Rewrite { expr, direction } => {
+        Tactic::Rewrite {
+            expr,
+            direction,
+            all,
+        } => {
             let eq_proof = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
             let checked = infer_proof(env, &goal.context, &eq_proof, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot rewrite: {}", err.message)))?;
@@ -6769,6 +7332,42 @@ fn run_tactic(
                 RewriteDirection::Backward => (&right, &left),
                 RewriteDirection::Forward => (&left, &right),
             };
+            if *all {
+                if term_contains_subterm(replacement, needle) {
+                    return Err(TacticError::new(format!(
+                        "rewrite all would introduce new occurrences of `{needle}`"
+                    )));
+                }
+                let rule = SimpRule {
+                    name: "rewrite all".to_string(),
+                    proof: SimpRuleProof::Local(Box::new(eq_proof)),
+                    params: Vec::new(),
+                    lhs: needle.clone(),
+                    rhs: replacement.clone(),
+                };
+                let (source_target, rewrites) =
+                    rewrite_with_simp_rules(env, &goal.context, goal.target.clone(), &[rule])?;
+                if rewrites.is_empty() {
+                    return Err(TacticError::new(format!(
+                        "rewrite could not find `{needle}` in goal `{}`",
+                        goal.target
+                    )));
+                }
+                let body_id = fresh_goal(next_goal_id);
+                return Ok(StepResult {
+                    replacement: build_simp_replacement(
+                        body_id,
+                        goal.target.clone(),
+                        false,
+                        &rewrites,
+                    ),
+                    new_goals: vec![Goal {
+                        id: body_id,
+                        context: goal.context,
+                        target: source_target,
+                    }],
+                });
+            }
             let Some(source_target) = formula_rewrite_sources(&goal.target, needle, replacement)
                 .into_iter()
                 .min_by_key(rewrite_source_score)
@@ -7150,7 +7749,7 @@ struct SimpRule {
 #[derive(Clone)]
 enum SimpRuleProof {
     Theorem,
-    Local(Proof),
+    Local(Box<Proof>),
 }
 
 #[derive(Clone)]
@@ -7202,7 +7801,7 @@ fn collect_simp_rules(
             .unwrap_or_else(|| Proof::Hyp(name.clone()));
         rules.push(SimpRule {
             name: name.clone(),
-            proof: SimpRuleProof::Local(proof),
+            proof: SimpRuleProof::Local(Box::new(proof)),
             params: Vec::new(),
             lhs,
             rhs,
@@ -7593,7 +8192,7 @@ fn apply_simp_rule_to_term(
             name: rule.name.clone(),
             subst: schema_subst,
         },
-        SimpRuleProof::Local(proof) => proof.clone(),
+        SimpRuleProof::Local(proof) => proof.as_ref().clone(),
     };
     Ok(Some((replacement, eq_proof)))
 }
@@ -9180,6 +9779,65 @@ theorem bad (P : Prop) : P := by
     }
 
     #[test]
+    fn outline_lists_source_theorems() {
+        let result = outline(
+            r#"mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            result.theorems,
+            vec![SourceTheorem {
+                name: "id".to_string(),
+                line: 3,
+                tactic_count: 2,
+            }]
+        );
+    }
+
+    #[test]
+    fn goals_at_reports_state_before_cursor_line() {
+        let result = goals_at(
+            r#"mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#,
+            Position { line: 5, column: 1 },
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.theorem.as_deref(), Some("id"));
+        assert_eq!(result.next_tactic_index, 1);
+        assert_eq!(result.goals.len(), 1);
+        assert_eq!(result.goals[0].target, "P");
+        assert!(result.goals[0].context.iter().any(|entry| entry == "h : P"));
+    }
+
+    #[test]
+    fn run_tactic_steps_named_theorem() {
+        let source = r#"mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#;
+        let after_intro = run_tactic(source, "id", 0);
+        assert!(after_intro.diagnostics.is_empty());
+        assert_eq!(after_intro.next_tactic_index, 1);
+        assert_eq!(after_intro.goals[0].target, "P");
+
+        let after_exact = run_tactic(source, "id", 1);
+        assert!(after_exact.diagnostics.is_empty());
+        assert!(after_exact.completed);
+        assert!(after_exact.goals.is_empty());
+    }
+
+    #[test]
     fn intro_rejects_shadowing() {
         check_err_contains(
             r#"
@@ -9321,6 +9979,51 @@ theorem use_imported_id (P : Prop) : P -> P := by
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn virtual_imports_resolve_relative_std_paths() {
+        let imports = vec![
+            VirtualFile {
+                path: "std/prelude.ctea".to_string(),
+                source: "import prop.ctea".to_string(),
+            },
+            VirtualFile {
+                path: "std/prop.ctea".to_string(),
+                source: r#"
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#
+                .to_string(),
+            },
+        ];
+        let result = check_file_with_imports(
+            r#"
+import ../../../std/prelude.ctea
+
+mode constructive
+
+theorem use_imported_id (P : Prop) : P -> P := by
+  exact id
+"#,
+            &imports,
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            result.diagnostics
+        );
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "id" && theorem.is_imported));
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "use_imported_id" && !theorem.is_imported));
     }
 
     #[test]
@@ -10025,6 +10728,53 @@ theorem rewrite_forward
   rewrite -> h
   exact hm
 "#,
+        );
+    }
+
+    #[test]
+    fn rewrite_all_rewrites_multiple_occurrences() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Related(Person, Person)
+
+theorem rewrite_all_backward
+  : alice = mother(alice)
+    -> Related(alice, alice)
+    -> Related(mother(alice), mother(alice)) := by
+  intro h
+  intro hr
+  rewrite all h
+  exact hr
+"#,
+        );
+    }
+
+    #[test]
+    fn rewrite_all_rejects_expanding_rewrites() {
+        check_err_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Related(Person, Person)
+
+theorem bad
+  : alice = mother(alice)
+    -> Related(mother(alice), mother(alice))
+    -> Related(alice, alice) := by
+  intro h
+  intro hr
+  rewrite all -> h
+  exact hr
+"#,
+            "rewrite all would introduce new occurrences of `alice`",
         );
     }
 

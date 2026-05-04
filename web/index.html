@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cetacea</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">C</span>
+        <span>Cetacea</span>
+      </div>
+      <div class="actions">
+        <button id="checkButton" type="button">Check</button>
+        <button id="cursorGoalsButton" type="button">Goals</button>
+        <button id="resetButton" type="button">Reset Step</button>
+        <button id="stepButton" type="button">Step</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="editor-pane" aria-label="Source editor">
+        <textarea id="sourceEditor" spellcheck="false"></textarea>
+      </section>
+
+      <aside class="side-pane" aria-label="Proof state">
+        <div class="toolbar-row">
+          <label for="theoremSelect">Theorem</label>
+          <select id="theoremSelect"></select>
+        </div>
+        <div id="status" class="status">Loading wasm</div>
+
+        <section class="panel">
+          <h2>Goals</h2>
+          <div id="goalMeta" class="meta"></div>
+          <div id="goals"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Diagnostics</h2>
+          <div id="diagnostics"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Accepted</h2>
+          <div id="accepted"></div>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

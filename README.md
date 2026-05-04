@@ -16,6 +16,8 @@ compatibility, and argument type compatibility.
 - `crates/cetacea_core`: parser, AST, tactics, proof objects, and kernel
   checker.
 - `crates/cetacea_cli`: command-line checker.
+- `crates/cetacea_wasm`: WebAssembly exports for checking and goal stepping.
+- `web`: static browser UI.
 - `docs/USAGE.md`: language and proving guide.
 - `docs/DESIGN_AND_CODE.md`: implementation and design guide.
 - `std`: checked theorem-library files.
@@ -41,6 +43,21 @@ cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
 
+Build the WebAssembly checker and serve the browser UI from the repository
+root:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
+python3 -m http.server 8000
+```
+
+Then open:
+
+```text
+http://localhost:8000/web/
+```
+
 The CLI prints each accepted theorem or axiom from the root file and the
 strongest mode used by its checked proof object.
 Diagnostics for checked declarations and parse errors include the file and
@@ -56,6 +73,9 @@ loaded once.
 
 - `mode constructive` and `mode classical`
 - file imports with `import path/to/file.ctea`
+- source outline, cursor goal, and tactic-step APIs for editor integrations
+- WebAssembly exports and a static browser UI for checking and goal stepping
+- virtual imports for browser-hosted standard-library files
 - `sort`, `const`, `func`, `pred`, formula and term `def`, unary `Nat`
   `defrec`, and `axiom`
   declarations

@@ -30,6 +30,24 @@ After building, the compiled binary can be run directly:
 target/debug/cetacea_cli examples/imports.ctea
 ```
 
+Run the browser UI from the repository root:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
+python3 -m http.server 8000
+```
+
+Then open:
+
+```text
+http://localhost:8000/web/
+```
+
+The browser build embeds the standard library for virtual imports, so tutorial
+sources can still use imports such as `import std/prelude.ctea` or
+`import ../../../std/prelude.ctea`.
+
 The CLI prints accepted declarations from the root file. Imported declarations
 are checked and loaded, but they are not printed as part of the importing file's
 summary.
@@ -672,6 +690,10 @@ Here the target is `Happy(mother(alice))`, and `h` is
 `alice = mother(alice)`. `rewrite h` changes the subgoal to `Happy(alice)`.
 Use `rewrite -> h` for the opposite direction, where the target contains the
 left side and the new subgoal contains the right side.
+
+Use `rewrite all h` to rewrite every matching occurrence in the target. To
+keep this form finite and predictable, Cetacea rejects `rewrite all` when the
+replacement would introduce new occurrences of the term being rewritten.
 
 For theorems with parameters, explicit instantiation is sometimes needed:
 

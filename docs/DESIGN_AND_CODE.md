@@ -36,6 +36,13 @@ crates/cetacea_core/src/lib.rs
 crates/cetacea_cli/src/main.rs
   Command-line entry point.
 
+crates/cetacea_wasm/src/lib.rs
+  WebAssembly boundary. Exposes JSON-returning C-ABI functions for checking,
+  source outline, cursor goals, and tactic stepping.
+
+web/
+  Static browser UI that loads the wasm checker.
+
 std/
   Checked theorem-library files.
 
@@ -56,6 +63,21 @@ The main public entry points are:
 ```rust
 pub fn check_file(source: &str) -> CheckResult
 pub fn check_file_at_path(path: impl AsRef<Path>) -> CheckResult
+pub fn check_file_with_imports(source: &str, imports: &[VirtualFile]) -> CheckResult
+pub fn outline(source: &str) -> SourceOutline
+pub fn goals_at(source: &str, position: Position) -> GoalStepResult
+pub fn goals_at_with_imports(
+    source: &str,
+    position: Position,
+    imports: &[VirtualFile],
+) -> GoalStepResult
+pub fn run_tactic(source: &str, theorem_name: &str, tactic_index: usize) -> GoalStepResult
+pub fn run_tactic_with_imports(
+    source: &str,
+    theorem_name: &str,
+    tactic_index: usize,
+    imports: &[VirtualFile],
+) -> GoalStepResult
 pub fn check_proof(
     env: &Env,
     ctx: &Context,
@@ -78,9 +100,19 @@ because there is no root path.
 Use `check_file_at_path` for real files. This is what the CLI uses. It supports
 imports relative to the importing file.
 
+Use `check_file_with_imports` and the `*_with_imports` goal APIs for in-memory
+or browser-hosted sources where imports come from a virtual file map rather than
+the local filesystem.
+
 `check_proof` and `infer_proof` are the lower-level kernel-facing APIs. Most
 callers should not need them directly unless they are constructing proof
 objects programmatically.
+
+`outline`, `goals_at`, and `run_tactic` are editor-facing APIs. They parse the
+source, check declarations before the selected theorem, run tactics through the
+existing tactic elaborator, and return rendered goal snapshots plus diagnostics.
+`run_tactic` uses zero-based tactic indexes and returns the state after running
+the selected tactic and all prior tactics in that theorem.
 
 ## Core ASTs
 
@@ -755,6 +787,10 @@ Use `rewrite -> h` for the reverse tactic direction. Compound proof expressions
 such as `rewrite eq_symm h` are also accepted when schema arguments can be
 inferred from the supplied proof arguments.
 
+Use `rewrite all h` to rewrite every matching occurrence in the target. This
+form rejects expanding rewrites where the replacement would introduce new
+occurrences of the term being rewritten.
+
 ## Natural-Number Induction
 
 `NatInduction` is a proof object and `induction` is the tactic that builds it.
@@ -864,6 +900,28 @@ The CLI:
 The CLI filters out imported declarations using `CheckedTheorem::is_imported`.
 This avoids overwhelming output when a user checks a small file that imports
 the prelude.
+
+## Wasm And Web UI
+
+The wasm crate is intentionally thin, mirroring the CLI. It exports:
+
+- `cetacea_check`
+- `cetacea_outline`
+- `cetacea_goals_at`
+- `cetacea_run_tactic`
+
+The exports accept UTF-8 strings through explicit `cetacea_alloc` /
+`cetacea_free` memory helpers and return a length-prefixed JSON string. This
+keeps the wasm crate dependency-free while still making the browser boundary
+straightforward.
+
+The wasm wrapper embeds the current standard library as virtual imports, so
+browser sources can use paths such as `import std/prelude.ctea` or the
+CS250-style `import ../../../std/prelude.ctea` without filesystem access.
+
+The static UI in `web/` loads `cetacea_wasm.wasm`, renders diagnostics and
+accepted declarations, and uses the goal-stepping APIs to show the current proof
+state.
 
 ## Why the Language Is Small
 
