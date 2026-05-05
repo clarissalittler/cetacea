@@ -46,6 +46,138 @@
           <div id="tactics"></div>
         </section>
 
+        <section class="panel tutorial-panel">
+          <h2>Basic Tactics</h2>
+          <div class="tutorial-list">
+            <details class="tutorial-item">
+              <summary>
+                <span>Assumptions</span>
+                <code>intro</code>
+                <code>exact</code>
+                <code>apply</code>
+              </summary>
+              <p>
+                Use <code>intro name</code> to move an implication or universal
+                binder into the context. Use <code>exact proof</code> when a
+                hypothesis or theorem already proves the goal.
+              </p>
+              <pre>intro h
+exact h
+apply theorem_name</pre>
+            </details>
+
+            <details class="tutorial-item">
+              <summary>
+                <span>Conjunctions</span>
+                <code>split</code>
+                <code>.left</code>
+                <code>.right</code>
+              </summary>
+              <p>
+                Use <code>split</code> for conjunction goals. Project existing
+                conjunction hypotheses with <code>h.left</code> and
+                <code>h.right</code>.
+              </p>
+              <pre>split
+exact h.left
+exact h.right</pre>
+            </details>
+
+            <details class="tutorial-item">
+              <summary>
+                <span>Disjunctions</span>
+                <code>left</code>
+                <code>right</code>
+                <code>cases</code>
+              </summary>
+              <p>
+                Use <code>left</code> or <code>right</code> to choose a side of
+                an or-goal. Use <code>cases h with</code> to analyze an
+                existing disjunction.
+              </p>
+              <pre>cases h with
+| left hp =&gt;
+    exact hp
+| right hq =&gt;
+    exact hq</pre>
+            </details>
+
+            <details class="tutorial-item">
+              <summary>
+                <span>Existentials</span>
+                <code>exists</code>
+                <code>cases</code>
+              </summary>
+              <p>
+                Use <code>exists witness</code> to provide a witness. Use
+                <code>cases h with</code> to unpack a witness and its proof.
+              </p>
+              <pre>exists x
+exact hx
+
+cases h with
+| intro x hx =&gt;
+    exact hx</pre>
+            </details>
+
+            <details class="tutorial-item">
+              <summary>
+                <span>Equality</span>
+                <code>refl</code>
+                <code>rewrite</code>
+              </summary>
+              <p>
+                Use <code>refl</code> for goals where both sides compute to the
+                same term. Use <code>rewrite h</code> when an equality proof can
+                rewrite the current target.
+              </p>
+              <pre>refl
+rewrite h
+rewrite -&gt; h
+rewrite all h</pre>
+            </details>
+
+            <details class="tutorial-item">
+              <summary>
+                <span>Simplification</span>
+                <code>simp</code>
+                <code>unfold</code>
+              </summary>
+              <p>
+                Use <code>simp</code> for built-in computation and transparent
+                definitions. Use <code>simp at h</code> or <code>simp at *</code>
+                for hypotheses.
+              </p>
+              <pre>simp
+simp [lemma]
+simp at h
+unfold definition_name</pre>
+            </details>
+
+            <details class="tutorial-item">
+              <summary>
+                <span>Nat and Classical</span>
+                <code>induction</code>
+                <code>by_cases</code>
+                <code>by_contra</code>
+              </summary>
+              <p>
+                Use <code>induction n with</code> for natural numbers. In
+                classical mode, use <code>by_cases h : P</code> or
+                <code>by_contra h</code>.
+              </p>
+              <pre>induction n with
+| zero =&gt;
+    simp
+| succ n ih =&gt;
+    simp
+
+by_cases h : P
+by_contra h</pre>
+            </details>
+          </div>
+        </section>
+
         <section class="panel">
           <h2>Diagnostics</h2>
           <div id="diagnostics"></div>
