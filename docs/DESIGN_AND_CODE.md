@@ -63,10 +63,16 @@ The main public entry points are:
 ```rust
 pub fn check_file(source: &str) -> CheckResult
 pub fn check_file_at_path(path: impl AsRef<Path>) -> CheckResult
+pub fn check_source_at_path(source: &str, path: impl AsRef<Path>) -> CheckResult
 pub fn check_file_with_imports(source: &str, imports: &[VirtualFile]) -> CheckResult
 pub fn outline(source: &str) -> SourceOutline
 pub fn goals_at(source: &str, position: Position) -> GoalStepResult
 pub fn goals_at_path(path: impl AsRef<Path>, position: Position) -> GoalStepResult
+pub fn goals_at_source_path(
+    source: &str,
+    path: impl AsRef<Path>,
+    position: Position,
+) -> GoalStepResult
 pub fn goals_at_with_imports(
     source: &str,
     position: Position,
@@ -74,6 +80,12 @@ pub fn goals_at_with_imports(
 ) -> GoalStepResult
 pub fn run_tactic(source: &str, theorem_name: &str, tactic_index: usize) -> GoalStepResult
 pub fn run_tactic_at_path(
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+    tactic_index: usize,
+) -> GoalStepResult
+pub fn run_tactic_in_source_at_path(
+    source: &str,
     path: impl AsRef<Path>,
     theorem_name: &str,
     tactic_index: usize,
@@ -86,6 +98,11 @@ pub fn run_tactic_with_imports(
 ) -> GoalStepResult
 pub fn explain_theorem(source: &str, theorem_name: &str) -> ExplanationResult
 pub fn explain_theorem_at_path(path: impl AsRef<Path>, theorem_name: &str) -> ExplanationResult
+pub fn explain_theorem_in_source_at_path(
+    source: &str,
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+) -> ExplanationResult
 pub fn explain_theorem_with_imports(
     source: &str,
     theorem_name: &str,
@@ -112,6 +129,11 @@ because there is no root path.
 
 Use `check_file_at_path` for real files. This is what the CLI uses. It supports
 imports relative to the importing file.
+
+Use `check_source_at_path` and the source-at-path editor APIs for an
+unsaved editor buffer that still has a real filesystem identity. This is what
+the terminal TUI uses: the displayed source comes from memory, diagnostics are
+tied to the opened file path, and imports still resolve relative to that file.
 
 Use the `*_at_path` editor APIs for terminal or filesystem-backed editor
 integrations. They parse the selected root file, keep source locations tied to
@@ -931,10 +953,17 @@ The CLI filters out imported declarations using `CheckedTheorem::is_imported`.
 This avoids overwhelming output when a user checks a small file that imports
 the prelude.
 
-With `--interactive` or `-i`, the CLI starts a line-oriented terminal shell.
-It reuses the path-backed editor APIs for proof-state display, stepping,
-theorem search, tactic hints, and proof explanations. This keeps import
-resolution and diagnostics consistent with normal file checking.
+With `--tui`, `--interactive`, or `-i`, the CLI starts a full-screen terminal
+TUI. It uses raw terminal mode, an alternate screen, and ANSI drawing without
+external terminal dependencies. The left pane is an editable source buffer; the
+right pane can show cursor-sensitive goals, theorem outline, theorem search,
+proof explanations, diagnostics, or help. The TUI re-checks the in-memory
+buffer after cursor movement and edits using the source-at-path APIs, so import
+resolution and diagnostics stay consistent with normal file checking.
+
+With `--line`, the CLI starts the older line-oriented terminal shell. It reuses
+the path-backed editor APIs for proof-state display, stepping, theorem search,
+tactic hints, and proof explanations.
 
 ## Wasm And Web UI
 

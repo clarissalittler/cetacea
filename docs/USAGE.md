@@ -24,15 +24,30 @@ Check a file with the CLI:
 cargo run -p cetacea_cli -- examples/imports.ctea
 ```
 
-Start the terminal interactive mode with:
+Start the full-screen terminal TUI with:
 
 ```sh
-cargo run -p cetacea_cli -- --interactive examples/prop.ctea
+cargo run -p cetacea_cli -- --tui examples/prop.ctea
 ```
 
-Inside interactive mode, use `help` to see commands. The main commands are
-`theorems`, `select <name|number>`, `reset`, `step`, `goals <line> [column]`,
-`hints`, `search <text>`, and `explain [theorem]`.
+`--interactive` and `-i` are aliases for `--tui`.
+
+Inside the TUI, the left pane is an editable source buffer and the right pane
+shows information about the cursor position. Move with the arrow keys and type
+to edit. The goal pane updates as the cursor moves through a proof script.
+Use `m` to open the command menu, `F2` for the theorem outline, `F3` for
+theorem search, `F4` for proof explanations, `F5` for diagnostics, `Ctrl-S` to
+save, `Ctrl-R` to reload from disk, and `Ctrl-Q` to quit.
+
+The older line-oriented terminal shell remains available with:
+
+```sh
+cargo run -p cetacea_cli -- --line examples/prop.ctea
+```
+
+Inside line mode, use `help` to see commands. The main commands are `theorems`,
+`select <name|number>`, `reset`, `step`, `goals <line> [column]`, `hints`,
+`search <text>`, and `explain [theorem]`.
 
 After building, the compiled binary can be run directly:
 

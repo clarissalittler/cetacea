@@ -1058,6 +1058,34 @@ pub fn check_file_at_path(path: impl AsRef<Path>) -> CheckResult {
     checker.finish()
 }
 
+pub fn check_source_at_path(source: &str, path: impl AsRef<Path>) -> CheckResult {
+    let path = path.as_ref();
+    let (source_path, base_dir) = editor_source_context(path);
+    let file = match parse_file(source) {
+        Ok(file) => file,
+        Err(err) => {
+            return CheckResult {
+                diagnostics: vec![parse_diagnostic(
+                    Some(source_path.as_path()),
+                    err,
+                    Some(format!("could not parse `{}`", source_path.display())),
+                )],
+                ..CheckResult::default()
+            };
+        }
+    };
+
+    let mut checker = FileChecker::new();
+    checker.check_commands(
+        file.commands,
+        base_dir.as_deref(),
+        None,
+        false,
+        Some(source_path.as_path()),
+    );
+    checker.finish()
+}
+
 pub fn check_file_with_imports(source: &str, imports: &[VirtualFile]) -> CheckResult {
     let mut checker = FileChecker::with_virtual_files(imports);
     checker.check_source(source, None);
@@ -1144,6 +1172,51 @@ pub fn goals_at_path(path: impl AsRef<Path>, position: Position) -> GoalStepResu
         &[],
         base_dir.as_deref(),
         Some(canonical_path.as_path()),
+    )
+}
+
+pub fn goals_at_source_path(
+    source: &str,
+    path: impl AsRef<Path>,
+    position: Position,
+) -> GoalStepResult {
+    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path.as_ref()) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => {
+            return GoalStepResult {
+                diagnostics: vec![diagnostic],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+    let source_lines: Vec<_> = source.lines().collect();
+
+    let Some(theorem_index) = theorem_index_at_position(&file.commands, position) else {
+        return GoalStepResult {
+            diagnostics: vec![diagnostic_at(
+                Some(source_path.as_path()),
+                position.line,
+                "no theorem contains the requested position",
+            )],
+            ..GoalStepResult::default()
+        };
+    };
+
+    let Command::Theorem(decl) = &file.commands[theorem_index].command else {
+        unreachable!("theorem_index_at_position only returns theorem commands");
+    };
+    let tactic_count = decl
+        .tactics
+        .iter()
+        .take_while(|tactic| tactic_is_before_position(&source_lines, tactic, position))
+        .count();
+    goals_for_theorem_prefix(
+        file,
+        theorem_index,
+        tactic_count,
+        &[],
+        base_dir.as_deref(),
+        Some(source_path.as_path()),
     )
 }
 
@@ -1242,6 +1315,60 @@ pub fn run_tactic_at_path(
     )
 }
 
+pub fn run_tactic_in_source_at_path(
+    source: &str,
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+    tactic_index: usize,
+) -> GoalStepResult {
+    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path.as_ref()) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => {
+            return GoalStepResult {
+                diagnostics: vec![diagnostic],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+
+    let Some(theorem_index) = theorem_index_by_name(&file.commands, theorem_name) else {
+        return GoalStepResult {
+            theorem: Some(theorem_name.to_string()),
+            diagnostics: vec![Diagnostic::error(format!(
+                "unknown theorem `{theorem_name}`"
+            ))],
+            ..GoalStepResult::default()
+        };
+    };
+    let Command::Theorem(decl) = &file.commands[theorem_index].command else {
+        unreachable!("theorem_index_by_name only returns theorem commands");
+    };
+    if tactic_index >= decl.tactics.len() {
+        return GoalStepResult {
+            theorem: Some(theorem_name.to_string()),
+            tactic_count: decl.tactics.len(),
+            diagnostics: vec![diagnostic_at(
+                Some(source_path.as_path()),
+                decl.tactics
+                    .last()
+                    .map(|tactic| tactic.line)
+                    .unwrap_or(file.commands[theorem_index].line),
+                format!("tactic index {tactic_index} is out of range for theorem `{theorem_name}`"),
+            )],
+            ..GoalStepResult::default()
+        };
+    }
+
+    goals_for_theorem_prefix(
+        file,
+        theorem_index,
+        tactic_index + 1,
+        &[],
+        base_dir.as_deref(),
+        Some(source_path.as_path()),
+    )
+}
+
 pub fn run_tactic_with_imports(
     source: &str,
     theorem_name: &str,
@@ -1325,6 +1452,42 @@ pub fn explain_theorem_at_path(path: impl AsRef<Path>, theorem_name: &str) -> Ex
     )
 }
 
+pub fn explain_theorem_in_source_at_path(
+    source: &str,
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+) -> ExplanationResult {
+    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path.as_ref()) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => {
+            return ExplanationResult {
+                diagnostics: vec![diagnostic],
+                ..ExplanationResult::default()
+            };
+        }
+    };
+    let source_lines: Vec<_> = source.lines().collect();
+
+    let Some(theorem_index) = theorem_index_by_name(&file.commands, theorem_name) else {
+        return ExplanationResult {
+            theorem: Some(theorem_name.to_string()),
+            diagnostics: vec![Diagnostic::error(format!(
+                "unknown theorem `{theorem_name}`"
+            ))],
+            ..ExplanationResult::default()
+        };
+    };
+
+    explain_theorem_at_index(
+        file,
+        theorem_index,
+        &source_lines,
+        &[],
+        base_dir.as_deref(),
+        Some(source_path.as_path()),
+    )
+}
+
 pub fn explain_theorem_with_imports(
     source: &str,
     theorem_name: &str,
@@ -1373,6 +1536,30 @@ fn parse_editor_file_at_path(
     })?;
     let base_dir = canonical_path.parent().map(Path::to_path_buf);
     Ok((file, source, canonical_path, base_dir))
+}
+
+fn parse_editor_source_at_path(
+    source: &str,
+    path: &Path,
+) -> Result<(File, PathBuf, Option<PathBuf>), Diagnostic> {
+    let (source_path, base_dir) = editor_source_context(path);
+    let file = parse_file(source).map_err(|err| {
+        parse_diagnostic(
+            Some(source_path.as_path()),
+            err,
+            Some(format!("could not parse `{}`", source_path.display())),
+        )
+    })?;
+    Ok((file, source_path, base_dir))
+}
+
+fn editor_source_context(path: &Path) -> (PathBuf, Option<PathBuf>) {
+    let source_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let base_dir = source_path
+        .parent()
+        .map(Path::to_path_buf)
+        .or_else(|| path.parent().map(Path::to_path_buf));
+    (source_path, base_dir)
 }
 
 struct FileChecker {
@@ -11058,6 +11245,60 @@ theorem use_imported_id (P : Prop) : P -> P := by
         assert!(stepped.completed);
 
         let explained = explain_theorem_at_path(&root, "use_imported_id");
+        assert!(
+            explained.diagnostics.is_empty(),
+            "{:#?}",
+            explained.diagnostics
+        );
+        assert!(explained.completed);
+        assert_eq!(explained.steps.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn source_path_editor_apis_resolve_relative_imports() {
+        let dir =
+            std::env::temp_dir().join(format!("cetacea-source-path-editor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create source path editor directory");
+        std::fs::write(
+            dir.join("lib.ctea"),
+            r#"
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#,
+        )
+        .expect("write lib.ctea");
+        let root = dir.join("main.ctea");
+        let source = r#"import lib.ctea
+
+mode constructive
+
+theorem use_imported_id (P : Prop) : P -> P := by
+  exact id
+"#;
+
+        let checked = check_source_at_path(source, &root);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+        assert!(checked
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "id" && theorem.is_imported));
+
+        let goals = goals_at_source_path(source, &root, Position { line: 6, column: 1 });
+        assert!(goals.diagnostics.is_empty(), "{:#?}", goals.diagnostics);
+        assert_eq!(goals.theorem.as_deref(), Some("use_imported_id"));
+        assert_eq!(goals.goals[0].target, "P -> P");
+
+        let stepped = run_tactic_in_source_at_path(source, &root, "use_imported_id", 0);
+        assert!(stepped.diagnostics.is_empty(), "{:#?}", stepped.diagnostics);
+        assert!(stepped.completed);
+
+        let explained = explain_theorem_in_source_at_path(source, &root, "use_imported_id");
         assert!(
             explained.diagnostics.is_empty(),
             "{:#?}",

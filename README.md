@@ -44,14 +44,18 @@ cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
 
-Run the terminal interactive mode with:
+Run the full-screen terminal TUI with:
 
 ```sh
-cargo run -p cetacea_cli -- --interactive examples/prop.ctea
+cargo run -p cetacea_cli -- --tui examples/prop.ctea
 ```
 
-Interactive commands include `theorems`, `select`, `reset`, `step`,
-`goals`, `hints`, `search`, and `explain`.
+`--interactive` and `-i` are aliases for the TUI. In the TUI, arrow keys move
+through and edit the source buffer while the goal pane updates from the cursor
+position. Use `m` for the command menu, `F2` for the theorem outline, `F3` for
+theorem search, `F4` for proof explanations, `F5` for diagnostics, `Ctrl-S` to
+save, and `Ctrl-Q` to quit. The older command-oriented terminal shell remains
+available with `--line`.
 
 Build the WebAssembly checker and serve the browser UI from the repository
 root:
@@ -85,7 +89,10 @@ loaded once.
 - file imports with `import path/to/file.ctea`
 - source outline, cursor goal, tactic-step, and proof-explanation APIs for
   editor integrations
-- terminal interactive mode with goal display, tactic hints, theorem search,
+- full-screen terminal TUI with source editing, cursor-sensitive goal display,
+  tactic hints, theorem outline, theorem search, diagnostics, and proof
+  explanations
+- line-oriented terminal shell with goal display, tactic hints, theorem search,
   stepping, and proof explanations
 - WebAssembly exports and a static browser UI for checking, goal stepping,
   tactic hints, diagnostic help, theorem-library search, and proof explanations
