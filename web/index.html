@@ -14,7 +14,6 @@
       </div>
       <div class="actions">
         <button id="checkButton" type="button">Check</button>
-        <button id="cursorGoalsButton" type="button">Goals</button>
         <button id="resetButton" type="button">Reset Step</button>
         <button id="stepButton" type="button">Step</button>
       </div>
@@ -44,6 +43,30 @@
         <section class="panel">
           <h2>Tactics</h2>
           <div id="tactics"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Proof Explanation</h2>
+          <div id="proofExplanation"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Theorem Library</h2>
+          <div class="library-controls">
+            <input
+              id="librarySearch"
+              type="search"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Search name or statement"
+            />
+            <select id="libraryScope" aria-label="Theorem library scope">
+              <option value="all">All</option>
+              <option value="imported">Imported</option>
+              <option value="local">Local</option>
+            </select>
+          </div>
+          <div id="theoremLibrary"></div>
         </section>
 
         <section class="panel tutorial-panel">

@@ -16,7 +16,7 @@ literally that proof system, with one tactic per rule.
 | Disjunction intro (∨-I) | `left` or `right` | commit to one disjunct |
 | Disjunction elim (∨-E, proof by cases) | `cases h with` | two subgoals, one per case |
 | Bottom elim (⊥-E) | `contradiction` or `exfalso` | from `False` to anything |
-| Top intro (⊤-I) | (none currently — see `LIMITATIONS.md`) | — |
+| Top intro (⊤-I) | `trivial` or `exact True` | closes a `True` goal |
 | Excluded middle | `by_cases h : P` (classical) | two subgoals: with `h : P` and with `h : not P` |
 | Double-negation elim | `by_contra h` (classical) | turns target `P` into target `False` with hypothesis `h : not P` |
 

@@ -31,8 +31,9 @@ accepted theorem imp_trans (constructive)
 ```
 
 If a proof fails, you get a single error line with the file, line
-number, theorem name, and the immediate cause. That's the entire
-debugging interface.
+number, theorem name, and the immediate cause. In the browser UI, the
+same checker also shows current goals, tactic hints, and repair
+suggestions.
 
 ## A minimal `.ctea` file
 
@@ -95,11 +96,7 @@ This is the entire propositional-and-FOL surface you'll need:
 | `x ∈ A` | `x in A` | (built-in, sets) |
 | `A ⊆ B` | `A subset B` | (built-in, sets) |
 
-> **Heads-up about `True`.** The proof of plain `True` is a known rough
-> edge — there's no tactic that constructs it directly. If you need to
-> prove `True` itself, declare an `axiom triv : True` and use it. This
-> almost never comes up because `True` is rarely the goal in practice.
-> See `LIMITATIONS.md`.
+Use `trivial` or `exact True` to prove a plain `True` goal.
 
 ## What if my proof doesn't go through?
 
@@ -113,19 +110,16 @@ error: <file>:7: theorem `t` failed: exact expression does not solve the goal:
 
 A few things to know:
 
-- The `target:` line on the bottom is the **whole theorem statement**,
-  not your current open subgoal. It does not move as you make progress.
-  The actual local mismatch is in the line above it.
-- The error always points at the *line of the theorem* (here line 7),
-  not the failing tactic line. If your script is long, use the message
-  text to figure out which step blew up.
+- The `target:` line on the bottom is the current open subgoal at the
+  failing tactic.
+- The error points at the failing tactic line when Cetacea can identify
+  it, including inside `cases` and `induction` blocks.
 - "exact expression does not solve the goal" plus `expected: X` means
   the *open subgoal at that step* was `X`.
 
-When you're stuck, the most useful move is to insert "checkpoints" by
-splitting one big proof into smaller theorems whose statements you can
-read. Cetacea has no goal-display tactic — you have to make the
-intermediate goals into named theorems if you want to see them.
+When you're stuck in the browser UI, put the cursor on a tactic line and
+look at the Goals panel. In the CLI, you can temporarily insert
+`show_goal` to make the checker report the current goal at that point.
 
 ## How to read the rest of these tutorials
 

@@ -157,9 +157,9 @@ occurrence of `y` in the goal gets replaced with `x`. Read the message
 from the kernel — it's the most common place students get tangled.
 
 If you need the other direction (rewrite an `x` to a `y`), use
-`eq_subst_left` from `std/eq.ctea` directly. The `rewrite` tactic
-doesn't accept a compound proof expression like `rewrite eq_symm h`,
-so the cleanest approach is `apply` with explicit schema arguments:
+`rewrite -> h` for forward rewriting, or rewrite with a symmetric proof
+such as `rewrite eq_symm h`. You can also use `eq_subst_left` from
+`std/eq.ctea` directly:
 
 ```text
 theorem rewrite_back

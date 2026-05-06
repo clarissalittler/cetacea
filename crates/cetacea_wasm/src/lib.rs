@@ -1,6 +1,7 @@
 use cetacea_core::{
-    check_file_with_imports, goals_at_with_imports, outline, run_tactic_with_imports, CheckResult,
-    Diagnostic, GoalStepResult, LogicMode, Position, SourceOutline, VirtualFile,
+    check_file_with_imports, explain_theorem_with_imports, goals_at_with_imports, outline,
+    run_tactic_with_imports, CheckResult, Diagnostic, ExplanationResult, GoalSnapshot,
+    GoalStepResult, LogicMode, Position, SourceOutline, VirtualFile,
 };
 
 #[no_mangle]
@@ -113,6 +114,34 @@ pub unsafe extern "C" fn cetacea_run_tactic(
     )))
 }
 
+/// Explains a named theorem's tactic script as a length-prefixed JSON response.
+///
+/// # Safety
+///
+/// `source_ptr` and `theorem_ptr` must point to readable UTF-8 memory ranges of
+/// their corresponding lengths, allocated in this wasm instance.
+#[no_mangle]
+pub unsafe extern "C" fn cetacea_explain_theorem(
+    source_ptr: *const u8,
+    source_len: usize,
+    theorem_ptr: *const u8,
+    theorem_len: usize,
+) -> *mut u8 {
+    let source = match read_input(source_ptr, source_len) {
+        Ok(source) => source,
+        Err(err) => return response_json(error_json(&err)),
+    };
+    let theorem = match read_input(theorem_ptr, theorem_len) {
+        Ok(theorem) => theorem,
+        Err(err) => return response_json(error_json(&err)),
+    };
+    response_json(explanation_result_json(&explain_theorem_with_imports(
+        &source,
+        &theorem,
+        &standard_imports(),
+    )))
+}
+
 fn standard_imports() -> Vec<VirtualFile> {
     [
         (
@@ -165,8 +194,9 @@ fn check_result_json(result: &CheckResult) -> String {
         .iter()
         .map(|theorem| {
             format!(
-                r#"{{"name":{},"mode":{},"is_axiom":{},"is_imported":{}}}"#,
+                r#"{{"name":{},"statement":{},"mode":{},"is_axiom":{},"is_imported":{}}}"#,
                 json_string(&theorem.name),
+                json_string(&theorem.statement),
                 json_string(&theorem.mode_used.to_string()),
                 theorem.is_axiom,
                 theorem.is_imported
@@ -219,25 +249,7 @@ fn outline_json(outline: &SourceOutline) -> String {
 }
 
 fn goal_result_json(result: &GoalStepResult) -> String {
-    let goals = result
-        .goals
-        .iter()
-        .map(|goal| {
-            let context = goal
-                .context
-                .iter()
-                .map(|entry| json_string(entry))
-                .collect::<Vec<_>>()
-                .join(",");
-            format!(
-                r#"{{"id":{},"context":[{}],"target":{}}}"#,
-                goal.id,
-                context,
-                json_string(&goal.target)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
+    let goals = goals_json(&result.goals);
     format!(
         r#"{{"ok":{},"theorem":{},"mode":{},"next_tactic_index":{},"tactic_count":{},"completed":{},"goals":[{}],"diagnostics":[{}]}}"#,
         result.diagnostics.is_empty(),
@@ -248,6 +260,74 @@ fn goal_result_json(result: &GoalStepResult) -> String {
         result.completed,
         goals,
         diagnostics_json(&result.diagnostics)
+    )
+}
+
+fn explanation_result_json(result: &ExplanationResult) -> String {
+    let steps = result
+        .steps
+        .iter()
+        .map(|step| {
+            let explanation = step
+                .explanation
+                .iter()
+                .map(|line| json_string(line))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                r#"{{"index":{},"line":{},"tactic":{},"before":{},"after":[{}],"explanation":[{}]}}"#,
+                step.index,
+                step.line,
+                json_string(&step.tactic),
+                goal_json(&step.before),
+                goals_json(&step.after),
+                explanation
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"ok":{},"theorem":{},"statement":{},"mode":{},"completed":{},"steps":[{}],"diagnostics":[{}]}}"#,
+        result.diagnostics.is_empty(),
+        option_string_json(result.theorem.as_deref()),
+        option_string_json(result.statement.as_deref()),
+        mode_json(result.mode),
+        result.completed,
+        steps,
+        diagnostics_json(&result.diagnostics)
+    )
+}
+
+fn goals_json(goals: &[GoalSnapshot]) -> String {
+    goals.iter().map(goal_json).collect::<Vec<_>>().join(",")
+}
+
+fn goal_json(goal: &GoalSnapshot) -> String {
+    let context = goal
+        .context
+        .iter()
+        .map(|entry| json_string(entry))
+        .collect::<Vec<_>>()
+        .join(",");
+    let hints = goal
+        .hints
+        .iter()
+        .map(|hint| {
+            format!(
+                r#"{{"title":{},"tactic":{},"detail":{}}}"#,
+                json_string(&hint.title),
+                json_string(&hint.tactic),
+                json_string(&hint.detail)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"id":{},"context":[{}],"target":{},"hints":[{}]}}"#,
+        goal.id,
+        context,
+        json_string(&goal.target),
+        hints
     )
 }
 
@@ -282,12 +362,26 @@ fn diagnostic_json(diagnostic: &Diagnostic) -> String {
         .map(|note| json_string(note))
         .collect::<Vec<_>>()
         .join(",");
+    let suggestions = diagnostic
+        .suggestions
+        .iter()
+        .map(|suggestion| {
+            format!(
+                r#"{{"title":{},"detail":{},"example":{}}}"#,
+                json_string(&suggestion.title),
+                json_string(&suggestion.detail),
+                option_string_json(suggestion.example.as_deref())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        r#"{{"message":{},"location":{},"span":{},"notes":[{}]}}"#,
+        r#"{{"message":{},"location":{},"span":{},"notes":[{}],"suggestions":[{}]}}"#,
         json_string(&diagnostic.message),
         location,
         span,
-        notes
+        notes,
+        suggestions
     )
 }
 

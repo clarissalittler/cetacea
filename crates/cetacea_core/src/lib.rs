@@ -773,6 +773,14 @@ pub struct Diagnostic {
     pub location: Option<SourceLocation>,
     pub message: String,
     pub notes: Vec<String>,
+    pub suggestions: Vec<DiagnosticSuggestion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiagnosticSuggestion {
+    pub title: String,
+    pub detail: String,
+    pub example: Option<String>,
 }
 
 impl Diagnostic {
@@ -782,6 +790,7 @@ impl Diagnostic {
             location: None,
             message: message.into(),
             notes: Vec::new(),
+            suggestions: Vec::new(),
         }
     }
 
@@ -797,6 +806,142 @@ impl Diagnostic {
         self.notes.push(note.into());
         self
     }
+
+    fn with_suggestion(
+        mut self,
+        title: impl Into<String>,
+        detail: impl Into<String>,
+        example: Option<impl Into<String>>,
+    ) -> Self {
+        self.suggestions.push(DiagnosticSuggestion {
+            title: title.into(),
+            detail: detail.into(),
+            example: example.map(Into::into),
+        });
+        self
+    }
+
+    fn with_tactic_error_suggestions(mut self, message: &str, target: &Formula) -> Self {
+        for suggestion in tactic_error_suggestions(message, target) {
+            self.suggestions.push(suggestion);
+        }
+        self
+    }
+}
+
+fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSuggestion> {
+    let mut suggestions = Vec::new();
+    let target_text = target.to_string();
+
+    let push = |suggestions: &mut Vec<DiagnosticSuggestion>,
+                title: &str,
+                detail: String,
+                example: Option<&str>| {
+        suggestions.push(DiagnosticSuggestion {
+            title: title.to_string(),
+            detail,
+            example: example.map(str::to_string),
+        });
+    };
+
+    if message.contains("intro expects") {
+        push(
+            &mut suggestions,
+            "Match the goal shape",
+            format!(
+                "`intro` only opens implication or universal goals. The current target is `{target_text}`."
+            ),
+            None,
+        );
+    }
+    if message.contains("split expects") {
+        push(
+            &mut suggestions,
+            "Use `split` only for conjunctions",
+            format!("`split` works when the current target has the form `P /\\ Q`; here it is `{target_text}`."),
+            None,
+        );
+    }
+    if message.contains("left expects") || message.contains("right expects") {
+        push(
+            &mut suggestions,
+            "Choose a side only for disjunctions",
+            format!("`left` and `right` work when the current target has the form `P \\/ Q`; here it is `{target_text}`."),
+            None,
+        );
+    }
+    if message.contains("cases expects a disjunction proof") {
+        push(
+            &mut suggestions,
+            "Case split on an `or` hypothesis",
+            "`cases h with` needs `h` to prove a disjunction such as `P \\/ Q`.".to_string(),
+            Some("cases h with\n| left hp =>\n    ...\n| right hq =>\n    ..."),
+        );
+    }
+    if message.contains("cases expects an existential proof") {
+        push(
+            &mut suggestions,
+            "Unpack an existential hypothesis",
+            "`cases h with` needs `h` to prove an existential such as `exists x : A, P(x)`."
+                .to_string(),
+            Some("cases h with\n| intro x hx =>\n    ..."),
+        );
+    }
+    if message.contains("exists expects") {
+        push(
+            &mut suggestions,
+            "Provide a witness only for existential goals",
+            format!("`exists witness` works when the target has the form `exists x : A, P(x)`; here it is `{target_text}`."),
+            None,
+        );
+    }
+    if message.contains("refl expects") || message.contains("refl cannot prove") {
+        push(
+            &mut suggestions,
+            "Use equality simplification first",
+            "`refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.".to_string(),
+            Some("simp\nrefl"),
+        );
+    }
+    if message.contains("no matching assumption found") {
+        push(
+            &mut suggestions,
+            "Look for a hypothesis with the same target",
+            format!("`assumption` needs a local hypothesis whose formula is exactly the current target `{target_text}`."),
+            None,
+        );
+    }
+    if message.contains("exact proof does not solve the goal")
+        || message.contains("exact expression does not solve the goal")
+    {
+        push(
+            &mut suggestions,
+            "Match the proof to the target",
+            format!("`exact` closes the goal only when the expression proves the current target `{target_text}`. If you have an implication or theorem that can prove it, try `apply` first."),
+            Some("apply h"),
+        );
+    }
+    if message.contains("cannot infer theorem parameter") {
+        push(
+            &mut suggestions,
+            "Add explicit theorem parameters",
+            "The checker could not infer one of the theorem's schema parameters from the goal and context.".to_string(),
+            Some("apply theorem_name {A := Nat; P := fun x => ...}"),
+        );
+    }
+    if message.contains("requires classical mode")
+        || message.contains("uses classical")
+        || message.contains("by_contra introduces")
+    {
+        push(
+            &mut suggestions,
+            "Switch modes or avoid the classical rule",
+            "This tactic uses classical reasoning. Put `mode classical` before the theorem, or prove a constructive version instead.".to_string(),
+            Some("mode classical"),
+        );
+    }
+
+    suggestions
 }
 
 fn diagnostic_at(
@@ -810,6 +955,7 @@ fn diagnostic_at(
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckedTheorem {
     pub name: Name,
+    pub statement: String,
     pub mode_used: LogicMode,
     pub is_axiom: bool,
     pub is_imported: bool,
@@ -859,6 +1005,14 @@ pub struct GoalSnapshot {
     pub id: usize,
     pub context: Vec<String>,
     pub target: String,
+    pub hints: Vec<GoalHint>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GoalHint {
+    pub title: String,
+    pub tactic: String,
+    pub detail: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -870,6 +1024,26 @@ pub struct GoalStepResult {
     pub completed: bool,
     pub goals: Vec<GoalSnapshot>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ExplanationResult {
+    pub theorem: Option<Name>,
+    pub statement: Option<String>,
+    pub mode: Option<LogicMode>,
+    pub completed: bool,
+    pub steps: Vec<ExplanationStep>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplanationStep {
+    pub index: usize,
+    pub line: usize,
+    pub tactic: String,
+    pub before: GoalSnapshot,
+    pub after: Vec<GoalSnapshot>,
+    pub explanation: Vec<String>,
 }
 
 pub fn check_file(source: &str) -> CheckResult {
@@ -932,6 +1106,47 @@ pub fn goals_at(source: &str, position: Position) -> GoalStepResult {
     goals_at_with_imports(source, position, &[])
 }
 
+pub fn goals_at_path(path: impl AsRef<Path>, position: Position) -> GoalStepResult {
+    let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path.as_ref()) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => {
+            return GoalStepResult {
+                diagnostics: vec![diagnostic],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+    let source_lines: Vec<_> = source.lines().collect();
+
+    let Some(theorem_index) = theorem_index_at_position(&file.commands, position) else {
+        return GoalStepResult {
+            diagnostics: vec![diagnostic_at(
+                Some(canonical_path.as_path()),
+                position.line,
+                "no theorem contains the requested position",
+            )],
+            ..GoalStepResult::default()
+        };
+    };
+
+    let Command::Theorem(decl) = &file.commands[theorem_index].command else {
+        unreachable!("theorem_index_at_position only returns theorem commands");
+    };
+    let tactic_count = decl
+        .tactics
+        .iter()
+        .take_while(|tactic| tactic_is_before_position(&source_lines, tactic, position))
+        .count();
+    goals_for_theorem_prefix(
+        file,
+        theorem_index,
+        tactic_count,
+        &[],
+        base_dir.as_deref(),
+        Some(canonical_path.as_path()),
+    )
+}
+
 pub fn goals_at_with_imports(
     source: &str,
     position: Position,
@@ -967,11 +1182,64 @@ pub fn goals_at_with_imports(
         .iter()
         .take_while(|tactic| tactic_is_before_position(&source_lines, tactic, position))
         .count();
-    goals_for_theorem_prefix(file, theorem_index, tactic_count, imports)
+    goals_for_theorem_prefix(file, theorem_index, tactic_count, imports, None, None)
 }
 
 pub fn run_tactic(source: &str, theorem_name: &str, tactic_index: usize) -> GoalStepResult {
     run_tactic_with_imports(source, theorem_name, tactic_index, &[])
+}
+
+pub fn run_tactic_at_path(
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+    tactic_index: usize,
+) -> GoalStepResult {
+    let (file, _source, canonical_path, base_dir) = match parse_editor_file_at_path(path.as_ref()) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => {
+            return GoalStepResult {
+                diagnostics: vec![diagnostic],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+
+    let Some(theorem_index) = theorem_index_by_name(&file.commands, theorem_name) else {
+        return GoalStepResult {
+            theorem: Some(theorem_name.to_string()),
+            diagnostics: vec![Diagnostic::error(format!(
+                "unknown theorem `{theorem_name}`"
+            ))],
+            ..GoalStepResult::default()
+        };
+    };
+    let Command::Theorem(decl) = &file.commands[theorem_index].command else {
+        unreachable!("theorem_index_by_name only returns theorem commands");
+    };
+    if tactic_index >= decl.tactics.len() {
+        return GoalStepResult {
+            theorem: Some(theorem_name.to_string()),
+            tactic_count: decl.tactics.len(),
+            diagnostics: vec![diagnostic_at(
+                Some(canonical_path.as_path()),
+                decl.tactics
+                    .last()
+                    .map(|tactic| tactic.line)
+                    .unwrap_or(file.commands[theorem_index].line),
+                format!("tactic index {tactic_index} is out of range for theorem `{theorem_name}`"),
+            )],
+            ..GoalStepResult::default()
+        };
+    }
+
+    goals_for_theorem_prefix(
+        file,
+        theorem_index,
+        tactic_index + 1,
+        &[],
+        base_dir.as_deref(),
+        Some(canonical_path.as_path()),
+    )
 }
 
 pub fn run_tactic_with_imports(
@@ -1018,7 +1286,93 @@ pub fn run_tactic_with_imports(
         };
     }
 
-    goals_for_theorem_prefix(file, theorem_index, tactic_index + 1, imports)
+    goals_for_theorem_prefix(file, theorem_index, tactic_index + 1, imports, None, None)
+}
+
+pub fn explain_theorem(source: &str, theorem_name: &str) -> ExplanationResult {
+    explain_theorem_with_imports(source, theorem_name, &[])
+}
+
+pub fn explain_theorem_at_path(path: impl AsRef<Path>, theorem_name: &str) -> ExplanationResult {
+    let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path.as_ref()) {
+        Ok(parsed) => parsed,
+        Err(diagnostic) => {
+            return ExplanationResult {
+                diagnostics: vec![diagnostic],
+                ..ExplanationResult::default()
+            };
+        }
+    };
+    let source_lines: Vec<_> = source.lines().collect();
+
+    let Some(theorem_index) = theorem_index_by_name(&file.commands, theorem_name) else {
+        return ExplanationResult {
+            theorem: Some(theorem_name.to_string()),
+            diagnostics: vec![Diagnostic::error(format!(
+                "unknown theorem `{theorem_name}`"
+            ))],
+            ..ExplanationResult::default()
+        };
+    };
+
+    explain_theorem_at_index(
+        file,
+        theorem_index,
+        &source_lines,
+        &[],
+        base_dir.as_deref(),
+        Some(canonical_path.as_path()),
+    )
+}
+
+pub fn explain_theorem_with_imports(
+    source: &str,
+    theorem_name: &str,
+    imports: &[VirtualFile],
+) -> ExplanationResult {
+    let source_lines: Vec<_> = source.lines().collect();
+    let file = match parse_file(source) {
+        Ok(file) => file,
+        Err(err) => {
+            return ExplanationResult {
+                diagnostics: vec![parse_diagnostic(None, err, None)],
+                ..ExplanationResult::default()
+            };
+        }
+    };
+
+    let Some(theorem_index) = theorem_index_by_name(&file.commands, theorem_name) else {
+        return ExplanationResult {
+            theorem: Some(theorem_name.to_string()),
+            diagnostics: vec![Diagnostic::error(format!(
+                "unknown theorem `{theorem_name}`"
+            ))],
+            ..ExplanationResult::default()
+        };
+    };
+
+    explain_theorem_at_index(file, theorem_index, &source_lines, imports, None, None)
+}
+
+fn parse_editor_file_at_path(
+    path: &Path,
+) -> Result<(File, String, PathBuf, Option<PathBuf>), Diagnostic> {
+    let canonical_path = path.canonicalize().map_err(|err| {
+        Diagnostic::error(format!("could not read `{}`", path.display())).with_note(err.to_string())
+    })?;
+    let source = fs::read_to_string(&canonical_path).map_err(|err| {
+        Diagnostic::error(format!("could not read `{}`", canonical_path.display()))
+            .with_note(err.to_string())
+    })?;
+    let file = parse_file(&source).map_err(|err| {
+        parse_diagnostic(
+            Some(canonical_path.as_path()),
+            err,
+            Some(format!("could not parse `{}`", canonical_path.display())),
+        )
+    })?;
+    let base_dir = canonical_path.parent().map(Path::to_path_buf);
+    Ok((file, source, canonical_path, base_dir))
 }
 
 struct FileChecker {
@@ -1619,13 +1973,14 @@ impl FileChecker {
                     self.env.add_theorem(Theorem {
                         name: decl.name.clone(),
                         params: decl.params,
-                        statement: decl.statement,
+                        statement: decl.statement.clone(),
                         proof: None,
                         mode_used: mode,
                         is_axiom: true,
                     });
                     self.result.theorems.push(CheckedTheorem {
                         name: decl.name,
+                        statement: decl.statement.to_string(),
                         mode_used: mode,
                         is_axiom: true,
                         is_imported,
@@ -1682,7 +2037,8 @@ impl FileChecker {
                                     err.line.unwrap_or(line),
                                     format!("theorem `{}` failed: {}", decl.name, err.message),
                                 )
-                                .with_note(format!("target: {target}")),
+                                .with_note(format!("target: {target}"))
+                                .with_tactic_error_suggestions(&err.message, target),
                             );
                             continue;
                         }
@@ -1727,13 +2083,14 @@ impl FileChecker {
                     self.env.add_theorem(Theorem {
                         name: decl.name.clone(),
                         params: decl.params,
-                        statement: decl.statement,
+                        statement: decl.statement.clone(),
                         proof: Some(proof),
                         mode_used,
                         is_axiom: false,
                     });
                     self.result.theorems.push(CheckedTheorem {
                         name: decl.name,
+                        statement: decl.statement.to_string(),
                         mode_used,
                         is_axiom: false,
                         is_imported,
@@ -1814,6 +2171,8 @@ fn goals_for_theorem_prefix(
     theorem_index: usize,
     tactic_count: usize,
     imports: &[VirtualFile],
+    base_dir: Option<&Path>,
+    source_path: Option<&Path>,
 ) -> GoalStepResult {
     let located = file.commands[theorem_index].clone();
     let Command::Theorem(decl) = located.command else {
@@ -1825,10 +2184,10 @@ fn goals_for_theorem_prefix(
     let mut checker = FileChecker::with_virtual_files(imports);
     checker.check_commands(
         file.commands[..theorem_index].to_vec(),
-        None,
+        base_dir,
         None,
         false,
-        None,
+        source_path,
     );
     if !checker.result.diagnostics.is_empty() {
         return GoalStepResult {
@@ -1848,7 +2207,7 @@ fn goals_for_theorem_prefix(
                 mode: Some(mode),
                 tactic_count: decl.tactics.len(),
                 diagnostics: vec![diagnostic_at(
-                    None,
+                    source_path,
                     located.line,
                     format!("theorem `{}` has invalid parameters", decl.name),
                 )
@@ -1863,7 +2222,7 @@ fn goals_for_theorem_prefix(
             mode: Some(mode),
             tactic_count: decl.tactics.len(),
             diagnostics: vec![diagnostic_at(
-                None,
+                source_path,
                 located.line,
                 format!("theorem `{}` has invalid statement", decl.name),
             )
@@ -1883,13 +2242,18 @@ fn goals_for_theorem_prefix(
                 next_tactic_index: tactic_count,
                 tactic_count: decl.tactics.len(),
                 completed: session.goals.is_empty(),
-                goals: session.goals.iter().map(snapshot_goal).collect(),
+                goals: session
+                    .goals
+                    .iter()
+                    .map(|goal| snapshot_goal(&checker.env, goal, mode))
+                    .collect(),
                 diagnostics: vec![diagnostic_at(
-                    None,
+                    source_path,
                     err.line.unwrap_or(tactic.line),
                     format!("theorem `{}` failed: {}", decl.name, err.message),
                 )
-                .with_note(format!("target: {target}"))],
+                .with_note(format!("target: {target}"))
+                .with_tactic_error_suggestions(&err.message, target)],
             };
         }
     }
@@ -1903,7 +2267,7 @@ fn goals_for_theorem_prefix(
                 {
                     diagnostics.push(
                         diagnostic_at(
-                            None,
+                            source_path,
                             located.line,
                             format!(
                                 "theorem `{}` was rejected by the kernel: {}",
@@ -1917,7 +2281,7 @@ fn goals_for_theorem_prefix(
             Err(err) => {
                 diagnostics.push(
                     diagnostic_at(
-                        None,
+                        source_path,
                         err.line.unwrap_or(located.line),
                         format!("theorem `{}` failed: {}", decl.name, err.message),
                     )
@@ -1933,12 +2297,188 @@ fn goals_for_theorem_prefix(
         next_tactic_index: tactic_count,
         tactic_count: decl.tactics.len(),
         completed: session.goals.is_empty() && diagnostics.is_empty(),
-        goals: session.goals.iter().map(snapshot_goal).collect(),
+        goals: session
+            .goals
+            .iter()
+            .map(|goal| snapshot_goal(&checker.env, goal, mode))
+            .collect(),
         diagnostics,
     }
 }
 
-fn snapshot_goal(goal: &Goal) -> GoalSnapshot {
+fn explain_theorem_at_index(
+    file: File,
+    theorem_index: usize,
+    source_lines: &[&str],
+    imports: &[VirtualFile],
+    base_dir: Option<&Path>,
+    source_path: Option<&Path>,
+) -> ExplanationResult {
+    let located = file.commands[theorem_index].clone();
+    let Command::Theorem(decl) = located.command else {
+        unreachable!("explanations are only available for theorem commands");
+    };
+    let mode = mode_before_command(&file.commands, theorem_index);
+
+    let mut checker = FileChecker::with_virtual_files(imports);
+    checker.check_commands(
+        file.commands[..theorem_index].to_vec(),
+        base_dir,
+        None,
+        false,
+        source_path,
+    );
+    if !checker.result.diagnostics.is_empty() {
+        return ExplanationResult {
+            theorem: Some(decl.name),
+            statement: Some(decl.statement.to_string()),
+            mode: Some(mode),
+            diagnostics: checker.result.diagnostics,
+            ..ExplanationResult::default()
+        };
+    }
+
+    let theorem_ctx = match build_theorem_context(&checker.env, &decl.params) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            return ExplanationResult {
+                theorem: Some(decl.name.clone()),
+                statement: Some(decl.statement.to_string()),
+                mode: Some(mode),
+                diagnostics: vec![diagnostic_at(
+                    source_path,
+                    located.line,
+                    format!("theorem `{}` has invalid parameters", decl.name),
+                )
+                .with_note(err.message)],
+                ..ExplanationResult::default()
+            };
+        }
+    };
+    if let Err(err) = validate_formula(&checker.env, &theorem_ctx, &decl.statement) {
+        return ExplanationResult {
+            theorem: Some(decl.name.clone()),
+            statement: Some(decl.statement.to_string()),
+            mode: Some(mode),
+            diagnostics: vec![diagnostic_at(
+                source_path,
+                located.line,
+                format!("theorem `{}` has invalid statement", decl.name),
+            )
+            .with_note(err.message)
+            .with_note(format!("target: {}", decl.statement))],
+            ..ExplanationResult::default()
+        };
+    }
+
+    let mut session = ProofSession::new(theorem_ctx.clone(), decl.statement.clone());
+    let mut steps = Vec::new();
+    for (index, tactic) in decl.tactics.iter().enumerate() {
+        let Some(before_goal) = session.goals.first().cloned() else {
+            return ExplanationResult {
+                theorem: Some(decl.name.clone()),
+                statement: Some(decl.statement.to_string()),
+                mode: Some(mode),
+                steps,
+                diagnostics: vec![diagnostic_at(
+                    source_path,
+                    tactic.line,
+                    format!(
+                        "theorem `{}` has a tactic after all goals were solved",
+                        decl.name
+                    ),
+                )],
+                ..ExplanationResult::default()
+            };
+        };
+        let before_snapshot = snapshot_goal(&checker.env, &before_goal, mode);
+        let explanation = explain_tactic_step(&tactic.tactic, &before_goal);
+        if let Err(err) = session.step(&checker.env, tactic, mode) {
+            let target = err.target.as_deref().unwrap_or(&decl.statement);
+            return ExplanationResult {
+                theorem: Some(decl.name.clone()),
+                statement: Some(decl.statement.to_string()),
+                mode: Some(mode),
+                steps,
+                diagnostics: vec![diagnostic_at(
+                    source_path,
+                    err.line.unwrap_or(tactic.line),
+                    format!("theorem `{}` failed: {}", decl.name, err.message),
+                )
+                .with_note(format!("target: {target}"))
+                .with_tactic_error_suggestions(&err.message, target)],
+                ..ExplanationResult::default()
+            };
+        }
+        steps.push(ExplanationStep {
+            index,
+            line: tactic.line,
+            tactic: source_lines
+                .get(tactic.line.saturating_sub(1))
+                .map(|line| line.trim().to_string())
+                .unwrap_or_else(|| tactic_label(&tactic.tactic)),
+            before: before_snapshot,
+            after: session
+                .goals
+                .iter()
+                .map(|goal| snapshot_goal(&checker.env, goal, mode))
+                .collect(),
+            explanation,
+        });
+    }
+
+    let mut diagnostics = Vec::new();
+    let completed = session.goals.is_empty();
+    if completed {
+        match session.root.clone().complete() {
+            Ok(proof) => {
+                if let Err(err) =
+                    check_proof(&checker.env, &theorem_ctx, &proof, &decl.statement, mode)
+                {
+                    diagnostics.push(
+                        diagnostic_at(
+                            source_path,
+                            located.line,
+                            format!(
+                                "theorem `{}` was rejected by the kernel: {}",
+                                decl.name, err.message
+                            ),
+                        )
+                        .with_note(format!("target: {}", decl.statement)),
+                    );
+                }
+            }
+            Err(err) => diagnostics.push(
+                diagnostic_at(
+                    source_path,
+                    err.line.unwrap_or(located.line),
+                    format!("theorem `{}` failed: {}", decl.name, err.message),
+                )
+                .with_note(format!("target: {}", decl.statement)),
+            ),
+        }
+    } else if let Some(goal) = session.goals.first() {
+        diagnostics.push(
+            diagnostic_at(
+                source_path,
+                located.line,
+                format!("theorem `{}` has an unsolved goal", decl.name),
+            )
+            .with_note(format!("target: {}", goal.target)),
+        );
+    }
+
+    ExplanationResult {
+        theorem: Some(decl.name),
+        statement: Some(decl.statement.to_string()),
+        mode: Some(mode),
+        completed: completed && diagnostics.is_empty(),
+        steps,
+        diagnostics,
+    }
+}
+
+fn snapshot_goal(env: &Env, goal: &Goal, mode: LogicMode) -> GoalSnapshot {
     let mut context = Vec::new();
     for name in &goal.context.type_vars {
         context.push(format!("{name} : Type"));
@@ -1962,6 +2502,575 @@ fn snapshot_goal(goal: &Goal) -> GoalSnapshot {
         id: goal.id,
         context,
         target: goal.target.to_string(),
+        hints: goal_hints(env, goal, mode),
+    }
+}
+
+fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
+    let mut hints = Vec::new();
+
+    for binding in goal.context.proofs().iter().rev() {
+        if formulas_def_eq(env, &goal.context, &binding.formula, &goal.target).unwrap_or(false) {
+            push_goal_hint(
+                &mut hints,
+                "Use an assumption",
+                format!("exact {}", binding.name),
+                format!(
+                    "`{}` already proves the current target `{}`.",
+                    binding.name, goal.target
+                ),
+            );
+            push_goal_hint(
+                &mut hints,
+                "Close by matching assumption",
+                "assumption".to_string(),
+                "Search the local context for a hypothesis matching the target.".to_string(),
+            );
+            break;
+        }
+    }
+
+    match &goal.target {
+        Formula::True => {
+            push_goal_hint(
+                &mut hints,
+                "Prove true",
+                "trivial".to_string(),
+                "`trivial` closes a `True` goal.".to_string(),
+            );
+        }
+        Formula::False => {
+            if context_has_false(&goal.context) || context_has_negation_pair(&goal.context) {
+                push_goal_hint(
+                    &mut hints,
+                    "Find a contradiction",
+                    "contradiction".to_string(),
+                    "The context contains `False` or a proposition together with its negation."
+                        .to_string(),
+                );
+            }
+        }
+        Formula::Implies(_, _) => {
+            let name = suggest_unused_name(&goal.context, "h");
+            push_goal_hint(
+                &mut hints,
+                "Introduce the assumption",
+                format!("intro {name}"),
+                "The target is an implication; assume the premise and prove the conclusion."
+                    .to_string(),
+            );
+        }
+        Formula::Forall { var, .. } => {
+            let name = suggest_unused_name(&goal.context, var);
+            push_goal_hint(
+                &mut hints,
+                "Introduce an arbitrary element",
+                format!("intro {name}"),
+                "The target is universal; introduce a fresh variable and prove the body."
+                    .to_string(),
+            );
+        }
+        Formula::And(_, _) => {
+            push_goal_hint(
+                &mut hints,
+                "Prove both parts",
+                "split".to_string(),
+                "The target is a conjunction; `split` creates one goal for each side.".to_string(),
+            );
+        }
+        Formula::Or(_, _) => {
+            push_goal_hint(
+                &mut hints,
+                "Prove the left side",
+                "left".to_string(),
+                "The target is a disjunction; choose the left side if you can prove it."
+                    .to_string(),
+            );
+            push_goal_hint(
+                &mut hints,
+                "Prove the right side",
+                "right".to_string(),
+                "The target is a disjunction; choose the right side if you can prove it."
+                    .to_string(),
+            );
+        }
+        Formula::Exists { var_type, .. } => {
+            let witness = first_term_of_type(env, &goal.context, var_type)
+                .unwrap_or_else(|| "witness".to_string());
+            push_goal_hint(
+                &mut hints,
+                "Provide a witness",
+                format!("exists {witness}"),
+                "The target is existential; give a term of the required type, then prove the property for that term."
+                    .to_string(),
+            );
+        }
+        Formula::Eq(left, right) if left == right => {
+            push_goal_hint(
+                &mut hints,
+                "Use reflexivity",
+                "refl".to_string(),
+                "Both sides of the equality are already identical.".to_string(),
+            );
+        }
+        _ => {}
+    }
+
+    if !matches!(&goal.target, Formula::False)
+        && (context_has_false(&goal.context) || context_has_negation_pair(&goal.context))
+    {
+        push_goal_hint(
+            &mut hints,
+            "Use contradiction",
+            "contradiction".to_string(),
+            "A contradiction in the context proves any target.".to_string(),
+        );
+    }
+
+    add_apply_hints_from_context(env, goal, &mut hints);
+    add_apply_hints_from_theorems(env, goal, mode, &mut hints);
+    hints.truncate(12);
+    hints
+}
+
+fn push_goal_hint(
+    hints: &mut Vec<GoalHint>,
+    title: impl Into<String>,
+    tactic: impl Into<String>,
+    detail: impl Into<String>,
+) {
+    let hint = GoalHint {
+        title: title.into(),
+        tactic: tactic.into(),
+        detail: detail.into(),
+    };
+    if !hints.iter().any(|existing| existing.tactic == hint.tactic) {
+        hints.push(hint);
+    }
+}
+
+fn suggest_unused_name(ctx: &Context, base: &str) -> String {
+    let clean_base = if base.is_empty() { "h" } else { base };
+    if ctx.lookup(clean_base).is_none() && ctx.lookup_term(clean_base).is_none() {
+        return clean_base.to_string();
+    }
+    for idx in 1..100 {
+        let candidate = format!("{clean_base}{idx}");
+        if ctx.lookup(&candidate).is_none() && ctx.lookup_term(&candidate).is_none() {
+            return candidate;
+        }
+    }
+    format!("{clean_base}_new")
+}
+
+fn first_term_of_type(env: &Env, ctx: &Context, ty: &Type) -> Option<String> {
+    if let Some(binding) = ctx.term_vars.iter().rev().find(|binding| &binding.ty == ty) {
+        return Some(binding.name.clone());
+    }
+    let mut constants: Vec<_> = env
+        .consts
+        .iter()
+        .filter_map(|(name, const_ty)| {
+            if const_ty == ty {
+                Some(name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    constants.sort();
+    constants.into_iter().next()
+}
+
+fn context_has_false(ctx: &Context) -> bool {
+    ctx.proofs()
+        .iter()
+        .any(|binding| matches!(&binding.formula, Formula::False))
+}
+
+fn context_has_negation_pair(ctx: &Context) -> bool {
+    for left in ctx.proofs() {
+        for right in ctx.proofs() {
+            if let Formula::Implies(premise, conclusion) = &right.formula {
+                if matches!(conclusion.as_ref(), Formula::False)
+                    && premise.as_ref() == &left.formula
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn add_apply_hints_from_context(env: &Env, goal: &Goal, hints: &mut Vec<GoalHint>) {
+    let mut added = 0;
+    for binding in goal.context.proofs().iter().rev() {
+        if apply_plan_for_goal(
+            env,
+            &goal.context,
+            &binding.formula,
+            &goal.target,
+            &[],
+            SchemaSubst::default(),
+            None,
+        )
+        .is_ok()
+        {
+            push_goal_hint(
+                hints,
+                "Use a local implication or universal fact",
+                format!("apply {}", binding.name),
+                format!(
+                    "`{}` can reduce the current target to its remaining premise goals.",
+                    binding.name
+                ),
+            );
+            added += 1;
+            if added >= 3 {
+                break;
+            }
+        }
+    }
+}
+
+fn add_apply_hints_from_theorems(
+    env: &Env,
+    goal: &Goal,
+    mode: LogicMode,
+    hints: &mut Vec<GoalHint>,
+) {
+    let mut names: Vec<_> = env.theorems.keys().cloned().collect();
+    names.sort();
+    let mut added = 0;
+    for name in names {
+        let Some(theorem) = env.theorem(&name) else {
+            continue;
+        };
+        if matches!(mode, LogicMode::Constructive)
+            && matches!(theorem.mode_used, LogicMode::Classical)
+        {
+            continue;
+        }
+        if apply_plan_for_goal(
+            env,
+            &goal.context,
+            &theorem.statement,
+            &goal.target,
+            &theorem.params,
+            SchemaSubst::default(),
+            Some(theorem.name.as_str()),
+        )
+        .is_ok()
+        {
+            push_goal_hint(
+                hints,
+                "Use a known theorem",
+                format!("apply {}", theorem.name),
+                format!(
+                    "`{}` has a conclusion that matches the current target.",
+                    theorem.name
+                ),
+            );
+            added += 1;
+            if added >= 5 {
+                break;
+            }
+        }
+    }
+}
+
+fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
+    match tactic {
+        Tactic::Intro(name) => match &goal.target {
+            Formula::Implies(premise, conclusion) => vec![
+                "Use implication introduction.".to_string(),
+                format!("Assume `{premise}` and name that assumption `{name}`."),
+                format!("The remaining goal is `{conclusion}`."),
+            ],
+            Formula::Forall {
+                var,
+                var_type,
+                body,
+            } => vec![
+                "Use universal introduction.".to_string(),
+                format!("Let `{name}` be an arbitrary element of type `{var_type}`."),
+                format!(
+                    "The remaining goal is `{}`.",
+                    subst_formula_term(body, var, &Term::Var(name.clone()))
+                ),
+            ],
+            _ => vec![
+                "`intro` is an introduction rule for implications and universal statements."
+                    .to_string(),
+            ],
+        },
+        Tactic::Exact(expr) => vec![
+            format!(
+                "Use `{}` as a complete proof of the current goal.",
+                proof_expr_label(expr)
+            ),
+            "`exact` closes the goal only when that expression has exactly the target formula."
+                .to_string(),
+        ],
+        Tactic::Trivial => vec![
+            "Use truth introduction.".to_string(),
+            "`trivial` closes a goal whose target is `True`.".to_string(),
+        ],
+        Tactic::Assumption => vec![
+            "Look for the target among the local assumptions.".to_string(),
+            "If a hypothesis in the context matches the target, this closes the goal.".to_string(),
+        ],
+        Tactic::Apply(expr) => vec![
+            format!(
+                "Use `{}` as a rule whose conclusion matches the current goal.",
+                proof_expr_label(expr)
+            ),
+            "Any premises of that rule become new subgoals.".to_string(),
+        ],
+        Tactic::Split => match &goal.target {
+            Formula::And(left, right) => vec![
+                "Use conjunction introduction.".to_string(),
+                format!(
+                    "To prove `{}`, prove `{left}` and prove `{right}`.",
+                    goal.target
+                ),
+            ],
+            _ => vec!["`split` proves a conjunction by proving each side.".to_string()],
+        },
+        Tactic::Left => match &goal.target {
+            Formula::Or(left, _) => vec![
+                "Use left disjunction introduction.".to_string(),
+                format!("It is enough to prove the left side `{left}`."),
+            ],
+            _ => vec!["`left` chooses the left side of a disjunction goal.".to_string()],
+        },
+        Tactic::Right => match &goal.target {
+            Formula::Or(_, right) => vec![
+                "Use right disjunction introduction.".to_string(),
+                format!("It is enough to prove the right side `{right}`."),
+            ],
+            _ => vec!["`right` chooses the right side of a disjunction goal.".to_string()],
+        },
+        Tactic::CasesOr {
+            expr,
+            left_name,
+            right_name,
+            ..
+        } => vec![
+            format!(
+                "Use disjunction elimination on `{}`.",
+                proof_expr_label(expr)
+            ),
+            format!(
+                "The left branch assumes the left disjunct as `{left_name}`; the right branch assumes the right disjunct as `{right_name}`."
+            ),
+            "Both branch scripts must prove the original target.".to_string(),
+        ],
+        Tactic::CasesExists {
+            expr,
+            witness_name,
+            hyp_name,
+            ..
+        } => vec![
+            format!(
+                "Use existential elimination on `{}`.",
+                proof_expr_label(expr)
+            ),
+            format!("Open the existential with witness `{witness_name}` and evidence `{hyp_name}`."),
+            "The branch script must prove the original target without assuming a particular witness."
+                .to_string(),
+        ],
+        Tactic::Exists(witness) => match &goal.target {
+            Formula::Exists { var, body, .. } => vec![
+                "Use existential introduction.".to_string(),
+                format!("Choose `{witness}` as the witness."),
+                format!("It remains to prove `{}`.", subst_formula_term(body, var, witness)),
+            ],
+            _ => vec!["`exists` supplies a witness for an existential goal.".to_string()],
+        },
+        Tactic::Refl => vec![
+            "Use equality reflexivity.".to_string(),
+            "`refl` closes an equality goal when both sides are identical.".to_string(),
+        ],
+        Tactic::Rewrite {
+            expr,
+            direction,
+            all,
+        } => vec![
+            format!(
+                "Use the equality proof `{}` to rewrite the target {}.",
+                proof_expr_label(expr),
+                rewrite_direction_label(*direction)
+            ),
+            if *all {
+                "Every matching occurrence is rewritten.".to_string()
+            } else {
+                "One matching occurrence is rewritten.".to_string()
+            },
+        ],
+        Tactic::Unfold(name) => vec![
+            format!("Unfold the transparent definition `{name}` in the target."),
+            "After unfolding, prove the expanded goal.".to_string(),
+        ],
+        Tactic::Simp => vec![
+            "Simplify the target by unfolding transparent definitions and built-in computation."
+                .to_string(),
+            "Then prove the simplified goal.".to_string(),
+        ],
+        Tactic::SimpAt(name) => vec![
+            format!("Simplify the hypothesis `{name}`."),
+            "The target stays the same, but the context is replaced by the simplified hypothesis."
+                .to_string(),
+        ],
+        Tactic::SimpAll => vec![
+            "Simplify the target and every hypothesis.".to_string(),
+            "This exposes the logical structure produced by definitions, sets, and computation."
+                .to_string(),
+        ],
+        Tactic::SimpWith(names) => vec![
+            format!(
+                "Simplify the target using built-in computation plus {}.",
+                simp_names_label(names)
+            ),
+            "Then prove the simplified goal.".to_string(),
+        ],
+        Tactic::SimpWithAt { names, target } => vec![
+            format!(
+                "Simplify {} using built-in computation plus {}.",
+                simp_target_label(target),
+                simp_names_label(names)
+            ),
+            "Continue from the simplified proof state.".to_string(),
+        ],
+        Tactic::Induction { var_name, .. } => vec![
+            format!("Use natural-number induction on `{var_name}`."),
+            "The zero-case script proves the base case.".to_string(),
+            "The successor-case script may use the induction hypothesis to prove the next case."
+                .to_string(),
+        ],
+        Tactic::Exfalso => vec![
+            "Use false elimination.".to_string(),
+            "Instead of proving the current target directly, it is enough to prove `False`."
+                .to_string(),
+        ],
+        Tactic::Contradiction => vec![
+            "Search the context for a contradiction.".to_string(),
+            "A contradiction proves any target by false elimination.".to_string(),
+        ],
+        Tactic::ByCases { name, formula } => vec![
+            "Use excluded middle.".to_string(),
+            format!(
+                "Split into the case `{name} : {formula}` and the case `{name} : not {formula}`."
+            ),
+            "This is a classical reasoning step.".to_string(),
+        ],
+        Tactic::ByContra(name) => vec![
+            "Use proof by contradiction.".to_string(),
+            format!("Assume the negation of the target as `{name}` and prove `False`."),
+            "This is a classical reasoning step.".to_string(),
+        ],
+        Tactic::ShowGoal => vec![
+            "`show_goal` reports the current goal for debugging.".to_string(),
+            "It is not a proof step, so a finished proof should remove it.".to_string(),
+        ],
+    }
+}
+
+fn tactic_label(tactic: &Tactic) -> String {
+    match tactic {
+        Tactic::Intro(name) => format!("intro {name}"),
+        Tactic::Exact(expr) => format!("exact {}", proof_expr_label(expr)),
+        Tactic::Trivial => "trivial".to_string(),
+        Tactic::Assumption => "assumption".to_string(),
+        Tactic::Apply(expr) => format!("apply {}", proof_expr_label(expr)),
+        Tactic::Split => "split".to_string(),
+        Tactic::Left => "left".to_string(),
+        Tactic::Right => "right".to_string(),
+        Tactic::CasesOr { expr, .. } | Tactic::CasesExists { expr, .. } => {
+            format!("cases {} with", proof_expr_label(expr))
+        }
+        Tactic::Exists(witness) => format!("exists {witness}"),
+        Tactic::Refl => "refl".to_string(),
+        Tactic::Rewrite {
+            expr,
+            direction,
+            all,
+        } => {
+            let all = if *all { "all " } else { "" };
+            let direction = match direction {
+                RewriteDirection::Backward => "",
+                RewriteDirection::Forward => "-> ",
+            };
+            format!("rewrite {all}{direction}{}", proof_expr_label(expr))
+        }
+        Tactic::Unfold(name) => format!("unfold {name}"),
+        Tactic::Simp => "simp".to_string(),
+        Tactic::SimpAt(name) => format!("simp at {name}"),
+        Tactic::SimpAll => "simp at *".to_string(),
+        Tactic::SimpWith(names) => format!("simp [{}]", names.join(", ")),
+        Tactic::SimpWithAt { names, target } => {
+            format!("simp [{}] {}", names.join(", "), simp_target_label(target))
+        }
+        Tactic::Induction { var_name, .. } => format!("induction {var_name} with"),
+        Tactic::Exfalso => "exfalso".to_string(),
+        Tactic::Contradiction => "contradiction".to_string(),
+        Tactic::ByCases { name, formula } => format!("by_cases {name} : {formula}"),
+        Tactic::ByContra(name) => format!("by_contra {name}"),
+        Tactic::ShowGoal => "show_goal".to_string(),
+    }
+}
+
+fn proof_expr_label(expr: &ProofExpr) -> String {
+    let mut out = expr.base.clone();
+    if !expr.explicit_args.is_empty() {
+        out.push_str(" {");
+        out.push_str(
+            &expr
+                .explicit_args
+                .iter()
+                .map(|arg| format!("{} := {}", arg.name, arg.value))
+                .collect::<Vec<_>>()
+                .join("; "),
+        );
+        out.push('}');
+    }
+    for step in &expr.steps {
+        match step {
+            ProofStep::Arg(arg) => {
+                out.push(' ');
+                out.push_str(arg);
+            }
+            ProofStep::Projection(Projection::Left) => out.push_str(".left"),
+            ProofStep::Projection(Projection::Right) => out.push_str(".right"),
+        }
+    }
+    out
+}
+
+fn rewrite_direction_label(direction: RewriteDirection) -> &'static str {
+    match direction {
+        RewriteDirection::Backward => "from right to left",
+        RewriteDirection::Forward => "from left to right",
+    }
+}
+
+fn simp_names_label(names: &[Name]) -> String {
+    if names.is_empty() {
+        "no extra rewrite rules".to_string()
+    } else {
+        names
+            .iter()
+            .map(|name| format!("`{name}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn simp_target_label(target: &SimpTarget) -> String {
+    match target {
+        SimpTarget::Hyp(name) => format!("at {name}"),
+        SimpTarget::All => "at *".to_string(),
     }
 }
 
@@ -4728,6 +5837,18 @@ fn parse_diagnostic(path: Option<&Path>, err: ParseError, message: Option<String
     }
     if has_context {
         diagnostic = diagnostic.with_note(err.message);
+    }
+    if diagnostic.message.contains("unknown tactic")
+        || diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("unknown tactic"))
+    {
+        diagnostic = diagnostic.with_suggestion(
+            "Check the tactic name",
+            "Tactics are line-oriented. Common names include `intro`, `exact`, `apply`, `split`, `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `simp`, and `contradiction`.",
+            None::<String>,
+        );
     }
     diagnostic
 }
@@ -9896,6 +11017,119 @@ theorem id (P : Prop) : P -> P := by
         assert!(after_exact.diagnostics.is_empty());
         assert!(after_exact.completed);
         assert!(after_exact.goals.is_empty());
+    }
+
+    #[test]
+    fn path_editor_apis_resolve_relative_imports() {
+        let dir = std::env::temp_dir().join(format!("cetacea-path-editor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp path editor directory");
+        std::fs::write(
+            dir.join("lib.ctea"),
+            r#"
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#,
+        )
+        .expect("write lib.ctea");
+        let root = dir.join("main.ctea");
+        std::fs::write(
+            &root,
+            r#"import lib.ctea
+
+mode constructive
+
+theorem use_imported_id (P : Prop) : P -> P := by
+  exact id
+"#,
+        )
+        .expect("write main.ctea");
+
+        let goals = goals_at_path(&root, Position { line: 6, column: 1 });
+        assert!(goals.diagnostics.is_empty(), "{:#?}", goals.diagnostics);
+        assert_eq!(goals.theorem.as_deref(), Some("use_imported_id"));
+        assert_eq!(goals.goals[0].target, "P -> P");
+
+        let stepped = run_tactic_at_path(&root, "use_imported_id", 0);
+        assert!(stepped.diagnostics.is_empty(), "{:#?}", stepped.diagnostics);
+        assert!(stepped.completed);
+
+        let explained = explain_theorem_at_path(&root, "use_imported_id");
+        assert!(
+            explained.diagnostics.is_empty(),
+            "{:#?}",
+            explained.diagnostics
+        );
+        assert!(explained.completed);
+        assert_eq!(explained.steps.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn goal_snapshots_include_student_tactic_hints() {
+        let source = r#"mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#;
+        let before_intro = goals_at(source, Position { line: 4, column: 1 });
+        assert!(before_intro.diagnostics.is_empty());
+        assert!(before_intro.goals[0]
+            .hints
+            .iter()
+            .any(|hint| hint.tactic == "intro h"));
+
+        let after_intro = run_tactic(source, "id", 0);
+        assert!(after_intro.diagnostics.is_empty());
+        assert!(after_intro.goals[0]
+            .hints
+            .iter()
+            .any(|hint| hint.tactic == "exact h"));
+    }
+
+    #[test]
+    fn theorem_explanations_describe_checked_tactic_steps() {
+        let source = r#"mode constructive
+
+theorem and_comm (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  split
+  exact h.right
+  exact h.left
+"#;
+        let result = explain_theorem(source, "and_comm");
+        assert!(result.diagnostics.is_empty());
+        assert!(result.completed);
+        assert_eq!(result.steps.len(), 4);
+        assert_eq!(result.steps[0].tactic, "intro h");
+        assert!(result.steps[0]
+            .explanation
+            .iter()
+            .any(|line| line.contains("implication introduction")));
+        assert_eq!(result.steps[1].before.target, "Q /\\ P");
+        assert_eq!(result.steps[1].after.len(), 2);
+    }
+
+    #[test]
+    fn failed_tactics_include_repair_suggestions() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem bad (P : Prop) : P -> P := by
+  split
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.diagnostics[0]
+            .suggestions
+            .iter()
+            .any(|suggestion| suggestion.title == "Use `split` only for conjunctions"));
     }
 
     #[test]

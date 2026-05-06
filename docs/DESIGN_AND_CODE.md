@@ -66,18 +66,31 @@ pub fn check_file_at_path(path: impl AsRef<Path>) -> CheckResult
 pub fn check_file_with_imports(source: &str, imports: &[VirtualFile]) -> CheckResult
 pub fn outline(source: &str) -> SourceOutline
 pub fn goals_at(source: &str, position: Position) -> GoalStepResult
+pub fn goals_at_path(path: impl AsRef<Path>, position: Position) -> GoalStepResult
 pub fn goals_at_with_imports(
     source: &str,
     position: Position,
     imports: &[VirtualFile],
 ) -> GoalStepResult
 pub fn run_tactic(source: &str, theorem_name: &str, tactic_index: usize) -> GoalStepResult
+pub fn run_tactic_at_path(
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+    tactic_index: usize,
+) -> GoalStepResult
 pub fn run_tactic_with_imports(
     source: &str,
     theorem_name: &str,
     tactic_index: usize,
     imports: &[VirtualFile],
 ) -> GoalStepResult
+pub fn explain_theorem(source: &str, theorem_name: &str) -> ExplanationResult
+pub fn explain_theorem_at_path(path: impl AsRef<Path>, theorem_name: &str) -> ExplanationResult
+pub fn explain_theorem_with_imports(
+    source: &str,
+    theorem_name: &str,
+    imports: &[VirtualFile],
+) -> ExplanationResult
 pub fn check_proof(
     env: &Env,
     ctx: &Context,
@@ -100,9 +113,20 @@ because there is no root path.
 Use `check_file_at_path` for real files. This is what the CLI uses. It supports
 imports relative to the importing file.
 
+Use the `*_at_path` editor APIs for terminal or filesystem-backed editor
+integrations. They parse the selected root file, keep source locations tied to
+that path, and resolve imports relative to the root file while showing goals,
+stepping tactics, or explaining a proof.
+
 Use `check_file_with_imports` and the `*_with_imports` goal APIs for in-memory
 or browser-hosted sources where imports come from a virtual file map rather than
 the local filesystem.
+
+Use `explain_theorem_with_imports` for editor-facing proof explanations. It
+checks declarations before the selected theorem, runs the theorem tactic script
+step by step, and returns the goal before each tactic, the goals afterward, and
+short rule-based explanation sentences. The explanations are derived from the
+checked tactic execution path; they are not independent proof search.
 
 `check_proof` and `infer_proof` are the lower-level kernel-facing APIs. Most
 callers should not need them directly unless they are constructing proof
@@ -390,11 +414,14 @@ Design decisions:
 `CheckedTheorem` includes:
 
 ```rust
+pub statement: String
 pub is_imported: bool
 ```
 
-The CLI uses this to print only declarations from the root file. The imported
-declarations are still available to later proofs.
+The CLI uses `is_imported` to print only declarations from the root file. The
+browser uses `statement` plus the imported flag to populate the searchable
+theorem-library panel. The imported declarations are still available to later
+proofs.
 
 ## Diagnostics
 
@@ -406,6 +433,7 @@ pub struct Diagnostic {
     pub location: Option<SourceLocation>,
     pub message: String,
     pub notes: Vec<String>,
+    pub suggestions: Vec<DiagnosticSuggestion>,
 }
 ```
 
@@ -419,6 +447,8 @@ Current diagnostic design:
   on raw tactic lines while parsing theorem bodies.
 - Tactic execution errors report the failing tactic line and attach the current
   open goal as the diagnostic target note.
+- Common tactic errors also carry structured recovery suggestions so the browser
+  and CLI can show next actions without parsing diagnostic strings.
 - The CLI prints `path:line: message` when location information exists.
 
 This is a pragmatic halfway point. It helps users find failing declarations and
@@ -901,6 +931,11 @@ The CLI filters out imported declarations using `CheckedTheorem::is_imported`.
 This avoids overwhelming output when a user checks a small file that imports
 the prelude.
 
+With `--interactive` or `-i`, the CLI starts a line-oriented terminal shell.
+It reuses the path-backed editor APIs for proof-state display, stepping,
+theorem search, tactic hints, and proof explanations. This keeps import
+resolution and diagnostics consistent with normal file checking.
+
 ## Wasm And Web UI
 
 The wasm crate is intentionally thin, mirroring the CLI. It exports:
@@ -909,6 +944,7 @@ The wasm crate is intentionally thin, mirroring the CLI. It exports:
 - `cetacea_outline`
 - `cetacea_goals_at`
 - `cetacea_run_tactic`
+- `cetacea_explain_theorem`
 
 The exports accept UTF-8 strings through explicit `cetacea_alloc` /
 `cetacea_free` memory helpers and return a length-prefixed JSON string. This
@@ -921,7 +957,10 @@ CS250-style `import ../../../std/prelude.ctea` without filesystem access.
 
 The static UI in `web/` loads `cetacea_wasm.wasm`, renders diagnostics and
 accepted declarations, and uses the goal-stepping APIs to show the current proof
-state.
+state. Goal snapshots include rule-based tactic hints, and check results include
+theorem statements for the searchable theorem-library panel. The proof
+explanation panel calls `cetacea_explain_theorem` for the selected theorem and
+renders the checked tactic trace as student-facing prose.
 
 ## Why the Language Is Small
 

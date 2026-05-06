@@ -33,6 +33,7 @@ body {
 
 button,
 select,
+input,
 textarea {
   font: inherit;
 }
@@ -211,6 +212,16 @@ select {
   padding: 0 10px;
 }
 
+input[type="search"] {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: white;
+  color: var(--ink);
+  padding: 0 10px;
+}
+
 .status {
   min-height: 22px;
   margin-bottom: 12px;
@@ -253,6 +264,49 @@ select {
 
 .goal-target {
   font-weight: 650;
+}
+
+.goal-hints {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  background: #fbfcfe;
+}
+
+.hint-heading {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.hint-item {
+  display: grid;
+  grid-template-columns: minmax(96px, 140px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.hint-tactic {
+  min-width: 0;
+  padding: 6px 8px;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.hint-title {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.hint-detail {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .tactic-item {
@@ -306,6 +360,151 @@ select {
 .tutorial-list {
   display: grid;
   gap: 8px;
+}
+
+.library-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 108px;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#proofExplanation {
+  display: grid;
+  gap: 8px;
+}
+
+.explain-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.explain-step {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.explain-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.explain-line {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.explain-before,
+.explain-after {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.explain-before {
+  border-bottom: 1px solid var(--line);
+}
+
+.explain-after {
+  border-top: 1px solid var(--line);
+  background: #fbfcfe;
+}
+
+.explain-body {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+}
+
+.explain-body p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.explain-warning {
+  padding: 8px 10px;
+  border: 1px solid #fedf89;
+  border-radius: 4px;
+  background: #fffbeb;
+  color: #854d0e;
+  font-size: 13px;
+}
+
+#theoremLibrary {
+  display: grid;
+  gap: 8px;
+}
+
+.library-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.library-item.is-suggested {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.library-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.library-name {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-weight: 700;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.library-name:hover {
+  color: var(--accent);
+}
+
+.library-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #eef2f7;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.library-statement {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .tutorial-item {
@@ -416,6 +615,35 @@ pre {
   margin-top: 4px;
 }
 
+.diagnostic-help {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #fedf89;
+  border-radius: 4px;
+  background: #fffbeb;
+}
+
+.diagnostic-help-title {
+  color: #92400e;
+  font-weight: 700;
+}
+
+.diagnostic-help-detail {
+  margin-top: 3px;
+  color: #854d0e;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.diagnostic-example {
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: 4px;
+  background: #fff7d6;
+  color: var(--ink);
+  font-size: 12px;
+}
+
 .accepted-item {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -446,5 +674,15 @@ pre {
 
   .editor-shell {
     height: 54vh;
+  }
+
+  .hint-item,
+  .library-controls,
+  .library-head {
+    grid-template-columns: 1fr;
+  }
+
+  .library-badges {
+    justify-content: flex-start;
   }
 }

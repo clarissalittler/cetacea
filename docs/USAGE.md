@@ -24,6 +24,16 @@ Check a file with the CLI:
 cargo run -p cetacea_cli -- examples/imports.ctea
 ```
 
+Start the terminal interactive mode with:
+
+```sh
+cargo run -p cetacea_cli -- --interactive examples/prop.ctea
+```
+
+Inside interactive mode, use `help` to see commands. The main commands are
+`theorems`, `select <name|number>`, `reset`, `step`, `goals <line> [column]`,
+`hints`, `search <text>`, and `explain [theorem]`.
+
 After building, the compiled binary can be run directly:
 
 ```sh
@@ -47,6 +57,11 @@ http://localhost:8000/web/
 The browser build embeds the standard library for virtual imports, so tutorial
 sources can still use imports such as `import std/prelude.ctea` or
 `import ../../../std/prelude.ctea`.
+
+The browser UI also shows the current proof goals, rule-based tactic hints for
+each open goal, diagnostic repair suggestions, a searchable theorem-library
+panel populated by the checked source and imported standard library, and a
+line-by-line proof explanation for the selected theorem.
 
 The CLI prints accepted declarations from the root file. Imported declarations
 are checked and loaded, but they are not printed as part of the importing file's

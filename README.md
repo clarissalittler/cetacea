@@ -16,7 +16,8 @@ compatibility, and argument type compatibility.
 - `crates/cetacea_core`: parser, AST, tactics, proof objects, and kernel
   checker.
 - `crates/cetacea_cli`: command-line checker.
-- `crates/cetacea_wasm`: WebAssembly exports for checking and goal stepping.
+- `crates/cetacea_wasm`: WebAssembly exports for checking, goal stepping, and
+  proof explanations.
 - `web`: static browser UI.
 - `docs/USAGE.md`: language and proving guide.
 - `docs/DESIGN_AND_CODE.md`: implementation and design guide.
@@ -42,6 +43,15 @@ cargo run -p cetacea_cli -- std/prelude.ctea
 cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
+
+Run the terminal interactive mode with:
+
+```sh
+cargo run -p cetacea_cli -- --interactive examples/prop.ctea
+```
+
+Interactive commands include `theorems`, `select`, `reset`, `step`,
+`goals`, `hints`, `search`, and `explain`.
 
 Build the WebAssembly checker and serve the browser UI from the repository
 root:
@@ -73,8 +83,12 @@ loaded once.
 
 - `mode constructive` and `mode classical`
 - file imports with `import path/to/file.ctea`
-- source outline, cursor goal, and tactic-step APIs for editor integrations
-- WebAssembly exports and a static browser UI for checking and goal stepping
+- source outline, cursor goal, tactic-step, and proof-explanation APIs for
+  editor integrations
+- terminal interactive mode with goal display, tactic hints, theorem search,
+  stepping, and proof explanations
+- WebAssembly exports and a static browser UI for checking, goal stepping,
+  tactic hints, diagnostic help, theorem-library search, and proof explanations
 - virtual imports for browser-hosted standard-library files
 - `sort`, `const`, `func`, `pred`, formula and term `def`, unary `Nat`
   `defrec`, and `axiom`
@@ -120,7 +134,8 @@ loaded once.
 
 ## Next Milestones
 
-1. Improve diagnostics with precise source spans and proof-state rendering.
+1. Improve diagnostics with more precise source spans and richer recovery
+   suggestions.
 2. Improve theorem-instantiation diagnostics and broaden inference.
 3. Broaden `simp` with more computation rules and optional hypothesis
    simplification.
