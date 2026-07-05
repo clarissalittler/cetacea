@@ -1287,6 +1287,7 @@ Includes basic Nat addition, multiplication, subtraction, and order lemmas:
 - `le_succ_succ`
 - `le_succ_succ_rev`
 - `le_refl`
+- `le_trans`
 - `le_zero_inv`
 - `le_succ_inv`
 - `strong_induction_bounded`

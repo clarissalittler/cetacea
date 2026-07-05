@@ -214,3 +214,41 @@ theorem strong_induction (P : Nat -> Prop) (n : Nat)
   intro hstep
   apply strong_induction_bounded {P := P; n := n} h0 hstep n
   exact le_refl
+
+theorem le_trans (a : Nat) : forall b c : Nat, le(a, b) -> le(b, c) -> le(a, c) := by
+  induction a with
+  | zero =>
+      intro b
+      intro c
+      intro h1
+      intro h2
+      simp
+      trivial
+  | succ k ih =>
+      intro b
+      induction b with
+      | zero =>
+          intro c
+          intro h1
+          intro h2
+          simp at h1
+          exfalso
+          exact h1
+      | succ b0 ihb =>
+          intro c
+          induction c with
+          | zero =>
+              intro h1
+              intro h2
+              simp at h2
+              exfalso
+              exact h2
+          | succ c0 ihc =>
+              intro h1
+              intro h2
+              simp at h1
+              simp at h2
+              simp
+              apply ih b0 c0
+              exact h1
+              exact h2
