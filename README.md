@@ -25,8 +25,8 @@ compatibility, and argument type compatibility.
 - `docs/DESIGN_AND_CODE.md`: implementation and design guide.
 - `std`: checked theorem-library files.
 - `std/prelude.ctea`: imports the current standard-library theorem files.
-- `std/list.ctea`: `List` data type over `Nat`, `length`, axiomatized binary
-  `append`, and length lemmas.
+- `std/list.ctea`: `List` data type over `Nat`, recursive `length` and
+  `append`, and length/associativity lemmas.
 - `std/fun.ctea`: functions modeled as graphs, with `Total`, `SingleValued`,
   `Injective`, `Surjective`, identity-function theorems, and composition
   theorems.
@@ -113,13 +113,15 @@ loaded once.
 - WebAssembly exports and a static browser UI for checking, goal stepping,
   tactic hints, diagnostic help, theorem-library search, and proof explanations
 - virtual imports for browser-hosted standard-library files
-- `sort`, `const`, `func`, `pred`, formula and term `def`, unary `defrec`,
+- `sort`, `const`, `func`, `pred`, formula and term `def`, `defrec`,
   `data`, and `axiom` declarations
 - monomorphic inductive `data` declarations whose constructors become
   constants or functions, with structural `induction ... with` over them,
   including one induction hypothesis per recursive constructor argument
-- unary primitive recursive `defrec` definitions over `Nat` and over declared
-  data types, computed by `simp` and `refl`
+- primitive recursive `defrec` definitions over `Nat` and over declared data
+  types, computed by `simp` and `refl`; additional fixed parameters after the
+  recursive one support binary operations such as
+  `defrec append (l : List) (r : List) : List`
 - theorem declarations with proposition, predicate, type, and term parameters
 - built-in `Nat`, `Set T`, numeric Nat literals, `0`, `succ(n)`,
   `add(n, m)`, `mul(n, m)`, and `sub(n, m)`, plus Nat predicate `le(n, m)`
@@ -136,7 +138,8 @@ loaded once.
 - validation for function names, function arity, and function argument types
 - validation for transparent formula and term definitions, including definition
   arity, inferred type parameters, and proposition/predicate parameters
-- validation for unary primitive recursive `Nat` definitions
+- validation for primitive recursive definitions, including per-constructor
+  case coverage and binder counts
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
@@ -155,7 +158,11 @@ loaded once.
 - tactics: `intro`, `exact`, `trivial`, `assumption`, `apply`, `split`,
   `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `unfold`, `simp`,
   `induction`, `exfalso`, `contradiction`, `by_cases`, `by_contra`,
-  `show_goal`, `sorry` (alias `admit`)
+  `show_goal`, `sorry` (alias `admit`), and `have` for forward reasoning
+  (`have h : P`, `have h : P := proof`, `have h := proof`)
+- projections and parenthesized sub-expressions inside proof-expression
+  arguments, as in `exact f h.left` and `rewrite -> hinj x y (h.left)`;
+  projections bind tighter than application
 - `sorry` closes any goal; the theorem is accepted but reported as
   `incomplete: uses sorry`, and incompleteness propagates to theorems that
   use a sorry'd theorem, so instructors can distribute homework skeletons
@@ -185,12 +192,12 @@ loaded once.
 ## Next Milestones
 
 1. Parameterized (polymorphic) data types, so `List` and `Tree` can be
-   declared once for any element type.
-2. Binary and mutual recursion in `defrec`, removing the need to axiomatize
-   operations such as `append`.
+   declared once for any element type. Deliberately deferred: it requires
+   polymorphic function signatures and a type-application form threaded
+   through the whole kernel, while concrete declarations such as
+   `data NatList` cover the course exercises.
+2. Mutual recursion and recursion on later `defrec` arguments.
 3. Cardinality and counting support for the combinatorics side of a discrete
    math course.
 4. Decision procedures for modular arithmetic goals.
 5. Namespaces and qualified imports.
-6. A `have` tactic for forward reasoning inside proofs.
-7. Projections inside proof-expression arguments.

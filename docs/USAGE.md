@@ -330,7 +330,7 @@ itself; those recursive arguments are what structural induction and `defrec`
 recurse on. Data types are monomorphic: there are no type parameters, so
 `std/list.ctea`'s `List` is specifically a list of `Nat`.
 
-User-defined unary recursive functions use `defrec`, over `Nat`:
+User-defined recursive functions use `defrec`, over `Nat`:
 
 ```text
 defrec double (n : Nat) : Nat
@@ -358,9 +358,18 @@ Here `l`, `v`, and `r` are the constructor arguments of `node`, and `recl` and
 `recr` are `size(l)` and `size(r)`. Both `simp` and `refl` compute `defrec`
 definitions.
 
-`defrec` recurses over a single argument. Binary recursive operations such as
-list `append` are introduced as declared functions with their recursion
-equations as axioms; see `std/list.ctea` for the pattern.
+`defrec` recurses on its first argument only, but additional fixed parameters
+may follow it, which is enough for the usual binary operations:
+
+```text
+defrec append (l : List) (r : List) : List
+| nil => r
+| cons h t rec => cons(h, rec)
+```
+
+The extra parameters (`r` here) stay fixed through the recursion and are in
+scope in every arm; `rec` abbreviates `append(t, r)`. Recursion on a later
+argument or mutual recursion is not supported.
 
 Built-in set terms:
 
@@ -1064,6 +1073,37 @@ homework skeletons — an instructor can distribute a file of stated theorems
 with `sorry` bodies, and a submission is only fully proved when no accepted
 line carries the incomplete flag.
 
+### `have`
+
+`have` states an intermediate fact, proves it (or takes a proof directly), and
+makes it available as a named hypothesis for the rest of the proof:
+
+```text
+theorem chain (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
+  intro hpq
+  intro hqr
+  intro hp
+  have hq : Q
+  apply hpq
+  exact hp
+  apply hqr
+  exact hq
+```
+
+`have hq : Q` opens `Q` as the next goal; once it is closed, the original goal
+resumes with `hq : Q` in the context. When the proof is a single expression,
+supply it directly and no extra goal is opened:
+
+```text
+have hq := h.right
+have hp : P := h.left
+```
+
+The annotated form checks the expression against the stated formula and
+reports a mismatch as `have proof has type ..., but the stated formula
+is ...`. The name must be fresh; shadowing an existing hypothesis or variable
+is rejected.
+
 ### `by_cases`
 
 Classical case split:
@@ -1130,6 +1170,15 @@ Implication application:
 ```text
 exact h hp
 exact (h hp).left
+```
+
+Projections and parenthesized sub-expressions also work inside arguments, and
+projections bind tighter than application, so `f h.left` means `f (h.left)`:
+
+```text
+exact f h.left
+exact f (h.left) (h.right)
+rewrite -> hinj x y (h.left)
 ```
 
 Explicit theorem instantiation:
@@ -1292,13 +1341,14 @@ concrete list type used by the course examples:
 - `length`, a `defrec` over `List`
 - `length_nil`
 - `length_cons`
-- `append`, a declared binary function with its recursion equations as the
-  axioms `append_nil` and `append_cons`
+- `append`, a binary `defrec` recursing on its first argument
+- `append_nil` and `append_cons`, the recursion equations as theorems
 - `length_append`
 - `append_nil_length`
+- `append_assoc`
 
-Theorems that use `append` list the two axioms in their `accepted` line,
-because their proofs depend on the axiomatized recursion equations.
+Because `append` is a `defrec`, `simp` and `refl` compute it directly and no
+axioms are involved.
 
 ### `std/fun.ctea`
 
@@ -1485,8 +1535,9 @@ Cetacea is intentionally small. Important current limitations:
   division, modular arithmetic, or decidable equality tactic.
 - Data types are monomorphic: there are no type parameters, so there is no
   polymorphic `List A`.
-- `defrec` recurses over a single argument; binary and mutual recursion need
-  axiomatized recursion equations.
+- `defrec` recurses on its first argument, with optional fixed extra
+  parameters; recursion on later arguments and mutual recursion are not
+  supported.
 - `induction` rejects induction when local hypotheses depend on the induction
   variable.
 - `intro`, `cases` arm binders, and `induction` arm binders reject names that

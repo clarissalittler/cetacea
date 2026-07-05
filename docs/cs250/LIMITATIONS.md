@@ -67,13 +67,19 @@ one recursive-result name per recursive argument, in order. `simp` and
 `refl` both compute these definitions, on concrete and on symbolic
 constructor calls.
 
-The remaining gap is that `defrec` recurses over exactly one argument:
-there is no binary recursion, no mutual recursion, and no pattern
-matching deeper than one constructor. Binary textbook operations such as
-list `append` still need to be introduced as uninterpreted functions
-with axiomatized recursion equations — `std/list.ctea` does exactly this,
-and the axiom-dependency reporting (see the resolved section) at least
-makes the trust boundary visible on every `accepted` line.
+`defrec` now also takes additional fixed parameters after the recursive
+one, so binary textbook operations are directly definable:
+
+```text
+defrec append (l : List) (r : List) : List
+| nil => r
+| cons h t rec => cons(h, rec)
+```
+
+`std/list.ctea` defines `append` this way — no axioms involved — and
+proves `length_append` and `append_assoc` by structural induction. The
+remaining gaps are recursion on a *later* argument, mutual recursion,
+and pattern matching deeper than one constructor.
 
 The standard library includes `pred`, `pred_succ`, and `succ_inj`
 for the common successor-injectivity exercise.
@@ -92,7 +98,7 @@ data Tree
 `induction t with | leaf => ... | node l v r ihl ihr => ...` gives one
 induction hypothesis per recursive constructor argument, which is
 exactly Module 10's structural induction rule. With `std/list.ctea`
-(lists of naturals, `length`, axiomatized `append`) and strong induction
+(lists of naturals, recursive `length` and `append`) and strong induction
 in `std/nat.ctea`, the Module 8 sequence/recursion material, Module 9
 recurrences, and Module 10 structural induction material are now largely
 expressible; see the new `07_structural_induction.md` tutorial.
@@ -287,9 +293,15 @@ are now implemented:
 - Inductive data types can be declared with `data`, with structural
   `induction ... with` over them, including two-recursive-argument
   constructors such as tree nodes.
-- `defrec` works over declared data types, not just `Nat`.
+- `defrec` works over declared data types, not just `Nat`, and takes
+  additional fixed parameters, so binary operations such as `append` are
+  defined directly rather than axiomatized.
+- A `have` tactic supports forward reasoning (`have h : P`,
+  `have h : P := proof`).
+- Projections parse inside proof-expression arguments
+  (`exact f h.left`, `rewrite -> hinj x y (h.left)`).
 - The prelude now includes `std/list.ctea` (lists of naturals with
-  `length` and axiomatized `append`) and `std/fun.ctea`
+  recursive `length` and `append`) and `std/fun.ctea`
   (functions-as-graphs with `Total`, `SingleValued`, `Injective`,
   `Surjective`, and composition theorems).
 - Strong induction is available as `strong_induction` and

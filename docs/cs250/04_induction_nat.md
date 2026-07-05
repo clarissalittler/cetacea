@@ -88,11 +88,20 @@ zero case and the successor case.
 
 ## A custom right-recursive addition
 
-If you want a second addition-like operation with the textbook's
-right-recursive equations, you can axiomatize it. `defrec` handles
-unary recursion, but it does not define binary operations such as
-addition directly. This example is mostly an exercise, because Cetacea's
-built-in `add` already computes these equations:
+`defrec` defines binary operations directly when the recursion runs on
+the **first** argument — extra parameters after it stay fixed:
+
+```text
+defrec myadd_left (n : Nat) (m : Nat) : Nat
+| zero => m
+| succ k rec => succ(rec)
+```
+
+The textbook's addition, however, recurses on the **second** argument.
+`defrec` cannot do that, so to study the textbook's exact equations you
+either swap the argument roles or axiomatize them. This example
+axiomatizes them; it is mostly an exercise, because Cetacea's built-in
+`add` already computes these equations:
 
 ```text
 mode constructive
@@ -118,10 +127,10 @@ theorem myadd_zero_n (n : Nat) : myadd(0, n) = n := by
       refl
 ```
 
-Notice we still have to *axiomatize* these binary recursion equations
-rather than write a binary recursive function. For purposes of doing the
-textbook exercises in Cetacea, this is fine for short proofs but gets
-tedious; see `LIMITATIONS.md`.
+The axioms are only needed because the recursion runs on the second
+argument; first-argument recursions are ordinary `defrec` definitions
+(see `append` in `std/list.ctea`). See `LIMITATIONS.md` for the current
+`defrec` boundaries.
 
 ## Module 4 Exercise 11: `0 · n = 0`
 
