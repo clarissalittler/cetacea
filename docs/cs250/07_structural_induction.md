@@ -132,13 +132,15 @@ A tree node has two recursive arguments, so the `node` arm gets two
 induction hypotheses, bound after the constructor arguments:
 
 ```text
+defrec mirror (t : Tree) : Tree
+| leaf => leaf
+| node l v r recl recr => node(recr, v, recl)
+
 theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
   induction t with
   | leaf =>
-      rewrite -> mirror_leaf
       refl
   | node l v r ihl ihr =>
-      rewrite -> mirror_node {l := l; v := v; r := r}
       simp
       rewrite -> ihl
       rewrite -> ihr
@@ -146,11 +148,12 @@ theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
       refl
 ```
 
-Here `mirror` (swap the subtrees, everywhere) is axiomatized with one
-equation per constructor, since its result type is `Tree` rather than
-`Nat`. The final `add_comm` step is the mathematical heart of the proof:
-mirroring swaps the sizes of the two subtrees, and addition doesn't
-care.
+Here `mirror` (swap the subtrees, everywhere) is an ordinary `defrec` —
+recursive definitions can return any type, including the data type
+itself — so `simp` computes its equations directly and no axioms are
+involved. The final `add_comm` step is the mathematical heart of the
+proof: mirroring swaps the sizes of the two subtrees, and addition
+doesn't care.
 
 ## Strong induction on Nat
 
@@ -213,8 +216,8 @@ The library also has `strong_induction_bounded`, `le_zero_inv`, and
   needed.
 - Define `defrec depth (t : Tree) : Nat` (the depth of a tree) and prove
   `depth(node(leaf, v, leaf)) = 1` by `refl`.
-- Prove `mirror(mirror(t)) = t` by structural induction on `t`, using
-  the `mirror_leaf` and `mirror_node` axioms.
+- Prove `mirror(mirror(t)) = t` by structural induction on `t` — `simp`
+  computes the `mirror` equations for you.
 - Prove `le(length(l), length(append(l, l2)))`... is harder than it
   looks — you'll want lemmas relating `le` and `add` first. Good
   stretch exercise.
