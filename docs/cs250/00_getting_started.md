@@ -96,6 +96,11 @@ This is the entire propositional-and-FOL surface you'll need:
 | `x ∈ A` | `x in A` | (built-in, sets) |
 | `A ⊆ B` | `A subset B` | (built-in, sets) |
 
+You can also just type the course notation directly: the Unicode symbols
+`∧ ∨ ¬ → ↔ ∀ ∃ ∈ ⊆` are accepted as aliases for the ASCII spellings, so
+`P ∧ Q → Q ∧ P` parses the same as `P /\ Q -> Q /\ P`. (Other non-ASCII
+characters get a helpful error rather than a parse mystery.)
+
 Use `trivial` or `exact True` to prove a plain `True` goal.
 
 ## What if my proof doesn't go through?
@@ -116,6 +121,39 @@ A few things to know:
   it, including inside `cases` and `induction` blocks.
 - "exact expression does not solve the goal" plus `expected: X` means
   the *open subgoal at that step* was `X`.
+
+Two more things the checker does when you're stuck:
+
+- **Countermodel notes.** If what you're trying to prove is purely
+  propositional and *actually false*, the error says so and gives the
+  falsifying assignment:
+
+  ```
+  note: the statement is not a tautology: it is false when P = false, Q = true.
+  No proof can close it; check the statement itself.
+  ```
+
+  No amount of tactic cleverness will fix that — re-read the statement.
+  The variant "the open goal does not follow from the current
+  hypotheses ... Reconsider the earlier proof steps" means the statement
+  is fine but an earlier step (say, picking `left` when you needed
+  `right`) painted you into a corner. The browser UI shows the same
+  check as a "Warning: this goal is not provable" hint in the Goals
+  panel.
+
+- **`sorry`.** The `sorry` tactic (alias `admit`) closes any goal
+  unproved, so you can skip past a stuck theorem and keep checking the
+  rest of the file. The theorem is accepted but flagged:
+
+  ```
+  accepted theorem hard_one (constructive; incomplete: uses sorry)
+  ```
+
+  The flag propagates to anything that uses a sorry'd theorem, so a file
+  only counts as fully proved when no accepted line carries it. This is
+  also how homework skeletons are distributed: your instructor states
+  the theorems with `sorry` bodies, and your job is to make the flags
+  disappear.
 
 When you're stuck in the browser UI, put the cursor on a tactic line and
 look at the Goals panel. In the CLI, you can temporarily insert

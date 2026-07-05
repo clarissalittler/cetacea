@@ -6,8 +6,10 @@ Cetacea is a small tactic-based theorem prover following the design in
 The current implementation covers propositional logic, a first-order layer with
 typed variables, predicate applications, universal and existential
 quantification, equality, transparent formula and term definitions, typed sets,
-primitive recursive `Nat` definitions, and a small natural-number layer with
-induction. Declarations and formula annotations are checked for known types,
+user-declared inductive data types with structural induction, primitive
+recursive `defrec` definitions over `Nat` and data types, and a natural-number
+layer with ordinary and strong induction. Declarations and formula annotations
+are checked for known types,
 known predicates, predicate arity, function arity, definition arity, set element
 compatibility, and argument type compatibility.
 
@@ -23,6 +25,11 @@ compatibility, and argument type compatibility.
 - `docs/DESIGN_AND_CODE.md`: implementation and design guide.
 - `std`: checked theorem-library files.
 - `std/prelude.ctea`: imports the current standard-library theorem files.
+- `std/list.ctea`: `List` data type over `Nat`, `length`, axiomatized binary
+  `append`, and length lemmas.
+- `std/fun.ctea`: functions modeled as graphs, with `Total`, `SingleValued`,
+  `Injective`, `Surjective`, identity-function theorems, and composition
+  theorems.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
 - `examples/set_nat.ctea`: typed set and natural-number simplification examples.
@@ -72,8 +79,17 @@ Then open:
 http://localhost:8000/web/
 ```
 
+The browser UI is also deployed automatically to GitHub Pages by
+`.github/workflows/pages.yml`, which builds the WebAssembly checker and
+publishes the contents of `web/` on every push to `main`.
+
 The CLI prints each accepted theorem or axiom from the root file and the
-strongest mode used by its checked proof object.
+strongest mode used by its checked proof object. Accepted lines are printed
+for every passing theorem even when other theorems in the file fail. A proof
+that depends on axioms, directly or through other theorems, lists them, as in
+`accepted theorem length_append (constructive; axioms: append_cons,
+append_nil)`, and a proof that uses the `sorry` tactic (directly or through a
+sorry'd theorem) is reported as `(constructive; incomplete: uses sorry)`.
 Diagnostics for checked declarations and parse errors include the file and
 command or tactic line when the checker has path information. Parser
 diagnostics also carry line-local token spans where the parser can identify the
@@ -97,9 +113,13 @@ loaded once.
 - WebAssembly exports and a static browser UI for checking, goal stepping,
   tactic hints, diagnostic help, theorem-library search, and proof explanations
 - virtual imports for browser-hosted standard-library files
-- `sort`, `const`, `func`, `pred`, formula and term `def`, unary `Nat`
-  `defrec`, and `axiom`
-  declarations
+- `sort`, `const`, `func`, `pred`, formula and term `def`, unary `defrec`,
+  `data`, and `axiom` declarations
+- monomorphic inductive `data` declarations whose constructors become
+  constants or functions, with structural `induction ... with` over them,
+  including one induction hypothesis per recursive constructor argument
+- unary primitive recursive `defrec` definitions over `Nat` and over declared
+  data types, computed by `simp` and `refl`
 - theorem declarations with proposition, predicate, type, and term parameters
 - built-in `Nat`, `Set T`, numeric Nat literals, `0`, `succ(n)`,
   `add(n, m)`, `mul(n, m)`, and `sub(n, m)`, plus Nat predicate `le(n, m)`
@@ -107,6 +127,8 @@ loaded once.
   `diff(A, B)`, `powerset(A)`, and set builders `{ x : T | P(x) }`
 - formulas: `True`, `False`, atoms, equality, membership, subset, `not`, `/\`,
   `\/`, `->`, `<->`
+- Unicode aliases for the connectives: `∧`, `∨`, `¬`, `→`, `↔`, `∀`, `∃`,
+  `∈`, `⊆`
 - first-order formulas: `forall x : T, P(x)`, `exists x : T, P(x)`, and
   same-type multi-binders such as `forall x y : T, R(x, y)`
 - validation for type names, predicate names, predicate arity, and predicate
@@ -118,7 +140,8 @@ loaded once.
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
-  sets, and natural numbers
+  sets, natural numbers (including strong induction), lists, and functions as
+  graphs
 - checked standard-library prelude
 - examples checked by the core test suite
 - goal-directed schema instantiation for bare theorem references in `exact` and
@@ -128,21 +151,46 @@ loaded once.
 - proof objects for natural-deduction rules over implication, conjunction,
   disjunction, truth, falsehood, universal quantification, existential
   quantification, equality reflexivity, equality substitution, natural-number
-  induction, theorem references, and classical rules
+  induction, structural induction, theorem references, and classical rules
 - tactics: `intro`, `exact`, `trivial`, `assumption`, `apply`, `split`,
   `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `unfold`, `simp`,
   `induction`, `exfalso`, `contradiction`, `by_cases`, `by_contra`,
-  `show_goal`
+  `show_goal`, `sorry` (alias `admit`)
+- `sorry` closes any goal; the theorem is accepted but reported as
+  `incomplete: uses sorry`, and incompleteness propagates to theorems that
+  use a sorry'd theorem, so instructors can distribute homework skeletons
+- `cases h with | intro hp hq => ...` on conjunction hypotheses as well as
+  existentials
+- `refl` normalizes both sides of an equality goal, so pure computation facts
+  such as `add(n, 0) = n` and `mul(2, 3) = 6` close without a preceding `simp`
+- `exists` validates its witness term and reports type mismatches at the
+  tactic line
 - `simp` computation for transparent formula definitions, primitive recursive
-  Nat definitions, set membership, subset expansion, Nat arithmetic and
+  `defrec` definitions, set membership, subset expansion, Nat arithmetic and
   comparison, including terms nested under predicate and function arguments
 - kernel reporting of constructive versus classical proof use
+- per-theorem status reporting: `accepted` lines are printed for every passing
+  theorem even when other theorems fail, and each line lists the axioms the
+  proof depends on, directly or transitively
+- propositional countermodel feedback: when a failed statement or open goal is
+  purely propositional and classically falsifiable, the error notes a
+  falsifying assignment, and the Goals panel warns that the goal is not
+  provable
+- goal hints are speculatively executed, so failing suggestions are dropped
+- TUI undo and redo with Ctrl-Z / Ctrl-Y
+- browser UI localStorage autosave, a load-example menu, inline error markers,
+  and live re-checking
 - command and tactic-line reporting for checker diagnostics
 
 ## Next Milestones
 
-1. Improve diagnostics with more precise source spans and richer recovery
-   suggestions.
-2. Improve theorem-instantiation diagnostics and broaden inference.
-3. Broaden `simp` with more computation rules and optional hypothesis
-   simplification.
+1. Parameterized (polymorphic) data types, so `List` and `Tree` can be
+   declared once for any element type.
+2. Binary and mutual recursion in `defrec`, removing the need to axiomatize
+   operations such as `append`.
+3. Cardinality and counting support for the combinatorics side of a discrete
+   math course.
+4. Decision procedures for modular arithmetic goals.
+5. Namespaces and qualified imports.
+6. A `have` tactic for forward reasoning inside proofs.
+7. Projections inside proof-expression arguments.

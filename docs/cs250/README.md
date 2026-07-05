@@ -20,6 +20,8 @@ re-teach the math; they translate it into Cetacea.
 | `04_induction_nat.md` | Module 4 (end) | Natural-number induction |
 | `05_sets.md` | Module 1 / intermezzo | Sets and set extensionality |
 | `06_relations.md` | Module 1 | Reflexive / symmetric / transitive relations |
+| `07_structural_induction.md` | Modules 8–10 | Data types, recursion over them, structural and strong induction |
+| `08_functions.md` | Functions module | Functions as graphs: total, single-valued, injective, surjective, composition |
 | `LIMITATIONS.md` | — | What CS 250 topics Cetacea **can't** currently do, and rough edges I hit while writing these |
 
 Each tutorial has a sibling runnable file in `code/`. Check it the same
@@ -38,6 +40,10 @@ cargo run -p cetacea_cli -- docs/cs250/code/01_propositional.ctea
    *via* a truth table can be re-derived as a proof in `02`.
 3. Then `03` and `04` to see quantifiers and induction.
 4. `05` and `06` are about the parts of Module 1 that Cetacea supports.
+5. `07` continues induction into lists, trees, and strong induction —
+   read it after `04`, alongside Modules 8–10.
+6. `08` builds on `03` and `06`: functions are just special relations,
+   and the file makes that literal.
 
 ## What you'll get out of this
 

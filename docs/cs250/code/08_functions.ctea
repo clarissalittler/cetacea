@@ -1,0 +1,66 @@
+-- Companion file for docs/cs250/08_functions.md.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+func mother : Person -> Person
+
+-- The graph of a declared `func f : A -> B` is the predicate lambda
+-- `fun x y : A => f(x) = y` (the checker gives `y` type B from context).
+-- Every declared func is total and single-valued, and both facts are
+-- provable from its graph.
+
+theorem mother_total : Total(fun x y : Person => mother(x) = y) := by
+  unfold Total
+  intro x
+  exists mother(x)
+  refl
+
+theorem mother_single_valued
+  : SingleValued(fun x y : Person => mother(x) = y) := by
+  unfold SingleValued
+  intro x
+  intro y1
+  intro y2
+  intro h1
+  intro h2
+  rewrite <- h1
+  rewrite <- h2
+  refl
+
+-- The identity function id(x) = x has graph `fun x y : A => x = y`.
+-- std/fun.ctea proves it injective and surjective; "bijective" is written
+-- as the conjunction because definitions cannot pass predicate parameters
+-- to other definitions.
+theorem person_id_bijective
+  : Injective(fun x y : Person => x = y) /\ Surjective(fun x y : Person => x = y) := by
+  exact id_bijective {A := Person}
+
+-- The successor function on Nat is injective (but not surjective: nothing
+-- maps to 0).
+theorem succ_graph_injective : Injective(fun n m : Nat => succ(n) = m) := by
+  unfold Injective
+  intro x1
+  intro x2
+  intro y
+  intro h1
+  intro h2
+  apply succ_inj
+  rewrite -> h2
+  exact h1
+
+-- Composition of graphs: relation composition, exactly as in the course.
+-- The composite graph of F : A -> B and G : B -> C relates x to z when some
+-- intermediate y has F(x, y) and G(y, z). std/fun.ctea proves the two
+-- composition theorems; this shows how to apply one.
+theorem use_compose
+  (F : Person -> Person -> Prop)
+  (G : Person -> Person -> Prop)
+  : Surjective(F) -> Surjective(G)
+    -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\ G(y, z) := by
+  intro hf
+  intro hg
+  exact compose_surjective {A := Person; B := Person; C := Person; F := F; G := G} hf hg

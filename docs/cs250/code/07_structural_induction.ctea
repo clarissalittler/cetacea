@@ -1,0 +1,152 @@
+-- Companion file for docs/cs250/07_structural_induction.md.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- The prelude's std/list.ctea declares:
+--
+--   data List
+--   | nil
+--   | cons(Nat, List)
+--
+-- with `length` as a defrec, and `append` as an axiomatized binary function.
+-- `refl` computes defrec definitions directly:
+
+theorem length_two_demo : length(cons(1, cons(2, nil))) = 2 := by
+  refl
+
+-- A new recursive definition over List: the sum of the elements.
+defrec sum (l : List) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+theorem sum_singleton (n : Nat) : sum(cons(n, nil)) = n := by
+  simp
+  refl
+
+-- Structural induction on List: the nil arm and the cons arm.
+-- In the cons arm, `h` and `t` name the constructor arguments and `ih` is
+-- the induction hypothesis for the recursive argument `t`.
+theorem length_append_demo (l1 : List) (l2 : List)
+  : length(append(l1, l2)) = add(length(l1), length(l2)) := by
+  induction l1 with
+  | nil =>
+      rewrite -> append_nil {l := l2}
+      simp
+      refl
+  | cons h t ih =>
+      rewrite -> append_cons {h := h; t := t; l := l2}
+      simp
+      rewrite -> ih
+      refl
+
+theorem sum_append (l1 : List) (l2 : List)
+  : sum(append(l1, l2)) = add(sum(l1), sum(l2)) := by
+  induction l1 with
+  | nil =>
+      rewrite -> append_nil {l := l2}
+      simp
+      refl
+  | cons h t ih =>
+      rewrite -> append_cons {h := h; t := t; l := l2}
+      simp
+      rewrite -> ih
+      rewrite add_assoc {n := h; m := sum(t); k := sum(l2)}
+      refl
+
+-- A user-declared inductive type: binary trees with Nat labels.
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+-- In the node arm, `l`, `v`, `r` bind the constructor arguments, and then
+-- `recl`, `recr` bind the recursive results for `l` and `r`, in order.
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+
+theorem size_leaf : size(leaf) = 0 := by
+  refl
+
+theorem size_node (l : Tree) (v : Nat) (r : Tree)
+  : size(node(l, v, r)) = succ(add(size(l), size(r))) := by
+  refl
+
+-- `mirror` swaps the two subtrees everywhere. `defrec` recursion results are
+-- Nat-valued expressions built from the binders; a Tree-valued recursion like
+-- mirror is introduced as a function with its recursion equations as axioms.
+func mirror : Tree -> Tree
+
+axiom mirror_leaf : mirror(leaf) = leaf
+axiom mirror_node (l : Tree) (v : Nat) (r : Tree)
+  : mirror(node(l, v, r)) = node(mirror(r), v, mirror(l))
+
+-- Structural induction on Tree: the node arm gets one induction hypothesis
+-- per recursive argument, `ihl` for `l` and `ihr` for `r`.
+theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
+  induction t with
+  | leaf =>
+      rewrite -> mirror_leaf
+      refl
+  | node l v r ihl ihr =>
+      rewrite -> mirror_node {l := l; v := v; r := r}
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      rewrite -> add_comm {n := size(l); m := size(r)}
+      refl
+
+-- Strong induction on Nat, from std/nat.ctea:
+--
+--   strong_induction (P : Nat -> Prop) (n : Nat)
+--     : P(0)
+--       -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
+--       -> P(n)
+--
+-- First contact: a statement where the strong hypothesis is not even needed.
+theorem zero_le_all (n : Nat) : le(0, n) := by
+  apply strong_induction {P := fun m : Nat => le(0, m); n := n}
+  simp
+  trivial
+  intro k
+  intro hk
+  simp
+  trivial
+
+-- Two order lemmas used by the real example below.
+theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
+  induction n with
+  | zero =>
+      simp
+      trivial
+  | succ k ih =>
+      simp
+      exact ih
+
+theorem pred_le (n : Nat) : le(pred(n), n) := by
+  induction n with
+  | zero =>
+      simp
+      trivial
+  | succ k ih =>
+      simp
+      exact le_n_succ_n
+
+-- A recurrence that steps to the *predecessor of the predecessor*:
+-- g(succ(k)) looks up g at pred(k), which is not the immediate predecessor
+-- succ(k) - 1 = k. Ordinary induction gives P(k) only; strong induction gives
+-- P at every m <= k, which covers pred(k).
+func g : Nat -> Nat
+
+axiom g_zero : g(0) = 0
+axiom g_step (k : Nat) : g(succ(k)) = g(pred(k))
+
+theorem g_always_zero (n : Nat) : g(n) = 0 := by
+  apply strong_induction {P := fun m : Nat => g(m) = 0; n := n}
+  exact g_zero
+  intro k
+  intro hk
+  rewrite -> g_step {k := k}
+  apply hk
+  exact pred_le

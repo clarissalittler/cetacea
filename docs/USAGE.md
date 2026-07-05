@@ -76,7 +76,10 @@ sources can still use imports such as `import std/prelude.ctea` or
 The browser UI also shows the current proof goals, rule-based tactic hints for
 each open goal, diagnostic repair suggestions, a searchable theorem-library
 panel populated by the checked source and imported standard library, and a
-line-by-line proof explanation for the selected theorem.
+line-by-line proof explanation for the selected theorem. Tactic hints are
+speculatively executed before they are shown, so suggestions that would fail
+are dropped. The editor autosaves to localStorage, re-checks as you type,
+marks error lines inline, and has a load-example menu.
 
 The CLI prints accepted declarations from the root file. Imported declarations
 are checked and loaded, but they are not printed as part of the importing file's
@@ -90,6 +93,24 @@ accepted theorem imported_forall_mono (constructive)
 accepted theorem imported_exists_mono (constructive)
 accepted theorem imported_add_comm (constructive)
 accepted theorem imported_subset_trans (constructive)
+```
+
+Accepted lines are printed for every passing theorem even when other theorems
+in the file fail, so one broken proof does not hide the status of the rest of
+the file.
+
+A proof that depends on axioms, directly or through other theorems it uses,
+lists those axioms:
+
+```text
+accepted theorem length_append (constructive; axioms: append_cons, append_nil)
+```
+
+A proof that uses the `sorry` tactic, or a theorem whose proof does, is
+accepted but flagged as incomplete:
+
+```text
+accepted theorem homework_gap (constructive; incomplete: uses sorry)
 ```
 
 If a file has only imports, the CLI prints:
@@ -151,10 +172,12 @@ import fol.ctea
 import eq.ctea
 import nat.ctea
 import set.ctea
+import list.ctea
+import fun.ctea
 ```
 
 Use the prelude when you want the common propositional, first-order, equality,
-Nat, and set lemmas:
+Nat, set, list, and function-graph lemmas:
 
 ```text
 import ../std/prelude.ctea
@@ -292,7 +315,22 @@ the textbook right-recursive equations. In particular, `add(0, n)`,
 `sub` is truncated subtraction: `sub(n, 0)`, `sub(0, n)`, and
 `sub(succ(n), succ(m))` simplify directly.
 
-User-defined unary recursive functions over `Nat` use `defrec`:
+User-defined inductive data types use `data`:
+
+```text
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+```
+
+Each `|` line declares one constructor. A constructor without arguments, such
+as `leaf`, becomes a constant of the data type. A constructor with arguments,
+such as `node`, becomes a function. Argument types may mention the data type
+itself; those recursive arguments are what structural induction and `defrec`
+recurse on. Data types are monomorphic: there are no type parameters, so
+`std/list.ctea`'s `List` is specifically a list of `Nat`.
+
+User-defined unary recursive functions use `defrec`, over `Nat`:
 
 ```text
 defrec double (n : Nat) : Nat
@@ -304,6 +342,25 @@ The zero arm gives the value at `0`. In the successor arm, `k` is the
 predecessor and `rec` is the already-computed recursive result for `k`.
 The simplifier reduces concrete calls such as `double(succ(succ(0)))` and
 symbolic successor calls such as `double(succ(n))`.
+
+`defrec` also works over declared data types, with one arm per constructor in
+declaration order. In each arm, bind one name per constructor argument, then
+one name per recursive argument for its already-computed recursive result, in
+order:
+
+```text
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+```
+
+Here `l`, `v`, and `r` are the constructor arguments of `node`, and `recl` and
+`recr` are `size(l)` and `size(r)`. Both `simp` and `refl` compute `defrec`
+definitions.
+
+`defrec` recurses over a single argument. Binary recursive operations such as
+list `append` are introduced as declared functions with their recursion
+equations as axioms; see `std/list.ctea` for the pattern.
 
 Built-in set terms:
 
@@ -362,6 +419,23 @@ exists x y : T, R(x, y)
 ```
 
 `not P` is represented as `P -> False`.
+
+The usual Unicode symbols are accepted as aliases for the ASCII spellings:
+
+| Unicode | ASCII |
+|---|---|
+| `∧` | `/\` |
+| `∨` | `\/` |
+| `¬` | `not` |
+| `→` | `->` |
+| `↔` | `<->` |
+| `∀` | `forall` |
+| `∃` | `exists` |
+| `∈` | `in` |
+| `⊆` | `subset` |
+
+So `P ∧ Q → Q ∧ P` parses the same as `P /\ Q -> Q /\ P`. Other non-ASCII
+characters are rejected with an error that points at the offending character.
 
 `P <-> Q` is parsed as:
 
@@ -646,7 +720,7 @@ theorem or_right (P Q : Prop) : Q -> P \/ Q := by
 
 ### `cases`
 
-Use `cases` to eliminate disjunctions and existentials.
+Use `cases` to eliminate disjunctions, existentials, and conjunctions.
 
 For disjunction:
 
@@ -676,6 +750,22 @@ theorem exists_and_left
       exact hx.left
 ```
 
+The `| intro a b =>` form also destructures a conjunction hypothesis, naming
+the two halves:
+
+```text
+theorem and_comm_cases (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  cases h with
+  | intro hp hq =>
+      split
+      exact hq
+      exact hp
+```
+
+The binders in a `cases` arm must be fresh and distinct: reusing an existing
+name, or the same name twice, is rejected.
+
 Case body indentation matters. The body of a case arm is the indented block
 under `| left ... =>`, `| right ... =>`, or `| intro ... =>`.
 
@@ -690,16 +780,27 @@ theorem student_exists : Student(alice) -> exists x : Person, Student(x) := by
   exact h
 ```
 
+The witness term is validated against the existential's bound type, so a
+witness of the wrong type is reported at the tactic line, as in
+``witness `0` has type `Nat`, but expected `Person` ``.
+
 ### `refl`
 
 Use `refl` to prove equality whose two sides are definitionally equal after
-computation.
+computation. `refl` normalizes both sides itself, so pure computation goals
+close in one step:
 
 ```text
 theorem add_zero_left (n : Nat) : add(0, n) = n := by
-  simp
+  refl
+
+theorem two_times_three : mul(2, 3) = 6 := by
   refl
 ```
+
+This also covers `defrec` definitions, including `defrec` over data types.
+Writing `simp` before `refl` still works and can be useful when you want to
+see the simplified goal, but it is no longer required for computation.
 
 ### `rewrite`
 
@@ -836,21 +937,86 @@ theorem inter_hyp_and_goal
 
 ### `induction`
 
-Use `induction n with` for natural-number induction.
+Use `induction n with` for natural-number induction:
 
 ```text
-theorem add_zero_right (n : Nat) : add(n, 0) = n := by
-  simp
-  refl
+theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
 ```
 
-For facts that still need induction, the zero and successor arm bodies are
-indented. In the successor arm, `k` is the predecessor variable and `ih` is the
-induction hypothesis.
+The arm bodies are indented. In the successor arm, `k` is the predecessor
+variable and `ih` is the induction hypothesis.
+
+`induction` also does structural induction over declared data types. Arms must
+follow the constructor declaration order. Each arm binds one name per
+constructor argument, then one induction hypothesis per recursive argument, in
+order, after the constructor-argument binders:
+
+```text
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
+  induction t with
+  | leaf =>
+      rewrite -> mirror_leaf
+      refl
+  | node l v r ihl ihr =>
+      rewrite -> mirror_node {l := l; v := v; r := r}
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      rewrite -> add_comm {n := size(l); m := size(r)}
+      refl
+```
+
+Here `node` has two recursive arguments, so its arm binds two induction
+hypotheses: `ihl` for `l` and `ihr` for `r`.
+
+Induction binders must be fresh. Shadowing an existing variable or hypothesis
+is rejected with `induction binder would shadow an existing variable`, and
+this applies to the Nat `| succ k ih` binders as well.
 
 The checker rejects induction if a local hypothesis depends on the induction
 variable, because the current induction rule does not generalize such
 hypotheses.
+
+For strong (course-of-values) induction on `Nat`, use the library theorem
+`strong_induction` from `std/nat.ctea`:
+
+```text
+strong_induction (P : Nat -> Prop) (n : Nat)
+  : P(0)
+    -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
+    -> P(n)
+```
+
+It is applied with an explicit predicate lambda, since `P` cannot be inferred
+from the goal:
+
+```text
+theorem zero_le_all (n : Nat) : le(0, n) := by
+  apply strong_induction {P := fun m : Nat => le(0, m); n := n}
+  simp
+  trivial
+  intro k
+  intro hk
+  simp
+  trivial
+```
+
+After the `apply`, the first goal is `P(0)` and the second is the step goal,
+in which the strong hypothesis `hk` provides `P(m)` for every `m` with
+`le(m, k)`. The library also provides `strong_induction_bounded`,
+`le_zero_inv`, and `le_succ_inv`.
 
 ### `exfalso` and `contradiction`
 
@@ -876,6 +1042,27 @@ the proof and reports the current open goal.
 theorem stuck (P : Prop) : P := by
   show_goal
 ```
+
+### `sorry`
+
+Use `sorry` (or its alias `admit`) to close any goal without proving it. The
+theorem is accepted so the rest of the file can be checked, but it is reported
+as incomplete:
+
+```text
+theorem homework_gap (P Q : Prop) : P /\ Q -> Q /\ P := by
+  sorry
+```
+
+```text
+accepted theorem homework_gap (constructive; incomplete: uses sorry)
+```
+
+Incompleteness propagates: a theorem whose proof uses a sorry'd theorem is
+also reported as `incomplete: uses sorry`. This makes `sorry` safe to use for
+homework skeletons — an instructor can distribute a file of stated theorems
+with `sorry` bodies, and a submission is only fully proved when no accepted
+line carries the incomplete flag.
 
 ### `by_cases`
 
@@ -1051,6 +1238,10 @@ Includes basic Nat addition, multiplication, subtraction, and order lemmas:
 - `le_succ_succ`
 - `le_succ_succ_rev`
 - `le_refl`
+- `le_zero_inv`
+- `le_succ_inv`
+- `strong_induction_bounded`
+- `strong_induction`
 
 ### `std/set.ctea`
 
@@ -1091,6 +1282,49 @@ Includes set extensionality as an axiom plus set lemmas:
 - `inter_assoc_left`
 - `inter_empty_left`
 - `inter_empty_right`
+
+### `std/list.ctea`
+
+Lists of natural numbers. Cetacea data types are monomorphic, so this is the
+concrete list type used by the course examples:
+
+- `data List` with constructors `nil` and `cons(Nat, List)`
+- `length`, a `defrec` over `List`
+- `length_nil`
+- `length_cons`
+- `append`, a declared binary function with its recursion equations as the
+  axioms `append_nil` and `append_cons`
+- `length_append`
+- `append_nil_length`
+
+Theorems that use `append` list the two axioms in their `accepted` line,
+because their proofs depend on the axiomatized recursion equations.
+
+### `std/fun.ctea`
+
+Functions `f : A -> B` modeled by their graphs, following the
+functions-as-relations treatment: a graph is a predicate
+`G : A -> B -> Prop`, and `G(x, y)` means `f(x) = y`. For a declared
+`func f : A -> B`, the graph is the lambda `fun x y : A => f(x) = y` (the
+checker gives `y` its type `B` from context).
+
+Definitions, each with parameters `(A : Type) (B : Type) (G : A -> B -> Prop)`:
+
+- `Total`
+- `SingleValued`
+- `Injective`
+- `Surjective`
+
+Theorems:
+
+- `id_injective`
+- `id_surjective`
+- `id_bijective`, stated as the conjunction
+  `Injective(...) /\ Surjective(...)` — there is no `Bijective` definition
+  because definitions cannot pass their predicate parameters to other
+  definitions
+- `compose_injective`
+- `compose_surjective`
 
 ## Working Example
 
@@ -1249,14 +1483,40 @@ Cetacea is intentionally small. Important current limitations:
   still need explicit theorem parameters.
 - Nat has addition, multiplication, truncated subtraction, and `le`, but no
   division, modular arithmetic, or decidable equality tactic.
-- Nat induction is specialized to `Nat` and rejects induction when local
-  hypotheses depend on the induction variable.
-- `intro` rejects names that would shadow an existing local variable or
-  hypothesis.
+- Data types are monomorphic: there are no type parameters, so there is no
+  polymorphic `List A`.
+- `defrec` recurses over a single argument; binary and mutual recursion need
+  axiomatized recursion equations.
+- `induction` rejects induction when local hypotheses depend on the induction
+  variable.
+- `intro`, `cases` arm binders, and `induction` arm binders reject names that
+  would shadow an existing local variable or hypothesis.
 
 ## Debugging Failed Proofs
 
-When a proof fails:
+When a proof fails and the statement, or the open goal together with its
+hypotheses, is purely propositional and classically falsifiable, the error
+includes a countermodel note:
+
+```text
+note: the statement is not a tautology: it is false when P = false, Q = true.
+No proof can close it; check the statement itself.
+```
+
+or, when the statement is fine but an earlier step painted the proof into a
+corner:
+
+```text
+note: the open goal does not follow from the current hypotheses: it is false
+when P = true, Q = false. Reconsider the earlier proof steps.
+```
+
+The first note means no tactic script can ever succeed — the statement itself
+is wrong. The second means the statement may be provable, but not from here;
+back up and take a different step. The browser UI surfaces the same check as a
+"Warning: this goal is not provable" hint in the Goals panel.
+
+For everything else, when a proof fails:
 
 1. Read the target note in the diagnostic.
 2. Check whether the failing theorem is in constructive or classical mode.
@@ -1267,6 +1527,9 @@ When a proof fails:
 6. If a `cases` or `induction` block behaves oddly, check indentation.
 7. Try replacing `exact theorem_name` with explicit steps using `intro`,
    `apply`, `split`, and `cases`.
+8. Close a stubborn subgoal with `sorry` to keep checking the rest of the
+   file, then come back to it. The theorem stays flagged as
+   `incomplete: uses sorry` until the `sorry` is removed.
 
 ## Style Conventions
 
