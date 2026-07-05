@@ -1,0 +1,365 @@
+mode constructive
+
+import nat.ctea
+import eq.ctea
+
+-- Modular arithmetic over Nat: divisibility and congruence.
+--
+-- The course (CS 250, Module 6) defines x ≡ y (mod m) as "m divides x - y".
+-- Cetacea's Nat has truncated subtraction, so `sub(x, y)` is 0 whenever
+-- y >= x and the textbook definition silently degenerates. We therefore use
+-- a subtraction-free formulation that is equivalent over the integers:
+--
+--   ModEq(m, x, y)  :=  exists a b : Nat, x + m*a = y + m*b
+--
+-- i.e. x and y become equal after each is padded by some multiple of m.
+-- This version is manifestly symmetric and lets us *prove* reflexivity,
+-- symmetry, transitivity, and compatibility with + and * — no axioms needed.
+-- Divisibility is the usual existential: Divides(a, b) := exists k, b = a*k.
+
+-- ---------------------------------------------------------------------------
+-- Helper Nat lemmas that std/nat.ctea does not provide yet.
+-- ---------------------------------------------------------------------------
+
+-- Pull the middle element to the front: a + (b + c) = b + (a + c).
+theorem add_left_comm (a b c : Nat) : add(a, add(b, c)) = add(b, add(a, c)) := by
+  rewrite add_assoc {n := a; m := b; k := c}
+  rewrite add_assoc {n := b; m := a; k := c}
+  rewrite -> add_comm {n := a; m := b}
+  refl
+
+-- Exchange the two middle summands: (a + b) + (c + d) = (a + c) + (b + d).
+theorem add_middle_swap (a b c d : Nat)
+  : add(add(a, b), add(c, d)) = add(add(a, c), add(b, d)) := by
+  rewrite -> add_assoc {n := a; m := b; k := add(c, d)}
+  rewrite -> add_assoc {n := a; m := c; k := add(b, d)}
+  rewrite -> add_left_comm {a := b; b := c; c := d}
+  refl
+
+-- Addition is cancellative on the left.
+theorem add_cancel_left (k a b : Nat) : add(k, a) = add(k, b) -> a = b := by
+  induction k with
+  | zero =>
+      simp
+      intro h
+      exact h
+  | succ k0 ih =>
+      simp
+      intro h
+      apply ih
+      apply succ_inj
+      exact h
+
+-- Right distributivity: (a + b) * c = a*c + b*c.
+theorem mul_add_left (a b c : Nat)
+  : mul(add(a, b), c) = add(mul(a, c), mul(b, c)) := by
+  induction a with
+  | zero =>
+      simp
+      refl
+  | succ a0 ih =>
+      simp
+      rewrite -> ih
+      rewrite -> add_assoc {n := c; m := mul(a0, c); k := mul(b, c)}
+      refl
+
+-- Left distributivity: a * (b + c) = a*b + a*c.
+theorem mul_add_right (a b c : Nat)
+  : mul(a, add(b, c)) = add(mul(a, b), mul(a, c)) := by
+  induction a with
+  | zero =>
+      simp
+      refl
+  | succ a0 ih =>
+      simp
+      rewrite -> ih
+      rewrite -> add_middle_swap {a := b; b := c; c := mul(a0, b); d := mul(a0, c)}
+      refl
+
+theorem mul_comm (n m : Nat) : mul(n, m) = mul(m, n) := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ n0 ih =>
+      simp
+      rewrite -> ih
+      refl
+
+theorem mul_assoc (n m k : Nat) : mul(mul(n, m), k) = mul(n, mul(m, k)) := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ n0 ih =>
+      simp
+      rewrite -> mul_add_left {a := m; b := mul(n0, m); c := k}
+      rewrite -> ih
+      refl
+
+theorem mul_one_right (n : Nat) : mul(n, 1) = n := by
+  refl
+
+theorem mul_one_left (n : Nat) : mul(1, n) = n := by
+  refl
+
+-- ---------------------------------------------------------------------------
+-- Divisibility.
+-- ---------------------------------------------------------------------------
+
+def Divides (a : Nat) (b : Nat) : Prop := exists k : Nat, b = mul(a, k)
+
+theorem divides_refl (a : Nat) : Divides(a, a) := by
+  unfold Divides
+  exists 1
+  refl
+
+-- Every number divides 0 (with witness k = 0).
+theorem divides_zero (a : Nat) : Divides(a, 0) := by
+  unfold Divides
+  exists 0
+  refl
+
+theorem one_divides (a : Nat) : Divides(1, a) := by
+  unfold Divides
+  exists a
+  refl
+
+theorem divides_trans (a b c : Nat)
+  : Divides(a, b) -> Divides(b, c) -> Divides(a, c) := by
+  intro hab
+  intro hbc
+  simp at hab
+  simp at hbc
+  cases hab with
+  | intro k hk =>
+      cases hbc with
+      | intro j hj =>
+          unfold Divides
+          exists mul(k, j)
+          rewrite -> hj
+          rewrite -> hk
+          exact mul_assoc {n := a; m := k; k := j}
+
+-- A common divisor of two numbers divides their sum.
+theorem divides_add (d a b : Nat)
+  : Divides(d, a) -> Divides(d, b) -> Divides(d, add(a, b)) := by
+  intro ha
+  intro hb
+  simp at ha
+  simp at hb
+  cases ha with
+  | intro k hk =>
+      cases hb with
+      | intro j hj =>
+          unfold Divides
+          exists add(k, j)
+          rewrite -> mul_add_right {a := d; b := k; c := j}
+          rewrite hk
+          rewrite hj
+          refl
+
+-- A divisor of a divides any multiple of a.
+theorem divides_mul (d a k : Nat) : Divides(d, a) -> Divides(d, mul(a, k)) := by
+  intro h
+  simp at h
+  cases h with
+  | intro j hj =>
+      unfold Divides
+      exists mul(j, k)
+      rewrite mul_assoc {n := d; m := j; k := k}
+      rewrite hj
+      refl
+
+-- Concrete computations: the witness plus `refl` does all the arithmetic.
+theorem divides_3_12 : Divides(3, 12) := by
+  unfold Divides
+  exists 4
+  refl
+
+theorem divides_7_42 : Divides(7, 42) := by
+  unfold Divides
+  exists 6
+  refl
+
+theorem divides_2_10 : Divides(2, 10) := by
+  unfold Divides
+  exists 5
+  refl
+
+-- ---------------------------------------------------------------------------
+-- Congruence mod m.
+-- ---------------------------------------------------------------------------
+
+-- ModEq(m, x, y) is the subtraction-free reading of x ≡ y (mod m):
+-- some multiple of m added to x equals some multiple of m added to y.
+def ModEq (m : Nat) (x : Nat) (y : Nat) : Prop := exists a b : Nat, add(x, mul(m, a)) = add(y, mul(m, b))
+
+theorem modeq_refl (m x : Nat) : ModEq(m, x, x) := by
+  unfold ModEq
+  exists 0
+  exists 0
+  refl
+
+theorem modeq_sym (m x y : Nat) : ModEq(m, x, y) -> ModEq(m, y, x) := by
+  intro h
+  simp at h
+  cases h with
+  | intro a ha =>
+      cases ha with
+      | intro b hb =>
+          unfold ModEq
+          exists b
+          exists a
+          apply eq_symm
+          exact hb
+
+-- Transitivity is fully proved (no axioms): pad x's and z's witnesses with
+-- the middle equation's multiples and re-associate.
+theorem modeq_trans (m x y z : Nat)
+  : ModEq(m, x, y) -> ModEq(m, y, z) -> ModEq(m, x, z) := by
+  intro hxy
+  intro hyz
+  simp at hxy
+  simp at hyz
+  cases hxy with
+  | intro a ha =>
+      cases ha with
+      | intro b hab =>
+          cases hyz with
+          | intro c hc =>
+              cases hc with
+              | intro d hcd =>
+                  unfold ModEq
+                  exists add(a, c)
+                  exists add(d, b)
+                  rewrite -> mul_add_right {a := m; b := a; c := c}
+                  rewrite -> mul_add_right {a := m; b := d; c := b}
+                  rewrite add_assoc {n := x; m := mul(m, a); k := mul(m, c)}
+                  rewrite -> hab
+                  rewrite -> add_assoc {n := y; m := mul(m, b); k := mul(m, c)}
+                  rewrite -> add_comm {n := mul(m, b); m := mul(m, c)}
+                  rewrite add_assoc {n := y; m := mul(m, c); k := mul(m, b)}
+                  rewrite -> hcd
+                  rewrite -> add_assoc {n := z; m := mul(m, d); k := mul(m, b)}
+                  refl
+
+-- Congruence is compatible with addition.
+theorem modeq_add (m x y u v : Nat)
+  : ModEq(m, x, y) -> ModEq(m, u, v) -> ModEq(m, add(x, u), add(y, v)) := by
+  intro hxy
+  intro huv
+  simp at hxy
+  simp at huv
+  cases hxy with
+  | intro a ha =>
+      cases ha with
+      | intro b hab =>
+          cases huv with
+          | intro c hc =>
+              cases hc with
+              | intro d hcd =>
+                  unfold ModEq
+                  exists add(a, c)
+                  exists add(b, d)
+                  rewrite -> mul_add_right {a := m; b := a; c := c}
+                  rewrite -> mul_add_right {a := m; b := b; c := d}
+                  rewrite -> add_middle_swap {a := x; b := u; c := mul(m, a); d := mul(m, c)}
+                  rewrite -> add_middle_swap {a := y; b := v; c := mul(m, b); d := mul(m, d)}
+                  rewrite -> hab
+                  rewrite -> hcd
+                  refl
+
+-- Multiplying both sides of a congruence by a constant preserves it.
+theorem modeq_scale (m x y k : Nat)
+  : ModEq(m, x, y) -> ModEq(m, mul(k, x), mul(k, y)) := by
+  intro h
+  simp at h
+  cases h with
+  | intro a ha =>
+      cases ha with
+      | intro b hab =>
+          unfold ModEq
+          exists mul(k, a)
+          exists mul(k, b)
+          rewrite mul_assoc {n := m; m := k; k := a}
+          rewrite mul_assoc {n := m; m := k; k := b}
+          rewrite -> mul_comm {n := m; m := k}
+          rewrite -> mul_comm {n := m; m := k}
+          rewrite -> mul_assoc {n := k; m := m; k := a}
+          rewrite -> mul_assoc {n := k; m := m; k := b}
+          rewrite mul_add_right {a := k; b := x; c := mul(m, a)}
+          rewrite mul_add_right {a := k; b := y; c := mul(m, b)}
+          rewrite -> hab
+          refl
+
+-- The mirror image: multiplying on the right preserves congruence.
+theorem modeq_scale_right (m x y k : Nat)
+  : ModEq(m, x, y) -> ModEq(m, mul(x, k), mul(y, k)) := by
+  intro h
+  simp at h
+  cases h with
+  | intro a ha =>
+      cases ha with
+      | intro b hab =>
+          unfold ModEq
+          exists mul(a, k)
+          exists mul(b, k)
+          rewrite mul_assoc {n := m; m := a; k := k}
+          rewrite mul_assoc {n := m; m := b; k := k}
+          rewrite mul_add_left {a := x; b := mul(m, a); c := k}
+          rewrite mul_add_left {a := y; b := mul(m, b); c := k}
+          rewrite -> hab
+          refl
+
+-- Congruence is compatible with multiplication: scale each congruence and
+-- chain them through the midpoint mul(y, u) with transitivity.
+theorem modeq_mul (m x y u v : Nat)
+  : ModEq(m, x, y) -> ModEq(m, u, v) -> ModEq(m, mul(x, u), mul(y, v)) := by
+  intro hxy
+  intro huv
+  have hleft : ModEq(m, mul(x, u), mul(y, u)) := modeq_scale_right {m := m; x := x; y := y; k := u} hxy
+  have hright : ModEq(m, mul(y, u), mul(y, v)) := modeq_scale {m := m; x := u; y := v; k := y} huv
+  apply modeq_trans {m := m; x := mul(x, u); y := mul(y, u); z := mul(y, v)}
+  exact hleft
+  exact hright
+
+-- Adding a multiple of the modulus does not change the residue class.
+theorem modeq_add_multiple (m x k : Nat) : ModEq(m, add(x, mul(m, k)), x) := by
+  unfold ModEq
+  exists 0
+  exists k
+  refl
+
+-- Bridge to divisibility, easy direction: if m | x then x ≡ 0 (mod m).
+theorem divides_to_modeq_zero (m x : Nat) : Divides(m, x) -> ModEq(m, x, 0) := by
+  intro h
+  simp at h
+  cases h with
+  | intro k hk =>
+      unfold ModEq
+      exists 0
+      exists k
+      simp
+      exact hk
+
+-- Bridge to divisibility, hard direction. From x + m*a = m*b one must
+-- extract a witness k with x = m*(b - a), which needs order reasoning
+-- (a <= b when m > 0, and the degenerate m = 0 case) plus cancellation
+-- lemmas about truncated subtraction that std/nat.ctea does not have yet.
+-- We state it as an axiom; the CLI reports every theorem that relies on it.
+axiom modeq_zero_to_divides (m x : Nat) : ModEq(m, x, 0) -> Divides(m, x)
+
+-- Concrete congruences. On a 12-hour clock, 14 o'clock is 2 o'clock:
+-- witnesses a = 0, b = 1 give 14 + 12*0 = 2 + 12*1.
+theorem modeq_14_2_mod_12 : ModEq(12, 14, 2) := by
+  unfold ModEq
+  exists 0
+  exists 1
+  refl
+
+theorem modeq_9_2_mod_7 : ModEq(7, 9, 2) := by
+  unfold ModEq
+  exists 0
+  exists 1
+  refl

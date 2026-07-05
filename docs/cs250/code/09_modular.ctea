@@ -1,0 +1,176 @@
+-- Companion file for docs/cs250/09_modular.md.
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- ---------------------------------------------------------------------------
+-- Divisibility: proofs are witnesses.
+-- Divides(a, b) unfolds to `exists k : Nat, b = mul(a, k)`, so a
+-- divisibility proof is a witness plus a computation.
+-- ---------------------------------------------------------------------------
+
+theorem divides_4_20 : Divides(4, 20) := by
+  unfold Divides
+  exists 5
+  refl
+
+-- Library lemmas cover the generic facts; here a | 0 with a := 9.
+theorem divides_9_0 : Divides(9, 0) := by
+  exact divides_zero
+
+theorem divides_3_9 : Divides(3, 9) := by
+  unfold Divides
+  exists 3
+  refl
+
+-- The sum rule: 3 | 12 and 3 | 9, so 3 | (12 + 9). `divides_3_12` comes
+-- from std/modular.ctea. Passing the premises as proof-expression
+-- arguments keeps the `Divides` goals folded; `apply` would unfold them.
+theorem divides_3_sum : Divides(3, add(12, 9)) := by
+  exact divides_add {d := 3; a := 12; b := 9} divides_3_12 divides_3_9
+
+-- The chain rule: 3 | 6 and 6 | 18, so 3 | 18.
+theorem divides_3_6 : Divides(3, 6) := by
+  unfold Divides
+  exists 2
+  refl
+
+theorem divides_6_18 : Divides(6, 18) := by
+  unfold Divides
+  exists 3
+  refl
+
+theorem divides_3_18 : Divides(3, 18) := by
+  exact divides_trans {a := 3; b := 6; c := 18} divides_3_6 divides_6_18
+
+-- ---------------------------------------------------------------------------
+-- Congruence: clock arithmetic.
+-- ModEq(m, x, y) unfolds to `exists a b : Nat, x + m*a = y + m*b`.
+-- ---------------------------------------------------------------------------
+
+-- 27 o'clock is 3 o'clock: 27 + 12*0 = 3 + 12*2.
+theorem modeq_27_3_mod_12 : ModEq(12, 27, 3) := by
+  unfold ModEq
+  exists 0
+  exists 2
+  refl
+
+-- The same fact the other way around, swapping the two witnesses.
+theorem modeq_3_27_mod_12 : ModEq(12, 3, 27) := by
+  unfold ModEq
+  exists 2
+  exists 0
+  refl
+
+-- ---------------------------------------------------------------------------
+-- A congruence law proved from scratch: succ respects ModEq.
+-- This is the pattern for every ModEq proof: unpack the two witnesses,
+-- supply new ones, let simp + rewrite close the arithmetic.
+-- ---------------------------------------------------------------------------
+
+theorem modeq_succ (m x y : Nat) : ModEq(m, x, y) -> ModEq(m, succ(x), succ(y)) := by
+  intro h
+  simp at h
+  cases h with
+  | intro a ha =>
+      cases ha with
+      | intro b hb =>
+          unfold ModEq
+          exists a
+          exists b
+          simp
+          rewrite -> hb
+          refl
+
+-- ---------------------------------------------------------------------------
+-- Modular arithmetic without ever computing remainders:
+-- combine small congruences with modeq_add and modeq_mul.
+-- ---------------------------------------------------------------------------
+
+theorem modeq_8_3_mod_5 : ModEq(5, 8, 3) := by
+  unfold ModEq
+  exists 0
+  exists 1
+  refl
+
+theorem modeq_9_4_mod_5 : ModEq(5, 9, 4) := by
+  unfold ModEq
+  exists 0
+  exists 1
+  refl
+
+-- 8 + 9 ≡ 3 + 4 (mod 5): add the two congruences componentwise.
+theorem modeq_sum_demo : ModEq(5, add(8, 9), add(3, 4)) := by
+  exact modeq_add {m := 5; x := 8; y := 3; u := 9; v := 4} modeq_8_3_mod_5 modeq_9_4_mod_5
+
+theorem modeq_6_1_mod_5 : ModEq(5, 6, 1) := by
+  unfold ModEq
+  exists 0
+  exists 1
+  refl
+
+-- 6 * 6 ≡ 1 * 1 (mod 5): multiply the congruence 6 ≡ 1 by itself.
+theorem modeq_36_demo : ModEq(5, mul(6, 6), mul(1, 1)) := by
+  exact modeq_mul {m := 5; x := 6; y := 1; u := 6; v := 1} modeq_6_1_mod_5 modeq_6_1_mod_5
+
+-- The same fact stated with the numbers already multiplied out, proved
+-- directly by giving the padding witnesses: 36 + 5*0 = 1 + 5*7.
+theorem modeq_36_1_mod_5 : ModEq(5, 36, 1) := by
+  unfold ModEq
+  exists 0
+  exists 7
+  refl
+
+-- ---------------------------------------------------------------------------
+-- The divisibility bridge.
+-- ---------------------------------------------------------------------------
+
+-- The proved direction: m | x implies x ≡ 0 (mod m).
+theorem modeq_12_0_mod_3 : ModEq(3, 12, 0) := by
+  exact divides_to_modeq_zero {m := 3; x := 12} divides_3_12
+
+-- The converse uses the one axiom in std/modular.ctea. The CLI reports
+-- the dependency: this theorem is accepted with
+-- `axioms: modeq_zero_to_divides`.
+theorem residue_zero_divides (x : Nat) : ModEq(6, x, 0) -> Divides(6, x) := by
+  exact modeq_zero_to_divides
+
+-- ---------------------------------------------------------------------------
+-- A tiny application: parity is just "mod 2".
+-- ---------------------------------------------------------------------------
+
+theorem even_plus_even (a b : Nat)
+  : Divides(2, a) -> Divides(2, b) -> Divides(2, add(a, b)) := by
+  exact divides_add
+
+theorem even_times_anything (a k : Nat)
+  : Divides(2, a) -> Divides(2, mul(a, k)) := by
+  exact divides_mul
+
+-- ---------------------------------------------------------------------------
+-- Exercises. Replace each `sorry` with a proof. The file still checks
+-- with the sorries in place, but each one is flagged as incomplete.
+-- ---------------------------------------------------------------------------
+
+-- Exercise 1: find the witness.
+theorem exercise_divides_5_35 : Divides(5, 35) := by
+  sorry
+
+-- Exercise 2: 23 and 3 have the same last digit. Find the two padding
+-- witnesses (one of them is 0).
+theorem exercise_modeq_23_3_mod_10 : ModEq(10, 23, 3) := by
+  sorry
+
+-- Exercise 3: doubling respects congruence. One `exact` with `modeq_add`
+-- is enough — a congruence can be combined with itself.
+theorem exercise_modeq_double (m x y : Nat)
+  : ModEq(m, x, y) -> ModEq(m, add(x, x), add(y, y)) := by
+  sorry
+
+-- Exercise 4: a sum of two multiples of d is divisible by d. Unfold
+-- Divides, give the witness add(k, j), then use the distributivity lemma
+-- mul_add_right from std/modular.ctea (with a rewrite) to close the goal.
+theorem exercise_divides_sum_of_multiples (d k j : Nat)
+  : Divides(d, add(mul(d, k), mul(d, j))) := by
+  sorry

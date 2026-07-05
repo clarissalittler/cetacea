@@ -22,6 +22,7 @@ re-teach the math; they translate it into Cetacea.
 | `06_relations.md` | Module 1 | Reflexive / symmetric / transitive relations |
 | `07_structural_induction.md` | Modules 8–10 | Data types, recursion over them, structural and strong induction |
 | `08_functions.md` | Functions module | Functions as graphs: total, single-valued, injective, surjective, composition |
+| `09_modular.md` | Module 6 | Divisibility, congruence mod m as an equivalence, modular arithmetic |
 | `LIMITATIONS.md` | — | What CS 250 topics Cetacea **can't** currently do, and rough edges I hit while writing these |
 
 Each tutorial has a sibling runnable file in `code/`. Check it the same
@@ -44,6 +45,9 @@ cargo run -p cetacea_cli -- docs/cs250/code/01_propositional.ctea
    read it after `04`, alongside Modules 8–10.
 6. `08` builds on `03` and `06`: functions are just special relations,
    and the file makes that literal.
+7. `09` does Module 6 with the equivalence-relation ideas from `06` and
+   the arithmetic from `04` — it closes the modular-congruence gap that
+   `06` had to axiomatize around.
 
 ## What you'll get out of this
 
