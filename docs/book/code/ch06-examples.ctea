@@ -1,0 +1,193 @@
+-- Proofs, Checked — Chapter 6: Sets: Collections You Can Reason About
+-- Companion file for docs/book/06-sets.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch06-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Section 6.1: a tiny campus.
+sort Student
+
+const ana : Student
+const ben : Student
+
+pred TakesCS(Student)
+pred TakesMath(Student)
+
+-- Section 6.2: naming sets. CS is the set of students taking CS.
+def CS : Set Student := { x : Student | TakesCS(x) }
+def Math : Set Student := { x : Student | TakesMath(x) }
+
+-- Section 6.2: membership is a proposition, and simp computes it.
+theorem ana_in_cs : TakesCS(ana) -> ana in CS := by
+  intro h
+  simp
+  exact h
+
+-- Membership in a singleton becomes an equality — Chapter 5 pays off.
+theorem ben_in_singleton : ben in singleton(ben) := by
+  simp
+  refl
+
+-- Membership in a finite set becomes a disjunction — Chapter 2 pays off.
+theorem ben_in_pair : ben in {ana, ben} := by
+  simp
+  right
+  refl
+
+-- Section 6.3: subset is a quantified implication in disguise.
+theorem cs_subset_union : CS subset union(CS, Math) := by
+  simp
+  intro x
+  intro hx
+  left
+  exact hx
+
+-- The library already knows that shape.
+theorem cs_subset_union_library : CS subset union(CS, Math) := by
+  exact subset_union_left {T := Student; A := CS; B := Math}
+
+-- Section 6.4: element chasing, the universal set-proof skeleton.
+theorem overlap_takes_cs : inter(CS, Math) subset CS := by
+  simp
+  intro x
+  intro hx
+  exact hx.left
+
+-- Difference: membership in diff(A, B) is a conjunction with a negation.
+theorem diff_excludes : forall x : Student, x in diff(CS, Math) -> not (x in Math) := by
+  intro x
+  intro h
+  simp at h
+  intro hm
+  apply h.right
+  simp at hm
+  exact hm
+
+-- Section 6.5: chaining subsets with have and the library.
+theorem three_hops
+  (T : Type)
+  (A B C D : Set T)
+  : A subset B -> B subset C -> C subset D -> A subset D := by
+  intro h1
+  intro h2
+  intro h3
+  have hAC : A subset C
+  apply subset_trans
+  exact h1
+  exact h2
+  apply subset_trans
+  exact hAC
+  exact h3
+
+-- Section 6.6: set equality by extensionality. The four-line ritual:
+-- apply set_ext / intro x / simp / split — then element-chase both ways.
+theorem inter_union_dist
+  (T : Type)
+  (A B C : Set T)
+  : inter(A, union(B, C)) = union(inter(A, B), inter(A, C)) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro h
+  cases h.right with
+  | left hb =>
+      left
+      split
+      exact h.left
+      exact hb
+  | right hc =>
+      right
+      split
+      exact h.left
+      exact hc
+  intro h
+  cases h with
+  | left hab =>
+      split
+      exact hab.left
+      left
+      exact hab.right
+  | right hac =>
+      split
+      exact hac.left
+      right
+      exact hac.right
+
+-- Section 6.6: De Morgan for sets — this direction is constructive.
+theorem compl_union_demo
+  (T : Type)
+  (A B : Set T)
+  : compl(union(A, B)) = inter(compl(A), compl(B)) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro h
+  split
+  intro ha
+  apply h
+  left
+  exact ha
+  intro hb
+  apply h
+  right
+  exact hb
+  intro h
+  intro hab
+  cases hab with
+  | left ha =>
+      apply h.left
+      exact ha
+  | right hb =>
+      apply h.right
+      exact hb
+
+-- Section 6.7: the other route to equality — mutual inclusion.
+theorem inter_self (T : Type) (A : Set T) : inter(A, A) = A := by
+  apply subset_antisymm
+  simp
+  intro x
+  intro hx
+  exact hx.left
+  simp
+  intro x
+  intro hx
+  split
+  exact hx
+  exact hx
+
+-- Section 6.8: the OTHER De Morgan law hides a classical step (Chapter 3
+-- returns). Everything below this line has classical permission.
+mode classical
+
+theorem compl_inter_demo
+  (T : Type)
+  (A B : Set T)
+  : compl(inter(A, B)) = union(compl(A), compl(B)) := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro h
+  by_cases ha : x in A
+  right
+  intro hb
+  apply h
+  split
+  exact ha
+  exact hb
+  left
+  exact ha
+  intro h
+  intro hab
+  cases h with
+  | left hna =>
+      apply hna
+      exact hab.left
+  | right hnb =>
+      apply hnb
+      exact hab.right

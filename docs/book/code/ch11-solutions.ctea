@@ -1,0 +1,90 @@
+-- Proofs, Checked — Chapter 11: exercise solutions.
+-- Spoilers! Try docs/book/code/ch11-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch11-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+defrec sum (l : List) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+
+defrec mirror (t : Tree) : Tree
+| leaf => leaf
+| node l v r recl recr => node(recr, v, recl)
+
+defrec leaves (t : Tree) : Nat
+| leaf => 1
+| node l v r recl recr => add(recl, recr)
+
+-- Exercise 11.1
+theorem ex11_1 : size(node(node(leaf, 1, leaf), 2, leaf)) = 2 := by
+  refl
+
+-- Exercise 11.2
+theorem ex11_2 (l1 : List) (l2 : List) (l3 : List)
+  : append(append(l1, l2), l3) = append(l1, append(l2, l3)) := by
+  induction l1 with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      rewrite -> ih
+      refl
+
+-- Exercise 11.3
+theorem ex11_3 (l1 : List) (l2 : List)
+  : sum(append(l1, l2)) = add(sum(l1), sum(l2)) := by
+  induction l1 with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      rewrite -> ih
+      rewrite add_assoc {n := h; m := sum(t); k := sum(l2)}
+      refl
+
+-- Exercise 11.4
+theorem ex11_4 (t : Tree) : mirror(mirror(t)) = t := by
+  induction t with
+  | leaf =>
+      refl
+  | node l v r ihl ihr =>
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      refl
+
+-- Exercise 11.5
+theorem ex11_5 (t : Tree) : leaves(mirror(t)) = leaves(t) := by
+  induction t with
+  | leaf =>
+      refl
+  | node l v r ihl ihr =>
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      rewrite -> add_comm {n := leaves(l); m := leaves(r)}
+      refl
+
+-- Exercise 11.6
+theorem ex11_6 (t : Tree) : leaves(t) = succ(size(t)) := by
+  induction t with
+  | leaf =>
+      refl
+  | node l v r ihl ihr =>
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      rewrite -> add_succ_right {n := size(l); m := size(r)}
+      refl

@@ -1,0 +1,40 @@
+-- Proofs, Checked — Chapter 6: common mistakes.
+-- INTENDED TO FAIL. Every theorem in this file contains a deliberate
+-- mistake discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch06-mistakes.ctea
+
+mode constructive
+
+sort Student
+
+const ana : Student
+
+pred TakesCS(Student)
+
+def CS : Set Student := { x : Student | TakesCS(x) }
+
+-- Mistake 1: refl on a set equality. Sets are equal by extensionality,
+-- not by looking identical.
+theorem sets_equal_by_staring (T : Type) (A B : Set T)
+  : union(A, B) = union(B, A) := by
+  refl
+
+-- Mistake 2: intro on a subset goal before simp has exposed the forall.
+theorem subset_too_fast (T : Type) (A : Set T) : A subset A := by
+  intro x
+  intro hx
+  exact hx
+
+-- Mistake 3: subset is not symmetric — and watch how the failure looks.
+theorem subset_flip (T : Type) (A B : Set T) : A subset B -> B subset A := by
+  intro h
+  simp
+  intro x
+  intro hx
+  apply h
+  exact hx
+
+-- Mistake 4: an element is not a one-element set.
+theorem element_confusion : ana subset CS := by
+  simp

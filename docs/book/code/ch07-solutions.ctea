@@ -1,0 +1,103 @@
+-- Proofs, Checked — Chapter 7: exercise solutions.
+-- Spoilers! Try docs/book/code/ch07-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch07-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+pred Happy(Person)
+pred Likes(Person, Person)
+
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+
+def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
+
+def Transitive (T : Type) (R : T -> T -> Prop) : Prop := forall x y z : T, R(x, y) -> R(y, z) -> R(x, z)
+
+-- Exercise 7.1. 23 + 10*0 = 23 and 3 + 10*2 = 23.
+theorem ex7_1 : ModEq(10, 23, 3) := by
+  unfold ModEq
+  exists 0
+  exists 2
+  refl
+
+-- Exercise 7.2
+theorem ex7_2 : Reflexive(fun x y : Nat => Divides(x, y)) := by
+  unfold Reflexive
+  intro x
+  exact divides_refl
+
+-- Exercise 7.3
+theorem ex7_3 : Symmetric(fun x y : Person => Likes(x, y) /\ Likes(y, x)) := by
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  split
+  exact h.right
+  exact h.left
+
+-- Exercise 7.4
+theorem ex7_4 : Transitive(fun x y : Nat => Divides(x, y)) := by
+  unfold Transitive
+  intro x
+  intro y
+  intro z
+  intro h1
+  intro h2
+  apply divides_trans
+  exact h1
+  exact h2
+
+-- Exercise 7.5
+theorem ex7_5 : Reflexive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+  unfold Reflexive
+  intro x
+  split
+  intro h
+  exact h
+  intro h
+  exact h
+
+-- Exercise 7.6
+theorem ex7_6 : Symmetric(fun x y : Person => Happy(x) <-> Happy(y)) := by
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  split
+  exact h.right
+  exact h.left
+
+-- Exercise 7.7
+theorem ex7_7 : Transitive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+  unfold Transitive
+  intro x
+  intro y
+  intro z
+  intro h1
+  intro h2
+  split
+  intro hx
+  apply h2.left
+  apply h1.left
+  exact hx
+  intro hz
+  apply h1.right
+  apply h2.right
+  exact hz
+
+-- Exercise 7.8
+theorem ex7_8
+  : Reflexive(fun x y : Person => Happy(x) <-> Happy(y))
+    /\ Symmetric(fun x y : Person => Happy(x) <-> Happy(y))
+    /\ Transitive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+  split
+  exact ex7_5
+  split
+  exact ex7_6
+  exact ex7_7

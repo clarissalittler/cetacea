@@ -1,0 +1,53 @@
+-- Proofs, Checked — Chapter 8: exercises.
+-- Replace each `sorry` with a real proof.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch08-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const alice : Person
+
+-- Exercise 8.1 (warm-up). The squaring function's graph is total:
+-- every input has an output you can name.
+theorem ex8_1 : Total(fun x y : Nat => mul(x, x) = y) := by
+  sorry
+
+-- Exercise 8.2. And it is single-valued — two claimed outputs for the
+-- same input must be equal. (Chapter 5 rewriting does the whole job.)
+theorem ex8_2 : SingleValued(fun x y : Nat => mul(x, x) = y) := by
+  sorry
+
+-- Exercise 8.3. Adding two is injective. Hint: simp at h1 computes
+-- add(x1, 2) into successors; then peel with succ_inj, twice.
+theorem ex8_3 : Injective(fun x y : Nat => add(x, 2) = y) := by
+  sorry
+
+-- Exercise 8.4. The identity function is surjective: every y is hit —
+-- by whom?
+theorem ex8_4 : Surjective(fun x y : Nat => x = y) := by
+  sorry
+
+-- Exercise 8.5. The constant function sending everyone to alice is
+-- total...
+theorem ex8_5 : Total(fun x y : Person => y = alice) := by
+  sorry
+
+-- Exercise 8.6. ...and single-valued: both outputs equal alice, so
+-- they equal each other. (It is spectacularly NOT injective, but
+-- proving that would need two provably distinct Persons.)
+theorem ex8_6 : SingleValued(fun x y : Person => y = alice) := by
+  sorry
+
+-- Exercise 8.7. Composition preserves surjectivity. Mirror the
+-- compose_preserves_injective example, with compose_surjective.
+theorem ex8_7
+  (F : Person -> Person -> Prop)
+  (G : Person -> Person -> Prop)
+  : Surjective(F)
+    -> Surjective(G)
+    -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\ G(y, z) := by
+  sorry

@@ -1,0 +1,58 @@
+-- Proofs, Checked — Chapter 9: exercise solutions.
+-- Spoilers! Try docs/book/code/ch09-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch09-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Exercise 9.1. Computation: mul(1, n) unfolds to add(n, mul(0, n)),
+-- then to add(n, 0), then to n.
+theorem ex9_1 (n : Nat) : mul(1, n) = n := by
+  refl
+
+-- Exercise 9.2
+theorem ex9_2 (n : Nat) : le(n, succ(n)) := by
+  induction n with
+  | zero =>
+      simp
+      trivial
+  | succ k ih =>
+      simp
+      exact ih
+
+-- Exercise 9.3
+theorem ex9_3 (n m : Nat) : sub(add(n, m), n) = m := by
+  induction n with
+  | zero =>
+      refl
+  | succ k ih =>
+      simp
+      exact ih
+
+-- Exercise 9.4
+theorem ex9_4 (n m : Nat) : le(n, add(n, m)) := by
+  induction n with
+  | zero =>
+      simp
+      trivial
+  | succ k ih =>
+      simp
+      exact ih
+
+-- Exercise 9.5
+theorem ex9_5 (k n m : Nat) : add(k, add(n, m)) = add(k, add(m, n)) := by
+  rewrite -> add_comm {n := m; m := n}
+  refl
+
+-- Exercise 9.6
+theorem ex9_6 (n m p : Nat) : add(add(n, m), p) = add(n, add(m, p)) := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl

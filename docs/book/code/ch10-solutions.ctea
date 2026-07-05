@@ -1,0 +1,68 @@
+-- Proofs, Checked — Chapter 10: exercise solutions.
+-- Spoilers! Try docs/book/code/ch10-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch10-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+
+defrec triple (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(succ(rec)))
+
+defrec sumto (n : Nat) : Nat
+| zero => 0
+| succ k rec => add(succ(k), rec)
+
+defrec replicate (n : Nat) (x : Nat) : List
+| zero => nil
+| succ k rec => cons(x, rec)
+
+-- Exercise 10.1
+theorem ex10_1 : sumto(5) = 15 := by
+  refl
+
+-- Exercise 10.2
+theorem ex10_2 (n : Nat) : triple(succ(n)) = succ(succ(succ(triple(n)))) := by
+  refl
+
+-- Exercise 10.3
+theorem ex10_3 (n : Nat) : triple(n) = add(n, double(n)) := by
+  induction n with
+  | zero =>
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
+
+-- Exercise 10.4. Induction on n -- replicate recurses on its first
+-- argument, so that is where the computation unfolds.
+theorem ex10_4 (n : Nat) (x : Nat) : length(replicate(n, x)) = n := by
+  induction n with
+  | zero =>
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
+
+-- Exercise 10.5. No axioms: the accepted line is bare.
+theorem ex10_5 : Divides(3, 12) := by
+  unfold Divides
+  exists 4
+  refl
+
+-- Exercise 10.6. Same statement, but the accepted line now reads
+-- (constructive; axioms: modeq_zero_to_divides) -- this proof leans
+-- on the library's one trusted-not-proved statement.
+theorem ex10_6 : Divides(3, 12) := by
+  apply modeq_zero_to_divides {m := 3; x := 12}
+  exists 0
+  exists 4
+  refl

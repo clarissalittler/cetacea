@@ -1,0 +1,104 @@
+-- Proofs, Checked — Chapter 6: exercise solutions.
+-- Spoilers! Try docs/book/code/ch06-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch06-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Student
+
+const ana : Student
+const ben : Student
+
+pred TakesCS(Student)
+pred TakesMath(Student)
+
+def CS : Set Student := { x : Student | TakesCS(x) }
+def Math : Set Student := { x : Student | TakesMath(x) }
+
+-- Exercise 6.1
+theorem ex6_1 : TakesMath(ben) -> ben in Math := by
+  intro h
+  simp
+  exact h
+
+-- Exercise 6.2
+theorem ex6_2 : ana in {ana, ben} := by
+  simp
+  left
+  refl
+
+-- Exercise 6.3
+theorem ex6_3 : inter(CS, Math) subset union(CS, Math) := by
+  simp
+  intro x
+  intro hx
+  left
+  exact hx.left
+
+-- Exercise 6.4
+theorem ex6_4 : diff(CS, Math) subset CS := by
+  simp
+  intro x
+  intro hx
+  exact hx.left
+
+-- Exercise 6.5
+theorem ex6_5 (T : Type) (A B C : Set T)
+  : union(A, B) subset C -> A subset C := by
+  intro h
+  simp
+  intro x
+  intro hx
+  apply h
+  left
+  exact hx
+
+-- Exercise 6.6
+theorem ex6_6 (T : Type) (A : Set T) : union(A, A) = A := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro h
+  cases h with
+  | left hx =>
+      exact hx
+  | right hx =>
+      exact hx
+  intro h
+  left
+  exact h
+
+-- Exercise 6.7
+theorem ex6_7 (T : Type) (A : Set T) : diff(A, empty(T)) = A := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro h
+  exact h.left
+  intro h
+  split
+  exact h
+  intro hf
+  contradiction
+
+-- Exercise 6.8 (challenge) — needs a classical step.
+mode classical
+
+theorem ex6_8 (T : Type) (A : Set T) : compl(compl(A)) = A := by
+  apply set_ext
+  intro x
+  simp
+  split
+  intro h
+  by_contra hn
+  apply h
+  exact hn
+  intro h
+  intro hn
+  apply hn
+  exact h

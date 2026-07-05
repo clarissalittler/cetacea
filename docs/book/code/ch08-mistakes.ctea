@@ -1,0 +1,45 @@
+-- Proofs, Checked — Chapter 8: common mistakes.
+-- INTENDED TO FAIL. Every theorem in this file contains a deliberate
+-- mistake discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch08-mistakes.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+pred AgeIs(Person, Nat)
+
+-- Mistake 1: offering the input as a witness for the output. The goal
+-- wants an age (a Nat); x is a Person.
+theorem witness_from_wrong_column
+  : (forall p : Person, exists n : Nat, AgeIs(p, n)) -> Total(AgeIs) := by
+  intro h
+  unfold Total
+  intro x
+  exists x
+  exact h x
+
+-- Mistake 2: confusing single-valued with injective. The two
+-- definitions differ only in WHICH argument is repeated — and the
+-- checker catches the swap at the exact spot the arguments cross.
+theorem single_valued_is_not_injective (A : Type) (G : A -> A -> Prop)
+  : SingleValued(G) -> Injective(G) := by
+  intro h
+  unfold Injective
+  intro x1
+  intro x2
+  intro y
+  intro h1
+  intro h2
+  exact h x1 x2 y h1 h2
+
+-- Mistake 3: "inverting" succ with truncated subtraction. sub(y, 1)
+-- looks like a predecessor, but at y = 0 it is 0, and succ(0) is not 0.
+theorem succ_surjective_wish : Surjective(fun x y : Nat => succ(x) = y) := by
+  unfold Surjective
+  intro y
+  exists sub(y, 1)
+  refl

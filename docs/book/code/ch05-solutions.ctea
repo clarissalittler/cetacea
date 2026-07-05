@@ -1,0 +1,64 @@
+-- Proofs, Checked — Chapter 5: exercise solutions.
+-- Spoilers! Try docs/book/code/ch05-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch05-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const clark : Person
+const superman : Person
+const kal_el : Person
+
+pred Flies(Person)
+pred Reporter(Person)
+
+func mother : Person -> Person
+
+-- Exercise 5.1
+theorem ex5_1 : mul(3, 4) = 12 := by
+  refl
+
+-- Exercise 5.2
+theorem ex5_2 (n : Nat) : add(n, 2) = succ(succ(n)) := by
+  refl
+
+-- Exercise 5.3
+theorem ex5_3 : superman = clark -> clark = superman := by
+  intro h
+  exact eq_symm h
+
+-- Exercise 5.4. The one-line finish `exact eq_trans h1 h2` also works;
+-- the have makes the waypoint visible.
+theorem ex5_4
+  : clark = superman -> superman = kal_el -> clark = kal_el := by
+  intro h1
+  intro h2
+  have h3 : clark = kal_el := eq_trans h1 h2
+  exact h3
+
+-- Exercise 5.5
+theorem ex5_5 : clark = superman -> Reporter(superman) -> Reporter(clark) := by
+  intro h
+  intro hr
+  rewrite -> h
+  exact hr
+
+-- Exercise 5.6
+theorem ex5_6
+  : clark = superman
+    -> Flies(superman) /\ Reporter(superman)
+    -> Flies(clark) /\ Reporter(clark) := by
+  intro h
+  intro hs
+  rewrite all -> h
+  exact hs
+
+-- Exercise 5.7
+theorem ex5_7 : superman = kal_el -> mother(superman) = mother(kal_el) := by
+  intro h
+  rewrite -> h
+  refl

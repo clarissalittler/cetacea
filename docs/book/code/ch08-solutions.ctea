@@ -1,0 +1,82 @@
+-- Proofs, Checked — Chapter 8: exercise solutions.
+-- Spoilers! Try docs/book/code/ch08-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch08-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const alice : Person
+
+-- Exercise 8.1
+theorem ex8_1 : Total(fun x y : Nat => mul(x, x) = y) := by
+  unfold Total
+  intro x
+  exists mul(x, x)
+  refl
+
+-- Exercise 8.2
+theorem ex8_2 : SingleValued(fun x y : Nat => mul(x, x) = y) := by
+  unfold SingleValued
+  intro x
+  intro y1
+  intro y2
+  intro h1
+  intro h2
+  rewrite h1
+  exact h2
+
+-- Exercise 8.3. simp computes add(x, 2) to succ(succ(x)), and then
+-- succ_inj peels the successors two at a time.
+theorem ex8_3 : Injective(fun x y : Nat => add(x, 2) = y) := by
+  unfold Injective
+  intro x1
+  intro x2
+  intro y
+  intro h1
+  intro h2
+  simp at h1
+  simp at h2
+  apply succ_inj
+  apply succ_inj
+  rewrite -> h1
+  exact eq_symm h2
+
+-- Exercise 8.4
+theorem ex8_4 : Surjective(fun x y : Nat => x = y) := by
+  unfold Surjective
+  intro y
+  exists y
+  refl
+
+-- Exercise 8.5
+theorem ex8_5 : Total(fun x y : Person => y = alice) := by
+  unfold Total
+  intro x
+  exists alice
+  refl
+
+-- Exercise 8.6
+theorem ex8_6 : SingleValued(fun x y : Person => y = alice) := by
+  unfold SingleValued
+  intro x
+  intro y1
+  intro y2
+  intro h1
+  intro h2
+  rewrite -> h2
+  exact h1
+
+-- Exercise 8.7
+theorem ex8_7
+  (F : Person -> Person -> Prop)
+  (G : Person -> Person -> Prop)
+  : Surjective(F)
+    -> Surjective(G)
+    -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\ G(y, z) := by
+  intro hf
+  intro hg
+  exact compose_surjective {A := Person; B := Person; C := Person; F := F; G := G} hf hg

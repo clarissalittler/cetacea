@@ -1,0 +1,28 @@
+-- Proofs, Checked — Chapter 10: common mistakes.
+-- INTENDED TO FAIL. Each declaration or theorem contains a deliberate
+-- mistake discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch10-mistakes.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Mistake 1: redeclaring a name the prelude already owns. There is
+-- one global namespace, and std/list.ctea got here first.
+defrec length (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(rec)
+
+-- Mistake 2: wrong binder count in a defrec arm. cons has two
+-- constructor arguments (head, tail) and one recursive argument (the
+-- tail), so its arm needs three names -- here `t` is missing.
+defrec total (l : List) : Nat
+| nil => 0
+| cons h rec => add(h, rec)
+
+-- Mistake 3: expecting refl to prove something that needs induction.
+-- append recurses on its FIRST argument, so append(l, nil) is stuck:
+-- no equation applies until we know the shape of l.
+theorem append_nil_right (l : List) : append(l, nil) = l := by
+  refl

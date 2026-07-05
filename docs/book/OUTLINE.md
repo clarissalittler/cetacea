@@ -1,9 +1,8 @@
 # Proofs, Checked — Full Outline
 
-Twelve chapters, from "what is a proposition?" to strong induction.
-Chapters 1–4 are drafted; the rest are planned here so the whole arc is
-visible. Each entry lists the Cetacea features the chapter leans on, so
-drafting later chapters never requires features the reader hasn't met.
+Twelve chapters, from "what is a proposition?" to strong induction, all
+drafted. Each entry lists the Cetacea features the chapter leans on, so
+no chapter requires features the reader hasn't met.
 
 Constructive mode is the default from Chapter 1; classical reasoning is
 introduced deliberately in Chapter 3 and treated as an explicit,
@@ -76,6 +75,8 @@ instantiation with `{A := ...; P := ...}`.
 
 ## Chapter 5 — Equality: The Most Important Relation
 
+*Drafted: [05-equality.md](05-equality.md)*
+
 Equality is a relation with two superpowers: everything equals itself,
 and equals can be substituted for equals. The chapter introduces `refl`
 for equalities that hold by computation, `rewrite` for substituting
@@ -89,6 +90,8 @@ version of the "= ... = ..." calculations students already do.
 computation (`add`, `mul` simplification).
 
 ## Chapter 6 — Sets: Collections You Can Reason About
+
+*Drafted: [06-sets.md](06-sets.md)*
 
 Sets via membership: `x in A` is a proposition, `A subset B` is a
 quantified implication, and every Venn-diagram identity becomes a
@@ -105,6 +108,8 @@ sets.
 
 ## Chapter 7 — Relations: Structure Between Things
 
+*Drafted: [07-relations.md](07-relations.md)*
+
 Binary predicates as relations, and the three properties that organize
 them: reflexivity, symmetry, transitivity. The chapter uses `def` with
 predicate parameters to state the properties once and instantiate them
@@ -118,6 +123,8 @@ parameters, `unfold`, `simp` definition unfolding, lambda predicates
 
 ## Chapter 8 — Functions: Relations with Rules
 
+*Drafted: [08-functions.md](08-functions.md)*
+
 A function is a relation where every input relates to exactly one
 output — and this chapter makes that slogan literal by modeling
 functions as graph predicates `G(x, y)` meaning "f(x) = y". Total,
@@ -130,6 +137,8 @@ composition preserves injectivity and surjectivity.
 composition theorems), explicit instantiation of predicate parameters.
 
 ## Chapter 9 — Induction: Climbing the Number Line
+
+*Drafted: [09-induction.md](09-induction.md)*
 
 The natural numbers as `0` and `succ`, and induction as the proof
 principle they come with: prove the base, prove each rung follows from
@@ -146,19 +155,25 @@ restrictions.
 
 ## Chapter 10 — Recursion and Data: Building Your Own Worlds
 
+*Drafted: [10-recursion-data.md](10-recursion-data.md)*
+
 Definition by recursion is induction's constructive twin. The chapter
 introduces `defrec` over `Nat` (doubling, summing), then `data` for
 user-defined types like lists and trees, and shows that `refl` can
 prove concrete computations — evaluating a program and checking a
 proof become the same activity. Binary operations such as list append
-appear as axiomatized recursion equations, with an honest discussion of
-what taking equations on trust means.
+are defined directly with `defrec`'s fixed extra parameters; the
+honest discussion of what taking equations on trust means uses the one
+real axiom in `std/modular.ctea` and the checker's `axioms:` reporting.
 
 **Cetacea features:** `defrec` over `Nat` and over `data` types,
-`data` declarations, `refl`/`simp` computation, `axiom` for recursion
-equations, `std/list.ctea`, axiom tracking in `accepted` lines.
+binary `defrec` with fixed parameters, `data` declarations,
+`refl`/`simp` computation, `std/list.ctea`, axiom tracking in
+`accepted` lines.
 
 ## Chapter 11 — Structural Induction: Proofs That Follow the Data
+
+*Drafted: [11-structural-induction.md](11-structural-induction.md)*
 
 Every `data` type comes with its own induction principle: one case per
 constructor, one induction hypothesis per recursive argument. The
@@ -173,6 +188,8 @@ instantiated equation lemmas, combining `simp` and `rewrite` inside
 arms.
 
 ## Chapter 12 — Strong Induction, and Where to Go Next
+
+*Drafted: [12-strong-induction.md](12-strong-induction.md)*
 
 Sometimes the previous case isn't enough and you need *all* smaller
 cases — strong induction, provided by the library theorem

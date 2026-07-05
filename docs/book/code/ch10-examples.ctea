@@ -1,0 +1,110 @@
+-- Proofs, Checked — Chapter 10: Recursion and Data: Building Your Own Worlds
+-- Companion file for docs/book/10-recursion-data.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch10-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Section 10.2: a first recursive definition over Nat.
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+
+-- Concrete computation: running the program IS checking the proof.
+theorem double_three : double(3) = 6 := by
+  refl
+
+-- Symbolic computation: the successor equation, straight from the arm.
+theorem double_succ_demo (n : Nat) : double(succ(n)) = succ(succ(double(n))) := by
+  refl
+
+-- Recursion and induction are twins: a fact about a recursive
+-- definition, proved by induction along the same skeleton.
+theorem double_is_add (n : Nat) : double(n) = add(n, n) := by
+  induction n with
+  | zero =>
+      refl
+  | succ k ih =>
+      simp
+      rewrite ih
+      refl
+
+-- Section 10.2: summing 1 + 2 + ... + n.
+defrec sumto (n : Nat) : Nat
+| zero => 0
+| succ k rec => add(succ(k), rec)
+
+theorem sumto_four : sumto(4) = 10 := by
+  refl
+
+-- Section 10.4: a binary definition. The recursion runs on the first
+-- argument; m just comes along for the ride.
+defrec addl (n : Nat) (m : Nat) : Nat
+| zero => m
+| succ k rec => succ(rec)
+
+-- The two defining equations compute...
+theorem addl_zero_left (m : Nat) : addl(0, m) = m := by
+  refl
+
+theorem addl_succ_left (n m : Nat) : addl(succ(n), m) = succ(addl(n, m)) := by
+  refl
+
+-- ...but the mirror-image fact does not: addl(n, 0) is stuck until we
+-- know whether n is zero or a successor. Induction to the rescue.
+theorem addl_zero_right (n : Nat) : addl(n, 0) = n := by
+  induction n with
+  | zero =>
+      refl
+  | succ k ih =>
+      simp
+      rewrite -> ih
+      refl
+
+-- Section 10.5: lists (declared in std/list.ctea: nil, cons(Nat, List))
+-- and their recursive functions compute the same way.
+theorem length_demo : length(cons(7, cons(4, nil))) = 2 := by
+  refl
+
+-- Our own defrec over List: the sum of the elements.
+defrec sum (l : List) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+theorem sum_demo : sum(cons(1, cons(2, cons(3, nil)))) = 6 := by
+  refl
+
+-- append (std/list.ctea) is a binary defrec, like addl. Its recursion
+-- equations are theorems, not axioms -- refl proves both.
+theorem append_demo : append(cons(1, nil), cons(2, nil)) = cons(1, cons(2, nil)) := by
+  refl
+
+theorem append_cons_demo (h : Nat) (t : List) (l : List)
+  : append(cons(h, t), l) = cons(h, append(t, l)) := by
+  refl
+
+-- A binary defrec can even build a list from a number.
+defrec replicate (n : Nat) (x : Nat) : List
+| zero => nil
+| succ k rec => cons(x, rec)
+
+theorem replicate_two : replicate(2, 9) = cons(9, cons(9, nil)) := by
+  refl
+
+-- Section 10.6: the same fact twice -- once from definitions alone,
+-- once through the library's one honest axiom. Compare the accepted
+-- lines the checker prints for these two.
+theorem divides_5_20_direct : Divides(5, 20) := by
+  unfold Divides
+  exists 4
+  refl
+
+theorem divides_5_20_via_modeq : Divides(5, 20) := by
+  have hm : ModEq(5, 20, 0)
+  unfold ModEq
+  exists 0
+  exists 4
+  refl
+  exact modeq_zero_to_divides {m := 5; x := 20} hm

@@ -68,23 +68,23 @@ So `h : P /\ Q |- Q /\ P` reads "you have a hypothesis `h` proving
 
 ## Chapters
 
-Chapters 1–4 are fully drafted; 5–12 are outlined in
-[`OUTLINE.md`](OUTLINE.md).
+All twelve chapters are drafted; [`OUTLINE.md`](OUTLINE.md) has a
+one-paragraph synopsis of each.
 
-| # | Chapter | Status |
-|---|---|---|
-| 1 | [Propositions and How to State Them](01-propositions.md) | drafted |
-| 2 | [Natural Deduction: Proof as a Game with Rules](02-natural-deduction.md) | drafted |
-| 3 | [The Classical Moves: Excluded Middle and Friends](03-classical.md) | drafted |
-| 4 | [Everyone, Someone, No One: Quantifiers](04-quantifiers.md) | drafted |
-| 5 | Equality: The Most Important Relation | outlined |
-| 6 | Sets: Collections You Can Reason About | outlined |
-| 7 | Relations: Structure Between Things | outlined |
-| 8 | Functions: Relations with Rules | outlined |
-| 9 | Induction: Climbing the Number Line | outlined |
-| 10 | Recursion and Data: Building Your Own Worlds | outlined |
-| 11 | Structural Induction: Proofs That Follow the Data | outlined |
-| 12 | Strong Induction, and Where to Go Next | outlined |
+| # | Chapter |
+|---|---|
+| 1 | [Propositions and How to State Them](01-propositions.md) |
+| 2 | [Natural Deduction: Proof as a Game with Rules](02-natural-deduction.md) |
+| 3 | [The Classical Moves: Excluded Middle and Friends](03-classical.md) |
+| 4 | [Everyone, Someone, No One: Quantifiers](04-quantifiers.md) |
+| 5 | [Equality: The Most Important Relation](05-equality.md) |
+| 6 | [Sets: Collections You Can Reason About](06-sets.md) |
+| 7 | [Relations: Structure Between Things](07-relations.md) |
+| 8 | [Functions: Relations with Rules](08-functions.md) |
+| 9 | [Induction: Climbing the Number Line](09-induction.md) |
+| 10 | [Recursion and Data: Building Your Own Worlds](10-recursion-data.md) |
+| 11 | [Structural Induction: Proofs That Follow the Data](11-structural-induction.md) |
+| 12 | [Strong Induction, and Where to Go Next](12-strong-induction.md) |
 
 ## A word of encouragement
 

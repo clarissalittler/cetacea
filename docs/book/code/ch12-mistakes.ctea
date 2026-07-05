@@ -1,0 +1,32 @@
+-- Proofs, Checked — Chapter 12: common mistakes.
+-- INTENDED TO FAIL. Each theorem contains a deliberate mistake
+-- discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch12-mistakes.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+func bulb : Nat -> Nat
+
+axiom bulb_zero : bulb(0) = 0
+axiom bulb_step (k : Nat) : bulb(succ(k)) = bulb(pred(k))
+
+-- Mistake 1: ordinary induction is one rung short. The induction
+-- hypothesis speaks about k, but after rewriting with bulb_step the
+-- goal speaks about pred(k).
+theorem one_rung_short (n : Nat) : bulb(n) = 0 := by
+  induction n with
+  | zero =>
+      exact bulb_zero
+  | succ k ih =>
+      rewrite -> bulb_step {k := k}
+      exact ih
+
+-- Mistake 2: applying strong_induction without saying what P is. The
+-- predicate cannot be inferred from the goal; spell it out as a
+-- lambda.
+theorem which_predicate (n : Nat) : bulb(n) = 0 := by
+  apply strong_induction
+  exact bulb_zero

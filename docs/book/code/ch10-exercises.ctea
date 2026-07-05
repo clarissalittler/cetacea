@@ -1,0 +1,58 @@
+-- Proofs, Checked — Chapter 10: exercises.
+-- Replace each `sorry` with a real proof. The recursive definitions
+-- you need are provided; your job is the theorems about them.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch10-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+defrec double (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(rec))
+
+defrec triple (n : Nat) : Nat
+| zero => 0
+| succ k rec => succ(succ(succ(rec)))
+
+defrec sumto (n : Nat) : Nat
+| zero => 0
+| succ k rec => add(succ(k), rec)
+
+defrec replicate (n : Nat) (x : Nat) : List
+| zero => nil
+| succ k rec => cons(x, rec)
+
+-- Exercise 10.1 (warm-up). Gauss for small n: pure computation.
+theorem ex10_1 : sumto(5) = 15 := by
+  sorry
+
+-- Exercise 10.2. The successor equation for triple -- symbolic, but
+-- still just computation.
+theorem ex10_2 (n : Nat) : triple(succ(n)) = succ(succ(succ(triple(n)))) := by
+  sorry
+
+-- Exercise 10.3. Relate two recursive definitions. Induction on n;
+-- the succ arm needs `simp`, then the induction hypothesis.
+theorem ex10_3 (n : Nat) : triple(n) = add(n, double(n)) := by
+  sorry
+
+-- Exercise 10.4. A list built by recursion on a *number*: n copies of
+-- x has length n. Which variable do you induct on? (Only one choice
+-- compiles: the recursion runs on the first argument.)
+theorem ex10_4 (n : Nat) (x : Nat) : length(replicate(n, x)) = n := by
+  sorry
+
+-- Exercise 10.5. Divisibility by hand: unfold Divides, name the
+-- witness, compute.
+theorem ex10_5 : Divides(3, 12) := by
+  sorry
+
+-- Exercise 10.6. The same fact through the axiom bridge: apply
+-- modeq_zero_to_divides {m := 3; x := 12}, then prove the congruence
+-- with two witnesses. When both are accepted, compare the two
+-- accepted lines the checker prints. What extra baggage does this one
+-- carry?
+theorem ex10_6 : Divides(3, 12) := by
+  sorry

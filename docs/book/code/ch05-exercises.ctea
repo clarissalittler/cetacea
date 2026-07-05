@@ -1,0 +1,53 @@
+-- Proofs, Checked — Chapter 5: exercises.
+-- Replace each `sorry` with a real proof.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch05-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const clark : Person
+const superman : Person
+const kal_el : Person
+
+pred Flies(Person)
+pred Reporter(Person)
+
+func mother : Person -> Person
+
+-- Exercise 5.1 (warm-up). Let the checker do the arithmetic.
+theorem ex5_1 : mul(3, 4) = 12 := by
+  sorry
+
+-- Exercise 5.2. Computation with a variable in the way.
+theorem ex5_2 (n : Nat) : add(n, 2) = succ(succ(n)) := by
+  sorry
+
+-- Exercise 5.3. Equality is symmetric — one lemma, or one rewrite.
+theorem ex5_3 : superman = clark -> clark = superman := by
+  sorry
+
+-- Exercise 5.4. Chain two equations. Try the `have ... :=` form with
+-- eq_trans, even if you can see a shorter route.
+theorem ex5_4
+  : clark = superman -> superman = kal_el -> clark = kal_el := by
+  sorry
+
+-- Exercise 5.5. Substitute into a predicate. Watch the direction: the
+-- goal mentions `clark`, the left side of the equation.
+theorem ex5_5 : clark = superman -> Reporter(superman) -> Reporter(clark) := by
+  sorry
+
+-- Exercise 5.6. Rewrite every occurrence at once.
+theorem ex5_6
+  : clark = superman
+    -> Flies(superman) /\ Reporter(superman)
+    -> Flies(clark) /\ Reporter(clark) := by
+  sorry
+
+-- Exercise 5.7. Equal people have equal mothers.
+theorem ex5_7 : superman = kal_el -> mother(superman) = mother(kal_el) := by
+  sorry

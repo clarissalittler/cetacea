@@ -1,0 +1,58 @@
+-- Proofs, Checked — Chapter 6: exercises.
+-- Replace each `sorry` with a real proof.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch06-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Student
+
+const ana : Student
+const ben : Student
+
+pred TakesCS(Student)
+pred TakesMath(Student)
+
+def CS : Set Student := { x : Student | TakesCS(x) }
+def Math : Set Student := { x : Student | TakesMath(x) }
+
+-- Exercise 6.1 (warm-up). Membership in a named set.
+theorem ex6_1 : TakesMath(ben) -> ben in Math := by
+  sorry
+
+-- Exercise 6.2 (warm-up). Membership in a finite set is a disjunction.
+theorem ex6_2 : ana in {ana, ben} := by
+  sorry
+
+-- Exercise 6.3. Element chasing across two operations.
+theorem ex6_3 : inter(CS, Math) subset union(CS, Math) := by
+  sorry
+
+-- Exercise 6.4. The difference stays inside the left set.
+theorem ex6_4 : diff(CS, Math) subset CS := by
+  sorry
+
+-- Exercise 6.5. Feed the subset hypothesis an element it accepts.
+-- (After the intros, `apply h` turns the goal `x in C` into a goal
+-- about union(A, B).)
+theorem ex6_5 (T : Type) (A B C : Set T)
+  : union(A, B) subset C -> A subset C := by
+  sorry
+
+-- Exercise 6.6. Set equality: the four-line ritual, then both directions.
+theorem ex6_6 (T : Type) (A : Set T) : union(A, A) = A := by
+  sorry
+
+-- Exercise 6.7. Taking away nothing changes nothing.
+theorem ex6_7 (T : Type) (A : Set T) : diff(A, empty(T)) = A := by
+  sorry
+
+-- Exercise 6.8 (challenge). Double complement — one inclusion is
+-- constructive, the other needs a Chapter 3 move. The mode line below
+-- grants permission.
+mode classical
+
+theorem ex6_8 (T : Type) (A : Set T) : compl(compl(A)) = A := by
+  sorry

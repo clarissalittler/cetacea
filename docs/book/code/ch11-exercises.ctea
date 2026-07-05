@@ -1,0 +1,63 @@
+-- Proofs, Checked — Chapter 11: exercises.
+-- Replace each `sorry` with a real proof. The data type and the
+-- recursive definitions are provided.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch11-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+defrec sum (l : List) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+
+defrec mirror (t : Tree) : Tree
+| leaf => leaf
+| node l v r recl recr => node(recr, v, recl)
+
+defrec leaves (t : Tree) : Nat
+| leaf => 1
+| node l v r recl recr => add(recl, recr)
+
+-- Exercise 11.1 (warm-up). A concrete tree: count before you prove.
+theorem ex11_1 : size(node(node(leaf, 1, leaf), 2, leaf)) = 2 := by
+  sorry
+
+-- Exercise 11.2. Associativity of append. Induct on l1 -- the
+-- argument append recurses on. The skeleton is the same as
+-- length_append_demo.
+theorem ex11_2 (l1 : List) (l2 : List) (l3 : List)
+  : append(append(l1, l2), l3) = append(l1, append(l2, l3)) := by
+  sorry
+
+-- Exercise 11.3. Sum distributes over append. The cons arm needs one
+-- extra step beyond the induction hypothesis:
+-- rewrite add_assoc {n := h; m := sum(t); k := sum(l2)}.
+theorem ex11_3 (l1 : List) (l2 : List)
+  : sum(append(l1, l2)) = add(sum(l1), sum(l2)) := by
+  sorry
+
+-- Exercise 11.4. Mirroring twice is doing nothing. Two induction
+-- hypotheses, two rewrites.
+theorem ex11_4 (t : Tree) : mirror(mirror(t)) = t := by
+  sorry
+
+-- Exercise 11.5. Mirroring preserves the leaf count. Model the proof
+-- on mirror_size_demo, add_comm and all.
+theorem ex11_5 (t : Tree) : leaves(mirror(t)) = leaves(t) := by
+  sorry
+
+-- Exercise 11.6 (challenge). Every tree has one more leaf than it has
+-- nodes. In the node arm, after the two induction hypotheses, you
+-- will want add_succ_right {n := size(l); m := size(r)}.
+theorem ex11_6 (t : Tree) : leaves(t) = succ(size(t)) := by
+  sorry

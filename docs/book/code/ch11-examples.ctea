@@ -1,0 +1,67 @@
+-- Proofs, Checked — Chapter 11: Structural Induction: Proofs That Follow the Data
+-- Companion file for docs/book/11-structural-induction.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch11-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Section 11.2: the Chapter 10 cliffhanger, resolved. append(l, nil)
+-- is stuck as a computation, but structural induction on l unsticks it
+-- one constructor at a time.
+theorem append_nil_demo (l : List) : append(l, nil) = l := by
+  induction l with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      rewrite -> ih
+      refl
+
+-- Section 11.3: length of an append. The proof skeleton is identical
+-- -- structural induction proofs follow the data, not the theorem.
+-- This is `length_append` in std/list.ctea.
+theorem length_append_demo (l1 : List) (l2 : List)
+  : length(append(l1, l2)) = add(length(l1), length(l2)) := by
+  induction l1 with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      rewrite -> ih
+      refl
+
+-- Section 11.4: a tree type of our own. node has TWO recursive
+-- arguments, so its induction arm will carry two hypotheses.
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+
+-- mirror swaps every left subtree with its right sibling.
+defrec mirror (t : Tree) : Tree
+| leaf => leaf
+| node l v r recl recr => node(recr, v, recl)
+
+theorem mirror_concrete
+  : mirror(node(leaf, 1, node(leaf, 2, leaf)))
+    = node(node(leaf, 2, leaf), 1, leaf) := by
+  refl
+
+-- Section 11.5: mirroring preserves size. One arm per constructor,
+-- one induction hypothesis per recursive argument: ihl for l, ihr
+-- for r.
+theorem mirror_size_demo (t : Tree) : size(mirror(t)) = size(t) := by
+  induction t with
+  | leaf =>
+      refl
+  | node l v r ihl ihr =>
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      rewrite -> add_comm {n := size(l); m := size(r)}
+      refl

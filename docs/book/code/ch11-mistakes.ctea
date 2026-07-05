@@ -1,0 +1,50 @@
+-- Proofs, Checked — Chapter 11: common mistakes.
+-- INTENDED TO FAIL. Each theorem contains a deliberate mistake
+-- discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch11-mistakes.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Mistake 1: arms out of declaration order. List declares nil first,
+-- so the nil arm must come first.
+theorem arms_out_of_order (l : List) : append(l, nil) = l := by
+  induction l with
+  | cons h t ih =>
+      simp
+      rewrite -> ih
+      refl
+  | nil =>
+      refl
+
+-- Mistake 2: forgetting the induction hypothesis binder. The cons arm
+-- binds the head, the tail, AND the hypothesis about the tail.
+theorem missing_binders (l : List) : append(l, nil) = l := by
+  induction l with
+  | nil =>
+      refl
+  | cons h t =>
+      simp
+      refl
+
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+
+-- Mistake 3: one induction hypothesis for a two-recursive-argument
+-- constructor. node recurses on both subtrees, so its arm needs five
+-- binders: l, v, r, then ihl and ihr.
+theorem one_ih_for_node (t : Tree) : le(0, size(t)) := by
+  induction t with
+  | leaf =>
+      simp
+      trivial
+  | node l v r ih =>
+      simp
+      trivial

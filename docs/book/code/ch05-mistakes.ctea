@@ -1,0 +1,36 @@
+-- Proofs, Checked — Chapter 5: common mistakes.
+-- INTENDED TO FAIL. Every theorem in this file contains a deliberate
+-- mistake discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch05-mistakes.ctea
+
+mode constructive
+
+sort Person
+
+const clark : Person
+const superman : Person
+
+pred Flies(Person)
+
+-- Mistake 1: rewriting in the wrong direction. The goal mentions
+-- `clark`, but bare `rewrite h` hunts for the equation's RIGHT side.
+theorem wrong_direction : clark = superman -> Flies(superman) -> Flies(clark) := by
+  intro h
+  intro hs
+  rewrite h
+  exact hs
+
+-- Mistake 2: refl on an equation that is simply false.
+theorem arithmetic_optimism : add(2, 2) = 5 := by
+  refl
+
+-- Mistake 3: `have` states one equality, the proof provides the other.
+theorem have_backwards : clark = superman -> superman = clark := by
+  intro h
+  have h2 : superman = clark := h
+  exact h2
+
+-- Mistake 4: comparing things of different types.
+theorem type_confusion : clark = 0 := by
+  refl

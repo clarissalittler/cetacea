@@ -1,0 +1,112 @@
+-- Proofs, Checked — Chapter 7: Relations: Structure Between Things
+-- Companion file for docs/book/07-relations.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch07-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+pred Knows(Person, Person)
+
+-- Section 7.2: the three properties, stated once, over any relation.
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+
+def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
+
+def Transitive (T : Type) (R : T -> T -> Prop) : Prop := forall x y z : T, R(x, y) -> R(y, z) -> R(x, z)
+
+-- Section 7.3: equality passes all three tests — Chapter 5 as a report card.
+theorem eq_reflexive (T : Type) : Reflexive(fun x y : T => x = y) := by
+  unfold Reflexive
+  intro x
+  refl
+
+theorem eq_symmetric (T : Type) : Symmetric(fun x y : T => x = y) := by
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  exact eq_symm h
+
+theorem eq_transitive (T : Type) : Transitive(fun x y : T => x = y) := by
+  unfold Transitive
+  intro x
+  intro y
+  intro z
+  intro h1
+  intro h2
+  exact eq_trans h1 h2
+
+-- Section 7.4: le is reflexive...
+theorem le_reflexive : Reflexive(fun x y : Nat => le(x, y)) := by
+  unfold Reflexive
+  intro x
+  exact le_refl
+
+-- ...but NOT symmetric, and we can prove that it isn't.
+theorem le_not_symmetric : not Symmetric(fun x y : Nat => le(x, y)) := by
+  intro h
+  simp at h
+  have h01 : le(1, 0)
+  apply h 0 1
+  trivial
+  apply succ_not_le_zero {n := 0}
+  exact h01
+
+-- Section 7.5: building a symmetric relation out of an unruly one.
+theorem mutual_knowing_symmetric
+  : Symmetric(fun x y : Person => Knows(x, y) /\ Knows(y, x)) := by
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  split
+  exact h.right
+  exact h.left
+
+-- Section 7.6: the payoff — congruence mod m is an equivalence relation.
+-- ModEq(m, x, y) and its refl/sym/trans theorems come from std/modular.ctea.
+theorem modeq_reflexive (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
+  unfold Reflexive
+  intro x
+  exact modeq_refl
+
+theorem modeq_symmetric (m : Nat) : Symmetric(fun x y : Nat => ModEq(m, x, y)) := by
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  exact modeq_sym {m := m; x := x; y := y} h
+
+theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => ModEq(m, x, y)) := by
+  unfold Transitive
+  intro x
+  intro y
+  intro z
+  intro h1
+  intro h2
+  apply modeq_trans
+  exact h1
+  exact h2
+
+-- The whole bundle in one statement: an equivalence relation.
+theorem modeq_equivalence (m : Nat)
+  : Reflexive(fun x y : Nat => ModEq(m, x, y))
+    /\ Symmetric(fun x y : Nat => ModEq(m, x, y))
+    /\ Transitive(fun x y : Nat => ModEq(m, x, y)) := by
+  split
+  exact modeq_reflexive {m := m}
+  split
+  exact modeq_symmetric {m := m}
+  exact modeq_transitive {m := m}
+
+-- Section 7.6: a concrete residue fact — 27 o'clock is 3 o'clock.
+-- The witnesses say: 27 + 12*0 and 3 + 12*2 are the same number.
+theorem clock_27_is_3 : ModEq(12, 27, 3) := by
+  unfold ModEq
+  exists 0
+  exists 2
+  refl

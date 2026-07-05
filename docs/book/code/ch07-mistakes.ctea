@@ -1,0 +1,34 @@
+-- Proofs, Checked — Chapter 7: common mistakes.
+-- INTENDED TO FAIL. Every theorem in this file contains a deliberate
+-- mistake discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch07-mistakes.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+
+def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
+
+-- Mistake 1: forgetting to unfold. The definition hides the forall,
+-- and intro cannot see through the name.
+theorem forgot_to_unfold (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
+  intro x
+  exact modeq_refl
+
+-- Mistake 2: unfolding the wrong definition.
+theorem wrong_property (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
+  unfold Symmetric
+  intro x
+  exact modeq_refl
+
+-- Mistake 3: wishful thinking — le is not symmetric, and the proof
+-- runs aground exactly where the two sides trade places.
+theorem le_symmetric_wish : Symmetric(fun x y : Nat => le(x, y)) := by
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  exact h
