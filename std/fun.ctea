@@ -1,0 +1,92 @@
+mode constructive
+
+import eq.ctea
+
+-- Functions f : A -> B are modeled by their graphs, following the course
+-- treatment of functions as special relations: G(x, y) means "f(x) = y".
+-- For a declared `func f : A -> B`, the graph is the predicate lambda
+-- `fun x y : ... => f(x) = y`.
+
+def Total (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, exists y : B, G(x, y)
+
+def SingleValued (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, forall y1 y2 : B, G(x, y1) -> G(x, y2) -> y1 = y2
+
+def Injective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x1 x2 : A, forall y : B, G(x1, y) -> G(x2, y) -> x1 = x2
+
+def Surjective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall y : B, exists x : A, G(x, y)
+
+-- Bijective(G) is written `Injective(G) /\ Surjective(G)` at use sites,
+-- because definitions cannot yet pass their predicate parameters to other
+-- definitions.
+
+theorem id_injective (A : Type) : Injective(fun x y : A => x = y) := by
+  unfold Injective
+  intro x1
+  intro x2
+  intro y
+  intro h1
+  intro h2
+  rewrite -> h1
+  rewrite <- h2
+  refl
+
+theorem id_surjective (A : Type) : Surjective(fun x y : A => x = y) := by
+  unfold Surjective
+  intro y
+  exists y
+  refl
+
+theorem id_bijective (A : Type)
+  : Injective(fun x y : A => x = y) /\ Surjective(fun x y : A => x = y) := by
+  split
+  exact id_injective {A := A}
+  exact id_surjective {A := A}
+
+theorem compose_injective
+  (A : Type) (B : Type) (C : Type)
+  (F : A -> B -> Prop)
+  (G : B -> C -> Prop)
+  : Injective(F)
+    -> Injective(G)
+    -> forall x1 x2 : A, forall z : C,
+         (exists y : B, F(x1, y) /\ G(y, z))
+         -> (exists y : B, F(x2, y) /\ G(y, z))
+         -> x1 = x2 := by
+  intro hf
+  intro hg
+  intro x1
+  intro x2
+  intro z
+  intro h1
+  intro h2
+  cases h1 with
+  | intro y1 hy1 =>
+      cases h2 with
+      | intro y2 hy2 =>
+          apply hf x1 x2 y1
+          exact hy1.left
+          apply eq_subst_right {A := B; P := fun b : B => F(x2, b); x := y2; y := y1}
+          apply hg y2 y1 z
+          exact hy2.right
+          exact hy1.right
+          exact hy2.left
+
+theorem compose_surjective
+  (A : Type) (B : Type) (C : Type)
+  (F : A -> B -> Prop)
+  (G : B -> C -> Prop)
+  : Surjective(F)
+    -> Surjective(G)
+    -> forall z : C, exists x : A, exists y : B, F(x, y) /\ G(y, z) := by
+  intro hf
+  intro hg
+  intro z
+  cases hg z with
+  | intro y hy =>
+      cases hf y with
+      | intro x hx =>
+          exists x
+          exists y
+          split
+          exact hx
+          exact hy

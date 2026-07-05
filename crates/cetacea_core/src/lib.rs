@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -444,6 +444,12 @@ pub enum Proof {
         ih_name: Name,
         step_case: Box<Proof>,
     },
+    DataInd {
+        var_name: Name,
+        data_name: Name,
+        target: Formula,
+        arms: Vec<DataIndArm>,
+    },
     TheoremRef {
         name: Name,
         subst: SchemaSubst,
@@ -453,6 +459,17 @@ pub enum Proof {
         args: Vec<Proof>,
         target: Formula,
     },
+    Sorry {
+        target: Formula,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataIndArm {
+    pub ctor: Name,
+    pub arg_names: Vec<Name>,
+    pub ih_names: Vec<Name>,
+    pub proof: Proof,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -497,6 +514,46 @@ pub struct RecDef {
     pub step_var: Name,
     pub rec_name: Name,
     pub succ_body: Term,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataCtor {
+    pub name: Name,
+    pub arg_types: Vec<Type>,
+}
+
+impl DataCtor {
+    fn recursive_arg_indices(&self, data_name: &str) -> Vec<usize> {
+        self.arg_types
+            .iter()
+            .enumerate()
+            .filter(|(_, ty)| matches!(ty, Type::Named(name) if name == data_name))
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataDef {
+    pub name: Name,
+    pub ctors: Vec<DataCtor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataRecArm {
+    pub ctor: Name,
+    pub arg_names: Vec<Name>,
+    pub rec_names: Vec<Name>,
+    pub body: Term,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataRecDef {
+    pub name: Name,
+    pub param: Name,
+    pub data_name: Name,
+    pub result_type: Type,
+    pub arms: Vec<DataRecArm>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -630,6 +687,8 @@ pub struct Theorem {
     pub proof: Option<Proof>,
     pub mode_used: LogicMode,
     pub is_axiom: bool,
+    pub uses_sorry: bool,
+    pub axiom_deps: Vec<Name>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -641,6 +700,8 @@ pub struct Env {
     defs: HashMap<Name, FormulaDef>,
     term_defs: HashMap<Name, TermDef>,
     rec_defs: HashMap<Name, RecDef>,
+    data_defs: HashMap<Name, DataDef>,
+    data_rec_defs: HashMap<Name, DataRecDef>,
     theorems: HashMap<Name, Theorem>,
 }
 
@@ -683,6 +744,22 @@ impl Env {
 
     pub fn add_rec_def(&mut self, def: RecDef) {
         self.rec_defs.insert(def.name.clone(), def);
+    }
+
+    pub fn add_data_def(&mut self, def: DataDef) {
+        self.data_defs.insert(def.name.clone(), def);
+    }
+
+    pub fn data_def(&self, name: &str) -> Option<&DataDef> {
+        self.data_defs.get(name)
+    }
+
+    pub fn add_data_rec_def(&mut self, def: DataRecDef) {
+        self.data_rec_defs.insert(def.name.clone(), def);
+    }
+
+    pub fn data_rec_def(&self, name: &str) -> Option<&DataRecDef> {
+        self.data_rec_defs.get(name)
     }
 
     fn formula_def(&self, name: &str) -> Option<&FormulaDef> {
@@ -917,8 +994,8 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
         push(
             &mut suggestions,
             "Match the proof to the target",
-            format!("`exact` closes the goal only when the expression proves the current target `{target_text}`. If you have an implication or theorem that can prove it, try `apply` first."),
-            Some("apply h"),
+            format!("`exact` closes the goal only when the expression proves the current target `{target_text}`. Check which hypothesis (or which projection, `.left`/`.right`) proves exactly this target; for an implication or theorem whose conclusion matches, use `apply`."),
+            None,
         );
     }
     if message.contains("cannot infer theorem parameter") {
@@ -959,6 +1036,8 @@ pub struct CheckedTheorem {
     pub mode_used: LogicMode,
     pub is_axiom: bool,
     pub is_imported: bool,
+    pub uses_sorry: bool,
+    pub axiom_deps: Vec<Name>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -2015,6 +2094,235 @@ impl FileChecker {
                         }
                     }
                 }
+                Command::Data(decl) => {
+                    if self.env.has_top_level_name(&decl.name) {
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{}` as a data type", decl.name),
+                        ));
+                        continue;
+                    }
+                    let mut names_ok = true;
+                    for (idx, ctor) in decl.ctors.iter().enumerate() {
+                        if self.env.has_top_level_name(&ctor.name)
+                            || ctor.name == decl.name
+                            || decl.ctors[..idx].iter().any(|other| other.name == ctor.name)
+                        {
+                            self.result.diagnostics.push(diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "cannot declare `{}` as a constructor of `{}`: the name is already taken",
+                                    ctor.name, decl.name
+                                ),
+                            ));
+                            names_ok = false;
+                            break;
+                        }
+                    }
+                    if !names_ok {
+                        continue;
+                    }
+                    // Register the sort first so recursive constructor
+                    // arguments such as `cons(Nat, NatList)` validate.
+                    self.env.add_sort(decl.name.clone());
+                    let mut types_ok = true;
+                    for ctor in &decl.ctors {
+                        for ty in &ctor.arg_types {
+                            if let Err(err) = validate_type(&self.env, &Context::new(), ty) {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!(
+                                            "constructor `{}` of data type `{}` has an invalid argument type",
+                                            ctor.name, decl.name
+                                        ),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                types_ok = false;
+                            }
+                        }
+                    }
+                    if !types_ok {
+                        continue;
+                    }
+                    for ctor in &decl.ctors {
+                        if ctor.arg_types.is_empty() {
+                            self.env
+                                .add_const(ctor.name.clone(), Type::Named(decl.name.clone()));
+                        } else {
+                            self.env.add_func(
+                                ctor.name.clone(),
+                                ctor.arg_types.clone(),
+                                Type::Named(decl.name.clone()),
+                            );
+                        }
+                    }
+                    self.env.add_data_def(DataDef {
+                        name: decl.name,
+                        ctors: decl.ctors,
+                    });
+                }
+                Command::DataRecDef(decl) => {
+                    if self.env.has_top_level_name(&decl.name) {
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!("cannot redeclare `{}` as a recursive definition", decl.name),
+                        ));
+                        continue;
+                    }
+                    let Some(data) = self.env.data_def(&decl.param_type).cloned() else {
+                        self.result.diagnostics.push(diagnostic_at(
+                            source_path,
+                            line,
+                            format!(
+                                "recursive definition `{}` recurses over `{}`, which is not a declared data type",
+                                decl.name, decl.param_type
+                            ),
+                        ));
+                        continue;
+                    };
+                    if let Err(err) = validate_type(&self.env, &Context::new(), &decl.result_type) {
+                        self.result.diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "recursive definition `{}` has invalid result type",
+                                    decl.name
+                                ),
+                            )
+                            .with_note(err.message),
+                        );
+                        continue;
+                    }
+                    if decl.arms.len() != data.ctors.len() {
+                        let expected: Vec<&str> =
+                            data.ctors.iter().map(|ctor| ctor.name.as_str()).collect();
+                        self.result.diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "recursive definition `{}` needs one case per constructor of `{}`",
+                                    decl.name, data.name
+                                ),
+                            )
+                            .with_note(format!("expected cases: {}", expected.join(", "))),
+                        );
+                        continue;
+                    }
+                    let mut arms = Vec::new();
+                    let mut arms_ok = true;
+                    for (arm, ctor) in decl.arms.iter().zip(data.ctors.iter()) {
+                        if arm.ctor != ctor.name {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    arm.line,
+                                    format!(
+                                        "recursive definition case `{}` does not match constructor `{}`",
+                                        arm.ctor, ctor.name
+                                    ),
+                                )
+                                .with_note(
+                                    "cases must follow the constructor declaration order"
+                                        .to_string(),
+                                ),
+                            );
+                            arms_ok = false;
+                            break;
+                        }
+                        let rec_count = ctor.recursive_arg_indices(&data.name).len();
+                        let expected_binders = ctor.arg_types.len() + rec_count;
+                        if arm.binders.len() != expected_binders {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    arm.line,
+                                    format!(
+                                        "recursive definition case `{}` expects {} binder(s), but got {}",
+                                        ctor.name,
+                                        expected_binders,
+                                        arm.binders.len()
+                                    ),
+                                )
+                                .with_note(format!(
+                                    "bind the {} constructor argument(s) first, then {} recursive result(s)",
+                                    ctor.arg_types.len(),
+                                    rec_count
+                                )),
+                            );
+                            arms_ok = false;
+                            break;
+                        }
+                        let arg_names = arm.binders[..ctor.arg_types.len()].to_vec();
+                        let rec_names = arm.binders[ctor.arg_types.len()..].to_vec();
+                        let mut arm_ctx = Context::new();
+                        for (name, ty) in arg_names.iter().zip(ctor.arg_types.iter()) {
+                            arm_ctx.add_term(name.clone(), ty.clone());
+                        }
+                        for name in &rec_names {
+                            arm_ctx.add_term(name.clone(), decl.result_type.clone());
+                        }
+                        match validate_term(&self.env, &arm_ctx, &arm.body) {
+                            Ok(actual) if actual == decl.result_type => {}
+                            Ok(actual) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        arm.line,
+                                        format!(
+                                            "recursive definition case `{}` has invalid body",
+                                            ctor.name
+                                        ),
+                                    )
+                                    .with_note(format!(
+                                        "case body has type `{actual}`, but expected `{}`",
+                                        decl.result_type
+                                    )),
+                                );
+                                arms_ok = false;
+                                break;
+                            }
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        arm.line,
+                                        format!(
+                                            "recursive definition case `{}` has invalid body",
+                                            ctor.name
+                                        ),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                arms_ok = false;
+                                break;
+                            }
+                        }
+                        arms.push(DataRecArm {
+                            ctor: ctor.name.clone(),
+                            arg_names,
+                            rec_names,
+                            body: arm.body.clone(),
+                        });
+                    }
+                    if !arms_ok {
+                        continue;
+                    }
+                    self.env.add_data_rec_def(DataRecDef {
+                        name: decl.name,
+                        param: decl.param,
+                        data_name: data.name.clone(),
+                        result_type: decl.result_type,
+                        arms,
+                    });
+                }
                 Command::RecDef(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
                         self.result.diagnostics.push(diagnostic_at(
@@ -2164,13 +2472,17 @@ impl FileChecker {
                         proof: None,
                         mode_used: mode,
                         is_axiom: true,
+                        uses_sorry: false,
+                        axiom_deps: vec![decl.name.clone()],
                     });
                     self.result.theorems.push(CheckedTheorem {
-                        name: decl.name,
+                        name: decl.name.clone(),
                         statement: decl.statement.to_string(),
                         mode_used: mode,
                         is_axiom: true,
                         is_imported,
+                        uses_sorry: false,
+                        axiom_deps: vec![decl.name],
                     });
                 }
                 Command::Theorem(decl) => {
@@ -2218,14 +2530,27 @@ impl FileChecker {
                         Ok(proof) => proof,
                         Err(err) => {
                             let target = err.target.as_deref().unwrap_or(&decl.statement);
+                            let mut diagnostic = diagnostic_at(
+                                source_path,
+                                err.line.unwrap_or(line),
+                                format!("theorem `{}` failed: {}", decl.name, err.message),
+                            )
+                            .with_note(format!("target: {target}"));
+                            if let Some(model) = propositional_countermodel(&[], &decl.statement) {
+                                diagnostic = diagnostic.with_note(format!(
+                                    "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
+                                    countermodel_note(&model)
+                                ));
+                            } else if let Some(model) =
+                                propositional_countermodel(&err.hyps, target)
+                            {
+                                diagnostic = diagnostic.with_note(format!(
+                                    "the open goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
+                                    countermodel_note(&model)
+                                ));
+                            }
                             self.result.diagnostics.push(
-                                diagnostic_at(
-                                    source_path,
-                                    err.line.unwrap_or(line),
-                                    format!("theorem `{}` failed: {}", decl.name, err.message),
-                                )
-                                .with_note(format!("target: {target}"))
-                                .with_tactic_error_suggestions(&err.message, target),
+                                diagnostic.with_tactic_error_suggestions(&err.message, target),
                             );
                             continue;
                         }
@@ -2267,6 +2592,8 @@ impl FileChecker {
                         continue;
                     }
 
+                    let uses_sorry = proof_uses_sorry(&self.env, &proof);
+                    let axiom_deps = proof_axiom_deps(&self.env, &proof);
                     self.env.add_theorem(Theorem {
                         name: decl.name.clone(),
                         params: decl.params,
@@ -2274,6 +2601,8 @@ impl FileChecker {
                         proof: Some(proof),
                         mode_used,
                         is_axiom: false,
+                        uses_sorry,
+                        axiom_deps: axiom_deps.clone(),
                     });
                     self.result.theorems.push(CheckedTheorem {
                         name: decl.name,
@@ -2281,6 +2610,8 @@ impl FileChecker {
                         mode_used,
                         is_axiom: false,
                         is_imported,
+                        uses_sorry,
+                        axiom_deps,
                     });
                 }
             }
@@ -2696,6 +3027,24 @@ fn snapshot_goal(env: &Env, goal: &Goal, mode: LogicMode) -> GoalSnapshot {
 fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
     let mut hints = Vec::new();
 
+    let hyp_formulas: Vec<Formula> = goal
+        .context
+        .proofs()
+        .iter()
+        .map(|binding| binding.formula.clone())
+        .collect();
+    if let Some(model) = propositional_countermodel(&hyp_formulas, &goal.target) {
+        push_goal_hint(
+            &mut hints,
+            "Warning: this goal is not provable",
+            "show_goal".to_string(),
+            format!(
+                "The goal does not follow from the current hypotheses: it is false when {}. Revisit the earlier proof steps or the theorem statement.",
+                countermodel_note(&model)
+            ),
+        );
+    }
+
     for binding in goal.context.proofs().iter().rev() {
         if formulas_def_eq(env, &goal.context, &binding.formula, &goal.target).unwrap_or(false) {
             push_goal_hint(
@@ -2816,6 +3165,19 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
 
     add_apply_hints_from_context(env, goal, &mut hints);
     add_apply_hints_from_theorems(env, goal, mode, &mut hints);
+    // Only show hints that actually advance the goal: speculatively run each
+    // suggested tactic and drop the ones that fail. Hints that cannot be
+    // parsed as a single tactic line (multi-line constructs) are kept.
+    hints.retain(|hint| {
+        if hint.tactic == "show_goal" {
+            return true;
+        }
+        let Ok(tactic) = parse_tactic_line(&hint.tactic) else {
+            return true;
+        };
+        let mut next_goal_id = usize::MAX / 2;
+        run_tactic_step(env, goal.clone(), &tactic, mode, &mut next_goal_id).is_ok()
+    });
     hints.truncate(12);
     hints
 }
@@ -3131,9 +3493,10 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
             "Continue from the simplified proof state.".to_string(),
         ],
         Tactic::Induction { var_name, .. } => vec![
-            format!("Use natural-number induction on `{var_name}`."),
-            "The zero-case script proves the base case.".to_string(),
-            "The successor-case script may use the induction hypothesis to prove the next case."
+            format!("Use induction on `{var_name}`."),
+            "Each constructor case proves the goal for terms built with that constructor."
+                .to_string(),
+            "Recursive cases may use the induction hypotheses for the smaller subterms."
                 .to_string(),
         ],
         Tactic::Exfalso => vec![
@@ -3161,12 +3524,17 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
             "`show_goal` reports the current goal for debugging.".to_string(),
             "It is not a proof step, so a finished proof should remove it.".to_string(),
         ],
+        Tactic::Sorry => vec![
+            format!("Give up on the goal `{}` for now.", goal.target),
+            "`sorry` closes the goal without a proof, so the theorem is only provisionally accepted.".to_string(),
+        ],
     }
 }
 
 fn tactic_label(tactic: &Tactic) -> String {
     match tactic {
         Tactic::Intro(name) => format!("intro {name}"),
+        Tactic::Sorry => "sorry".to_string(),
         Tactic::Exact(expr) => format!("exact {}", proof_expr_label(expr)),
         Tactic::Trivial => "trivial".to_string(),
         Tactic::Assumption => "assumption".to_string(),
@@ -3347,6 +3715,216 @@ pub fn check_proof(
     }
 }
 
+/// Collects the propositional atoms of a formula. Returns `false` if the
+/// formula is not purely propositional (quantifiers, equality, membership,
+/// predicates, ...), in which case truth-table reasoning does not apply.
+fn collect_propositional_atoms(formula: &Formula, atoms: &mut BTreeSet<Name>) -> bool {
+    match formula {
+        Formula::True | Formula::False => true,
+        Formula::Atom(name) => {
+            atoms.insert(name.clone());
+            true
+        }
+        Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
+            collect_propositional_atoms(left, atoms) && collect_propositional_atoms(right, atoms)
+        }
+        _ => false,
+    }
+}
+
+fn eval_propositional(formula: &Formula, atoms: &[Name], bits: u32) -> bool {
+    match formula {
+        Formula::True => true,
+        Formula::False => false,
+        Formula::Atom(name) => atoms
+            .iter()
+            .position(|atom| atom == name)
+            .map(|idx| bits & (1 << idx) != 0)
+            .unwrap_or(false),
+        Formula::And(left, right) => {
+            eval_propositional(left, atoms, bits) && eval_propositional(right, atoms, bits)
+        }
+        Formula::Or(left, right) => {
+            eval_propositional(left, atoms, bits) || eval_propositional(right, atoms, bits)
+        }
+        Formula::Implies(left, right) => {
+            !eval_propositional(left, atoms, bits) || eval_propositional(right, atoms, bits)
+        }
+        _ => false,
+    }
+}
+
+const MAX_COUNTERMODEL_ATOMS: usize = 16;
+
+/// If `hyps -> target` is purely propositional and classically falsifiable,
+/// returns a falsifying truth assignment. A `Some` result means the goal is
+/// not provable (in either logic mode), which usually indicates the statement
+/// itself is wrong rather than the proof.
+pub fn propositional_countermodel(hyps: &[Formula], target: &Formula) -> Option<Vec<(Name, bool)>> {
+    let mut atom_set = BTreeSet::new();
+    for hyp in hyps {
+        if !collect_propositional_atoms(hyp, &mut atom_set) {
+            return None;
+        }
+    }
+    if !collect_propositional_atoms(target, &mut atom_set) {
+        return None;
+    }
+    if atom_set.len() > MAX_COUNTERMODEL_ATOMS {
+        return None;
+    }
+    let atoms: Vec<Name> = atom_set.into_iter().collect();
+    for bits in 0..(1u32 << atoms.len()) {
+        let hyps_hold = hyps
+            .iter()
+            .all(|hyp| eval_propositional(hyp, &atoms, bits));
+        if hyps_hold && !eval_propositional(target, &atoms, bits) {
+            return Some(
+                atoms
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, atom)| (atom.clone(), bits & (1 << idx) != 0))
+                    .collect(),
+            );
+        }
+    }
+    None
+}
+
+fn countermodel_note(model: &[(Name, bool)]) -> String {
+    if model.is_empty() {
+        return "it is false outright".to_string();
+    }
+    model
+        .iter()
+        .map(|(atom, value)| format!("{atom} = {value}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn ensure_kernel_binder_unused(ctx: &Context, name: &str) -> Result<(), KernelError> {
+    if ctx.lookup(name).is_some() {
+        return Err(KernelError::new(format!(
+            "induction binder `{name}` would shadow an existing hypothesis"
+        )));
+    }
+    if ctx.lookup_term(name).is_some() {
+        return Err(KernelError::new(format!(
+            "induction binder `{name}` would shadow an existing variable"
+        )));
+    }
+    Ok(())
+}
+
+fn visit_proof_nodes(proof: &Proof, visit: &mut impl FnMut(&Proof)) {
+    visit(proof);
+    match proof {
+        Proof::Hyp(_)
+        | Proof::TrueIntro
+        | Proof::EqRefl(_)
+        | Proof::TheoremRef { .. }
+        | Proof::Sorry { .. } => {}
+        Proof::FalseElim { proof_false, .. } => visit_proof_nodes(proof_false, visit),
+        Proof::AndIntro(left, right) => {
+            visit_proof_nodes(left, visit);
+            visit_proof_nodes(right, visit);
+        }
+        Proof::AndElimLeft(inner) | Proof::AndElimRight(inner) => visit_proof_nodes(inner, visit),
+        Proof::OrIntroLeft { proof_left, .. } => visit_proof_nodes(proof_left, visit),
+        Proof::OrIntroRight { proof_right, .. } => visit_proof_nodes(proof_right, visit),
+        Proof::OrElim {
+            proof_or,
+            left_case,
+            right_case,
+            ..
+        } => {
+            visit_proof_nodes(proof_or, visit);
+            visit_proof_nodes(left_case, visit);
+            visit_proof_nodes(right_case, visit);
+        }
+        Proof::ImpIntro { body, .. } => visit_proof_nodes(body, visit),
+        Proof::ImpElim {
+            proof_imp,
+            proof_arg,
+        } => {
+            visit_proof_nodes(proof_imp, visit);
+            visit_proof_nodes(proof_arg, visit);
+        }
+        Proof::EqSubst {
+            eq_proof,
+            proof_body,
+            ..
+        } => {
+            visit_proof_nodes(eq_proof, visit);
+            visit_proof_nodes(proof_body, visit);
+        }
+        Proof::Convert { proof_body, .. } => visit_proof_nodes(proof_body, visit),
+        Proof::ForallIntro { body, .. } => visit_proof_nodes(body, visit),
+        Proof::ForallElim { proof_forall, .. } => visit_proof_nodes(proof_forall, visit),
+        Proof::ExistsIntro { proof_body, .. } => visit_proof_nodes(proof_body, visit),
+        Proof::ExistsElim {
+            proof_exists, body, ..
+        } => {
+            visit_proof_nodes(proof_exists, visit);
+            visit_proof_nodes(body, visit);
+        }
+        Proof::NatInd {
+            base_case,
+            step_case,
+            ..
+        } => {
+            visit_proof_nodes(base_case, visit);
+            visit_proof_nodes(step_case, visit);
+        }
+        Proof::DataInd { arms, .. } => {
+            for arm in arms {
+                visit_proof_nodes(&arm.proof, visit);
+            }
+        }
+        Proof::Classical { args, .. } => {
+            for arg in args {
+                visit_proof_nodes(arg, visit);
+            }
+        }
+    }
+}
+
+/// Whether the proof contains a `sorry`, directly or through a referenced
+/// theorem that was itself admitted with `sorry`.
+pub fn proof_uses_sorry(env: &Env, proof: &Proof) -> bool {
+    let mut found = false;
+    visit_proof_nodes(proof, &mut |node| match node {
+        Proof::Sorry { .. } => found = true,
+        Proof::TheoremRef { name, .. } => {
+            if env.theorem(name).is_some_and(|theorem| theorem.uses_sorry) {
+                found = true;
+            }
+        }
+        _ => {}
+    });
+    found
+}
+
+/// Names of the axioms this proof depends on, directly or through referenced
+/// theorems. Sorted and deduplicated.
+pub fn proof_axiom_deps(env: &Env, proof: &Proof) -> Vec<Name> {
+    let mut deps = HashSet::new();
+    visit_proof_nodes(proof, &mut |node| {
+        if let Proof::TheoremRef { name, .. } = node {
+            if let Some(theorem) = env.theorem(name) {
+                if theorem.is_axiom {
+                    deps.insert(theorem.name.clone());
+                } else {
+                    deps.extend(theorem.axiom_deps.iter().cloned());
+                }
+            }
+        }
+    });
+    let mut deps: Vec<Name> = deps.into_iter().collect();
+    deps.sort();
+    deps
+}
+
 pub fn infer_proof(
     env: &Env,
     ctx: &Context,
@@ -3367,6 +3945,13 @@ pub fn infer_proof(
             formula: Formula::True,
             mode_used: LogicMode::Constructive,
         }),
+        Proof::Sorry { target } => {
+            validate_formula(env, ctx, target)?;
+            Ok(CheckedProof {
+                formula: target.clone(),
+                mode_used: LogicMode::Constructive,
+            })
+        }
         Proof::FalseElim {
             proof_false,
             target,
@@ -3667,6 +4252,9 @@ pub fn infer_proof(
                 }
             }
 
+            ensure_kernel_binder_unused(ctx, step_var)?;
+            ensure_kernel_binder_unused(ctx, ih_name)?;
+
             let base_target = subst_formula_term(target, var_name, &Term::Zero);
             let base_mode = check_proof(env, ctx, base_case, &base_target, allowed_mode)?;
 
@@ -3682,6 +4270,103 @@ pub fn infer_proof(
             Ok(CheckedProof {
                 formula: target.clone(),
                 mode_used: base_mode.combine(step_mode),
+            })
+        }
+        Proof::DataInd {
+            var_name,
+            data_name,
+            target,
+            arms,
+        } => {
+            validate_formula(env, ctx, target)?;
+            let Some(var_type) = ctx.lookup_term(var_name) else {
+                return Err(KernelError::new(format!(
+                    "induction variable `{var_name}` is not in scope"
+                )));
+            };
+            if var_type != &Type::Named(data_name.clone()) {
+                return Err(KernelError::new(format!(
+                    "induction variable `{var_name}` has type `{var_type}`, but expected `{data_name}`"
+                )));
+            }
+            let Some(data) = env.data_def(data_name).cloned() else {
+                return Err(KernelError::new(format!(
+                    "`{data_name}` is not a declared data type"
+                )));
+            };
+            for binding in ctx.proofs() {
+                if formula_has_free_term(&binding.formula, var_name) {
+                    return Err(KernelError::new(format!(
+                        "cannot induct on `{var_name}` while hypothesis `{}` depends on it",
+                        binding.name
+                    )));
+                }
+            }
+            if arms.len() != data.ctors.len() {
+                return Err(KernelError::new(format!(
+                    "induction over `{data_name}` needs one arm per constructor"
+                )));
+            }
+
+            let mut mode_used = LogicMode::Constructive;
+            for (arm, ctor) in arms.iter().zip(data.ctors.iter()) {
+                if arm.ctor != ctor.name {
+                    return Err(KernelError::new(format!(
+                        "induction arm `{}` does not match constructor `{}`",
+                        arm.ctor, ctor.name
+                    )));
+                }
+                let rec_indices = ctor.recursive_arg_indices(data_name);
+                if arm.arg_names.len() != ctor.arg_types.len()
+                    || arm.ih_names.len() != rec_indices.len()
+                {
+                    return Err(KernelError::new(format!(
+                        "induction arm `{}` binds the wrong number of names",
+                        ctor.name
+                    )));
+                }
+                for (idx, name) in arm
+                    .arg_names
+                    .iter()
+                    .chain(arm.ih_names.iter())
+                    .enumerate()
+                {
+                    let seen: Vec<&Name> = arm
+                        .arg_names
+                        .iter()
+                        .chain(arm.ih_names.iter())
+                        .take(idx)
+                        .collect();
+                    if seen.contains(&name) {
+                        return Err(KernelError::new(format!(
+                            "induction arm `{}` repeats the binder `{name}`",
+                            ctor.name
+                        )));
+                    }
+                    ensure_kernel_binder_unused(ctx, name)?;
+                }
+
+                let mut arm_ctx = ctx.clone();
+                for (name, ty) in arm.arg_names.iter().zip(ctor.arg_types.iter()) {
+                    arm_ctx.add_term(name.clone(), ty.clone());
+                }
+                for (ih_name, rec_idx) in arm.ih_names.iter().zip(rec_indices.iter()) {
+                    let ih_formula = subst_formula_term(
+                        target,
+                        var_name,
+                        &Term::Var(arm.arg_names[*rec_idx].clone()),
+                    );
+                    arm_ctx.add_proof(ih_name.clone(), ih_formula);
+                }
+                let ctor_term = data_ctor_term(&ctor.name, &arm.arg_names);
+                let arm_target = subst_formula_term(target, var_name, &ctor_term);
+                let arm_mode = check_proof(env, &arm_ctx, &arm.proof, &arm_target, allowed_mode)?;
+                mode_used = mode_used.combine(arm_mode);
+            }
+
+            Ok(CheckedProof {
+                formula: target.clone(),
+                mode_used,
             })
         }
         Proof::TheoremRef { name, subst } => {
@@ -3839,7 +4524,7 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                     "definition `{name}` expects {expected} argument(s), but got 0"
                 )));
             }
-            if env.rec_def(name).is_some() {
+            if env.rec_def(name).is_some() || env.data_rec_def(name).is_some() {
                 return Err(ValidationError::new(format!(
                     "recursive definition `{name}` expects 1 argument(s), but got 0"
                 )));
@@ -3879,6 +4564,22 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                     if actual != Type::Nat {
                         return Err(ValidationError::new(format!(
                             "argument 1 of `{name}` has type `{actual}`, but expected `Nat`"
+                        )));
+                    }
+                    return Ok(def.result_type.clone());
+                }
+                if let Some(def) = env.data_rec_def(name) {
+                    if args.len() != 1 {
+                        return Err(ValidationError::new(format!(
+                            "recursive definition `{name}` expects 1 argument(s), but got {}",
+                            args.len()
+                        )));
+                    }
+                    let actual = validate_term(env, ctx, &args[0])?;
+                    if actual != Type::Named(def.data_name.clone()) {
+                        return Err(ValidationError::new(format!(
+                            "argument 1 of `{name}` has type `{actual}`, but expected `{}`",
+                            def.data_name
                         )));
                     }
                     return Ok(def.result_type.clone());
@@ -5024,6 +5725,12 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
                     return normalize_rec_def(env, ctx, def, arg);
                 }
             }
+            if let Some(def) = env.data_rec_def(name) {
+                if args.len() == 1 {
+                    let arg = normalize_term(env, ctx, &args[0])?;
+                    return normalize_data_rec_def(env, ctx, def, arg);
+                }
+            }
             Ok(Term::App(
                 name.clone(),
                 args.iter()
@@ -5126,6 +5833,48 @@ fn normalize_rec_def(
     }
 }
 
+fn normalize_data_rec_def(
+    env: &Env,
+    ctx: &Context,
+    def: &DataRecDef,
+    arg: Term,
+) -> Result<Term, ValidationError> {
+    let (ctor_name, ctor_args): (&str, &[Term]) = match &arg {
+        Term::Var(name) => (name.as_str(), &[]),
+        Term::App(name, args) => (name.as_str(), args.as_slice()),
+        _ => return Ok(Term::App(def.name.clone(), vec![arg])),
+    };
+    let Some(data) = env.data_def(&def.data_name) else {
+        return Ok(Term::App(def.name.clone(), vec![arg]));
+    };
+    let Some(ctor) = data.ctors.iter().find(|ctor| ctor.name == ctor_name) else {
+        return Ok(Term::App(def.name.clone(), vec![arg]));
+    };
+    if ctor.arg_types.len() != ctor_args.len() {
+        return Ok(Term::App(def.name.clone(), vec![arg]));
+    }
+    let Some(arm) = def.arms.iter().find(|arm| arm.ctor == ctor.name) else {
+        return Ok(Term::App(def.name.clone(), vec![arg]));
+    };
+
+    let mut subst: HashMap<Name, Term> = HashMap::new();
+    for (name, value) in arm.arg_names.iter().zip(ctor_args.iter()) {
+        subst.insert(name.clone(), value.clone());
+    }
+    for (rec_name, rec_idx) in arm
+        .rec_names
+        .iter()
+        .zip(ctor.recursive_arg_indices(&def.data_name))
+    {
+        subst.insert(
+            rec_name.clone(),
+            Term::App(def.name.clone(), vec![ctor_args[rec_idx].clone()]),
+        );
+    }
+    let body = subst_term_terms(&arm.body, &subst);
+    normalize_term(env, ctx, &body)
+}
+
 fn set_element_type(env: &Env, ctx: &Context, set: &Term) -> Result<Type, ValidationError> {
     match validate_term(env, ctx, set)? {
         Type::Set(elem) => Ok(*elem),
@@ -5199,6 +5948,7 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             for param in params {
                 scoped.term_args.remove(&param.name);
             }
+            let (params, body) = rename_schema_lambda_binders_if_needed(params, body, &scoped);
             Term::PredLambda {
                 params: params
                     .iter()
@@ -5207,7 +5957,7 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
                         ty: param.ty.as_ref().map(|ty| subst_type_schema(ty, subst)),
                     })
                     .collect(),
-                body: Box::new(subst_formula_schema(body, &scoped)),
+                body: Box::new(subst_formula_schema(&body, &scoped)),
             }
         }
         Term::Zero => Term::Zero,
@@ -5257,10 +6007,11 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             body,
         } => {
             let scoped = subst_without_term_arg(subst, var);
+            let (var, body) = rename_schema_binder_if_needed(var, body, &scoped);
             Term::SetBuilder {
-                var: var.clone(),
+                var,
                 var_type: subst_type_schema(var_type, subst),
-                body: Box::new(subst_formula_schema(body, &scoped)),
+                body: Box::new(subst_formula_schema(&body, &scoped)),
             }
         }
     }
@@ -5270,6 +6021,144 @@ fn subst_without_term_arg(subst: &SchemaSubst, var: &str) -> SchemaSubst {
     let mut scoped = subst.clone();
     scoped.term_args.remove(var);
     scoped
+}
+
+fn schema_subst_free_term_vars(subst: &SchemaSubst) -> HashSet<Name> {
+    let mut vars = HashSet::new();
+    for term in subst.term_args.values() {
+        collect_free_term_vars(term, &mut Vec::new(), &mut vars);
+    }
+    for formula in subst.formula_args.values() {
+        vars.extend(free_term_vars_in_formula(formula));
+    }
+    for arg in subst.predicate_args.values() {
+        if let PredicateArg::Lambda { params, body } = arg {
+            let mut inner = free_term_vars_in_formula(body);
+            for param in params {
+                inner.remove(&param.name);
+            }
+            vars.extend(inner);
+        }
+    }
+    vars
+}
+
+#[derive(Clone, Copy)]
+enum SchemaNameKind {
+    Atom,
+    Predicate,
+}
+
+fn formula_mentions_schema_name(formula: &Formula, name: &str, kind: SchemaNameKind) -> bool {
+    match formula {
+        Formula::True | Formula::False => false,
+        Formula::Atom(atom) => matches!(kind, SchemaNameKind::Atom) && atom == name,
+        Formula::Eq(left, right) | Formula::In(left, right) | Formula::Subset(left, right) => {
+            term_mentions_schema_name(left, name, kind) || term_mentions_schema_name(right, name, kind)
+        }
+        Formula::PredApp(pred, args) => {
+            (matches!(kind, SchemaNameKind::Predicate) && pred == name)
+                || args
+                    .iter()
+                    .any(|arg| term_mentions_schema_name(arg, name, kind))
+        }
+        Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
+            formula_mentions_schema_name(left, name, kind)
+                || formula_mentions_schema_name(right, name, kind)
+        }
+        Formula::Forall { body, .. } | Formula::Exists { body, .. } => {
+            formula_mentions_schema_name(body, name, kind)
+        }
+    }
+}
+
+fn term_mentions_schema_name(term: &Term, name: &str, kind: SchemaNameKind) -> bool {
+    match term {
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => false,
+        Term::App(_, args) => args
+            .iter()
+            .any(|arg| term_mentions_schema_name(arg, name, kind)),
+        Term::PredLambda { body, .. } | Term::SetBuilder { body, .. } => {
+            formula_mentions_schema_name(body, name, kind)
+        }
+        Term::Succ(inner)
+        | Term::Singleton(inner)
+        | Term::Fst(inner)
+        | Term::Snd(inner)
+        | Term::Complement(inner)
+        | Term::Powerset(inner) => term_mentions_schema_name(inner, name, kind),
+        Term::Add(left, right)
+        | Term::Mul(left, right)
+        | Term::Sub(left, right)
+        | Term::Pair(left, right)
+        | Term::Union(left, right)
+        | Term::Inter(left, right)
+        | Term::Diff(left, right)
+        | Term::CartProd(left, right) => {
+            term_mentions_schema_name(left, name, kind)
+                || term_mentions_schema_name(right, name, kind)
+        }
+    }
+}
+
+fn formula_mentions_schema_subst(formula: &Formula, subst: &SchemaSubst) -> bool {
+    subst
+        .term_args
+        .keys()
+        .any(|key| formula_has_free_term(formula, key))
+        || subst
+            .formula_args
+            .keys()
+            .any(|key| formula_mentions_schema_name(formula, key, SchemaNameKind::Atom))
+        || subst
+            .predicate_args
+            .keys()
+            .any(|key| formula_mentions_schema_name(formula, key, SchemaNameKind::Predicate))
+}
+
+fn rename_schema_binder_if_needed(var: &str, body: &Formula, scoped: &SchemaSubst) -> (Name, Formula) {
+    if !formula_mentions_schema_subst(body, scoped) {
+        return (var.to_string(), body.clone());
+    }
+    let replacement_free_vars = schema_subst_free_term_vars(scoped);
+    if !replacement_free_vars.contains(var) {
+        return (var.to_string(), body.clone());
+    }
+    let mut avoid = free_term_vars_in_formula(body);
+    avoid.extend(replacement_free_vars);
+    avoid.extend(scoped.term_args.keys().cloned());
+    let fresh = fresh_bound_name(var, &avoid);
+    let body = subst_formula_term(body, var, &Term::Var(fresh.clone()));
+    (fresh, body)
+}
+
+fn rename_schema_lambda_binders_if_needed(
+    params: &[LambdaParam],
+    body: &Formula,
+    scoped: &SchemaSubst,
+) -> (Vec<LambdaParam>, Formula) {
+    if !formula_mentions_schema_subst(body, scoped) {
+        return (params.to_vec(), body.clone());
+    }
+    let replacement_free_vars = schema_subst_free_term_vars(scoped);
+    let mut params = params.to_vec();
+    let mut body = body.clone();
+    let mut avoid = free_term_vars_in_formula(&body);
+    avoid.extend(replacement_free_vars.iter().cloned());
+    avoid.extend(scoped.term_args.keys().cloned());
+    for param in &params {
+        avoid.insert(param.name.clone());
+    }
+    for param in &mut params {
+        if !replacement_free_vars.contains(&param.name) {
+            continue;
+        }
+        let fresh = fresh_bound_name(&param.name, &avoid);
+        body = subst_formula_term(&body, &param.name, &Term::Var(fresh.clone()));
+        avoid.insert(fresh.clone());
+        param.name = fresh;
+    }
+    (params, body)
 }
 
 fn subst_formula_schema(formula: &Formula, subst: &SchemaSubst) -> Formula {
@@ -5324,10 +6213,11 @@ fn subst_formula_schema(formula: &Formula, subst: &SchemaSubst) -> Formula {
             body,
         } => {
             let scoped = subst_without_term_arg(subst, var);
+            let (var, body) = rename_schema_binder_if_needed(var, body, &scoped);
             Formula::forall(
-                var.clone(),
+                var,
                 subst_type_schema(var_type, subst),
-                subst_formula_schema(body, &scoped),
+                subst_formula_schema(&body, &scoped),
             )
         }
         Formula::Exists {
@@ -5336,10 +6226,11 @@ fn subst_formula_schema(formula: &Formula, subst: &SchemaSubst) -> Formula {
             body,
         } => {
             let scoped = subst_without_term_arg(subst, var);
+            let (var, body) = rename_schema_binder_if_needed(var, body, &scoped);
             Formula::exists(
-                var.clone(),
+                var,
                 subst_type_schema(var_type, subst),
-                subst_formula_schema(body, &scoped),
+                subst_formula_schema(&body, &scoped),
             )
         }
     }
@@ -5359,151 +6250,15 @@ fn term_type(env: &Env, ctx: &Context, term: &Term) -> Result<Type, KernelError>
 }
 
 fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
-    match term {
-        Term::Var(name) if name == var => replacement.clone(),
-        Term::Var(_) => term.clone(),
-        Term::App(name, args) => Term::App(
-            name.clone(),
-            args.iter()
-                .map(|arg| subst_term(arg, var, replacement))
-                .collect(),
-        ),
-        Term::PredLambda { params, body } if params.iter().any(|param| param.name == var) => {
-            Term::PredLambda {
-                params: params.clone(),
-                body: body.clone(),
-            }
-        }
-        Term::PredLambda { params, body } => Term::PredLambda {
-            params: params.clone(),
-            body: Box::new(subst_formula_term(body, var, replacement)),
-        },
-        Term::Zero => Term::Zero,
-        Term::Succ(term) => Term::Succ(Box::new(subst_term(term, var, replacement))),
-        Term::Add(left, right) => Term::Add(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Mul(left, right) => Term::Mul(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Sub(left, right) => Term::Sub(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Pair(left, right) => Term::Pair(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Fst(term) => Term::Fst(Box::new(subst_term(term, var, replacement))),
-        Term::Snd(term) => Term::Snd(Box::new(subst_term(term, var, replacement))),
-        Term::EmptySet(ty) => Term::EmptySet(ty.clone()),
-        Term::Universe(ty) => Term::Universe(ty.clone()),
-        Term::Singleton(term) => Term::Singleton(Box::new(subst_term(term, var, replacement))),
-        Term::Union(left, right) => Term::Union(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Inter(left, right) => Term::Inter(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Diff(left, right) => Term::Diff(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Complement(term) => Term::Complement(Box::new(subst_term(term, var, replacement))),
-        Term::CartProd(left, right) => Term::CartProd(
-            Box::new(subst_term(left, var, replacement)),
-            Box::new(subst_term(right, var, replacement)),
-        ),
-        Term::Powerset(term) => Term::Powerset(Box::new(subst_term(term, var, replacement))),
-        Term::SetBuilder {
-            var: bound,
-            var_type,
-            body,
-        } if bound == var => Term::SetBuilder {
-            var: bound.clone(),
-            var_type: var_type.clone(),
-            body: body.clone(),
-        },
-        Term::SetBuilder {
-            var: bound,
-            var_type,
-            body,
-        } => Term::SetBuilder {
-            var: bound.clone(),
-            var_type: var_type.clone(),
-            body: Box::new(subst_formula_term(body, var, replacement)),
-        },
-    }
+    let mut subst = HashMap::new();
+    subst.insert(var.to_string(), replacement.clone());
+    subst_term_terms(term, &subst)
 }
 
 fn subst_formula_term(formula: &Formula, var: &str, replacement: &Term) -> Formula {
-    match formula {
-        Formula::True => Formula::True,
-        Formula::False => Formula::False,
-        Formula::Atom(name) => Formula::Atom(name.clone()),
-        Formula::Eq(left, right) => Formula::eq(
-            subst_term(left, var, replacement),
-            subst_term(right, var, replacement),
-        ),
-        Formula::In(elem, set) => Formula::membership(
-            subst_term(elem, var, replacement),
-            subst_term(set, var, replacement),
-        ),
-        Formula::Subset(left, right) => Formula::subset(
-            subst_term(left, var, replacement),
-            subst_term(right, var, replacement),
-        ),
-        Formula::PredApp(name, args) => Formula::PredApp(
-            name.clone(),
-            args.iter()
-                .map(|arg| subst_term(arg, var, replacement))
-                .collect(),
-        ),
-        Formula::And(left, right) => Formula::and(
-            subst_formula_term(left, var, replacement),
-            subst_formula_term(right, var, replacement),
-        ),
-        Formula::Or(left, right) => Formula::or(
-            subst_formula_term(left, var, replacement),
-            subst_formula_term(right, var, replacement),
-        ),
-        Formula::Implies(left, right) => Formula::implies(
-            subst_formula_term(left, var, replacement),
-            subst_formula_term(right, var, replacement),
-        ),
-        Formula::Forall {
-            var: bound,
-            var_type,
-            body,
-        } if bound == var => Formula::forall(bound.clone(), var_type.clone(), *body.clone()),
-        Formula::Forall {
-            var: bound,
-            var_type,
-            body,
-        } => Formula::forall(
-            bound.clone(),
-            var_type.clone(),
-            subst_formula_term(body, var, replacement),
-        ),
-        Formula::Exists {
-            var: bound,
-            var_type,
-            body,
-        } if bound == var => Formula::exists(bound.clone(), var_type.clone(), *body.clone()),
-        Formula::Exists {
-            var: bound,
-            var_type,
-            body,
-        } => Formula::exists(
-            bound.clone(),
-            var_type.clone(),
-            subst_formula_term(body, var, replacement),
-        ),
-    }
+    let mut subst = HashMap::new();
+    subst.insert(var.to_string(), replacement.clone());
+    subst_formula_terms(formula, &subst)
 }
 
 fn term_has_free_var(term: &Term, name: &str) -> bool {
@@ -5955,8 +6710,33 @@ enum Command {
     Pred(Name, Vec<Type>),
     Def(DefDecl),
     RecDef(RecDefDecl),
+    Data(DataDecl),
+    DataRecDef(DataRecDefDecl),
     Axiom(AxiomDecl),
     Theorem(TheoremDecl),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DataDecl {
+    name: Name,
+    ctors: Vec<DataCtor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DataRecArmDecl {
+    ctor: Name,
+    binders: Vec<Name>,
+    body: Term,
+    line: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DataRecDefDecl {
+    name: Name,
+    param: Name,
+    param_type: Name,
+    result_type: Type,
+    arms: Vec<DataRecArmDecl>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6033,7 +6813,7 @@ fn parse_diagnostic(path: Option<&Path>, err: ParseError, message: Option<String
     {
         diagnostic = diagnostic.with_suggestion(
             "Check the tactic name",
-            "Tactics are line-oriented. Common names include `intro`, `exact`, `apply`, `split`, `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `simp`, and `contradiction`.",
+            "Tactics are line-oriented. Common names include `intro`, `exact`, `apply`, `split`, `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `simp`, `induction`, `contradiction`, and `sorry` (to leave a hole).",
             None::<String>,
         );
     }
@@ -6341,10 +7121,7 @@ enum Tactic {
     },
     Induction {
         var_name: Name,
-        zero_tactics: Vec<LocatedTactic>,
-        step_var: Name,
-        ih_name: Name,
-        step_tactics: Vec<LocatedTactic>,
+        arms: Vec<TacticInductionArm>,
     },
     Exfalso,
     Contradiction,
@@ -6354,6 +7131,15 @@ enum Tactic {
     },
     ByContra(Name),
     ShowGoal,
+    Sorry,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TacticInductionArm {
+    ctor: Name,
+    binders: Vec<Name>,
+    tactics: Vec<LocatedTactic>,
+    line: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6841,6 +7627,38 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
             continue;
         }
 
+        // Textbook Unicode connectives are accepted as aliases for the ASCII
+        // syntax, so formulas pasted from course notes lex directly.
+        let unicode_alias = match ch {
+            '∧' => Some(TokenKind::Sym("/\\".to_string())),
+            '∨' => Some(TokenKind::Sym("\\/".to_string())),
+            '→' => Some(TokenKind::Sym("->".to_string())),
+            '↔' => Some(TokenKind::Sym("<->".to_string())),
+            '¬' => Some(TokenKind::Ident("not".to_string())),
+            '∀' => Some(TokenKind::Ident("forall".to_string())),
+            '∃' => Some(TokenKind::Ident("exists".to_string())),
+            '∈' => Some(TokenKind::Ident("in".to_string())),
+            '⊆' => Some(TokenKind::Ident("subset".to_string())),
+            _ => None,
+        };
+        if let Some(kind) = unicode_alias {
+            tokens.push(Token {
+                kind,
+                span: Span { start: i, end: i + 1 },
+            });
+            i += 1;
+            continue;
+        }
+        if !ch.is_ascii() {
+            return Err(ParseError::new(format!(
+                "unexpected character `{ch}`: Cetacea uses ASCII syntax for this symbol (for example `/\\` for `∧`, `->` for `→`, `not` for `¬`)"
+            ))
+            .with_span(Span {
+                start: i,
+                end: i + 1,
+            }));
+        }
+
         let rest: String = chars[i..].iter().collect();
         let sym = if rest.starts_with(":=") {
             Some(":=")
@@ -7011,9 +7829,75 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             continue;
         }
 
+        if trimmed.starts_with("data ") {
+            let rest = trimmed.strip_prefix("data ").unwrap_or_default();
+            let name =
+                expect_single_name(rest, "data").map_err(|err| err.with_line(command_line))?;
+            i += 1;
+            let mut ctors = Vec::new();
+            loop {
+                while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
+                    i += 1;
+                }
+                if i >= lines.len() || !strip_comment(lines[i]).trim().starts_with('|') {
+                    break;
+                }
+                let ctor_line = i + 1;
+                ctors.push(
+                    parse_data_ctor_arm(strip_comment(lines[i]).trim())
+                        .map_err(|err| err.with_line(ctor_line))?,
+                );
+                i += 1;
+            }
+            if ctors.is_empty() {
+                return Err(
+                    ParseError::new("data declaration needs at least one `| constructor` case")
+                        .with_line(command_line),
+                );
+            }
+            commands.push(located_command(command_line, Command::Data(DataDecl { name, ctors })));
+            continue;
+        }
+
         if trimmed.starts_with("defrec ") {
-            let (name, param, result_type) =
+            let (name, param, param_type, result_type) =
                 parse_defrec_header(trimmed).map_err(|err| err.with_line(command_line))?;
+
+            if let Type::Named(param_type_name) = param_type {
+                i += 1;
+                let mut arms = Vec::new();
+                loop {
+                    while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
+                        i += 1;
+                    }
+                    if i >= lines.len() || !strip_comment(lines[i]).trim().starts_with('|') {
+                        break;
+                    }
+                    let arm_line = i + 1;
+                    arms.push(
+                        parse_data_rec_arm(strip_comment(lines[i]).trim(), arm_line)
+                            .map_err(|err| err.with_line(arm_line))?,
+                    );
+                    i += 1;
+                }
+                if arms.is_empty() {
+                    return Err(ParseError::new(
+                        "recursive definition needs at least one `| constructor` case",
+                    )
+                    .with_line(command_line));
+                }
+                commands.push(located_command(
+                    command_line,
+                    Command::DataRecDef(DataRecDefDecl {
+                        name,
+                        param,
+                        param_type: param_type_name,
+                        result_type,
+                        arms,
+                    }),
+                ));
+                continue;
+            }
 
             i += 1;
             while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
@@ -7195,6 +8079,7 @@ fn is_command_start(trimmed: &str) -> bool {
         || trimmed.starts_with("pred ")
         || trimmed.starts_with("defrec ")
         || trimmed.starts_with("def ")
+        || trimmed.starts_with("data ")
         || trimmed.starts_with("axiom ")
 }
 
@@ -7260,7 +8145,7 @@ fn parse_def_header(header: &str) -> Result<(Name, Vec<Param>, DefResult), Parse
     Ok((name, params, result))
 }
 
-fn parse_defrec_header(header: &str) -> Result<(Name, Name, Type), ParseError> {
+fn parse_defrec_header(header: &str) -> Result<(Name, Name, Type, Type), ParseError> {
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("defrec")?;
     let name = tokens.expect_ident()?;
@@ -7268,17 +8153,70 @@ fn parse_defrec_header(header: &str) -> Result<(Name, Name, Type), ParseError> {
     let param = tokens.expect_ident()?;
     tokens.expect_sym(":")?;
     let param_type = tokens.parse_type()?;
-    if param_type != Type::Nat {
-        return Err(
-            ParseError::new("recursive definition parameter must have type `Nat`")
-                .with_span(tokens.current_span()),
-        );
+    if !matches!(param_type, Type::Nat | Type::Named(_)) {
+        return Err(ParseError::new(
+            "recursive definition parameter must have type `Nat` or a declared data type",
+        )
+        .with_span(tokens.current_span()));
     }
     tokens.expect_sym(")")?;
     tokens.expect_sym(":")?;
     let result_type = tokens.parse_type()?;
     tokens.expect_eof()?;
-    Ok((name, param, result_type))
+    Ok((name, param, param_type, result_type))
+}
+
+fn parse_data_ctor_arm(line: &str) -> Result<DataCtor, ParseError> {
+    let Some(rest) = line.strip_prefix('|') else {
+        return Err(ParseError::new(
+            "data constructor expects `| name` or `| name(Type, ...)`",
+        ));
+    };
+    let mut tokens = Tokens::new(rest.trim())?;
+    let name = tokens.expect_ident()?;
+    let mut arg_types = Vec::new();
+    if tokens.eat_sym("(") {
+        loop {
+            arg_types.push(tokens.parse_type()?);
+            if tokens.eat_sym(",") {
+                continue;
+            }
+            break;
+        }
+        tokens.expect_sym(")")?;
+    }
+    tokens.expect_eof()?;
+    Ok(DataCtor { name, arg_types })
+}
+
+fn parse_data_rec_arm(line: &str, line_no: usize) -> Result<DataRecArmDecl, ParseError> {
+    let expect_message = "recursive definition case expects `| ctor binders => term`";
+    let Some(rest) = line.strip_prefix('|') else {
+        return Err(ParseError::new(expect_message));
+    };
+    let Some((binders, body)) = rest.split_once("=>") else {
+        return Err(ParseError::new(expect_message));
+    };
+    let mut parts = binders.split_whitespace();
+    let Some(ctor) = parts.next() else {
+        return Err(ParseError::new(
+            "recursive definition case needs a constructor name",
+        ));
+    };
+    let binders: Vec<Name> = parts.map(str::to_string).collect();
+    for (idx, binder) in binders.iter().enumerate() {
+        if binders[..idx].contains(binder) {
+            return Err(ParseError::new(
+                "recursive definition case binders must be distinct",
+            ));
+        }
+    }
+    Ok(DataRecArmDecl {
+        ctor: ctor.to_string(),
+        binders,
+        body: parse_term_str(body.trim())?,
+        line: line_no,
+    })
 }
 
 fn parse_defrec_zero_arm(line: &str) -> Result<Term, ParseError> {
@@ -7479,40 +8417,43 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, Par
             .and_then(|rest| rest.strip_suffix(" with"))
         {
             i += 1;
-            i = skip_empty_tactic_lines(lines, i);
-            if i >= lines.len() {
-                return Err(ParseError::new("expected zero case arm").with_line(line_no));
+            let mut arms = Vec::new();
+            loop {
+                let next = skip_empty_tactic_lines(lines, i);
+                if next >= lines.len() || !lines[next].text.trim().starts_with('|') {
+                    if arms.is_empty() {
+                        return Err(
+                            ParseError::new("expected at least one `| constructor =>` case arm")
+                                .with_line(line_no),
+                        );
+                    }
+                    // Do not consume trailing blank lines past the last arm.
+                    break;
+                }
+                i = next;
+                let arm_line = lines[i].line;
+                let arm_indent = line_indent(&lines[i].text);
+                let (ctor, binders) = parse_induction_arm(lines[i].text.trim())
+                    .map_err(|err| err.with_line(arm_line))?;
+                i += 1;
+                let body_start = i;
+                let body_end = case_body_end(lines, i, arm_indent);
+                let arm_tactics = parse_tactic_lines(&lines[body_start..body_end])?;
+                arms.push(TacticInductionArm {
+                    ctor,
+                    binders,
+                    tactics: arm_tactics,
+                    line: arm_line,
+                });
+                i = body_end;
             }
-            let zero_line = lines[i].line;
-            let zero_indent = line_indent(&lines[i].text);
-            parse_zero_case_arm(lines[i].text.trim()).map_err(|err| err.with_line(zero_line))?;
-            i += 1;
-            let zero_start = i;
-            let zero_end = case_body_end(lines, i, zero_indent);
-            i = skip_empty_tactic_lines(lines, zero_end);
-            if i >= lines.len() {
-                return Err(ParseError::new("expected successor case arm").with_line(zero_line));
-            }
-            let zero_tactics = parse_tactic_lines(&lines[zero_start..zero_end])?;
-            let step_line = lines[i].line;
-            let step_indent = line_indent(&lines[i].text);
-            let (step_var, ih_name) = parse_succ_case_arm(lines[i].text.trim())
-                .map_err(|err| err.with_line(step_line))?;
-            i += 1;
-            let step_start = i;
-            let step_end = case_body_end(lines, i, step_indent);
-            let step_tactics = parse_tactic_lines(&lines[step_start..step_end])?;
-            i = step_end;
 
             tactics.push(LocatedTactic {
                 line: line_no,
                 tactic: Tactic::Induction {
                     var_name: expect_single_name(var_name, "induction")
                         .map_err(|err| err.with_line(line_no))?,
-                    zero_tactics,
-                    step_var,
-                    ih_name,
-                    step_tactics,
+                    arms,
                 },
             });
             continue;
@@ -7619,28 +8560,28 @@ fn parse_exists_case_arm(line: &str) -> Result<(Name, Name), ParseError> {
     Ok((names[0].to_string(), names[1].to_string()))
 }
 
-fn parse_zero_case_arm(line: &str) -> Result<(), ParseError> {
-    if line == "| zero =>" {
-        Ok(())
-    } else {
-        Err(ParseError::new("expected `| zero =>` case arm"))
-    }
-}
-
-fn parse_succ_case_arm(line: &str) -> Result<(Name, Name), ParseError> {
-    let Some(rest) = line.strip_prefix("| succ ") else {
-        return Err(ParseError::new("expected successor case arm"));
+fn parse_induction_arm(line: &str) -> Result<(Name, Vec<Name>), ParseError> {
+    let Some(rest) = line.strip_prefix('|') else {
+        return Err(ParseError::new(
+            "induction case expects `| constructor binders =>`",
+        ));
     };
-    let Some(names) = rest.strip_suffix("=>") else {
+    let Some(head) = rest.strip_suffix("=>") else {
         return Err(ParseError::new("case arm must end with `=>`"));
     };
-    let names: Vec<&str> = names.split_whitespace().collect();
-    if names.len() != 2 {
+    let mut parts = head.split_whitespace();
+    let Some(ctor) = parts.next() else {
         return Err(ParseError::new(
-            "successor case arm expects variable and induction hypothesis names",
+            "induction case needs a constructor name, as in `| zero =>`",
         ));
+    };
+    let binders: Vec<Name> = parts.map(str::to_string).collect();
+    for (idx, binder) in binders.iter().enumerate() {
+        if binders[..idx].contains(binder) {
+            return Err(ParseError::new("induction case binders must be distinct"));
+        }
     }
-    Ok((names[0].to_string(), names[1].to_string()))
+    Ok((ctor.to_string(), binders))
 }
 
 fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
@@ -7743,6 +8684,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if line == "show_goal" || line == "print_state" {
         return Ok(Tactic::ShowGoal);
     }
+    if line == "sorry" || line == "admit" {
+        return Ok(Tactic::Sorry);
+    }
 
     Err(ParseError::new(format!("unknown tactic `{line}`")))
 }
@@ -7843,6 +8787,11 @@ fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
             "left" => steps.push(ProofStep::Projection(Projection::Left)),
             "right" => steps.push(ProofStep::Projection(Projection::Right)),
             other => {
+                if other.contains('(') || other.contains(')') {
+                    return Err(ParseError::new(
+                        "projections such as `h.left` are not supported inside proof-expression arguments; use a separate `apply` step (for example `apply eq_subst_right`) or restate the argument as its own hypothesis",
+                    ));
+                }
                 return Err(ParseError::new(format!(
                     "unknown proof projection `.{other}`"
                 )))
@@ -8003,6 +8952,7 @@ fn split_first_projection(input: &str) -> Result<(&str, &str), ParseError> {
 struct TacticError {
     message: String,
     target: Option<Box<Formula>>,
+    hyps: Vec<Formula>,
     line: Option<usize>,
 }
 
@@ -8011,6 +8961,7 @@ impl TacticError {
         Self {
             message: message.into(),
             target: None,
+            hyps: Vec::new(),
             line: None,
         }
     }
@@ -8018,6 +8969,13 @@ impl TacticError {
     fn with_target(mut self, target: Formula) -> Self {
         if self.target.is_none() {
             self.target = Some(Box::new(target));
+        }
+        self
+    }
+
+    fn with_hyps(mut self, hyps: Vec<Formula>) -> Self {
+        if self.hyps.is_empty() {
+            self.hyps = hyps;
         }
         self
     }
@@ -8073,6 +9031,12 @@ impl ProofSession {
         let goal = self.goals.remove(0);
         let goal_id = goal.id;
         let goal_target = goal.target.clone();
+        let goal_hyps: Vec<Formula> = goal
+            .context
+            .proof_vars
+            .iter()
+            .map(|binding| binding.formula.clone())
+            .collect();
         let StepResult {
             replacement,
             new_goals,
@@ -8083,7 +9047,11 @@ impl ProofSession {
             allowed_mode,
             &mut self.next_goal_id,
         )
-        .map_err(|err| err.with_target(goal_target).with_line(located.line))?;
+        .map_err(|err| {
+            err.with_target(goal_target)
+                .with_hyps(goal_hyps)
+                .with_line(located.line)
+        })?;
         if !self.root.replace_hole(goal_id, &replacement) {
             return Err(TacticError::new("internal error: missing proof hole"));
         }
@@ -8096,7 +9064,14 @@ impl ProofSession {
     fn complete(self) -> Result<Proof, TacticError> {
         if let Some(goal) = self.goals.first() {
             return Err(TacticError::new(format!("unsolved goal `{}`", goal.target))
-                .with_target(goal.target.clone()));
+                .with_target(goal.target.clone())
+                .with_hyps(
+                    goal.context
+                        .proof_vars
+                        .iter()
+                        .map(|binding| binding.formula.clone())
+                        .collect(),
+                ));
         }
         self.root.complete()
     }
@@ -8598,49 +9573,108 @@ fn run_tactic_step(
                 .map_err(|err| TacticError::new(format!("cannot case split: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
                 .map_err(|err| TacticError::new(err.message))?;
-            let Formula::Exists {
-                var,
-                var_type,
-                body,
-            } = formula
-            else {
-                return Err(TacticError::new("cases expects an existential proof"));
-            };
+            match formula {
+                Formula::Exists {
+                    var,
+                    var_type,
+                    body,
+                } => {
+                    let mut body_ctx = goal.context.clone();
+                    body_ctx.add_term(witness_name.clone(), var_type);
+                    body_ctx.add_proof(
+                        hyp_name.clone(),
+                        subst_formula_term(&body, &var, &Term::Var(witness_name.clone())),
+                    );
+                    let body_proof = prove(
+                        env,
+                        body_ctx,
+                        goal.target.clone(),
+                        body_tactics,
+                        allowed_mode,
+                    )?;
 
-            let mut body_ctx = goal.context.clone();
-            body_ctx.add_term(witness_name.clone(), var_type);
-            body_ctx.add_proof(
-                hyp_name.clone(),
-                subst_formula_term(&body, &var, &Term::Var(witness_name.clone())),
-            );
-            let body_proof = prove(
-                env,
-                body_ctx,
-                goal.target.clone(),
-                body_tactics,
-                allowed_mode,
-            )?;
+                    Ok(StepResult {
+                        replacement: PartialProof::Done(Proof::ExistsElim {
+                            proof_exists: Box::new(proof_exists),
+                            witness_name: witness_name.clone(),
+                            hyp_name: hyp_name.clone(),
+                            body: Box::new(body_proof),
+                            target: goal.target,
+                        }),
+                        new_goals: Vec::new(),
+                    })
+                }
+                Formula::And(left, right) => {
+                    ensure_intro_name_unused(&goal.context, witness_name)?;
+                    ensure_intro_name_unused(&goal.context, hyp_name)?;
+                    if witness_name == hyp_name {
+                        return Err(TacticError::new(
+                            "cases on a conjunction needs two distinct hypothesis names",
+                        ));
+                    }
+                    let mut body_ctx = goal.context.clone();
+                    body_ctx.add_proof(witness_name.clone(), (*left).clone());
+                    body_ctx.add_proof(hyp_name.clone(), (*right).clone());
+                    let body_proof = prove(
+                        env,
+                        body_ctx,
+                        goal.target.clone(),
+                        body_tactics,
+                        allowed_mode,
+                    )?;
 
-            Ok(StepResult {
-                replacement: PartialProof::Done(Proof::ExistsElim {
-                    proof_exists: Box::new(proof_exists),
-                    witness_name: witness_name.clone(),
-                    hyp_name: hyp_name.clone(),
-                    body: Box::new(body_proof),
-                    target: goal.target,
-                }),
-                new_goals: Vec::new(),
-            })
+                    // (fun hl => fun hr => body) (h.left) (h.right)
+                    let lambda = Proof::ImpIntro {
+                        hyp_name: witness_name.clone(),
+                        hyp_formula: (*left).clone(),
+                        body: Box::new(Proof::ImpIntro {
+                            hyp_name: hyp_name.clone(),
+                            hyp_formula: (*right).clone(),
+                            body: Box::new(body_proof),
+                        }),
+                    };
+                    let applied = Proof::ImpElim {
+                        proof_imp: Box::new(Proof::ImpElim {
+                            proof_imp: Box::new(lambda),
+                            proof_arg: Box::new(Proof::AndElimLeft(Box::new(
+                                proof_exists.clone(),
+                            ))),
+                        }),
+                        proof_arg: Box::new(Proof::AndElimRight(Box::new(proof_exists))),
+                    };
+                    Ok(StepResult {
+                        replacement: PartialProof::Done(applied),
+                        new_goals: Vec::new(),
+                    })
+                }
+                _ => Err(TacticError::new(
+                    "cases with `| intro a b` expects an existential or conjunction proof",
+                )),
+            }
         }
         Tactic::Exists(witness) => {
             let Formula::Exists {
                 var,
-                var_type: _,
+                var_type,
                 body,
             } = &goal.target
             else {
                 return Err(TacticError::new("exists expects an existential goal"));
             };
+            match validate_term(env, &goal.context, witness) {
+                Ok(actual) if &actual == var_type => {}
+                Ok(actual) => {
+                    return Err(TacticError::new(format!(
+                        "exists witness `{witness}` has type `{actual}`, but the goal needs a `{var_type}`"
+                    )));
+                }
+                Err(err) => {
+                    return Err(TacticError::new(format!(
+                        "exists witness `{witness}` is not valid here: {}",
+                        err.message
+                    )));
+                }
+            }
             let id = fresh_goal(next_goal_id);
             Ok(StepResult {
                 replacement: PartialProof::ExistsIntro {
@@ -8660,6 +9694,21 @@ fn run_tactic_step(
                 return Err(TacticError::new("refl expects an equality goal"));
             };
             if left != right {
+                // Try computation: `refl` also closes goals whose two sides
+                // normalize to the same term, so `simp` is not needed first.
+                let norm_left = normalize_term(env, &goal.context, left)
+                    .map_err(|err| TacticError::new(err.message))?;
+                let norm_right = normalize_term(env, &goal.context, right)
+                    .map_err(|err| TacticError::new(err.message))?;
+                if norm_left == norm_right {
+                    return Ok(StepResult {
+                        replacement: PartialProof::Done(Proof::Convert {
+                            proof_body: Box::new(Proof::EqRefl(norm_left)),
+                            target: goal.target.clone(),
+                        }),
+                        new_goals: Vec::new(),
+                    });
+                }
                 return Err(TacticError::new(format!(
                     "refl cannot prove `{left} = {right}` because the sides are not identical"
                 )));
@@ -8924,23 +9973,13 @@ fn run_tactic_step(
                 }
             }
         }
-        Tactic::Induction {
-            var_name,
-            zero_tactics,
-            step_var,
-            ih_name,
-            step_tactics,
-        } => {
+        Tactic::Induction { var_name, arms } => {
             let Some(var_type) = goal.context.lookup_term(var_name) else {
                 return Err(TacticError::new(format!(
                     "induction variable `{var_name}` is not in scope"
                 )));
             };
-            if var_type != &Type::Nat {
-                return Err(TacticError::new(format!(
-                    "induction variable `{var_name}` has type `{var_type}`, but expected `Nat`"
-                )));
-            }
+            let var_type = var_type.clone();
             if let Some(binding) = goal
                 .context
                 .proofs()
@@ -8953,35 +9992,127 @@ fn run_tactic_step(
                 )));
             }
 
-            let base_target = subst_formula_term(&goal.target, var_name, &Term::Zero);
-            let base_case = prove(
-                env,
-                goal.context.clone(),
-                base_target,
-                zero_tactics,
-                allowed_mode,
-            )?;
+            match &var_type {
+                Type::Nat => {
+                    if arms.len() != 2
+                        || arms[0].ctor != "zero"
+                        || arms[1].ctor != "succ"
+                        || !arms[0].binders.is_empty()
+                        || arms[1].binders.len() != 2
+                    {
+                        return Err(TacticError::new(format!(
+                            "induction on `{var_name}` over `Nat` expects the arms `| zero =>` and `| succ k ih =>`"
+                        )));
+                    }
+                    let step_var = &arms[1].binders[0];
+                    let ih_name = &arms[1].binders[1];
+                    ensure_induction_binder_unused(&goal.context, step_var)?;
+                    ensure_induction_binder_unused(&goal.context, ih_name)?;
 
-            let mut step_ctx = goal.context.clone();
-            step_ctx.add_term(step_var.clone(), Type::Nat);
-            let step_var_term = Term::Var(step_var.clone());
-            let ih_formula = subst_formula_term(&goal.target, var_name, &step_var_term);
-            step_ctx.add_proof(ih_name.clone(), ih_formula);
-            let step_target =
-                subst_formula_term(&goal.target, var_name, &Term::Succ(Box::new(step_var_term)));
-            let step_case = prove(env, step_ctx, step_target, step_tactics, allowed_mode)?;
+                    let base_target = subst_formula_term(&goal.target, var_name, &Term::Zero);
+                    let base_case = prove(
+                        env,
+                        goal.context.clone(),
+                        base_target,
+                        &arms[0].tactics,
+                        allowed_mode,
+                    )?;
 
-            Ok(StepResult {
-                replacement: PartialProof::Done(Proof::NatInd {
-                    var_name: var_name.clone(),
-                    target: goal.target,
-                    base_case: Box::new(base_case),
-                    step_var: step_var.clone(),
-                    ih_name: ih_name.clone(),
-                    step_case: Box::new(step_case),
-                }),
-                new_goals: Vec::new(),
-            })
+                    let mut step_ctx = goal.context.clone();
+                    step_ctx.add_term(step_var.clone(), Type::Nat);
+                    let step_var_term = Term::Var(step_var.clone());
+                    let ih_formula = subst_formula_term(&goal.target, var_name, &step_var_term);
+                    step_ctx.add_proof(ih_name.clone(), ih_formula);
+                    let step_target = subst_formula_term(
+                        &goal.target,
+                        var_name,
+                        &Term::Succ(Box::new(step_var_term)),
+                    );
+                    let step_case =
+                        prove(env, step_ctx, step_target, &arms[1].tactics, allowed_mode)?;
+
+                    Ok(StepResult {
+                        replacement: PartialProof::Done(Proof::NatInd {
+                            var_name: var_name.clone(),
+                            target: goal.target,
+                            base_case: Box::new(base_case),
+                            step_var: step_var.clone(),
+                            ih_name: ih_name.clone(),
+                            step_case: Box::new(step_case),
+                        }),
+                        new_goals: Vec::new(),
+                    })
+                }
+                Type::Named(data_name) if env.data_def(data_name).is_some() => {
+                    let data = env.data_def(data_name).cloned().expect("data def exists");
+                    if arms.len() != data.ctors.len() {
+                        let expected: Vec<&str> =
+                            data.ctors.iter().map(|ctor| ctor.name.as_str()).collect();
+                        return Err(TacticError::new(format!(
+                            "induction on `{var_name}` over `{data_name}` needs one arm per constructor: {}",
+                            expected.join(", ")
+                        )));
+                    }
+                    let mut proof_arms = Vec::new();
+                    for (arm, ctor) in arms.iter().zip(data.ctors.iter()) {
+                        if arm.ctor != ctor.name {
+                            return Err(TacticError::new(format!(
+                                "induction arm `{}` does not match constructor `{}`; arms must follow the declaration order",
+                                arm.ctor, ctor.name
+                            )));
+                        }
+                        let rec_indices = ctor.recursive_arg_indices(data_name);
+                        let expected_binders = ctor.arg_types.len() + rec_indices.len();
+                        if arm.binders.len() != expected_binders {
+                            return Err(TacticError::new(format!(
+                                "induction arm `{}` expects {} binder(s): one per constructor argument, then one induction hypothesis per recursive argument",
+                                ctor.name, expected_binders
+                            )));
+                        }
+                        for binder in &arm.binders {
+                            ensure_induction_binder_unused(&goal.context, binder)?;
+                        }
+                        let arg_names = &arm.binders[..ctor.arg_types.len()];
+                        let ih_names = &arm.binders[ctor.arg_types.len()..];
+
+                        let mut arm_ctx = goal.context.clone();
+                        for (name, ty) in arg_names.iter().zip(ctor.arg_types.iter()) {
+                            arm_ctx.add_term(name.clone(), ty.clone());
+                        }
+                        for (ih_name, rec_idx) in ih_names.iter().zip(rec_indices.iter()) {
+                            let ih_formula = subst_formula_term(
+                                &goal.target,
+                                var_name,
+                                &Term::Var(arg_names[*rec_idx].clone()),
+                            );
+                            arm_ctx.add_proof(ih_name.clone(), ih_formula);
+                        }
+                        let ctor_term = data_ctor_term(&ctor.name, arg_names);
+                        let arm_target = subst_formula_term(&goal.target, var_name, &ctor_term);
+                        let arm_proof =
+                            prove(env, arm_ctx, arm_target, &arm.tactics, allowed_mode)?;
+                        proof_arms.push(DataIndArm {
+                            ctor: ctor.name.clone(),
+                            arg_names: arg_names.to_vec(),
+                            ih_names: ih_names.to_vec(),
+                            proof: arm_proof,
+                        });
+                    }
+
+                    Ok(StepResult {
+                        replacement: PartialProof::Done(Proof::DataInd {
+                            var_name: var_name.clone(),
+                            data_name: data_name.clone(),
+                            target: goal.target,
+                            arms: proof_arms,
+                        }),
+                        new_goals: Vec::new(),
+                    })
+                }
+                other => Err(TacticError::new(format!(
+                    "induction variable `{var_name}` has type `{other}`, but expected `Nat` or a declared data type"
+                ))),
+            }
         }
         Tactic::Exfalso => {
             let id = fresh_goal(next_goal_id);
@@ -9070,10 +10201,44 @@ fn run_tactic_step(
                 }],
             })
         }
+        Tactic::Sorry => Ok(StepResult {
+            replacement: PartialProof::Done(Proof::Sorry {
+                target: goal.target,
+            }),
+            new_goals: Vec::new(),
+        }),
         Tactic::ShowGoal => Err(TacticError::new(format!(
             "current goal is `{}`",
             goal.target
         ))),
+    }
+}
+
+fn ensure_induction_binder_unused(ctx: &Context, name: &str) -> Result<(), TacticError> {
+    if ctx.lookup(name).is_some() {
+        return Err(TacticError::new(format!(
+            "induction binder `{name}` would shadow an existing hypothesis"
+        )));
+    }
+    if ctx.lookup_term(name).is_some() {
+        return Err(TacticError::new(format!(
+            "induction binder `{name}` would shadow an existing variable"
+        )));
+    }
+    Ok(())
+}
+
+fn data_ctor_term(ctor_name: &str, arg_names: &[Name]) -> Term {
+    if arg_names.is_empty() {
+        Term::Var(ctor_name.to_string())
+    } else {
+        Term::App(
+            ctor_name.to_string(),
+            arg_names
+                .iter()
+                .map(|name| Term::Var(name.clone()))
+                .collect(),
+        )
     }
 }
 
@@ -11439,6 +12604,16 @@ theorem trivial_true : True := by
     }
 
     #[test]
+    fn std_list_checks() {
+        check_path_ok("std/list.ctea");
+    }
+
+    #[test]
+    fn std_fun_checks() {
+        check_path_ok("std/fun.ctea");
+    }
+
+    #[test]
     fn std_prelude_checks() {
         check_path_ok("std/prelude.ctea");
     }
@@ -11702,6 +12877,239 @@ theorem not_not_em (P : Prop) : not not (P \/ not P) := by
   exact p
 "#,
         );
+    }
+
+    #[test]
+    fn forall_elim_avoids_variable_capture() {
+        // Instantiating `forall x, exists y, not (x = y)` at the local
+        // variable `y` must rename the inner binder, not capture it.
+        // Capture would make this satisfiable hypothesis prove `False`.
+        let result = check_file(
+            r#"
+mode constructive
+
+sort T
+
+theorem boom (y : T) : (forall x : T, exists y : T, not (x = y)) -> False := by
+  intro h
+  cases h y with
+  | intro w hw =>
+      apply hw
+      refl
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn forall_elim_capture_renames_binder_in_goal() {
+        let result = check_ok(
+            r#"
+mode constructive
+
+sort T
+
+theorem fine (y : T) : (forall x : T, exists y : T, x = y) -> exists z : T, y = z := by
+  intro h
+  cases h y with
+  | intro w hw =>
+      exists w
+      exact hw
+"#,
+        );
+        assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn schema_instantiation_avoids_variable_capture() {
+        // Explicit theorem arguments `{x := y}` must rename the axiom's
+        // inner `exists y` binder rather than capture the argument.
+        let result = check_file(
+            r#"
+mode constructive
+
+sort T
+
+axiom two (x : T) : exists y : T, not (x = y)
+
+theorem boom2 (y : T) : False := by
+  cases two {x := y} with
+  | intro w hw =>
+      apply hw
+      refl
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn sorry_accepts_theorem_as_incomplete() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem hole (P Q : Prop) : P /\ Q -> Q /\ P := by
+  sorry
+
+theorem uses_hole (P Q : Prop) : P /\ Q -> Q /\ P := by
+  exact hole
+
+theorem honest (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#,
+        );
+        assert!(result.diagnostics.is_empty());
+        let hole = result.theorems.iter().find(|t| t.name == "hole").unwrap();
+        assert!(hole.uses_sorry);
+        let uses_hole = result
+            .theorems
+            .iter()
+            .find(|t| t.name == "uses_hole")
+            .unwrap();
+        assert!(uses_hole.uses_sorry, "sorry should taint dependent theorems");
+        let honest = result.theorems.iter().find(|t| t.name == "honest").unwrap();
+        assert!(!honest.uses_sorry);
+    }
+
+    #[test]
+    fn sorry_inside_split_branch_leaves_other_goals_open() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem partial_split (P Q : Prop) : P -> Q -> P /\ Q := by
+  intro hp
+  intro hq
+  split
+  sorry
+  exact hq
+"#,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert!(result.theorems[0].uses_sorry);
+    }
+
+    #[test]
+    fn axiom_dependencies_are_reported_transitively() {
+        let result = check_file(
+            r#"
+mode constructive
+
+sort Z
+pred Cong(Z, Z)
+axiom cong_sym : forall x : Z, forall y : Z, Cong(x, y) -> Cong(y, x)
+
+theorem direct (x y : Z) : Cong(x, y) -> Cong(y, x) := by
+  intro h
+  apply cong_sym
+  exact h
+
+theorem indirect (x y : Z) : Cong(x, y) -> Cong(y, x) := by
+  exact direct
+"#,
+        );
+        assert!(result.diagnostics.is_empty());
+        let direct = result.theorems.iter().find(|t| t.name == "direct").unwrap();
+        assert_eq!(direct.axiom_deps, vec!["cong_sym".to_string()]);
+        let indirect = result
+            .theorems
+            .iter()
+            .find(|t| t.name == "indirect")
+            .unwrap();
+        assert_eq!(indirect.axiom_deps, vec!["cong_sym".to_string()]);
+    }
+
+    #[test]
+    fn failing_file_still_reports_passing_theorems() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem bad (P Q : Prop) : P -> Q := by
+  intro h
+  exact h
+
+theorem good (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.theorems.iter().any(|t| t.name == "good"));
+    }
+
+    #[test]
+    fn countermodel_reported_for_non_tautology_statement() {
+        let result = check_file(
+            r#"
+mode classical
+
+theorem converse_error (P Q : Prop) : (P -> Q) -> Q -> P := by
+  intro hpq
+  intro hq
+  exact hq
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            notes.contains("not a tautology") && notes.contains("P = false, Q = true"),
+            "expected countermodel note, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn countermodel_reported_for_unprovable_goal_after_wrong_branch() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem wrong_branch (P Q : Prop) : Q -> P \/ Q := by
+  intro hq
+  left
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            notes.contains("does not follow from the current hypotheses"),
+            "expected goal countermodel note, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn no_countermodel_note_for_provable_statement_with_fixable_mistake() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem fixable (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  split
+  exact h.left
+  exact h.right
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            !notes.contains("false when"),
+            "should not claim unprovability for a provable goal: {notes}"
+        );
+    }
+
+    #[test]
+    fn propositional_countermodel_ignores_non_propositional_goals() {
+        assert!(propositional_countermodel(
+            &[],
+            &Formula::forall(
+                "x".to_string(),
+                Type::Named("T".to_string()),
+                Formula::Atom("P".to_string()),
+            ),
+        )
+        .is_none());
     }
 
     #[test]
@@ -12937,7 +14345,7 @@ defrec bad (x : Person) : Nat
 | zero => 0
 | succ k rec => rec
 "#,
-            "recursive definition parameter must have type `Nat`",
+            "recurses over `Person`, which is not a declared data type",
         );
     }
 
@@ -13213,11 +14621,273 @@ theorem add_assoc (n m k : Nat) : add(add(n, m), k) = add(n, add(m, k)) := by
   | zero =>
       simp
       refl
+  | succ n0 ih =>
+      simp
+      rewrite ih
+      refl
+"#,
+        );
+    }
+
+    #[test]
+    fn data_type_structural_induction_over_lists() {
+        check_ok(
+            r#"
+mode constructive
+
+data NatList
+| nil
+| cons(Nat, NatList)
+
+defrec len (l : NatList) : Nat
+| nil => 0
+| cons h t rec => succ(rec)
+
+defrec snoc_one (l : NatList) : NatList
+| nil => cons(1, nil)
+| cons h t rec => cons(h, rec)
+
+theorem len_example : len(cons(1, cons(2, nil))) = 2 := by
+  simp
+  refl
+
+theorem len_snoc_one (l : NatList) : len(snoc_one(l)) = succ(len(l)) := by
+  induction l with
+  | nil =>
+      simp
+      refl
+  | cons h t ih =>
+      simp
+      rewrite ih
+      refl
+"#,
+        );
+    }
+
+    #[test]
+    fn data_type_structural_induction_over_trees_two_hypotheses() {
+        check_ok(
+            r#"
+mode constructive
+
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+
+defrec mirror (t : Tree) : Tree
+| leaf => leaf
+| node l v r recl recr => node(recr, v, recl)
+
+theorem size_example : size(node(leaf, 5, node(leaf, 3, leaf))) = 2 := by
+  simp
+  refl
+
+theorem mirror_leaf : mirror(leaf) = leaf := by
+  simp
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn data_induction_requires_all_constructor_arms() {
+        check_err_contains(
+            r#"
+mode constructive
+
+data NatList
+| nil
+| cons(Nat, NatList)
+
+theorem missing_arm (l : NatList) : l = l := by
+  induction l with
+  | nil =>
+      refl
+"#,
+            "needs one arm per constructor",
+        );
+    }
+
+    #[test]
+    fn data_induction_rejects_wrong_arm_order() {
+        check_err_contains(
+            r#"
+mode constructive
+
+data NatList
+| nil
+| cons(Nat, NatList)
+
+theorem wrong_order (l : NatList) : l = l := by
+  induction l with
+  | cons h t ih =>
+      refl
+  | nil =>
+      refl
+"#,
+            "does not match constructor",
+        );
+    }
+
+    #[test]
+    fn data_induction_rejects_wrong_binder_count() {
+        check_err_contains(
+            r#"
+mode constructive
+
+data NatList
+| nil
+| cons(Nat, NatList)
+
+theorem wrong_binders (l : NatList) : l = l := by
+  induction l with
+  | nil =>
+      refl
+  | cons h ih =>
+      refl
+"#,
+            "expects 3 binder(s)",
+        );
+    }
+
+    #[test]
+    fn data_rec_def_requires_matching_arms() {
+        check_err_contains(
+            r#"
+mode constructive
+
+data NatList
+| nil
+| cons(Nat, NatList)
+
+defrec broken (l : NatList) : Nat
+| nil => 0
+"#,
+            "needs one case per constructor",
+        );
+    }
+
+    #[test]
+    fn data_declaration_rejects_taken_constructor_names() {
+        check_err_contains(
+            r#"
+mode constructive
+
+const nil : Nat
+
+data NatList
+| nil
+| cons(Nat, NatList)
+"#,
+            "the name is already taken",
+        );
+    }
+
+    #[test]
+    fn unicode_connectives_parse_as_ascii_aliases() {
+        check_ok(
+            r#"
+mode constructive
+
+sort T
+pred Nice(T)
+
+theorem uni (P Q : Prop) : P ∧ Q → Q ∨ ¬P := by
+  intro h
+  left
+  exact h.right
+
+theorem uni_fol (x : T) : (∀y : T, Nice(y)) → ∃z : T, Nice(z) := by
+  intro h
+  exists x
+  exact h x
+"#,
+        );
+    }
+
+    #[test]
+    fn cases_splits_conjunction_hypothesis() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem cases_and (P Q R : Prop) : P /\ Q -> (P -> Q -> R) -> R := by
+  intro h
+  intro hf
+  cases h with
+  | intro hp hq =>
+      apply hf
+      exact hp
+      exact hq
+"#,
+        );
+    }
+
+    #[test]
+    fn refl_closes_goals_up_to_computation() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem add_zero (n : Nat) : add(n, 0) = n := by
+  refl
+
+theorem two_times_three : mul(2, 3) = 6 := by
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn goal_hints_only_suggest_working_tactics() {
+        // With no term of type T in scope, the placeholder hint
+        // `exists witness` cannot succeed and must be filtered out.
+        let source = r#"
+mode constructive
+
+sort T
+pred Nice(T)
+
+theorem find : (forall x : T, Nice(x)) -> exists y : T, Nice(y) := by
+  intro h
+"#;
+        let goals = goals_at_source_path(source, "hints.ctea", Position { line: 9, column: 1 });
+        let hints: Vec<&GoalHint> = goals
+            .goals
+            .iter()
+            .flat_map(|snapshot| snapshot.hints.iter())
+            .collect();
+        for hint in &hints {
+            assert_ne!(
+                hint.tactic, "exists witness",
+                "hint engine should not suggest a tactic that fails"
+            );
+        }
+    }
+
+    #[test]
+    fn nat_induction_rejects_shadowing_step_binder() {
+        // `| succ k ih` while `k` is already a theorem parameter would
+        // collapse the step case onto the diagonal, which is unsound.
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem add_assoc (n m k : Nat) : add(add(n, m), k) = add(n, add(m, k)) := by
+  induction n with
+  | zero =>
+      simp
+      refl
   | succ k ih =>
       simp
       rewrite ih
       refl
 "#,
+            "induction binder `k` would shadow an existing variable",
         );
     }
 

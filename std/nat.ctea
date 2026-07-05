@@ -136,3 +136,81 @@ theorem le_refl (n : Nat) : le(n, n) := by
   | succ k ih =>
       simp
       exact ih
+
+theorem le_zero_inv (m : Nat) : le(m, 0) -> m = 0 := by
+  induction m with
+  | zero =>
+      intro h
+      refl
+  | succ m0 ih =>
+      simp
+      intro h
+      exfalso
+      exact h
+
+theorem le_succ_inv (m : Nat)
+  : forall k : Nat, le(m, succ(k)) -> le(m, k) \/ m = succ(k) := by
+  induction m with
+  | zero =>
+      intro k
+      intro h
+      left
+      simp
+      trivial
+  | succ m0 ihm =>
+      intro k
+      induction k with
+      | zero =>
+          intro h
+          simp at h
+          right
+          rewrite -> le_zero_inv h
+          refl
+      | succ k0 ihk =>
+          intro h
+          simp at h
+          cases ihm k0 h with
+          | left hl =>
+              left
+              simp
+              exact hl
+          | right hr =>
+              right
+              rewrite -> hr
+              refl
+
+-- Strong (course-of-values) induction: to prove `P(n)`, it is enough to
+-- prove `P(0)` and to prove each `P(succ(k))` assuming `P(m)` for every
+-- `m <= k`.
+theorem strong_induction_bounded (P : Nat -> Prop) (n : Nat)
+  : P(0)
+    -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
+    -> forall m : Nat, le(m, n) -> P(m) := by
+  intro h0
+  intro hstep
+  induction n with
+  | zero =>
+      intro m
+      intro hm
+      rewrite -> le_zero_inv hm
+      exact h0
+  | succ k ihn =>
+      intro m
+      intro hm
+      cases le_succ_inv {m := m} k hm with
+      | left hl =>
+          apply ihn m
+          exact hl
+      | right hr =>
+          rewrite -> hr
+          apply hstep k
+          exact ihn
+
+theorem strong_induction (P : Nat -> Prop) (n : Nat)
+  : P(0)
+    -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
+    -> P(n) := by
+  intro h0
+  intro hstep
+  apply strong_induction_bounded {P := P; n := n} h0 hstep n
+  exact le_refl

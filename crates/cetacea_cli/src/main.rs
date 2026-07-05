@@ -72,8 +72,8 @@ fn print_usage() {
 
 fn run_check(path: &Path) -> i32 {
     let result = check_file_at_path(path);
+    print_accepted(&result);
     if result.diagnostics.is_empty() {
-        print_accepted(&result);
         0
     } else {
         print_diagnostics(&result.diagnostics);
@@ -366,6 +366,24 @@ impl TextBuffer {
     }
 }
 
+const UNDO_LIMIT: usize = 200;
+
+#[derive(Clone)]
+struct EditSnapshot {
+    lines: Vec<String>,
+    cursor_line: usize,
+    cursor_col: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditKind {
+    InsertChar,
+    Backspace,
+    Delete,
+    Newline,
+    Replace,
+}
+
 fn char_to_byte_index(text: &str, char_idx: usize) -> usize {
     text.char_indices()
         .nth(char_idx)
@@ -388,6 +406,10 @@ struct TuiApp {
     search_query: String,
     selected_theorem: Option<String>,
     quit_confirm: bool,
+    undo_stack: Vec<EditSnapshot>,
+    redo_stack: Vec<EditSnapshot>,
+    last_edit: Option<(EditKind, usize, usize)>,
+    saved_lines: Option<Vec<String>>,
     outline: SourceOutline,
     check_result: CheckResult,
     goals: GoalStepResult,
@@ -405,9 +427,11 @@ impl TuiApp {
             .first()
             .map(|theorem| theorem.line.saturating_sub(1))
             .unwrap_or(0);
+        let buffer = TextBuffer::from_source(source);
+        let saved_lines = Some(buffer.lines.clone());
         Ok(Self {
             path,
-            buffer: TextBuffer::from_source(source),
+            buffer,
             cursor_line,
             cursor_col: 0,
             row_scroll: 0,
@@ -420,6 +444,10 @@ impl TuiApp {
             search_query: String::new(),
             selected_theorem: None,
             quit_confirm: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            last_edit: None,
+            saved_lines,
             outline: initial_outline,
             check_result: CheckResult::default(),
             goals: GoalStepResult::default(),
@@ -468,6 +496,70 @@ impl TuiApp {
             .min(self.search_results().len().saturating_sub(1));
     }
 
+    fn snapshot(&self) -> EditSnapshot {
+        EditSnapshot {
+            lines: self.buffer.lines.clone(),
+            cursor_line: self.cursor_line,
+            cursor_col: self.cursor_col,
+        }
+    }
+
+    fn push_undo_snapshot(&mut self) {
+        if self.undo_stack.len() >= UNDO_LIMIT {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(self.snapshot());
+    }
+
+    /// Called before a mutating edit is applied. Pushes an undo snapshot of
+    /// the pre-edit state unless this edit continues a run of consecutive
+    /// single-character insertions at the position where the previous
+    /// insertion left the cursor.
+    fn record_edit(&mut self, kind: EditKind) {
+        let coalesce = kind == EditKind::InsertChar
+            && self.last_edit == Some((EditKind::InsertChar, self.cursor_line, self.cursor_col));
+        if !coalesce {
+            self.push_undo_snapshot();
+        }
+        self.redo_stack.clear();
+    }
+
+    fn undo(&mut self) {
+        let Some(snapshot) = self.undo_stack.pop() else {
+            self.status = "Nothing to undo.".to_string();
+            return;
+        };
+        let current = self.snapshot();
+        self.redo_stack.push(current);
+        self.restore_snapshot(snapshot);
+        self.status = "Undid last edit.".to_string();
+    }
+
+    fn redo(&mut self) {
+        let Some(snapshot) = self.redo_stack.pop() else {
+            self.status = "Nothing to redo.".to_string();
+            return;
+        };
+        self.push_undo_snapshot();
+        self.restore_snapshot(snapshot);
+        self.status = "Redid last edit.".to_string();
+    }
+
+    fn restore_snapshot(&mut self, snapshot: EditSnapshot) {
+        self.buffer.lines = snapshot.lines;
+        self.cursor_line = snapshot.cursor_line;
+        self.cursor_col = snapshot.cursor_col;
+        self.buffer
+            .clamp_cursor(&mut self.cursor_line, &mut self.cursor_col);
+        self.buffer.dirty = match &self.saved_lines {
+            Some(saved) => &self.buffer.lines != saved,
+            None => true,
+        };
+        self.last_edit = None;
+        self.quit_confirm = false;
+        self.refresh_analysis();
+    }
+
     fn handle_key(&mut self, key: Key) {
         match self.focus {
             TuiFocus::Menu => self.handle_menu_key(key),
@@ -482,6 +574,8 @@ impl TuiApp {
             Key::Ctrl('q') => self.request_quit(),
             Key::Ctrl('s') | Key::F(6) => self.save(),
             Key::Ctrl('r') | Key::F(7) => self.reload(),
+            Key::Ctrl('z') => self.undo(),
+            Key::Ctrl('y') => self.redo(),
             Key::F(8) => {
                 self.refresh_analysis();
                 self.status = "Checked current buffer.".to_string();
@@ -511,34 +605,53 @@ impl TuiApp {
             Key::Home => self.cursor_col = 0,
             Key::End => self.cursor_col = self.buffer.line_len(self.cursor_line),
             Key::Enter => {
+                self.record_edit(EditKind::Newline);
                 let (line, col) = self
                     .buffer
                     .insert_newline(self.cursor_line, self.cursor_col);
                 self.cursor_line = line;
                 self.cursor_col = col;
+                self.last_edit = Some((EditKind::Newline, line, col));
                 self.quit_confirm = false;
                 self.refresh_analysis();
             }
             Key::Backspace => {
+                let is_noop = self.cursor_line == 0 && self.cursor_col == 0;
+                if !is_noop {
+                    self.record_edit(EditKind::Backspace);
+                }
                 let (line, col) = self.buffer.backspace(self.cursor_line, self.cursor_col);
                 self.cursor_line = line;
                 self.cursor_col = col;
+                if !is_noop {
+                    self.last_edit = Some((EditKind::Backspace, line, col));
+                }
                 self.quit_confirm = false;
                 self.refresh_analysis();
             }
             Key::Delete => {
+                let is_noop = self.cursor_col >= self.buffer.line_len(self.cursor_line)
+                    && self.cursor_line + 1 >= self.buffer.line_count();
+                if !is_noop {
+                    self.record_edit(EditKind::Delete);
+                }
                 let (line, col) = self.buffer.delete(self.cursor_line, self.cursor_col);
                 self.cursor_line = line;
                 self.cursor_col = col;
+                if !is_noop {
+                    self.last_edit = Some((EditKind::Delete, line, col));
+                }
                 self.quit_confirm = false;
                 self.refresh_analysis();
             }
             Key::Char(ch) => {
+                self.record_edit(EditKind::InsertChar);
                 let (line, col) = self
                     .buffer
                     .insert_char(self.cursor_line, self.cursor_col, ch);
                 self.cursor_line = line;
                 self.cursor_col = col;
+                self.last_edit = Some((EditKind::InsertChar, line, col));
                 self.quit_confirm = false;
                 self.refresh_analysis();
             }
@@ -638,6 +751,7 @@ impl TuiApp {
             Ok(()) => {
                 self.buffer.dirty = false;
                 self.quit_confirm = false;
+                self.saved_lines = Some(self.buffer.lines.clone());
                 self.status = format!("Saved {}.", self.path.display());
                 self.refresh_analysis();
             }
@@ -648,7 +762,10 @@ impl TuiApp {
     fn reload(&mut self) {
         match fs::read_to_string(&self.path) {
             Ok(source) => {
+                self.record_edit(EditKind::Replace);
+                self.last_edit = None;
                 self.buffer = TextBuffer::from_source(source);
+                self.saved_lines = Some(self.buffer.lines.clone());
                 self.quit_confirm = false;
                 self.cursor_line = self
                     .cursor_line
@@ -1075,6 +1192,7 @@ impl TuiApp {
             "  arrows/PageUp/PageDown move cursor".to_string(),
             "  typing edits the proof buffer".to_string(),
             "  Ctrl-S saves".to_string(),
+            "  Ctrl-Z undoes, Ctrl-Y redoes".to_string(),
             "  Ctrl-R reloads from disk".to_string(),
             "  Ctrl-Q quits".to_string(),
             "".to_string(),
@@ -1126,7 +1244,7 @@ impl TuiApp {
             "\x1b[{};1H{}",
             rows,
             fit_line(
-                " Ctrl-S save  Ctrl-R reload  Ctrl-Q quit  m menu  Tab panel  / search ",
+                " Ctrl-S save  Ctrl-Z undo  Ctrl-Y redo  Ctrl-R reload  Ctrl-Q quit  m menu  Tab panel  / search ",
                 cols
             )
         )
@@ -1813,9 +1931,16 @@ fn print_accepted(result: &CheckResult) {
     {
         accepted = true;
         let kind = if theorem.is_axiom { "axiom" } else { "theorem" };
-        println!("accepted {kind} {} ({})", theorem.name, theorem.mode_used);
+        let mut notes = vec![theorem.mode_used.to_string()];
+        if theorem.uses_sorry {
+            notes.push("incomplete: uses sorry".to_string());
+        }
+        if !theorem.is_axiom && !theorem.axiom_deps.is_empty() {
+            notes.push(format!("axioms: {}", theorem.axiom_deps.join(", ")));
+        }
+        println!("accepted {kind} {} ({})", theorem.name, notes.join("; "));
     }
-    if !accepted {
+    if !accepted && result.diagnostics.is_empty() {
         println!("accepted file");
     }
 }

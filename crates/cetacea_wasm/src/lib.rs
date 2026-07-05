@@ -153,6 +153,8 @@ fn standard_imports() -> Vec<VirtualFile> {
         ("std/eq.ctea", include_str!("../../../std/eq.ctea")),
         ("std/nat.ctea", include_str!("../../../std/nat.ctea")),
         ("std/set.ctea", include_str!("../../../std/set.ctea")),
+        ("std/list.ctea", include_str!("../../../std/list.ctea")),
+        ("std/fun.ctea", include_str!("../../../std/fun.ctea")),
     ]
     .into_iter()
     .map(|(path, source)| VirtualFile {
@@ -193,13 +195,21 @@ fn check_result_json(result: &CheckResult) -> String {
         .theorems
         .iter()
         .map(|theorem| {
+            let axiom_deps = theorem
+                .axiom_deps
+                .iter()
+                .map(|name| json_string(name))
+                .collect::<Vec<_>>()
+                .join(",");
             format!(
-                r#"{{"name":{},"statement":{},"mode":{},"is_axiom":{},"is_imported":{}}}"#,
+                r#"{{"name":{},"statement":{},"mode":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}]}}"#,
                 json_string(&theorem.name),
                 json_string(&theorem.statement),
                 json_string(&theorem.mode_used.to_string()),
                 theorem.is_axiom,
-                theorem.is_imported
+                theorem.is_imported,
+                theorem.uses_sorry,
+                axiom_deps
             )
         })
         .collect::<Vec<_>>()

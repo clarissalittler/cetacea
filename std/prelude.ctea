@@ -3,4 +3,6 @@ import fol.ctea
 import eq.ctea
 import nat.ctea
 import set.ctea
+import list.ctea
+import fun.ctea
 
