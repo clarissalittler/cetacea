@@ -32,11 +32,8 @@ theorem length_append_demo (l1 : List) (l2 : List)
   : length(append(l1, l2)) = add(length(l1), length(l2)) := by
   induction l1 with
   | nil =>
-      rewrite -> append_nil {l := l2}
-      simp
       refl
   | cons h t ih =>
-      rewrite -> append_cons {h := h; t := t; l := l2}
       simp
       rewrite -> ih
       refl
@@ -45,11 +42,8 @@ theorem sum_append (l1 : List) (l2 : List)
   : sum(append(l1, l2)) = add(sum(l1), sum(l2)) := by
   induction l1 with
   | nil =>
-      rewrite -> append_nil {l := l2}
-      simp
       refl
   | cons h t ih =>
-      rewrite -> append_cons {h := h; t := t; l := l2}
       simp
       rewrite -> ih
       rewrite add_assoc {n := h; m := sum(t); k := sum(l2)}

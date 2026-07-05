@@ -506,17 +506,6 @@ pub struct TermDef {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RecDef {
-    pub name: Name,
-    pub param: Name,
-    pub result_type: Type,
-    pub zero_body: Term,
-    pub step_var: Name,
-    pub rec_name: Name,
-    pub succ_body: Term,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataCtor {
     pub name: Name,
     pub arg_types: Vec<Type>,
@@ -527,7 +516,11 @@ impl DataCtor {
         self.arg_types
             .iter()
             .enumerate()
-            .filter(|(_, ty)| matches!(ty, Type::Named(name) if name == data_name))
+            .filter(|(_, ty)| match ty {
+                Type::Named(name) => name == data_name,
+                Type::Nat => data_name == "Nat",
+                _ => false,
+            })
             .map(|(idx, _)| idx)
             .collect()
     }
@@ -552,8 +545,35 @@ pub struct DataRecDef {
     pub name: Name,
     pub param: Name,
     pub data_name: Name,
+    pub extra_params: Vec<(Name, Type)>,
     pub result_type: Type,
     pub arms: Vec<DataRecArm>,
+}
+
+/// `Nat` participates in the generalized `defrec` machinery as a built-in
+/// data definition with constructors `zero` and `succ(Nat)`.
+fn builtin_nat_data_def() -> DataDef {
+    DataDef {
+        name: "Nat".to_string(),
+        ctors: vec![
+            DataCtor {
+                name: "zero".to_string(),
+                arg_types: Vec::new(),
+            },
+            DataCtor {
+                name: "succ".to_string(),
+                arg_types: vec![Type::Nat],
+            },
+        ],
+    }
+}
+
+fn data_def_for_type(env: &Env, ty: &Type) -> Option<DataDef> {
+    match ty {
+        Type::Nat => Some(builtin_nat_data_def()),
+        Type::Named(name) => env.data_def(name).cloned(),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -699,7 +719,6 @@ pub struct Env {
     preds: HashMap<Name, Vec<Type>>,
     defs: HashMap<Name, FormulaDef>,
     term_defs: HashMap<Name, TermDef>,
-    rec_defs: HashMap<Name, RecDef>,
     data_defs: HashMap<Name, DataDef>,
     data_rec_defs: HashMap<Name, DataRecDef>,
     theorems: HashMap<Name, Theorem>,
@@ -742,10 +761,6 @@ impl Env {
         self.term_defs.insert(def.name.clone(), def);
     }
 
-    pub fn add_rec_def(&mut self, def: RecDef) {
-        self.rec_defs.insert(def.name.clone(), def);
-    }
-
     pub fn add_data_def(&mut self, def: DataDef) {
         self.data_defs.insert(def.name.clone(), def);
     }
@@ -768,10 +783,6 @@ impl Env {
 
     fn term_def(&self, name: &str) -> Option<&TermDef> {
         self.term_defs.get(name)
-    }
-
-    fn rec_def(&self, name: &str) -> Option<&RecDef> {
-        self.rec_defs.get(name)
     }
 
     fn has_sort(&self, name: &str) -> bool {
@@ -797,7 +808,7 @@ impl Env {
     fn has_def(&self, name: &str) -> bool {
         self.defs.contains_key(name)
             || self.term_defs.contains_key(name)
-            || self.rec_defs.contains_key(name)
+            || self.data_rec_defs.contains_key(name)
     }
 
     fn has_top_level_name(&self, name: &str) -> bool {
@@ -2175,7 +2186,7 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    let Some(data) = self.env.data_def(&decl.param_type).cloned() else {
+                    let Some(data) = data_def_for_type(&self.env, &decl.param_type) else {
                         self.result.diagnostics.push(diagnostic_at(
                             source_path,
                             line,
@@ -2198,6 +2209,46 @@ impl FileChecker {
                             )
                             .with_note(err.message),
                         );
+                        continue;
+                    }
+                    let mut extras_ok = true;
+                    for (extra_name, extra_type) in &decl.extra_params {
+                        if extra_name == &decl.param
+                            || decl
+                                .extra_params
+                                .iter()
+                                .filter(|(other, _)| other == extra_name)
+                                .count()
+                                > 1
+                        {
+                            self.result.diagnostics.push(diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "recursive definition `{}` repeats the parameter name `{extra_name}`",
+                                    decl.name
+                                ),
+                            ));
+                            extras_ok = false;
+                            break;
+                        }
+                        if let Err(err) = validate_type(&self.env, &Context::new(), extra_type) {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!(
+                                        "recursive definition `{}` has an invalid parameter type",
+                                        decl.name
+                                    ),
+                                )
+                                .with_note(err.message),
+                            );
+                            extras_ok = false;
+                            break;
+                        }
+                    }
+                    if !extras_ok {
                         continue;
                     }
                     if decl.arms.len() != data.ctors.len() {
@@ -2263,6 +2314,9 @@ impl FileChecker {
                         let arg_names = arm.binders[..ctor.arg_types.len()].to_vec();
                         let rec_names = arm.binders[ctor.arg_types.len()..].to_vec();
                         let mut arm_ctx = Context::new();
+                        for (extra_name, extra_type) in &decl.extra_params {
+                            arm_ctx.add_term(extra_name.clone(), extra_type.clone());
+                        }
                         for (name, ty) in arg_names.iter().zip(ctor.arg_types.iter()) {
                             arm_ctx.add_term(name.clone(), ty.clone());
                         }
@@ -2319,114 +2373,9 @@ impl FileChecker {
                         name: decl.name,
                         param: decl.param,
                         data_name: data.name.clone(),
+                        extra_params: decl.extra_params,
                         result_type: decl.result_type,
                         arms,
-                    });
-                }
-                Command::RecDef(decl) => {
-                    if self.env.has_top_level_name(&decl.name) {
-                        self.result.diagnostics.push(diagnostic_at(
-                            source_path,
-                            line,
-                            format!("cannot redeclare `{}` as a recursive definition", decl.name),
-                        ));
-                        continue;
-                    }
-                    if let Err(err) = validate_type(&self.env, &Context::new(), &decl.result_type) {
-                        self.result.diagnostics.push(
-                            diagnostic_at(
-                                source_path,
-                                line,
-                                format!(
-                                    "recursive definition `{}` has invalid result type",
-                                    decl.name
-                                ),
-                            )
-                            .with_note(err.message),
-                        );
-                        continue;
-                    }
-                    match validate_term(&self.env, &Context::new(), &decl.zero_body) {
-                        Ok(actual) if actual == decl.result_type => {}
-                        Ok(actual) => {
-                            self.result.diagnostics.push(
-                                diagnostic_at(
-                                    source_path,
-                                    line,
-                                    format!(
-                                        "recursive definition `{}` has invalid zero case",
-                                        decl.name
-                                    ),
-                                )
-                                .with_note(format!(
-                                    "zero case has type `{actual}`, but expected `{}`",
-                                    decl.result_type
-                                )),
-                            );
-                            continue;
-                        }
-                        Err(err) => {
-                            self.result.diagnostics.push(
-                                diagnostic_at(
-                                    source_path,
-                                    line,
-                                    format!(
-                                        "recursive definition `{}` has invalid zero case",
-                                        decl.name
-                                    ),
-                                )
-                                .with_note(err.message),
-                            );
-                            continue;
-                        }
-                    }
-
-                    let mut step_ctx = Context::new();
-                    step_ctx.add_term(decl.step_var.clone(), Type::Nat);
-                    step_ctx.add_term(decl.rec_name.clone(), decl.result_type.clone());
-                    match validate_term(&self.env, &step_ctx, &decl.succ_body) {
-                        Ok(actual) if actual == decl.result_type => {}
-                        Ok(actual) => {
-                            self.result.diagnostics.push(
-                                diagnostic_at(
-                                    source_path,
-                                    line,
-                                    format!(
-                                        "recursive definition `{}` has invalid successor case",
-                                        decl.name
-                                    ),
-                                )
-                                .with_note(format!(
-                                    "successor case has type `{actual}`, but expected `{}`",
-                                    decl.result_type
-                                )),
-                            );
-                            continue;
-                        }
-                        Err(err) => {
-                            self.result.diagnostics.push(
-                                diagnostic_at(
-                                    source_path,
-                                    line,
-                                    format!(
-                                        "recursive definition `{}` has invalid successor case",
-                                        decl.name
-                                    ),
-                                )
-                                .with_note(err.message),
-                            );
-                            continue;
-                        }
-                    }
-
-                    self.env.add_rec_def(RecDef {
-                        name: decl.name,
-                        param: decl.param,
-                        result_type: decl.result_type,
-                        zero_body: decl.zero_body,
-                        step_var: decl.step_var,
-                        rec_name: decl.rec_name,
-                        succ_body: decl.succ_body,
                     });
                 }
                 Command::Axiom(decl) => {
@@ -3528,6 +3477,27 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
             format!("Give up on the goal `{}` for now.", goal.target),
             "`sorry` closes the goal without a proof, so the theorem is only provisionally accepted.".to_string(),
         ],
+        Tactic::Have { name, formula, expr } => {
+            let mut sentences = Vec::new();
+            match formula {
+                Some(formula) => sentences.push(format!(
+                    "State the intermediate fact `{formula}` and name it `{name}`."
+                )),
+                None => sentences.push(format!(
+                    "Name an intermediate fact `{name}` from the given proof."
+                )),
+            }
+            if expr.is_some() {
+                sentences.push(
+                    "The supplied proof establishes the fact immediately.".to_string(),
+                );
+            } else {
+                sentences.push(
+                    "First prove the stated fact, then continue the original goal with the new hypothesis available.".to_string(),
+                );
+            }
+            sentences
+        }
     }
 }
 
@@ -3535,6 +3505,14 @@ fn tactic_label(tactic: &Tactic) -> String {
     match tactic {
         Tactic::Intro(name) => format!("intro {name}"),
         Tactic::Sorry => "sorry".to_string(),
+        Tactic::Have { name, formula, expr } => match (formula, expr) {
+            (Some(formula), Some(expr)) => {
+                format!("have {name} : {formula} := {}", proof_expr_label(expr))
+            }
+            (Some(formula), None) => format!("have {name} : {formula}"),
+            (None, Some(expr)) => format!("have {name} := {}", proof_expr_label(expr)),
+            (None, None) => format!("have {name}"),
+        },
         Tactic::Exact(expr) => format!("exact {}", proof_expr_label(expr)),
         Tactic::Trivial => "trivial".to_string(),
         Tactic::Assumption => "assumption".to_string(),
@@ -4524,9 +4502,10 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                     "definition `{name}` expects {expected} argument(s), but got 0"
                 )));
             }
-            if env.rec_def(name).is_some() || env.data_rec_def(name).is_some() {
+            if let Some(def) = env.data_rec_def(name) {
                 return Err(ValidationError::new(format!(
-                    "recursive definition `{name}` expects 1 argument(s), but got 0"
+                    "recursive definition `{name}` expects {} argument(s), but got 0",
+                    1 + def.extra_params.len()
                 )));
             }
             Err(ValidationError::new(format!("unknown term `{name}`")))
@@ -4553,34 +4532,30 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             }
 
             let Some(def) = env.term_def(name) else {
-                if let Some(def) = env.rec_def(name) {
-                    if args.len() != 1 {
-                        return Err(ValidationError::new(format!(
-                            "recursive definition `{name}` expects 1 argument(s), but got {}",
-                            args.len()
-                        )));
-                    }
-                    let actual = validate_term(env, ctx, &args[0])?;
-                    if actual != Type::Nat {
-                        return Err(ValidationError::new(format!(
-                            "argument 1 of `{name}` has type `{actual}`, but expected `Nat`"
-                        )));
-                    }
-                    return Ok(def.result_type.clone());
-                }
                 if let Some(def) = env.data_rec_def(name) {
-                    if args.len() != 1 {
+                    let expected_args = 1 + def.extra_params.len();
+                    if args.len() != expected_args {
                         return Err(ValidationError::new(format!(
-                            "recursive definition `{name}` expects 1 argument(s), but got {}",
+                            "recursive definition `{name}` expects {expected_args} argument(s), but got {}",
                             args.len()
                         )));
                     }
-                    let actual = validate_term(env, ctx, &args[0])?;
-                    if actual != Type::Named(def.data_name.clone()) {
-                        return Err(ValidationError::new(format!(
-                            "argument 1 of `{name}` has type `{actual}`, but expected `{}`",
-                            def.data_name
-                        )));
+                    let recursive_type = if def.data_name == "Nat" {
+                        Type::Nat
+                    } else {
+                        Type::Named(def.data_name.clone())
+                    };
+                    let mut expected_types = vec![recursive_type];
+                    expected_types.extend(def.extra_params.iter().map(|(_, ty)| ty.clone()));
+                    for (idx, (arg, expected)) in args.iter().zip(expected_types.iter()).enumerate()
+                    {
+                        let actual = validate_term(env, ctx, arg)?;
+                        if &actual != expected {
+                            return Err(ValidationError::new(format!(
+                                "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
+                                idx + 1
+                            )));
+                        }
                     }
                     return Ok(def.result_type.clone());
                 }
@@ -5719,16 +5694,14 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
                 let (body, _) = instantiate_term_def(env, ctx, def, args)?;
                 return normalize_term(env, ctx, &body);
             }
-            if let Some(def) = env.rec_def(name) {
-                if args.len() == 1 {
-                    let arg = normalize_term(env, ctx, &args[0])?;
-                    return normalize_rec_def(env, ctx, def, arg);
-                }
-            }
             if let Some(def) = env.data_rec_def(name) {
-                if args.len() == 1 {
+                if args.len() == 1 + def.extra_params.len() {
                     let arg = normalize_term(env, ctx, &args[0])?;
-                    return normalize_data_rec_def(env, ctx, def, arg);
+                    let extras = args[1..]
+                        .iter()
+                        .map(|arg| normalize_term(env, ctx, arg))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    return normalize_data_rec_def(env, ctx, def, arg, extras);
                 }
             }
             Ok(Term::App(
@@ -5810,54 +5783,48 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
     }
 }
 
-fn normalize_rec_def(
-    env: &Env,
-    ctx: &Context,
-    def: &RecDef,
-    arg: Term,
-) -> Result<Term, ValidationError> {
-    match arg {
-        Term::Zero => normalize_term(env, ctx, &def.zero_body),
-        Term::Succ(pred) => {
-            let pred_term = *pred;
-            let recursive = normalize_term(
-                env,
-                ctx,
-                &Term::App(def.name.clone(), vec![pred_term.clone()]),
-            )?;
-            let with_step = subst_term(&def.succ_body, &def.step_var, &pred_term);
-            let with_rec = subst_term(&with_step, &def.rec_name, &recursive);
-            normalize_term(env, ctx, &with_rec)
-        }
-        other => Ok(Term::App(def.name.clone(), vec![other])),
-    }
-}
-
 fn normalize_data_rec_def(
     env: &Env,
     ctx: &Context,
     def: &DataRecDef,
     arg: Term,
+    extras: Vec<Term>,
 ) -> Result<Term, ValidationError> {
+    let stuck = |arg: Term, extras: &[Term]| {
+        let mut all_args = vec![arg];
+        all_args.extend(extras.iter().cloned());
+        Term::App(def.name.clone(), all_args)
+    };
+    // Nat's constructors are the built-in `Zero`/`Succ` term forms; user data
+    // constructors are consts (`Var`) or applications (`App`).
+    let succ_arg;
     let (ctor_name, ctor_args): (&str, &[Term]) = match &arg {
+        Term::Zero => ("zero", &[]),
+        Term::Succ(inner) => {
+            succ_arg = [(**inner).clone()];
+            ("succ", &succ_arg)
+        }
         Term::Var(name) => (name.as_str(), &[]),
         Term::App(name, args) => (name.as_str(), args.as_slice()),
-        _ => return Ok(Term::App(def.name.clone(), vec![arg])),
+        _ => return Ok(stuck(arg, &extras)),
     };
-    let Some(data) = env.data_def(&def.data_name) else {
-        return Ok(Term::App(def.name.clone(), vec![arg]));
+    let Some(data) = data_def_for_name(env, &def.data_name) else {
+        return Ok(stuck(arg, &extras));
     };
     let Some(ctor) = data.ctors.iter().find(|ctor| ctor.name == ctor_name) else {
-        return Ok(Term::App(def.name.clone(), vec![arg]));
+        return Ok(stuck(arg, &extras));
     };
     if ctor.arg_types.len() != ctor_args.len() {
-        return Ok(Term::App(def.name.clone(), vec![arg]));
+        return Ok(stuck(arg, &extras));
     }
     let Some(arm) = def.arms.iter().find(|arm| arm.ctor == ctor.name) else {
-        return Ok(Term::App(def.name.clone(), vec![arg]));
+        return Ok(stuck(arg, &extras));
     };
 
     let mut subst: HashMap<Name, Term> = HashMap::new();
+    for ((extra_name, _), value) in def.extra_params.iter().zip(extras.iter()) {
+        subst.insert(extra_name.clone(), value.clone());
+    }
     for (name, value) in arm.arg_names.iter().zip(ctor_args.iter()) {
         subst.insert(name.clone(), value.clone());
     }
@@ -5866,13 +5833,20 @@ fn normalize_data_rec_def(
         .iter()
         .zip(ctor.recursive_arg_indices(&def.data_name))
     {
-        subst.insert(
-            rec_name.clone(),
-            Term::App(def.name.clone(), vec![ctor_args[rec_idx].clone()]),
-        );
+        let mut rec_args = vec![ctor_args[rec_idx].clone()];
+        rec_args.extend(extras.iter().cloned());
+        subst.insert(rec_name.clone(), Term::App(def.name.clone(), rec_args));
     }
     let body = subst_term_terms(&arm.body, &subst);
     normalize_term(env, ctx, &body)
+}
+
+fn data_def_for_name(env: &Env, name: &str) -> Option<DataDef> {
+    if name == "Nat" {
+        Some(builtin_nat_data_def())
+    } else {
+        env.data_def(name).cloned()
+    }
 }
 
 fn set_element_type(env: &Env, ctx: &Context, set: &Term) -> Result<Type, ValidationError> {
@@ -6247,12 +6221,6 @@ fn apply_predicate_lambda(params: &[LambdaParam], body: &Formula, args: &[Term])
 
 fn term_type(env: &Env, ctx: &Context, term: &Term) -> Result<Type, KernelError> {
     validate_term(env, ctx, term).map_err(KernelError::from)
-}
-
-fn subst_term(term: &Term, var: &str, replacement: &Term) -> Term {
-    let mut subst = HashMap::new();
-    subst.insert(var.to_string(), replacement.clone());
-    subst_term_terms(term, &subst)
 }
 
 fn subst_formula_term(formula: &Formula, var: &str, replacement: &Term) -> Formula {
@@ -6671,17 +6639,6 @@ struct DefDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RecDefDecl {
-    name: Name,
-    param: Name,
-    result_type: Type,
-    zero_body: Term,
-    step_var: Name,
-    rec_name: Name,
-    succ_body: Term,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 enum DefResult {
     Formula,
     Term(Type),
@@ -6709,7 +6666,6 @@ enum Command {
     Func(Name, Vec<Type>, Type),
     Pred(Name, Vec<Type>),
     Def(DefDecl),
-    RecDef(RecDefDecl),
     Data(DataDecl),
     DataRecDef(DataRecDefDecl),
     Axiom(AxiomDecl),
@@ -6734,7 +6690,8 @@ struct DataRecArmDecl {
 struct DataRecDefDecl {
     name: Name,
     param: Name,
-    param_type: Name,
+    param_type: Type,
+    extra_params: Vec<(Name, Type)>,
     result_type: Type,
     arms: Vec<DataRecArmDecl>,
 }
@@ -7132,6 +7089,11 @@ enum Tactic {
     ByContra(Name),
     ShowGoal,
     Sorry,
+    Have {
+        name: Name,
+        formula: Option<Formula>,
+        expr: Option<ProofExpr>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7860,85 +7822,42 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         }
 
         if trimmed.starts_with("defrec ") {
-            let (name, param, param_type, result_type) =
+            let (name, param, param_type, extra_params, result_type) =
                 parse_defrec_header(trimmed).map_err(|err| err.with_line(command_line))?;
 
-            if let Type::Named(param_type_name) = param_type {
-                i += 1;
-                let mut arms = Vec::new();
-                loop {
-                    while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
-                        i += 1;
-                    }
-                    if i >= lines.len() || !strip_comment(lines[i]).trim().starts_with('|') {
-                        break;
-                    }
-                    let arm_line = i + 1;
-                    arms.push(
-                        parse_data_rec_arm(strip_comment(lines[i]).trim(), arm_line)
-                            .map_err(|err| err.with_line(arm_line))?,
-                    );
+            i += 1;
+            let mut arms = Vec::new();
+            loop {
+                while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
                     i += 1;
                 }
-                if arms.is_empty() {
-                    return Err(ParseError::new(
-                        "recursive definition needs at least one `| constructor` case",
-                    )
-                    .with_line(command_line));
+                if i >= lines.len() || !strip_comment(lines[i]).trim().starts_with('|') {
+                    break;
                 }
-                commands.push(located_command(
-                    command_line,
-                    Command::DataRecDef(DataRecDefDecl {
-                        name,
-                        param,
-                        param_type: param_type_name,
-                        result_type,
-                        arms,
-                    }),
-                ));
-                continue;
-            }
-
-            i += 1;
-            while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
-                i += 1;
-            }
-            if i >= lines.len() {
-                return Err(ParseError::new("recursive definition needs a zero case")
-                    .with_line(command_line));
-            }
-            let zero_line = i + 1;
-            let zero_body = parse_defrec_zero_arm(strip_comment(lines[i]).trim())
-                .map_err(|err| err.with_line(zero_line))?;
-
-            i += 1;
-            while i < lines.len() && strip_comment(lines[i]).trim().is_empty() {
-                i += 1;
-            }
-            if i >= lines.len() {
-                return Err(
-                    ParseError::new("recursive definition needs a successor case")
-                        .with_line(command_line),
+                let arm_line = i + 1;
+                arms.push(
+                    parse_data_rec_arm(strip_comment(lines[i]).trim(), arm_line)
+                        .map_err(|err| err.with_line(arm_line))?,
                 );
+                i += 1;
             }
-            let succ_line = i + 1;
-            let (step_var, rec_name, succ_body) =
-                parse_defrec_succ_arm(strip_comment(lines[i]).trim())
-                    .map_err(|err| err.with_line(succ_line))?;
-
+            if arms.is_empty() {
+                return Err(ParseError::new(
+                    "recursive definition needs at least one `| constructor` case",
+                )
+                .with_line(command_line));
+            }
             commands.push(located_command(
                 command_line,
-                Command::RecDef(RecDefDecl {
+                Command::DataRecDef(DataRecDefDecl {
                     name,
                     param,
+                    param_type,
+                    extra_params,
                     result_type,
-                    zero_body,
-                    step_var,
-                    rec_name,
-                    succ_body,
+                    arms,
                 }),
             ));
-            i += 1;
             continue;
         }
 
@@ -8145,7 +8064,9 @@ fn parse_def_header(header: &str) -> Result<(Name, Vec<Param>, DefResult), Parse
     Ok((name, params, result))
 }
 
-fn parse_defrec_header(header: &str) -> Result<(Name, Name, Type, Type), ParseError> {
+type DefrecHeader = (Name, Name, Type, Vec<(Name, Type)>, Type);
+
+fn parse_defrec_header(header: &str) -> Result<DefrecHeader, ParseError> {
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("defrec")?;
     let name = tokens.expect_ident()?;
@@ -8155,15 +8076,25 @@ fn parse_defrec_header(header: &str) -> Result<(Name, Name, Type, Type), ParseEr
     let param_type = tokens.parse_type()?;
     if !matches!(param_type, Type::Nat | Type::Named(_)) {
         return Err(ParseError::new(
-            "recursive definition parameter must have type `Nat` or a declared data type",
+            "recursive definition must recurse over `Nat` or a declared data type (the first parameter)",
         )
         .with_span(tokens.current_span()));
     }
     tokens.expect_sym(")")?;
+    // Additional fixed (non-recursive) parameters, as in
+    // `defrec append (l : List) (r : List) : List`.
+    let mut extra_params = Vec::new();
+    while tokens.eat_sym("(") {
+        let extra_name = tokens.expect_ident()?;
+        tokens.expect_sym(":")?;
+        let extra_type = tokens.parse_type()?;
+        tokens.expect_sym(")")?;
+        extra_params.push((extra_name, extra_type));
+    }
     tokens.expect_sym(":")?;
     let result_type = tokens.parse_type()?;
     tokens.expect_eof()?;
-    Ok((name, param, param_type, result_type))
+    Ok((name, param, param_type, extra_params, result_type))
 }
 
 fn parse_data_ctor_arm(line: &str) -> Result<DataCtor, ParseError> {
@@ -8217,44 +8148,6 @@ fn parse_data_rec_arm(line: &str, line_no: usize) -> Result<DataRecArmDecl, Pars
         body: parse_term_str(body.trim())?,
         line: line_no,
     })
-}
-
-fn parse_defrec_zero_arm(line: &str) -> Result<Term, ParseError> {
-    let Some(body) = line.strip_prefix("| zero =>") else {
-        return Err(ParseError::new(
-            "recursive definition zero case expects `| zero => term`",
-        ));
-    };
-    parse_term_str(body.trim())
-}
-
-fn parse_defrec_succ_arm(line: &str) -> Result<(Name, Name, Term), ParseError> {
-    let Some(rest) = line.strip_prefix("| succ ") else {
-        return Err(ParseError::new(
-            "recursive definition successor case expects `| succ k rec => term`",
-        ));
-    };
-    let Some((binders, body)) = rest.split_once("=>") else {
-        return Err(ParseError::new(
-            "recursive definition successor case expects `| succ k rec => term`",
-        ));
-    };
-    let binders: Vec<&str> = binders.split_whitespace().collect();
-    if binders.len() != 2 {
-        return Err(ParseError::new(
-            "recursive definition successor case expects exactly two binders",
-        ));
-    }
-    if binders[0] == binders[1] {
-        return Err(ParseError::new(
-            "recursive definition successor case binders must be distinct",
-        ));
-    }
-    Ok((
-        binders[0].to_string(),
-        binders[1].to_string(),
-        parse_term_str(body.trim())?,
-    ))
 }
 
 fn parse_decl_params(tokens: &mut Tokens) -> Result<Vec<Param>, ParseError> {
@@ -8687,6 +8580,45 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if line == "sorry" || line == "admit" {
         return Ok(Tactic::Sorry);
     }
+    if let Some(rest) = line.strip_prefix("have ") {
+        let (binding, expr) = match rest.split_once(":=") {
+            Some((binding, expr)) => {
+                let expr = expr.trim();
+                let offset = line.find(expr).unwrap_or(0);
+                (
+                    binding.trim(),
+                    Some(parse_proof_expr(expr).map_err(|err| err.with_offset(offset))?),
+                )
+            }
+            None => (rest.trim(), None),
+        };
+        let (name, formula) = match binding.split_once(':') {
+            Some((name, formula)) => {
+                let formula = formula.trim();
+                let offset = line.find(formula).unwrap_or(0);
+                (
+                    name.trim(),
+                    Some(parse_formula_str(formula).map_err(|err| err.with_offset(offset))?),
+                )
+            }
+            None => (binding, None),
+        };
+        if name.is_empty() || name.contains(char::is_whitespace) {
+            return Err(ParseError::new(
+                "have expects `have name : formula`, `have name := proof`, or `have name : formula := proof`",
+            ));
+        }
+        if formula.is_none() && expr.is_none() {
+            return Err(ParseError::new(
+                "have needs a stated formula (`have name : formula`) or a proof (`have name := proof`)",
+            ));
+        }
+        return Ok(Tactic::Have {
+            name: name.to_string(),
+            formula,
+            expr,
+        });
+    }
 
     Err(ParseError::new(format!("unknown tactic `{line}`")))
 }
@@ -8762,75 +8694,151 @@ fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
         return Err(ParseError::new("expected proof expression"));
     }
 
-    if let Some(rest) = input.strip_prefix('(') {
+    // Split into top-level tokens: whitespace separates tokens, but
+    // parenthesized and braced groups (with anything inside) stay whole, so
+    // arguments such as `(hy.right)` and `{A := T; x := a}` are single
+    // tokens. Projections bind to their own token: `f x h.right` is
+    // `f x (h.right)`.
+    let tokens = tokenize_proof_expr(input)?;
+    let mut idx = 1;
+
+    let mut expr = if let Some(rest) = tokens[0].strip_prefix('(') {
         let close = matching_close_paren(rest)?;
         let inner = &rest[..close];
         let suffix = rest[close + 1..].trim();
         let mut expr = parse_proof_expr(inner)?;
-        append_proof_expr_suffix(&mut expr, suffix)?;
-        return Ok(expr);
-    }
+        append_projection_suffix(&mut expr, suffix)?;
+        expr
+    } else {
+        let (name_part, brace_part) = match tokens[0].find('{') {
+            Some(brace_start) => (&tokens[0][..brace_start], Some(&tokens[0][brace_start..])),
+            None => (tokens[0].as_str(), None),
+        };
+        let mut parts = name_part.split('.');
+        let base = parts
+            .next()
+            .ok_or_else(|| ParseError::new("expected proof expression"))?
+            .trim()
+            .to_string();
+        if base.is_empty() {
+            return Err(ParseError::new("expected proof expression"));
+        }
+        let mut steps = Vec::new();
+        push_projection_parts(parts, &mut steps)?;
 
-    let mut parts = input.split('.');
-    let head = parts
-        .next()
-        .ok_or_else(|| ParseError::new("expected proof expression"))?
-        .trim();
-    let (base, explicit_args, remaining) = parse_proof_expr_head(head)?;
-    let mut steps = Vec::new();
-    for word in remaining.split_whitespace() {
-        steps.push(ProofStep::Arg(word.to_string()));
-    }
+        // Explicit theorem arguments: either attached to the name token or
+        // the next token, but only directly after the bare theorem name.
+        let mut explicit_args = Vec::new();
+        let brace_token = if brace_part.is_some() {
+            brace_part.map(str::to_string)
+        } else if steps.is_empty() && idx < tokens.len() && tokens[idx].starts_with('{') {
+            idx += 1;
+            Some(tokens[idx - 1].clone())
+        } else {
+            None
+        };
+        if let Some(brace_token) = brace_token {
+            if !steps.is_empty() {
+                return Err(ParseError::new(
+                    "explicit theorem arguments `{...}` must come directly after the theorem name",
+                ));
+            }
+            let after_open = brace_token
+                .strip_prefix('{')
+                .ok_or_else(|| ParseError::new("expected `{` to open theorem arguments"))?;
+            let close = matching_close_brace(after_open)?;
+            explicit_args = parse_explicit_args(&after_open[..close])?;
+            let suffix = after_open[close + 1..].trim();
+            append_projection_suffix_to_steps(&mut steps, suffix)?;
+        }
+        ProofExpr {
+            base,
+            explicit_args,
+            steps,
+        }
+    };
 
+    for token in &tokens[idx..] {
+        expr.steps.push(ProofStep::Arg(token.clone()));
+    }
+    Ok(expr)
+}
+
+fn tokenize_proof_expr(input: &str) -> Result<Vec<String>, ParseError> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i].is_whitespace() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut depth = 0usize;
+        while i < chars.len() {
+            let ch = chars[i];
+            match ch {
+                '(' | '{' => depth += 1,
+                ')' | '}' => {
+                    if depth == 0 {
+                        return Err(ParseError::new(format!(
+                            "unbalanced `{ch}` in proof expression"
+                        )));
+                    }
+                    depth -= 1;
+                }
+                _ if ch.is_whitespace() && depth == 0 => break,
+                _ => {}
+            }
+            i += 1;
+        }
+        if depth != 0 {
+            return Err(ParseError::new("unbalanced `(` in proof expression"));
+        }
+        tokens.push(chars[start..i].iter().collect());
+    }
+    if tokens.is_empty() {
+        return Err(ParseError::new("expected proof expression"));
+    }
+    Ok(tokens)
+}
+
+fn push_projection_parts<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    steps: &mut Vec<ProofStep>,
+) -> Result<(), ParseError> {
     for part in parts {
         match part.trim() {
             "left" => steps.push(ProofStep::Projection(Projection::Left)),
             "right" => steps.push(ProofStep::Projection(Projection::Right)),
             other => {
-                if other.contains('(') || other.contains(')') {
-                    return Err(ParseError::new(
-                        "projections such as `h.left` are not supported inside proof-expression arguments; use a separate `apply` step (for example `apply eq_subst_right`) or restate the argument as its own hypothesis",
-                    ));
-                }
                 return Err(ParseError::new(format!(
                     "unknown proof projection `.{other}`"
                 )))
             }
         }
     }
-
-    Ok(ProofExpr {
-        base,
-        explicit_args,
-        steps,
-    })
+    Ok(())
 }
 
-fn parse_proof_expr_head(input: &str) -> Result<(Name, Vec<ExplicitArg>, String), ParseError> {
-    let input = input.trim();
-    let Some((base, rest)) = split_first_word(input) else {
-        return Err(ParseError::new("expected proof expression"));
+fn append_projection_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), ParseError> {
+    append_projection_suffix_to_steps(&mut expr.steps, suffix)
+}
+
+fn append_projection_suffix_to_steps(
+    steps: &mut Vec<ProofStep>,
+    suffix: &str,
+) -> Result<(), ParseError> {
+    let suffix = suffix.trim();
+    if suffix.is_empty() {
+        return Ok(());
+    }
+    let Some(rest) = suffix.strip_prefix('.') else {
+        return Err(ParseError::new(format!(
+            "unexpected `{suffix}` in a proof expression"
+        )));
     };
-    let mut rest = rest.trim();
-    let mut explicit_args = Vec::new();
-
-    if let Some(after_open) = rest.strip_prefix('{') {
-        let close = matching_close_brace(after_open)?;
-        let body = &after_open[..close];
-        explicit_args = parse_explicit_args(body)?;
-        rest = after_open[close + 1..].trim();
-    }
-
-    Ok((base.to_string(), explicit_args, rest.to_string()))
-}
-
-fn split_first_word(input: &str) -> Option<(&str, &str)> {
-    let input = input.trim_start();
-    if input.is_empty() {
-        return None;
-    }
-    let end = input.find(char::is_whitespace).unwrap_or(input.len());
-    Some((&input[..end], &input[end..]))
+    push_projection_parts(rest.split('.'), steps)
 }
 
 fn parse_explicit_args(input: &str) -> Result<Vec<ExplicitArg>, ParseError> {
@@ -8909,43 +8917,6 @@ fn matching_close_brace(input_after_open: &str) -> Result<usize, ParseError> {
         }
     }
     Err(ParseError::new("unclosed theorem-instantiation block"))
-}
-
-fn append_proof_expr_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), ParseError> {
-    let mut rest = suffix.trim();
-    while !rest.is_empty() {
-        if let Some(after_dot) = rest.strip_prefix('.') {
-            let (projection, after_projection) = split_first_projection(after_dot)?;
-            match projection {
-                "left" => expr.steps.push(ProofStep::Projection(Projection::Left)),
-                "right" => expr.steps.push(ProofStep::Projection(Projection::Right)),
-                other => {
-                    return Err(ParseError::new(format!(
-                        "unknown proof projection `.{other}`"
-                    )))
-                }
-            }
-            rest = after_projection.trim();
-        } else {
-            let Some((arg, after_arg)) = split_first_word(rest) else {
-                return Err(ParseError::new("unexpected text after proof expression"));
-            };
-            expr.steps.push(ProofStep::Arg(arg.to_string()));
-            rest = after_arg.trim();
-        }
-    }
-    Ok(())
-}
-
-fn split_first_projection(input: &str) -> Result<(&str, &str), ParseError> {
-    let input = input.trim_start();
-    if input.is_empty() {
-        return Err(ParseError::new("expected proof projection"));
-    }
-    let end = input
-        .find(|ch: char| ch == '.' || ch.is_whitespace())
-        .unwrap_or(input.len());
-    Ok((&input[..end], &input[end..]))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10207,6 +10178,93 @@ fn run_tactic_step(
             }),
             new_goals: Vec::new(),
         }),
+        Tactic::Have {
+            name,
+            formula,
+            expr,
+        } => {
+            ensure_intro_name_unused(&goal.context, name).map_err(|err| {
+                TacticError::new(err.message.replace("`intro`", "`have`"))
+            })?;
+            if let Some(formula) = formula {
+                validate_formula(env, &goal.context, formula).map_err(|err| {
+                    TacticError::new(format!(
+                        "have formula `{formula}` is not valid here: {}",
+                        err.message
+                    ))
+                })?;
+            }
+            match expr {
+                Some(expr) => {
+                    let proof = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
+                    let checked = infer_proof(env, &goal.context, &proof, allowed_mode)
+                        .map_err(|err| TacticError::new(err.message))?;
+                    let hyp_formula = match formula {
+                        Some(stated) => {
+                            if !formulas_def_eq(env, &goal.context, &checked.formula, stated)
+                                .unwrap_or(false)
+                            {
+                                return Err(TacticError::new(format!(
+                                    "have proof has type `{}`, but the stated formula is `{stated}`",
+                                    checked.formula
+                                )));
+                            }
+                            stated.clone()
+                        }
+                        None => checked.formula.clone(),
+                    };
+                    let rest_id = fresh_goal(next_goal_id);
+                    let mut rest_ctx = goal.context.clone();
+                    rest_ctx.add_proof(name.clone(), hyp_formula.clone());
+                    Ok(StepResult {
+                        replacement: PartialProof::ImpElim {
+                            proof_imp: Box::new(PartialProof::ImpIntro {
+                                hyp_name: name.clone(),
+                                hyp_formula,
+                                body: Box::new(PartialProof::Hole(rest_id)),
+                            }),
+                            proof_arg: Box::new(PartialProof::Done(proof)),
+                        },
+                        new_goals: vec![Goal {
+                            id: rest_id,
+                            context: rest_ctx,
+                            target: goal.target,
+                        }],
+                    })
+                }
+                None => {
+                    let hyp_formula = formula
+                        .clone()
+                        .expect("have without proof always has a formula");
+                    let claim_id = fresh_goal(next_goal_id);
+                    let rest_id = fresh_goal(next_goal_id);
+                    let mut rest_ctx = goal.context.clone();
+                    rest_ctx.add_proof(name.clone(), hyp_formula.clone());
+                    Ok(StepResult {
+                        replacement: PartialProof::ImpElim {
+                            proof_imp: Box::new(PartialProof::ImpIntro {
+                                hyp_name: name.clone(),
+                                hyp_formula: hyp_formula.clone(),
+                                body: Box::new(PartialProof::Hole(rest_id)),
+                            }),
+                            proof_arg: Box::new(PartialProof::Hole(claim_id)),
+                        },
+                        new_goals: vec![
+                            Goal {
+                                id: claim_id,
+                                context: goal.context.clone(),
+                                target: hyp_formula,
+                            },
+                            Goal {
+                                id: rest_id,
+                                context: rest_ctx,
+                                target: goal.target,
+                            },
+                        ],
+                    })
+                }
+            }
+        }
         Tactic::ShowGoal => Err(TacticError::new(format!(
             "current goal is `{}`",
             goal.target
@@ -14362,7 +14420,7 @@ defrec bad (n : Nat) : Nat
 | zero => alice
 | succ k rec => rec
 "#,
-            "zero case has type `Person`, but expected `Nat`",
+            "case body has type `Person`, but expected `Nat`",
         );
     }
 
@@ -14376,7 +14434,7 @@ defrec bad (n : Nat) : Nat
 | zero => 0
 | succ k k => k
 "#,
-            "recursive definition successor case binders must be distinct",
+            "recursive definition case binders must be distinct",
         );
     }
 
@@ -14867,6 +14925,105 @@ theorem find : (forall x : T, Nice(x)) -> exists y : T, Nice(y) := by
                 "hint engine should not suggest a tactic that fails"
             );
         }
+    }
+
+    #[test]
+    fn projections_parse_inside_proof_expression_arguments() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem tight_binding (P Q R : Prop)
+  : (P -> Q /\ R) -> P /\ True -> Q /\ R := by
+  intro f
+  intro h
+  exact f h.left
+
+theorem paren_arg_projection (P Q R : Prop)
+  : (P -> Q -> R) -> (P /\ Q) -> R := by
+  intro f
+  intro h
+  exact f (h.left) (h.right)
+
+sort B
+
+theorem rewrite_compound_proj (x y : B) (P : B -> Prop)
+  (hg : B -> B -> Prop)
+  : (forall a b : B, hg(a, b) -> a = b) -> (hg(x, y) /\ True) -> P(y) -> P(x) := by
+  intro hinj
+  intro h
+  intro hp
+  rewrite -> hinj x y (h.left)
+  exact hp
+"#,
+        );
+    }
+
+    #[test]
+    fn have_states_intermediate_goal() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem chain (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
+  intro hpq
+  intro hqr
+  intro hp
+  have hq : Q
+  apply hpq
+  exact hp
+  apply hqr
+  exact hq
+"#,
+        );
+    }
+
+    #[test]
+    fn have_with_immediate_proof_and_annotation() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem use_have (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  have hp : P := h.left
+  have hq := h.right
+  split
+  exact hq
+  exact hp
+"#,
+        );
+    }
+
+    #[test]
+    fn have_rejects_wrong_annotation() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad_have (P Q : Prop) : P /\ Q -> P := by
+  intro h
+  have hp : P := h.right
+  exact hp
+"#,
+            "have proof has type `Q`, but the stated formula is `P`",
+        );
+    }
+
+    #[test]
+    fn have_rejects_shadowing() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem shadow_have (P Q : Prop) : P -> Q -> P := by
+  intro h
+  have h : Q -> P
+  sorry
+  sorry
+"#,
+            "would shadow",
+        );
     }
 
     #[test]

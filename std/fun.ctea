@@ -65,10 +65,8 @@ theorem compose_injective
       | intro y2 hy2 =>
           apply hf x1 x2 y1
           exact hy1.left
-          apply eq_subst_right {A := B; P := fun b : B => F(x2, b); x := y2; y := y1}
-          apply hg y2 y1 z
-          exact hy2.right
-          exact hy1.right
+          have heq : y2 = y1 := hg y2 y1 z (hy2.right) (hy1.right)
+          rewrite heq
           exact hy2.left
 
 theorem compose_surjective

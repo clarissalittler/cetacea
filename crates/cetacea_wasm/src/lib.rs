@@ -155,6 +155,7 @@ fn standard_imports() -> Vec<VirtualFile> {
         ("std/set.ctea", include_str!("../../../std/set.ctea")),
         ("std/list.ctea", include_str!("../../../std/list.ctea")),
         ("std/fun.ctea", include_str!("../../../std/fun.ctea")),
+        ("std/modular.ctea", include_str!("../../../std/modular.ctea")),
     ]
     .into_iter()
     .map(|(path, source)| VirtualFile {
