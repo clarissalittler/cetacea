@@ -21,6 +21,8 @@ theorem em_demo (P : Prop) : P \\/ not P := by
   exact h
 `;
 
+const STORAGE_KEY = "cetacea.web.editor";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -28,6 +30,8 @@ const editor = document.querySelector("#sourceEditor");
 const sourceHighlights = document.querySelector("#sourceHighlights");
 const checkButton = document.querySelector("#checkButton");
 const resetButton = document.querySelector("#resetButton");
+const exampleSelect = document.querySelector("#exampleSelect");
+const resetSampleButton = document.querySelector("#resetSampleButton");
 const stepButton = document.querySelector("#stepButton");
 const theoremSelect = document.querySelector("#theoremSelect");
 const statusEl = document.querySelector("#status");
@@ -45,12 +49,15 @@ let wasm = null;
 let stepIndex = -1;
 let activeGoalResult = null;
 let cursorSyncTimer = 0;
+let editDebounceTimer = 0;
 let theoremLibraryItems = [];
 let lastEditorSelection = { start: 0, end: 0 };
+let diagnosticLineMarks = new Map();
 
-editor.value = sampleSource;
+editor.value = loadSavedSource() ?? sampleSource;
 rememberEditorSelection();
 renderSourceHighlights();
+populateExampleSelect();
 setControls(false);
 loadWasm();
 
@@ -91,8 +98,26 @@ theoremSelect.addEventListener("change", () => {
 librarySearchEl.addEventListener("input", renderTheoremLibrary);
 libraryScopeEl.addEventListener("change", renderTheoremLibrary);
 
+exampleSelect.addEventListener("change", () => {
+  const example = (window.CETACEA_EXAMPLES ?? []).find(
+    (item) => item.id === exampleSelect.value,
+  );
+  if (!example) return;
+  setEditorSource(example.source);
+  statusEl.textContent = `Loaded example: ${example.label}`;
+  statusEl.classList.remove("error");
+});
+
+resetSampleButton.addEventListener("click", () => {
+  exampleSelect.value = "";
+  setEditorSource(sampleSource);
+  statusEl.textContent = "Restored the sample source";
+  statusEl.classList.remove("error");
+});
+
 editor.addEventListener("input", () => {
   rememberEditorSelection();
+  scheduleEditDebounce();
   if (!wasm) return;
   stepIndex = -1;
   activeGoalResult = null;
@@ -105,11 +130,21 @@ editor.addEventListener("input", () => {
 });
 editor.addEventListener("click", () => {
   rememberEditorSelection();
-  scheduleCursorSync();
+  scheduleCursorSync({ announce: true });
 });
-editor.addEventListener("keyup", () => {
+editor.addEventListener("keyup", (event) => {
   rememberEditorSelection();
-  scheduleCursorSync();
+  const navigationKeys = [
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+  ];
+  scheduleCursorSync({ announce: navigationKeys.includes(event.key) });
 });
 editor.addEventListener("select", () => {
   rememberEditorSelection();
@@ -148,6 +183,66 @@ function setControls(enabled) {
     button.disabled = !enabled;
   }
   theoremSelect.disabled = !enabled;
+}
+
+function loadSavedSource() {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveSource() {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, editor.value);
+  } catch {
+    // Storage may be unavailable (private browsing, quota); autosave is best effort.
+  }
+}
+
+function scheduleEditDebounce() {
+  window.clearTimeout(editDebounceTimer);
+  editDebounceTimer = window.setTimeout(() => {
+    saveSource();
+    if (wasm) renderCheck(callSource("cetacea_check", editor.value));
+  }, 500);
+}
+
+function populateExampleSelect() {
+  for (const example of window.CETACEA_EXAMPLES ?? []) {
+    const option = document.createElement("option");
+    option.value = example.id;
+    option.textContent = example.label;
+    exampleSelect.append(option);
+  }
+}
+
+function setEditorSource(source) {
+  window.clearTimeout(editDebounceTimer);
+  editor.value = source;
+  editor.setSelectionRange(0, 0);
+  rememberEditorSelection();
+  saveSource();
+  stepIndex = -1;
+  activeGoalResult = null;
+  diagnosticLineMarks = new Map();
+  if (!wasm) {
+    renderSourceHighlights(null);
+    return;
+  }
+  refreshOutline();
+  renderCheck(callSource("cetacea_check", editor.value));
+  renderTactics(null);
+  renderExplanationForSelected();
+  renderSourceHighlights(null);
+  const first = currentOutline()[0];
+  if (first) {
+    renderGoals(callGoalsAt(editor.value, first.line, 1));
+  } else {
+    goalMetaEl.textContent = "";
+    goalsEl.replaceChildren(empty("No goals"));
+  }
 }
 
 function refreshOutline() {
@@ -267,10 +362,10 @@ function syncCursorGoals(options = {}) {
   renderGoals(result, { position, announce: options.announce });
 }
 
-function scheduleCursorSync() {
+function scheduleCursorSync(options = {}) {
   if (!wasm) return;
   window.clearTimeout(cursorSyncTimer);
-  cursorSyncTimer = window.setTimeout(syncCursorGoals, 120);
+  cursorSyncTimer = window.setTimeout(() => syncCursorGoals(options), 120);
 }
 
 function renderCheck(result) {
@@ -285,7 +380,23 @@ function renderCheck(result) {
     for (const theorem of theorems.filter((item) => !item.is_imported)) {
       const item = document.createElement("div");
       item.className = "accepted-item";
-      item.textContent = `${theorem.is_axiom ? "axiom" : "theorem"} ${theorem.name} (${theorem.mode})`;
+      const head = document.createElement("div");
+      head.textContent = `${theorem.is_axiom ? "axiom" : "theorem"} ${theorem.name} (${theorem.mode})`;
+      if (theoremUsesSorry(theorem)) {
+        const incomplete = document.createElement("span");
+        incomplete.className = "incomplete-flag";
+        incomplete.textContent = " (incomplete)";
+        incomplete.title = "This proof uses sorry and is not finished.";
+        head.append(incomplete);
+      }
+      item.append(head);
+      const axioms = theoremAxiomDeps(theorem);
+      if (axioms.length) {
+        const deps = document.createElement("div");
+        deps.className = "accepted-axioms";
+        deps.textContent = `axioms: ${axioms.join(", ")}`;
+        item.append(deps);
+      }
       acceptedEl.append(item);
     }
   }
@@ -318,9 +429,14 @@ function renderGoals(result, options = {}) {
     const cursorText = options.position
       ? `line ${options.position.line}, column ${options.position.column}`
       : "the selected cursor position";
-    statusEl.textContent = result.theorem
-      ? `Showing goals at ${cursorText}`
-      : `No theorem at ${cursorText}`;
+    const goalCount = (result.goals ?? []).length;
+    if (result.theorem && result.completed) {
+      statusEl.textContent = `${result.theorem}: proof complete at ${cursorText}`;
+    } else if (result.theorem) {
+      statusEl.textContent = `${result.theorem}: ${goalCount} goal${goalCount === 1 ? "" : "s"} at ${cursorText}`;
+    } else {
+      statusEl.textContent = `No theorem at ${cursorText}`;
+    }
     statusEl.classList.toggle("error", !result.theorem);
   }
   stepButton.disabled =
@@ -497,7 +613,21 @@ function renderSourceHighlights(result = activeGoalResult) {
     element.className = "source-line";
     if (lineNumber === highlight.current) element.classList.add("is-current");
     if (lineNumber === highlight.next) element.classList.add("is-next");
-    element.textContent = line || " ";
+    if (diagnosticLineMarks.has(lineNumber)) {
+      element.classList.add("is-error");
+      const span = clampSpan(diagnosticLineMarks.get(lineNumber), line);
+      if (span && line) {
+        element.append(
+          document.createTextNode(line.slice(0, span.start)),
+          errorToken(line.slice(span.start, span.end) || " "),
+          document.createTextNode(line.slice(span.end)),
+        );
+      } else {
+        element.textContent = line || " ";
+      }
+    } else {
+      element.textContent = line || " ";
+    }
     sourceHighlights.append(element);
   }
   syncHighlightScroll();
@@ -519,6 +649,13 @@ function highlightedLines(result) {
   };
 }
 
+function errorToken(text) {
+  const element = document.createElement("span");
+  element.className = "error-token";
+  element.textContent = text;
+  return element;
+}
+
 function syncHighlightScroll() {
   sourceHighlights.scrollTop = editor.scrollTop;
   sourceHighlights.scrollLeft = editor.scrollLeft;
@@ -535,11 +672,13 @@ function moveCursorToLineEnd(lineNumber) {
 }
 
 function renderDiagnostics(diagnostics) {
+  updateDiagnosticLineMarks(diagnostics);
   diagnosticsEl.replaceChildren();
   if (!diagnostics.length) {
     diagnosticsEl.append(empty("No diagnostics"));
     return;
   }
+  const editorLines = editor.value.split("\n");
   for (const diagnostic of diagnostics) {
     const item = document.createElement("div");
     item.className = "diagnostic";
@@ -548,6 +687,8 @@ function renderDiagnostics(diagnostics) {
     const location = diagnostic.location ? `line ${diagnostic.location.line}: ` : "";
     title.textContent = `${location}${diagnostic.message}`;
     item.append(title);
+    const marker = diagnosticSourceMarker(diagnostic, editorLines);
+    if (marker) item.append(marker);
     for (const note of diagnostic.notes ?? []) {
       const noteEl = document.createElement("div");
       noteEl.className = "diagnostic-note";
@@ -573,6 +714,52 @@ function renderDiagnostics(diagnostics) {
     }
     diagnosticsEl.append(item);
   }
+}
+
+function diagnosticInEditor(diagnostic) {
+  return Boolean(diagnostic.location?.line) && !diagnostic.location.path;
+}
+
+function updateDiagnosticLineMarks(diagnostics) {
+  diagnosticLineMarks = new Map();
+  for (const diagnostic of diagnostics) {
+    if (!diagnosticInEditor(diagnostic)) continue;
+    const line = diagnostic.location.line;
+    // Keep the first span reported for a line so the caret stays stable.
+    if (!diagnosticLineMarks.has(line) || !diagnosticLineMarks.get(line)) {
+      diagnosticLineMarks.set(line, diagnostic.span ?? null);
+    }
+  }
+  renderSourceHighlights();
+}
+
+function diagnosticSourceMarker(diagnostic, editorLines) {
+  if (!diagnosticInEditor(diagnostic)) return null;
+  const lineText = editorLines[diagnostic.location.line - 1];
+  if (lineText === undefined) return null;
+  const marker = document.createElement("pre");
+  marker.className = "diagnostic-source";
+  const codeLine = document.createElement("span");
+  codeLine.textContent = lineText;
+  marker.append(codeLine, document.createTextNode("\n"));
+  const caretLine = document.createElement("span");
+  caretLine.className = "diagnostic-caret";
+  const span = clampSpan(diagnostic.span, lineText);
+  if (span) {
+    caretLine.textContent =
+      " ".repeat(span.start) + "^" + "~".repeat(Math.max(0, span.end - span.start - 1));
+  } else {
+    caretLine.textContent = "^".padStart(lineText.search(/\S/) + 1 || 1);
+  }
+  marker.append(caretLine);
+  return marker;
+}
+
+function clampSpan(span, lineText) {
+  if (!span || typeof span.start !== "number" || typeof span.end !== "number") return null;
+  const start = Math.max(0, Math.min(span.start, lineText.length));
+  const end = Math.max(start, Math.min(span.end, lineText.length + 1));
+  return { start, end };
 }
 
 function renderTheoremLibrary() {
@@ -623,6 +810,7 @@ function renderTheoremLibrary() {
       badge(theorem.mode),
       badge(theorem.is_imported ? "imported" : "local"),
     );
+    if (theoremUsesSorry(theorem)) badges.append(badge("incomplete", "badge-warn"));
     if (suggested.has(theorem.name)) badges.append(badge("suggested"));
     head.append(name, badges);
 
@@ -650,11 +838,23 @@ function suggestedTheoremNames() {
   return suggested;
 }
 
-function badge(text) {
+function badge(text, extraClass) {
   const element = document.createElement("span");
   element.className = "badge";
+  if (extraClass) element.classList.add(extraClass);
   element.textContent = text;
   return element;
+}
+
+// The wasm may serialize these per-theorem fields as snake_case (Rust side)
+// or camelCase; older builds omit them entirely, so treat them as optional.
+function theoremUsesSorry(theorem) {
+  return Boolean(theorem.uses_sorry ?? theorem.usesSorry);
+}
+
+function theoremAxiomDeps(theorem) {
+  const deps = theorem.axiom_deps ?? theorem.axiomDeps;
+  return Array.isArray(deps) ? deps : [];
 }
 
 function addInsertButtonHandlers(button, tactic) {

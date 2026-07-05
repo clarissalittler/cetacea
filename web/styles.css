@@ -68,9 +68,30 @@ textarea {
 
 .actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.example-picker {
+  display: inline-flex;
+}
+
+.example-picker select {
+  max-width: 240px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 button {
@@ -180,6 +201,19 @@ button:disabled {
 .source-line.is-next {
   background: rgba(245, 158, 11, 0.14);
   box-shadow: inset 3px 0 0 var(--next);
+}
+
+.source-line.is-error {
+  background: rgba(240, 68, 56, 0.18);
+  box-shadow: inset 3px 0 0 var(--error);
+}
+
+.error-token {
+  background: rgba(240, 68, 56, 0.32);
+  border-radius: 2px;
+  text-decoration: underline wavy #f97066;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 3px;
 }
 
 .side-pane {
@@ -615,6 +649,25 @@ pre {
   margin-top: 4px;
 }
 
+.diagnostic-source {
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre;
+  overflow-x: auto;
+  word-break: normal;
+}
+
+.diagnostic-caret {
+  color: var(--error);
+  font-weight: 700;
+}
+
 .diagnostic-help {
   margin-top: 8px;
   padding: 8px;
@@ -649,6 +702,24 @@ pre {
   border: 1px solid var(--line);
   border-radius: 6px;
   margin-bottom: 8px;
+}
+
+.incomplete-flag {
+  color: #b54708;
+  font-weight: 650;
+}
+
+.accepted-axioms {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.badge-warn {
+  background: #fef0c7;
+  color: #b54708;
 }
 
 .empty {

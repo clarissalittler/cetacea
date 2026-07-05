@@ -13,6 +13,13 @@
         <span>Cetacea</span>
       </div>
       <div class="actions">
+        <label class="example-picker">
+          <span class="visually-hidden">Load example</span>
+          <select id="exampleSelect">
+            <option value="">Load example…</option>
+          </select>
+        </label>
+        <button id="resetSampleButton" type="button">Reset to sample</button>
         <button id="checkButton" type="button">Check</button>
         <button id="resetButton" type="button">Reset Step</button>
         <button id="stepButton" type="button">Step</button>
@@ -32,7 +39,7 @@
           <label for="theoremSelect">Theorem</label>
           <select id="theoremSelect"></select>
         </div>
-        <div id="status" class="status">Loading wasm</div>
+        <div id="status" class="status" role="status" aria-live="polite">Loading wasm</div>
 
         <section class="panel">
           <h2>Goals</h2>
@@ -213,6 +220,7 @@ by_contra h</pre>
       </aside>
     </main>
 
+    <script src="./examples.js"></script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>
