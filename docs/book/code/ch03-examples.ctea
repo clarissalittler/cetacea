@@ -1,0 +1,63 @@
+-- Proofs, Checked — Chapter 3: Classical Moves
+-- Companion file for docs/book/03-classical.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch03-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Section 3.2: the easy double-negation direction is constructive.
+theorem not_not_intro (P : Prop) : P -> not not P := by
+  intro hp
+  intro hnp
+  apply hnp
+  exact hp
+
+mode classical
+
+-- Section 3.3: excluded middle, proved with `by_cases`.
+theorem em_demo (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+
+-- Section 3.4: double-negation elimination, proved with `by_contra`.
+theorem dne_demo (P : Prop) : not not P -> P := by
+  intro hnn
+  by_contra hn
+  apply hnn
+  exact hn
+
+-- Section 3.5: the hard direction of de Morgan.
+theorem demorgan_hard (P Q : Prop) : not (P /\ Q) -> not P \/ not Q := by
+  intro h
+  by_contra hn
+  apply h
+  split
+  by_contra hnp
+  apply hn
+  left
+  exact hnp
+  by_contra hnq
+  apply hn
+  right
+  exact hnq
+
+-- Section 3.6: the reverse contrapositive needs classical logic.
+-- (The forward direction was modus tollens, back in Chapter 2.)
+theorem contrapositive_rev (P Q : Prop) : (not Q -> not P) -> P -> Q := by
+  intro h
+  intro hp
+  by_contra hnq
+  apply h hnq
+  exact hp
+
+-- Section 3.7: the checker reports the strongest mode a proof actually
+-- USES. This file says `mode classical`, but this proof never uses a
+-- classical rule, so it is accepted as constructive.
+theorem mode_is_measured (P : Prop) : P -> P := by
+  intro h
+  exact h

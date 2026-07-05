@@ -1,0 +1,94 @@
+-- Proofs, Checked — Chapter 2: Natural Deduction
+-- Companion file for docs/book/02-natural-deduction.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch02-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Section 2.3: modus ponens, the arrow-elimination rule.
+theorem modus_ponens_demo (P Q : Prop) : P -> (P -> Q) -> Q := by
+  intro hp
+  intro hpq
+  apply hpq
+  exact hp
+
+-- Section 2.3: chaining implications (hypothetical syllogism).
+theorem chain_demo (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
+  intro hpq
+  intro hqr
+  intro hp
+  apply hqr
+  apply hpq
+  exact hp
+
+-- Section 2.4: or-introduction commits to one side.
+theorem or_intro_demo (P Q : Prop) : P -> P \/ Q := by
+  intro hp
+  left
+  exact hp
+
+-- Section 2.4: or-elimination is proof by cases.
+theorem or_elim_demo (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+  intro hpr
+  intro hqr
+  intro h
+  cases h with
+  | left hp =>
+      apply hpr
+      exact hp
+  | right hq =>
+      apply hqr
+      exact hq
+
+-- Section 2.5: `not P` literally is `P -> False`, so this proof is
+-- just `intro` and `exact`.
+theorem not_is_an_arrow (P : Prop) : (P -> False) -> not P := by
+  intro h
+  exact h
+
+-- Section 2.5: from a contradiction, anything follows (two spellings).
+theorem explosion_by_hand (P Q : Prop) : P -> not P -> Q := by
+  intro hp
+  intro hnp
+  exfalso
+  apply hnp
+  exact hp
+
+theorem explosion_short (P Q : Prop) : P -> not P -> Q := by
+  intro hp
+  intro hnp
+  contradiction
+
+-- Section 2.5: modus tollens.
+theorem modus_tollens_demo (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+  intro hpq
+  intro hnq
+  intro hp
+  apply hnq
+  apply hpq
+  exact hp
+
+-- Section 2.6: disjunctive syllogism — an or, minus one side.
+theorem disjunctive_syllogism_demo (P Q : Prop) : P \/ Q -> not P -> Q := by
+  intro h
+  intro hnp
+  cases h with
+  | left hp =>
+      contradiction
+  | right hq =>
+      exact hq
+
+-- Section 2.7: `<->` is a conjunction of two implications, so `split`
+-- opens it and each half starts with `intro`.
+theorem iff_swap_demo (P Q : Prop) : P /\ Q <-> Q /\ P := by
+  split
+  intro h
+  split
+  exact h.right
+  exact h.left
+  intro h
+  split
+  exact h.right
+  exact h.left

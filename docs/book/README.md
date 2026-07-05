@@ -1,0 +1,98 @@
+# Proofs, Checked
+
+**A First Course in Logic with the Cetacea Proof Assistant**
+
+This is a textbook about logic and proof, written for students meeting
+formal proof for the first time — roughly the audience of a
+community-college discrete math course such as CS 250. It assumes no
+prior experience with proofs, proof assistants, or advanced math.
+
+What makes it different from other logic books: **every proof in it is
+checked by a program.** The Cetacea proof assistant, which lives in this
+repository, reads your proofs line by line and either accepts them or
+tells you exactly where they go wrong. You never have to wonder whether
+your proof is *really* right. You will still learn to read and write
+proofs on paper — but here, paper proofs get a safety net.
+
+The math leads and the tool follows. Cetacea shows up in every section,
+but always in service of a logical idea, never the other way around. If
+you want a pure reference manual for the language, that is
+[`docs/USAGE.md`](../USAGE.md); if you want terse course-aligned
+translations of CS 250 modules, see [`docs/cs250/`](../cs250/README.md).
+This book is the slow, friendly path.
+
+## What you need
+
+Build the checker once, from the repository root:
+
+```sh
+cargo build
+```
+
+Then check any file like this (also from the repository root):
+
+```sh
+target/debug/cetacea_cli docs/book/code/ch01-examples.ctea
+```
+
+or equivalently `cargo run -p cetacea_cli -- <file>`. There is also an
+interactive terminal UI (`cargo run -p cetacea_cli -- --tui <file>`)
+that shows the proof state as you move your cursor through a proof —
+worth trying once you are comfortable with the basics.
+
+## How to use this book
+
+Each chapter comes with three (sometimes four) companion files in
+[`code/`](code/):
+
+| File | What it is |
+|---|---|
+| `chNN-examples.ctea` | Every worked proof from the chapter, runnable. It checks clean. |
+| `chNN-exercises.ctea` | The chapter's exercises with `sorry` placeholder proofs. It checks as-is, but every theorem is flagged `incomplete: uses sorry`. Your job is to clear the flags. |
+| `chNN-solutions.ctea` | Full solutions. Genuinely try the exercises first. |
+| `chNN-mistakes.ctea` / `ch02-fallacies.ctea` | **Intended to fail.** Deliberately wrong proofs whose error messages the chapter dissects. Run them; read the errors. |
+
+The rhythm for each chapter:
+
+1. Read the chapter with the examples file open next to it.
+2. Run the examples file and watch every theorem get accepted.
+3. Run the mistakes file and read what rejection looks like.
+4. Open the exercises file and replace each `sorry` with a proof,
+   re-running the checker as you go. The `incomplete: uses sorry` flags
+   are your to-do list; the chapter is done when they are all gone.
+
+A small notational convention used throughout: when we narrate the
+middle of a proof, we write the *goal state* as `hypotheses |- target`.
+So `h : P /\ Q |- Q /\ P` reads "you have a hypothesis `h` proving
+`P /\ Q`, and you must prove `Q /\ P`."
+
+## Chapters
+
+Chapters 1–4 are fully drafted; 5–12 are outlined in
+[`OUTLINE.md`](OUTLINE.md).
+
+| # | Chapter | Status |
+|---|---|---|
+| 1 | [Propositions and How to State Them](01-propositions.md) | drafted |
+| 2 | [Natural Deduction: Proof as a Game with Rules](02-natural-deduction.md) | drafted |
+| 3 | [The Classical Moves: Excluded Middle and Friends](03-classical.md) | drafted |
+| 4 | [Everyone, Someone, No One: Quantifiers](04-quantifiers.md) | drafted |
+| 5 | Equality: The Most Important Relation | outlined |
+| 6 | Sets: Collections You Can Reason About | outlined |
+| 7 | Relations: Structure Between Things | outlined |
+| 8 | Functions: Relations with Rules | outlined |
+| 9 | Induction: Climbing the Number Line | outlined |
+| 10 | Recursion and Data: Building Your Own Worlds | outlined |
+| 11 | Structural Induction: Proofs That Follow the Data | outlined |
+| 12 | Strong Induction, and Where to Go Next | outlined |
+
+## A word of encouragement
+
+Formal proof has a reputation for being hard, and the first week can
+feel like learning to write with your other hand. Two things to hold on
+to. First, the checker's error messages are *for you* — Chapter 1
+onward, this book teaches you to read them the way a musician reads
+feedback from a tuner. Second, every proof in this book was rejected by
+the checker at least once while being written. Rejection is the normal
+state of a proof in progress. The only proof that never fails is the
+one you never run.

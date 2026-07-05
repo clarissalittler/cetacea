@@ -1,0 +1,54 @@
+-- Proofs, Checked — Chapter 4: exercises.
+-- Replace each `sorry` with a real proof.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch04-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const alice : Person
+const bob : Person
+
+pred Happy(Person)
+pred Rich(Person)
+pred Knows(Person, Person)
+
+-- Exercise 4.1 (warm-up). Forall-elimination.
+theorem ex4_1 : (forall x : Person, Knows(x, x)) -> Knows(alice, alice) := by
+  sorry
+
+-- Exercise 4.2 (warm-up). Exists-introduction.
+theorem ex4_2 : Rich(bob) -> exists x : Person, Rich(x) := by
+  sorry
+
+-- Exercise 4.3. The other half of forall_and_half from the examples.
+theorem ex4_3
+  : (forall x : Person, Happy(x) /\ Rich(x)) -> forall x : Person, Rich(x) := by
+  sorry
+
+-- Exercise 4.4. Two foralls in, one forall out.
+theorem ex4_4
+  : (forall x : Person, Happy(x))
+    -> (forall x : Person, Rich(x))
+    -> forall x : Person, Happy(x) /\ Rich(x) := by
+  sorry
+
+-- Exercise 4.5. An exists distributes over or. Open the box first,
+-- then case on what you find inside.
+theorem ex4_5
+  : (exists x : Person, Happy(x) \/ Rich(x))
+    -> (exists x : Person, Happy(x)) \/ (exists x : Person, Rich(x)) := by
+  sorry
+
+-- Exercise 4.6. One counterexample refutes a universal claim.
+theorem ex4_6
+  : (exists x : Person, not Happy(x)) -> not forall x : Person, Happy(x) := by
+  sorry
+
+-- Exercise 4.7. Two bound variables: `intro h` then apply h to both
+-- constants at once, as in `h alice bob`.
+theorem ex4_7 : (forall x y : Person, Knows(x, y)) -> Knows(alice, bob) := by
+  sorry

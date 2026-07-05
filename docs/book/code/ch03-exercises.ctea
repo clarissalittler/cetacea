@@ -1,0 +1,42 @@
+-- Proofs, Checked — Chapter 3: exercises.
+-- Replace each `sorry` with a real proof. Exercise 3.1 must stay in the
+-- constructive part of the file; the rest may use classical tactics.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch03-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Exercise 3.1 (constructive!). Even without excluded middle, you can
+-- prove that excluded middle is not *false*. Start with `intro h`, then
+-- notice that `h` can refute either side of the or — and refuting the
+-- right side requires a proof of P... which you can extract from h too.
+theorem ex3_1 (P : Prop) : not not (P \/ not P) := by
+  sorry
+
+mode classical
+
+-- Exercise 3.2 (warm-up). Excluded middle, mirrored.
+theorem ex3_2 (P : Prop) : not P \/ P := by
+  sorry
+
+-- Exercise 3.3. Every implication hides an or, classically.
+theorem ex3_3 (P Q : Prop) : (P -> Q) -> not P \/ Q := by
+  sorry
+
+-- Exercise 3.4. If assuming not-P forces Q, then something in {P, Q}
+-- must hold.
+theorem ex3_4 (P Q : Prop) : (not P -> Q) -> P \/ Q := by
+  sorry
+
+-- Exercise 3.5. A failed implication pins down both truth values.
+theorem ex3_5 (P Q : Prop) : not (P -> Q) -> P /\ not Q := by
+  sorry
+
+-- Exercise 3.6 (challenge). Peirce's law. Try `by_contra` first, and
+-- remember that once you hold `hn : not P`, the premise `(P -> Q) -> P`
+-- only needs a proof of `P -> Q` — which `hn` lets you fake, because a
+-- P in hand yields a contradiction.
+theorem ex3_6 (P Q : Prop) : ((P -> Q) -> P) -> P := by
+  sorry

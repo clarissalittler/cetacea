@@ -1,0 +1,39 @@
+-- Proofs, Checked — Chapter 2: exercises.
+-- Replace each `sorry` with a real proof.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch02-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Exercise 2.1. Or-elimination, then or-introduction on the other side.
+theorem ex2_1 (P Q : Prop) : P \/ Q -> Q \/ P := by
+  sorry
+
+-- Exercise 2.2. Both cases hand you the same thing.
+theorem ex2_2 (P : Prop) : P \/ P -> P := by
+  sorry
+
+-- Exercise 2.3. Upgrade the left side of an or, leave the right alone.
+theorem ex2_3 (P Q R : Prop) : (P -> Q) -> P \/ R -> Q \/ R := by
+  sorry
+
+-- Exercise 2.4. Remember: the goal `not (...)` is an implication in
+-- disguise, so it starts with `intro`.
+theorem ex2_4 (P : Prop) : not (P /\ not P) := by
+  sorry
+
+-- Exercise 2.5. One de Morgan direction. Prove each half separately.
+theorem ex2_5 (P Q : Prop) : not (P \/ Q) -> not P /\ not Q := by
+  sorry
+
+-- Exercise 2.6. Double-negation *introduction* — no classical logic
+-- needed. (Chapter 3 is about why the reverse direction is different.)
+theorem ex2_6 (P : Prop) : P -> not not P := by
+  sorry
+
+-- Exercise 2.7. Disjunctive syllogism, mirrored from the chapter's
+-- version: this time the *right* side is ruled out.
+theorem ex2_7 (P Q : Prop) : P \/ Q -> not Q -> P := by
+  sorry

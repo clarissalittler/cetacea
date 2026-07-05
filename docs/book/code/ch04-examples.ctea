@@ -1,0 +1,99 @@
+-- Proofs, Checked — Chapter 4: Everyone, Someone, No One
+-- Companion file for docs/book/04-quantifiers.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch04-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Section 4.2: a tiny world to quantify over.
+sort Person
+
+const alice : Person
+const bob : Person
+
+pred Happy(Person)
+pred Rich(Person)
+pred Knows(Person, Person)
+
+-- Section 4.3: forall-elimination. What holds for everyone holds for
+-- Alice in particular.
+theorem everyone_alice : (forall x : Person, Happy(x)) -> Happy(alice) := by
+  intro h
+  exact h alice
+
+-- Section 4.3: forall-introduction. To prove something about everyone,
+-- prove it about a person you know nothing about.
+theorem forall_and_half
+  : (forall x : Person, Happy(x) /\ Rich(x)) -> forall x : Person, Happy(x) := by
+  intro h
+  intro x
+  exact (h x).left
+
+-- Section 4.4: exists-introduction. One example settles it.
+theorem someone_happy : Happy(alice) -> exists x : Person, Happy(x) := by
+  intro h
+  exists alice
+  exact h
+
+-- Section 4.4: exists-elimination. Open the box, name the witness.
+theorem exists_weaken
+  : (exists x : Person, Happy(x) /\ Rich(x)) -> exists x : Person, Happy(x) := by
+  intro h
+  cases h with
+  | intro w hw =>
+      exists w
+      exact hw.left
+
+-- Section 4.5: the two rule pairs working together.
+theorem exists_mono_demo
+  : (forall x : Person, Happy(x) -> Rich(x))
+    -> (exists x : Person, Happy(x))
+    -> exists x : Person, Rich(x) := by
+  intro himp
+  intro h
+  cases h with
+  | intro w hw =>
+      exists w
+      apply himp w
+      exact hw
+
+-- Section 4.6: quantifier negation, direction 1.
+-- "Nobody is happy" refutes "somebody is happy."
+theorem no_happy_no_witness
+  : (forall x : Person, not Happy(x)) -> not exists x : Person, Happy(x) := by
+  intro h
+  intro he
+  cases he with
+  | intro w hw =>
+      apply h w
+      exact hw
+
+-- Section 4.6: quantifier negation, direction 2.
+theorem no_witness_no_happy
+  : (not exists x : Person, Happy(x)) -> forall x : Person, not Happy(x) := by
+  intro h
+  intro x
+  intro hx
+  apply h
+  exists x
+  exact hx
+
+-- Section 4.7: swapping quantifiers — the direction that works.
+theorem celebrity_spread
+  : (exists x : Person, forall y : Person, Knows(x, y))
+    -> forall y : Person, exists x : Person, Knows(x, y) := by
+  intro h
+  intro y
+  cases h with
+  | intro w hw =>
+      exists w
+      exact hw y
+
+-- Section 4.8: the standard library already knows the general pattern.
+theorem use_the_library
+  : (forall x : Person, Happy(x) -> Rich(x))
+    -> (forall x : Person, Happy(x))
+    -> forall x : Person, Rich(x) := by
+  exact forall_mono {A := Person; P := Happy; Q := Rich}

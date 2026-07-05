@@ -1,0 +1,77 @@
+-- Proofs, Checked — Chapter 2: exercise solutions.
+-- Spoilers! Try docs/book/code/ch02-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch02-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Exercise 2.1
+theorem ex2_1 (P Q : Prop) : P \/ Q -> Q \/ P := by
+  intro h
+  cases h with
+  | left hp =>
+      right
+      exact hp
+  | right hq =>
+      left
+      exact hq
+
+-- Exercise 2.2
+theorem ex2_2 (P : Prop) : P \/ P -> P := by
+  intro h
+  cases h with
+  | left hp =>
+      exact hp
+  | right hp2 =>
+      exact hp2
+
+-- Exercise 2.3
+theorem ex2_3 (P Q R : Prop) : (P -> Q) -> P \/ R -> Q \/ R := by
+  intro hpq
+  intro h
+  cases h with
+  | left hp =>
+      left
+      apply hpq
+      exact hp
+  | right hr =>
+      right
+      exact hr
+
+-- Exercise 2.4
+theorem ex2_4 (P : Prop) : not (P /\ not P) := by
+  intro h
+  apply h.right
+  exact h.left
+
+-- Exercise 2.5
+theorem ex2_5 (P Q : Prop) : not (P \/ Q) -> not P /\ not Q := by
+  intro h
+  split
+  intro hp
+  apply h
+  left
+  exact hp
+  intro hq
+  apply h
+  right
+  exact hq
+
+-- Exercise 2.6
+theorem ex2_6 (P : Prop) : P -> not not P := by
+  intro hp
+  intro hnp
+  apply hnp
+  exact hp
+
+-- Exercise 2.7
+theorem ex2_7 (P Q : Prop) : P \/ Q -> not Q -> P := by
+  intro h
+  intro hnq
+  cases h with
+  | left hp =>
+      exact hp
+  | right hq =>
+      contradiction

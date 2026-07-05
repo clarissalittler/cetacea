@@ -1,0 +1,57 @@
+-- Proofs, Checked — Chapter 1: Propositions and How to State Them
+-- Companion file for docs/book/01-propositions.md.
+-- Every theorem here appears in the chapter. Check the file with:
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch01-examples.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Section 1.4: your first proof.
+theorem my_first_proof (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+-- Section 1.4: the easiest proposition of all.
+theorem true_is_easy : True := by
+  trivial
+
+-- Section 1.5: and-introduction. If it is raining and you know class is
+-- meeting, you may conclude "it is raining AND class is meeting."
+theorem and_intro_demo (P Q : Prop) : P -> Q -> P /\ Q := by
+  intro hp
+  intro hq
+  split
+  exact hp
+  exact hq
+
+-- Section 1.6: and-elimination, left and right.
+theorem and_elim_left_demo (P Q : Prop) : P /\ Q -> P := by
+  intro h
+  exact h.left
+
+theorem and_elim_right_demo (P Q : Prop) : P /\ Q -> Q := by
+  intro h
+  exact h.right
+
+-- Section 1.6: taking a conjunction apart and rebuilding it in the
+-- other order.
+theorem and_swap_demo (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  split
+  exact h.right
+  exact h.left
+
+-- Section 1.7: implications with more than one assumption. Each `intro`
+-- peels off one arrow.
+theorem keep_the_first (P Q : Prop) : P -> Q -> P := by
+  intro hp
+  intro hq
+  exact hp
+
+-- Section 1.7: using an implication that lives inside a conjunction.
+theorem cash_the_check (P Q : Prop) : P /\ (P -> Q) -> Q := by
+  intro h
+  apply h.right
+  exact h.left

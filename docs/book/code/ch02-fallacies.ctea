@@ -1,0 +1,42 @@
+-- Proofs, Checked — Chapter 2: famous fallacies.
+-- INTENDED TO FAIL. Each "theorem" below is a classic invalid argument.
+-- Cetacea rejects all three; the chapter walks through the error
+-- messages, including the countermodel notes.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch02-fallacies.ctea
+
+mode classical
+
+-- Fallacy 1: affirming the consequent.
+-- "If it rained, the grass is wet. The grass is wet. So it rained."
+theorem affirming_the_consequent (P Q : Prop) : (P -> Q) -> Q -> P := by
+  intro hpq
+  intro hq
+  exact hq
+
+-- Fallacy 2: denying the antecedent.
+-- "If it rained, the grass is wet. It didn't rain. So the grass is dry."
+theorem denying_the_antecedent (P Q : Prop) : (P -> Q) -> not P -> not Q := by
+  intro hpq
+  intro hnp
+  intro hq
+  apply hnp
+  exact hq
+
+-- Fallacy 3: reading "or" as "and".
+-- "You may have soup or salad. So you may have soup."
+theorem or_gives_both (P Q : Prop) : P \/ Q -> P := by
+  intro h
+  cases h with
+  | left hp =>
+      exact hp
+  | right hq =>
+      exact hq
+
+-- Not a fallacy — a wrong turn. The statement is fine, but `left`
+-- commits to proving P, which our assumption cannot deliver. Compare
+-- the checker's note here with the notes above.
+theorem wrong_turn (P Q : Prop) : Q -> P \/ Q := by
+  intro hq
+  left
+  exact hq

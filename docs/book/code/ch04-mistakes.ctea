@@ -1,0 +1,33 @@
+-- Proofs, Checked — Chapter 4: common mistakes.
+-- INTENDED TO FAIL. Each theorem contains a deliberate mistake
+-- discussed in the "Common mistakes" section of the chapter.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch04-mistakes.ctea
+
+mode constructive
+
+sort Person
+
+const alice : Person
+
+pred Happy(Person)
+
+-- Mistake 1: a witness of the wrong type. The goal asks for a Person,
+-- and 0 is a natural number.
+theorem wrong_witness : Happy(alice) -> exists x : Person, Happy(x) := by
+  intro h
+  exists 0
+  exact h
+
+-- Mistake 2: trying to swap quantifiers the wrong way. `cases ... with
+-- | intro ...` opens an EXISTS; it cannot conjure a single witness out
+-- of a forall. (Good thing, too: the statement is false — see the
+-- chapter.)
+theorem everyone_has_an_admirer_so_someone_admires_everyone
+  (A : Type)
+  (R : A -> A -> Prop)
+  : (forall y : A, exists x : A, R(x, y)) -> exists x : A, forall y : A, R(x, y) := by
+  intro h
+  cases h with
+  | intro w hw =>
+      exists w

@@ -1,0 +1,74 @@
+-- Proofs, Checked — Chapter 3: exercise solutions.
+-- Spoilers! Try docs/book/code/ch03-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch03-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Exercise 3.1
+theorem ex3_1 (P : Prop) : not not (P \/ not P) := by
+  intro h
+  apply h
+  right
+  intro hp
+  apply h
+  left
+  exact hp
+
+mode classical
+
+-- Exercise 3.2
+theorem ex3_2 (P : Prop) : not P \/ P := by
+  by_cases h : P
+  right
+  exact h
+  left
+  exact h
+
+-- Exercise 3.3
+theorem ex3_3 (P Q : Prop) : (P -> Q) -> not P \/ Q := by
+  intro hpq
+  by_cases h : P
+  right
+  apply hpq
+  exact h
+  left
+  exact h
+
+-- Exercise 3.4
+theorem ex3_4 (P Q : Prop) : (not P -> Q) -> P \/ Q := by
+  intro h
+  by_cases hp : P
+  left
+  exact hp
+  right
+  apply h
+  exact hp
+
+-- Exercise 3.5
+theorem ex3_5 (P Q : Prop) : not (P -> Q) -> P /\ not Q := by
+  intro h
+  split
+  by_contra hnp
+  apply h
+  intro hp
+  exfalso
+  apply hnp
+  exact hp
+  intro hq
+  apply h
+  intro hp
+  exact hq
+
+-- Exercise 3.6
+theorem ex3_6 (P Q : Prop) : ((P -> Q) -> P) -> P := by
+  intro h
+  by_contra hn
+  apply hn
+  apply h
+  intro hp
+  exfalso
+  apply hn
+  exact hp

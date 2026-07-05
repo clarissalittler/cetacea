@@ -1,0 +1,23 @@
+-- Proofs, Checked — Chapter 3: common mistakes.
+-- INTENDED TO FAIL. Both proofs below are fine *classical* proofs, but
+-- this file never says `mode classical`, so the checker refuses the
+-- classical tactics. The chapter discusses both error messages.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch03-mistakes.ctea
+
+mode constructive
+
+-- Mistake 1: `by_cases` without classical mode.
+theorem em_needs_permission (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+
+-- Mistake 2: `by_contra` without classical mode.
+theorem dne_needs_permission (P : Prop) : not not P -> P := by
+  intro hnn
+  by_contra hn
+  apply hnn
+  exact hn

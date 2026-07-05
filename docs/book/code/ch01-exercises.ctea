@@ -1,0 +1,37 @@
+-- Proofs, Checked — Chapter 1: exercises.
+-- Replace each `sorry` with a real proof. The file checks as-is
+-- (each unfinished theorem is reported as "incomplete: uses sorry"),
+-- and your job is to make the "incomplete" flags disappear.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch01-exercises.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+-- Exercise 1.1 (warm-up). One `intro`, one `exact`.
+theorem ex1_1 (Q : Prop) : Q -> Q := by
+  sorry
+
+-- Exercise 1.2. Build the conjunction in the opposite order from the
+-- assumptions.
+theorem ex1_2 (P Q : Prop) : P -> Q -> Q /\ P := by
+  sorry
+
+-- Exercise 1.3. One assumption is enough to fill both slots.
+theorem ex1_3 (P : Prop) : P -> P /\ P := by
+  sorry
+
+-- Exercise 1.4. You will need `.left` and `.right` more than once each,
+-- possibly chained, as in `h.left.right`.
+theorem ex1_4 (P Q R : Prop) : (P /\ Q) /\ R -> P /\ (Q /\ R) := by
+  sorry
+
+-- Exercise 1.5. Dig the Q out of the middle.
+theorem ex1_5 (P Q R : Prop) : P /\ (Q /\ R) -> Q := by
+  sorry
+
+-- Exercise 1.6. Keep the P, and use the implication to upgrade it to a Q.
+-- Compare with `cash_the_check` in ch01-examples.ctea.
+theorem ex1_6 (P Q : Prop) : P /\ (P -> Q) -> P /\ Q := by
+  sorry

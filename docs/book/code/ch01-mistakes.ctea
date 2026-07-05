@@ -1,0 +1,36 @@
+-- Proofs, Checked — Chapter 1: common mistakes.
+-- INTENDED TO FAIL. Every theorem in this file contains a deliberate
+-- mistake discussed in the "Common mistakes" section of the chapter.
+-- Run it and read the errors:
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch01-mistakes.ctea
+
+mode constructive
+
+-- Mistake 1: grabbing the wrong half of a conjunction.
+theorem wrong_half (P Q : Prop) : P /\ Q -> Q := by
+  intro h
+  exact h.left
+
+-- Mistake 2: using `split` before the goal is a conjunction.
+theorem split_too_soon (P Q : Prop) : P -> Q -> P /\ Q := by
+  split
+
+-- Mistake 3: proving one half of a conjunction and stopping.
+theorem forgot_a_goal (P Q : Prop) : P -> Q -> P /\ Q := by
+  intro hp
+  intro hq
+  split
+  exact hp
+
+-- Mistake 4: reusing a hypothesis name.
+theorem name_reuse (P : Prop) : P -> P -> P := by
+  intro h
+  intro h
+
+-- Not a mistake, but it also stops the proof: `show_goal` asks the
+-- checker to report where you are. Useful whenever you are lost.
+theorem peek_at_the_goal (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  split
+  show_goal

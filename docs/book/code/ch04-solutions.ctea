@@ -1,0 +1,79 @@
+-- Proofs, Checked — Chapter 4: exercise solutions.
+-- Spoilers! Try docs/book/code/ch04-exercises.ctea yourself first.
+--
+--   cargo run -p cetacea_cli -- docs/book/code/ch04-solutions.ctea
+
+import ../../../std/prelude.ctea
+
+mode constructive
+
+sort Person
+
+const alice : Person
+const bob : Person
+
+pred Happy(Person)
+pred Rich(Person)
+pred Knows(Person, Person)
+
+-- Exercise 4.1
+theorem ex4_1 : (forall x : Person, Knows(x, x)) -> Knows(alice, alice) := by
+  intro h
+  exact h alice
+
+-- Exercise 4.2
+theorem ex4_2 : Rich(bob) -> exists x : Person, Rich(x) := by
+  intro h
+  exists bob
+  exact h
+
+-- Exercise 4.3
+theorem ex4_3
+  : (forall x : Person, Happy(x) /\ Rich(x)) -> forall x : Person, Rich(x) := by
+  intro h
+  intro x
+  exact (h x).right
+
+-- Exercise 4.4
+theorem ex4_4
+  : (forall x : Person, Happy(x))
+    -> (forall x : Person, Rich(x))
+    -> forall x : Person, Happy(x) /\ Rich(x) := by
+  intro hh
+  intro hr
+  intro x
+  split
+  exact hh x
+  exact hr x
+
+-- Exercise 4.5
+theorem ex4_5
+  : (exists x : Person, Happy(x) \/ Rich(x))
+    -> (exists x : Person, Happy(x)) \/ (exists x : Person, Rich(x)) := by
+  intro h
+  cases h with
+  | intro w hw =>
+      cases hw with
+      | left hh =>
+          left
+          exists w
+          exact hh
+      | right hr =>
+          right
+          exists w
+          exact hr
+
+-- Exercise 4.6
+theorem ex4_6
+  : (exists x : Person, not Happy(x)) -> not forall x : Person, Happy(x) := by
+  intro he
+  intro hall
+  cases he with
+  | intro w hw =>
+      apply hw
+      exact hall w
+
+-- Exercise 4.7
+theorem ex4_7 : (forall x y : Person, Knows(x, y)) -> Knows(alice, bob) := by
+  intro h
+  exact h alice bob
