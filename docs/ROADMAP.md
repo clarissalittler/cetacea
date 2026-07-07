@@ -15,7 +15,7 @@ test. Friction item numbers refer to FRICTION.md.
   inference, positional theorem term arguments, arithmetic countermodels,
   first-order countermodels, decimal numeral display, and no-op `simp`
   warnings, explicit rewrite direction docs, and rewrite occurrence
-  notes are implemented.
+  notes, and namespace-scoped proof/tactic references are implemented.
 - Next: parked design work (namespaces, aggressive computation revisit,
   polymorphic data types).
 
@@ -207,8 +207,10 @@ Status: done.
 - **Namespaces (item 18):** qualified names (`nat.add_comm`) and import
   aliasing touch the parser, `Env`, and every lookup; the `_demo`
   convention holds until standard-library migration lands. Parser slices
-  done: dot-qualified top-level names work, and `namespace` / `end`
-  blocks prefix declarations. Remaining design/implementation note:
+  done: dot-qualified top-level names work, `namespace` / `end` blocks
+  prefix declarations, and proof/tactic references inside a namespace
+  can resolve sibling theorems and formula definitions by short name.
+  Remaining design/implementation note:
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md).
 - **Aggressive goal computation (item 15):** behavior is defensible and
   chapters now narrate it; revisit only if Phase 3 doesn't already

@@ -113,14 +113,15 @@ stay meaningful.
     to the tactic line; `rewrite all` remains available when every
     occurrence should change.
 
-18. **Partially resolved: no namespaces.** Dot-qualified top-level names
-    now parse and resolve, and `namespace` / `end` blocks can prefix
-    declaration names. There are still no import aliases, scoped
-    unqualified lookup, ambiguity diagnostics, or standard-library
-    namespace migration. The book still cannot let students prove
-    `add_comm` or `length_append` under their real names without
-    colliding with the prelude; hence the pervasive `_demo` suffix
-    convention. The design note in
+18. **Partially resolved: namespace foundations.** Dot-qualified top-level
+    names now parse and resolve, `namespace` / `end` blocks can prefix
+    declaration names, and proof/tactic references inside a namespace can
+    resolve sibling theorems and formula definitions by short name. There
+    are still no import aliases, full scoped lookup for term/formula/type
+    references, ambiguity diagnostics, or standard-library namespace
+    migration. The book still cannot let students prove `add_comm` or
+    `length_append` under their real names without colliding with the
+    prelude; hence the pervasive `_demo` suffix convention. The design note in
     [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the
     remaining environment, import, and proof-projection work.
 
