@@ -8,13 +8,14 @@ test. Friction item numbers refer to FRICTION.md.
 
 ## Status
 
-- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, and Phase 5.1. The safety net is in CI; the
+- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5.1, and Phase 5.2. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
   def-name arguments, nested lambda propagation, mixed-type lambdas, and
   book debt repayment, def-aware matching, and annotation-driven `have`
   inference, positional theorem term arguments, arithmetic countermodels,
-  first-order countermodels, and decimal numeral display are implemented.
-- Next: Phase 5.2, `simp` no-progress.
+  first-order countermodels, decimal numeral display, and no-op `simp`
+  warnings are implemented.
+- Next: Phase 5.3, rewrite directions.
 
 ## Findings from triage
 
@@ -186,6 +187,7 @@ no-op carrying a diagnostic note ("this `simp` did nothing — consider
 deleting it"), so teaching scripts stop being fragile to upstream
 normalization changes. Update the handful of tests asserting the
 error.
+Status: done.
 **5.3 Rewrite directions (item 11).** Keep current semantics (flipping
 bare `rewrite` would silently re-orient every existing proof).
 Document all three forms in USAGE.md — explicitly stating `<-` ≡ bare ≡

@@ -909,11 +909,18 @@ pub struct SourceLocation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
+    pub severity: DiagnosticSeverity,
     pub span: Option<Span>,
     pub location: Option<SourceLocation>,
     pub message: String,
     pub notes: Vec<String>,
     pub suggestions: Vec<DiagnosticSuggestion>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    Error,
+    Warning,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -926,6 +933,18 @@ pub struct DiagnosticSuggestion {
 impl Diagnostic {
     fn error(message: impl Into<String>) -> Self {
         Self {
+            severity: DiagnosticSeverity::Error,
+            span: None,
+            location: None,
+            message: message.into(),
+            notes: Vec::new(),
+            suggestions: Vec::new(),
+        }
+    }
+
+    fn warning(message: impl Into<String>) -> Self {
+        Self {
+            severity: DiagnosticSeverity::Warning,
             span: None,
             location: None,
             message: message.into(),
@@ -970,6 +989,12 @@ impl Diagnostic {
         }
         self
     }
+}
+
+fn diagnostics_have_errors(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
 }
 
 fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSuggestion> {
@@ -1114,6 +1139,23 @@ fn diagnostic_at(
     message: impl Into<String>,
 ) -> Diagnostic {
     Diagnostic::error(message).with_location(source_path, line)
+}
+
+fn warning_at(source_path: Option<&Path>, line: usize, message: impl Into<String>) -> Diagnostic {
+    Diagnostic::warning(message).with_location(source_path, line)
+}
+
+fn tactic_note_diagnostic(
+    source_path: Option<&Path>,
+    theorem_name: &str,
+    note: TacticNote,
+) -> Diagnostic {
+    warning_at(
+        source_path,
+        note.line,
+        format!("theorem `{theorem_name}` has a no-op tactic"),
+    )
+    .with_note(note.message)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2545,7 +2587,7 @@ impl FileChecker {
                         );
                         continue;
                     }
-                    let proof = match prove(
+                    let proved = match prove(
                         &self.env,
                         theorem_ctx.clone(),
                         decl.statement.clone(),
@@ -2617,6 +2659,7 @@ impl FileChecker {
                             continue;
                         }
                     };
+                    let proof = proved.proof;
 
                     let mode_used =
                         match check_proof(&self.env, &theorem_ctx, &proof, &decl.statement, mode) {
@@ -2652,6 +2695,12 @@ impl FileChecker {
                             .with_note("change to `mode classical` or use a constructive proof"),
                         );
                         continue;
+                    }
+
+                    for note in proved.notes {
+                        self.result
+                            .diagnostics
+                            .push(tactic_note_diagnostic(source_path, &decl.name, note));
                     }
 
                     let uses_sorry = proof_uses_sorry(&self.env, &proof);
@@ -2769,7 +2818,7 @@ fn goals_for_theorem_prefix(
         false,
         source_path,
     );
-    if !checker.result.diagnostics.is_empty() {
+    if diagnostics_have_errors(&checker.result.diagnostics) {
         return GoalStepResult {
             theorem: Some(decl.name),
             mode: Some(mode),
@@ -2838,7 +2887,14 @@ fn goals_for_theorem_prefix(
         }
     }
 
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = checker.result.diagnostics;
+    diagnostics.extend(
+        session
+            .notes
+            .iter()
+            .cloned()
+            .map(|note| tactic_note_diagnostic(source_path, &decl.name, note)),
+    );
     if session.goals.is_empty() && tactic_count == decl.tactics.len() {
         match session.root.clone().complete() {
             Ok(proof) => {
@@ -2876,7 +2932,7 @@ fn goals_for_theorem_prefix(
         mode: Some(mode),
         next_tactic_index: tactic_count,
         tactic_count: decl.tactics.len(),
-        completed: session.goals.is_empty() && diagnostics.is_empty(),
+        completed: session.goals.is_empty() && !diagnostics_have_errors(&diagnostics),
         goals: session
             .goals
             .iter()
@@ -2908,7 +2964,7 @@ fn explain_theorem_at_index(
         false,
         source_path,
     );
-    if !checker.result.diagnostics.is_empty() {
+    if diagnostics_have_errors(&checker.result.diagnostics) {
         return ExplanationResult {
             theorem: Some(decl.name),
             statement: Some(decl.statement.to_string()),
@@ -3007,7 +3063,14 @@ fn explain_theorem_at_index(
         });
     }
 
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = checker.result.diagnostics;
+    diagnostics.extend(
+        session
+            .notes
+            .iter()
+            .cloned()
+            .map(|note| tactic_note_diagnostic(source_path, &decl.name, note)),
+    );
     let completed = session.goals.is_empty();
     if completed {
         match session.root.clone().complete() {
@@ -3052,7 +3115,7 @@ fn explain_theorem_at_index(
         theorem: Some(decl.name),
         statement: Some(decl.statement.to_string()),
         mode: Some(mode),
-        completed: completed && diagnostics.is_empty(),
+        completed: completed && !diagnostics_have_errors(&diagnostics),
         steps,
         diagnostics,
     }
@@ -9981,6 +10044,7 @@ struct ProofSession {
     root: PartialProof,
     goals: Vec<Goal>,
     next_goal_id: usize,
+    notes: Vec<TacticNote>,
 }
 
 impl ProofSession {
@@ -9993,6 +10057,7 @@ impl ProofSession {
                 target,
             }],
             next_goal_id: 1,
+            notes: Vec::new(),
         }
     }
 
@@ -10023,6 +10088,7 @@ impl ProofSession {
         let StepResult {
             replacement,
             new_goals,
+            notes,
         } = run_tactic_step(
             env,
             goal,
@@ -10039,6 +10105,12 @@ impl ProofSession {
         })?;
         if !self.root.replace_hole(goal_id, &replacement) {
             return Err(TacticError::new("internal error: missing proof hole"));
+        }
+        for mut note in notes {
+            if note.line == 0 {
+                note.line = located.line;
+            }
+            self.notes.push(note);
         }
         for new_goal in new_goals.into_iter().rev() {
             self.goals.insert(0, new_goal);
@@ -10298,17 +10370,49 @@ fn prove(
     target: Formula,
     tactics: &[LocatedTactic],
     allowed_mode: LogicMode,
-) -> Result<Proof, TacticError> {
+) -> Result<ProofResult, TacticError> {
     let mut session = ProofSession::new(context, target);
     for located in tactics {
         session.step(env, located, allowed_mode)?;
     }
-    session.complete()
+    let notes = std::mem::take(&mut session.notes);
+    Ok(ProofResult {
+        proof: session.complete()?,
+        notes,
+    })
+}
+
+struct ProofResult {
+    proof: Proof,
+    notes: Vec<TacticNote>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TacticNote {
+    line: usize,
+    message: String,
 }
 
 struct StepResult {
     replacement: PartialProof,
     new_goals: Vec<Goal>,
+    notes: Vec<TacticNote>,
+}
+
+fn simp_no_progress_result(goal: Goal, next_goal_id: &mut usize, tactic: &str) -> StepResult {
+    let id = fresh_goal(next_goal_id);
+    StepResult {
+        replacement: PartialProof::Hole(id),
+        new_goals: vec![Goal {
+            id,
+            context: goal.context,
+            target: goal.target,
+        }],
+        notes: vec![TacticNote {
+            line: 0,
+            message: format!("this `{tactic}` did nothing; consider deleting it"),
+        }],
+    }
 }
 
 fn run_tactic_step(
@@ -10336,6 +10440,7 @@ fn run_tactic_step(
                         context,
                         target: *conclusion,
                     }],
+                    notes: Vec::new(),
                 })
             }
             Formula::Forall {
@@ -10359,6 +10464,7 @@ fn run_tactic_step(
                         context,
                         target,
                     }],
+                    notes: Vec::new(),
                 })
             }
             _ => Err(TacticError::new(
@@ -10377,6 +10483,7 @@ fn run_tactic_step(
             Ok(StepResult {
                 replacement: PartialProof::Done(proof),
                 new_goals: Vec::new(),
+                notes: Vec::new(),
             })
         }
         Tactic::Trivial => {
@@ -10391,6 +10498,7 @@ fn run_tactic_step(
             Ok(StepResult {
                 replacement: PartialProof::Done(Proof::TrueIntro),
                 new_goals: Vec::new(),
+                notes: Vec::new(),
             })
         }
         Tactic::Assumption => {
@@ -10409,6 +10517,7 @@ fn run_tactic_step(
             Ok(StepResult {
                 replacement: PartialProof::Done(proof.clone()),
                 new_goals: Vec::new(),
+                notes: Vec::new(),
             })
         }
         Tactic::Apply(expr) => {
@@ -10440,6 +10549,7 @@ fn run_tactic_step(
             Ok(StepResult {
                 replacement,
                 new_goals,
+                notes: Vec::new(),
             })
         }
         Tactic::Split => {
@@ -10465,6 +10575,7 @@ fn run_tactic_step(
                         target: *right,
                     },
                 ],
+                notes: Vec::new(),
             })
         }
         Tactic::Left => {
@@ -10482,6 +10593,7 @@ fn run_tactic_step(
                     context: goal.context,
                     target: *left,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::Right => {
@@ -10499,6 +10611,7 @@ fn run_tactic_step(
                     context: goal.context,
                     target: *right,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::CasesOr {
@@ -10536,17 +10649,20 @@ fn run_tactic_step(
                 right_tactics,
                 allowed_mode,
             )?;
+            let mut notes = left_case.notes;
+            notes.extend(right_case.notes);
 
             Ok(StepResult {
                 replacement: PartialProof::Done(Proof::OrElim {
                     proof_or: Box::new(proof_or),
                     left_name: left_name.clone(),
-                    left_case: Box::new(left_case),
+                    left_case: Box::new(left_case.proof),
                     right_name: right_name.clone(),
-                    right_case: Box::new(right_case),
+                    right_case: Box::new(right_case.proof),
                     target: goal.target,
                 }),
                 new_goals: Vec::new(),
+                notes,
             })
         }
         Tactic::CasesExists {
@@ -10585,10 +10701,11 @@ fn run_tactic_step(
                             proof_exists: Box::new(proof_exists),
                             witness_name: witness_name.clone(),
                             hyp_name: hyp_name.clone(),
-                            body: Box::new(body_proof),
+                            body: Box::new(body_proof.proof),
                             target: goal.target,
                         }),
                         new_goals: Vec::new(),
+                        notes: body_proof.notes,
                     })
                 }
                 Formula::And(left, right) => {
@@ -10617,7 +10734,7 @@ fn run_tactic_step(
                         body: Box::new(Proof::ImpIntro {
                             hyp_name: hyp_name.clone(),
                             hyp_formula: (*right).clone(),
-                            body: Box::new(body_proof),
+                            body: Box::new(body_proof.proof),
                         }),
                     };
                     let applied = Proof::ImpElim {
@@ -10632,6 +10749,7 @@ fn run_tactic_step(
                     Ok(StepResult {
                         replacement: PartialProof::Done(applied),
                         new_goals: Vec::new(),
+                        notes: body_proof.notes,
                     })
                 }
                 _ => Err(TacticError::new(
@@ -10674,6 +10792,7 @@ fn run_tactic_step(
                     context: goal.context,
                     target: subst_formula_term(body, var, witness),
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::Refl => {
@@ -10694,6 +10813,7 @@ fn run_tactic_step(
                             target: goal.target.clone(),
                         }),
                         new_goals: Vec::new(),
+                        notes: Vec::new(),
                     });
                 }
                 return Err(TacticError::new(format!(
@@ -10703,6 +10823,7 @@ fn run_tactic_step(
             Ok(StepResult {
                 replacement: PartialProof::Done(Proof::EqRefl(left.clone())),
                 new_goals: Vec::new(),
+                notes: Vec::new(),
             })
         }
         Tactic::Rewrite {
@@ -10756,6 +10877,7 @@ fn run_tactic_step(
                         context: goal.context,
                         target: source_target,
                     }],
+                    notes: Vec::new(),
                 });
             }
             let Some(source_target) = formula_rewrite_sources(&goal.target, needle, replacement)
@@ -10780,6 +10902,7 @@ fn run_tactic_step(
                     context: goal.context,
                     target: source_target,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::Unfold(name) => {
@@ -10807,16 +10930,14 @@ fn run_tactic_step(
                     context: goal.context,
                     target,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::Simp => {
             let (target, changed) = unfold_formula_defs(env, &goal.context, &goal.target, None)
                 .map_err(|err| TacticError::new(format!("cannot simplify: {}", err.message)))?;
             if !changed {
-                return Err(TacticError::new(format!(
-                    "simp made no progress on goal `{}`",
-                    goal.target
-                )));
+                return Ok(simp_no_progress_result(goal, next_goal_id, "simp"));
             }
             let id = fresh_goal(next_goal_id);
             Ok(StepResult {
@@ -10829,6 +10950,7 @@ fn run_tactic_step(
                     context: goal.context,
                     target,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::SimpWith(names) => {
@@ -10837,10 +10959,11 @@ fn run_tactic_step(
                 simplify_formula_with_rules(env, &goal.context, &goal.target, &rules)
                     .map_err(|err| TacticError::new(format!("cannot simplify: {}", err.message)))?;
             if !builtin_changed && rewrites.is_empty() {
-                return Err(TacticError::new(format!(
-                    "simp made no progress on goal `{}`",
-                    goal.target
-                )));
+                return Ok(simp_no_progress_result(
+                    goal,
+                    next_goal_id,
+                    &tactic_label(tactic),
+                ));
             }
             let id = fresh_goal(next_goal_id);
             Ok(StepResult {
@@ -10855,15 +10978,18 @@ fn run_tactic_step(
                     context: goal.context,
                     target,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::SimpAt(name) => {
             let (context, changed) =
                 simplify_named_hypothesis_with_rules(env, &goal.context, name, &[])?;
             if !changed {
-                return Err(TacticError::new(format!(
-                    "simp made no progress on hypothesis `{name}`"
-                )));
+                return Ok(simp_no_progress_result(
+                    goal,
+                    next_goal_id,
+                    &tactic_label(tactic),
+                ));
             }
             let id = fresh_goal(next_goal_id);
             Ok(StepResult {
@@ -10873,6 +10999,7 @@ fn run_tactic_step(
                     context,
                     target: goal.target,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::SimpAll => {
@@ -10883,10 +11010,7 @@ fn run_tactic_step(
                 TacticError::new(format!("cannot simplify goal: {}", err.message))
             })?;
             if !hypotheses_changed && !target_changed {
-                return Err(TacticError::new(format!(
-                    "simp made no progress on goal or hypotheses for `{}`",
-                    goal.target
-                )));
+                return Ok(simp_no_progress_result(goal, next_goal_id, "simp at *"));
             }
             let id = fresh_goal(next_goal_id);
             let replacement = if target_changed {
@@ -10904,6 +11028,7 @@ fn run_tactic_step(
                     context,
                     target,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::SimpWithAt { names, target } => {
@@ -10913,9 +11038,11 @@ fn run_tactic_step(
                     let (context, changed) =
                         simplify_named_hypothesis_with_rules(env, &goal.context, name, &rules)?;
                     if !changed {
-                        return Err(TacticError::new(format!(
-                            "simp made no progress on hypothesis `{name}`"
-                        )));
+                        return Ok(simp_no_progress_result(
+                            goal,
+                            next_goal_id,
+                            &tactic_label(tactic),
+                        ));
                     }
                     let id = fresh_goal(next_goal_id);
                     Ok(StepResult {
@@ -10925,6 +11052,7 @@ fn run_tactic_step(
                             context,
                             target: goal.target,
                         }],
+                        notes: Vec::new(),
                     })
                 }
                 SimpTarget::All => {
@@ -10938,10 +11066,11 @@ fn run_tactic_step(
                         )?;
                     if !hypotheses_changed && !target_builtin_changed && target_rewrites.is_empty()
                     {
-                        return Err(TacticError::new(format!(
-                            "simp made no progress on goal or hypotheses for `{}`",
-                            goal.target
-                        )));
+                        return Ok(simp_no_progress_result(
+                            goal,
+                            next_goal_id,
+                            &tactic_label(tactic),
+                        ));
                     }
                     let id = fresh_goal(next_goal_id);
                     Ok(StepResult {
@@ -10956,6 +11085,7 @@ fn run_tactic_step(
                             context,
                             target,
                         }],
+                        notes: Vec::new(),
                     })
                 }
             }
@@ -11017,17 +11147,20 @@ fn run_tactic_step(
                     );
                     let step_case =
                         prove(env, step_ctx, step_target, &arms[1].tactics, allowed_mode)?;
+                    let mut notes = base_case.notes;
+                    notes.extend(step_case.notes);
 
                     Ok(StepResult {
                         replacement: PartialProof::Done(Proof::NatInd {
                             var_name: var_name.clone(),
                             target: goal.target,
-                            base_case: Box::new(base_case),
+                            base_case: Box::new(base_case.proof),
                             step_var: step_var.clone(),
                             ih_name: ih_name.clone(),
-                            step_case: Box::new(step_case),
+                            step_case: Box::new(step_case.proof),
                         }),
                         new_goals: Vec::new(),
+                        notes,
                     })
                 }
                 Type::Named(data_name) if env.data_def(data_name).is_some() => {
@@ -11041,6 +11174,7 @@ fn run_tactic_step(
                         )));
                     }
                     let mut proof_arms = Vec::new();
+                    let mut notes = Vec::new();
                     for (arm, ctor) in arms.iter().zip(data.ctors.iter()) {
                         if arm.ctor != ctor.name {
                             return Err(TacticError::new(format!(
@@ -11078,12 +11212,14 @@ fn run_tactic_step(
                         let arm_target = subst_formula_term(&goal.target, var_name, &ctor_term);
                         let arm_proof =
                             prove(env, arm_ctx, arm_target, &arm.tactics, allowed_mode)?;
+                        let arm_notes = arm_proof.notes;
                         proof_arms.push(DataIndArm {
                             ctor: ctor.name.clone(),
                             arg_names: arg_names.to_vec(),
                             ih_names: ih_names.to_vec(),
-                            proof: arm_proof,
+                            proof: arm_proof.proof,
                         });
+                        notes.extend(arm_notes);
                     }
 
                     Ok(StepResult {
@@ -11094,6 +11230,7 @@ fn run_tactic_step(
                             arms: proof_arms,
                         }),
                         new_goals: Vec::new(),
+                        notes,
                     })
                 }
                 other => Err(TacticError::new(format!(
@@ -11113,6 +11250,7 @@ fn run_tactic_step(
                     context: goal.context,
                     target: Formula::False,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::Contradiction => contradiction_step(env, goal),
@@ -11157,6 +11295,7 @@ fn run_tactic_step(
                         target: goal.target,
                     },
                 ],
+                notes: Vec::new(),
             })
         }
         Tactic::ByContra(name) => {
@@ -11186,6 +11325,7 @@ fn run_tactic_step(
                     context,
                     target: Formula::False,
                 }],
+                notes: Vec::new(),
             })
         }
         Tactic::Sorry => Ok(StepResult {
@@ -11193,6 +11333,7 @@ fn run_tactic_step(
                 target: goal.target,
             }),
             new_goals: Vec::new(),
+            notes: Vec::new(),
         }),
         Tactic::Have {
             name,
@@ -11250,6 +11391,7 @@ fn run_tactic_step(
                             context: rest_ctx,
                             target: goal.target,
                         }],
+                        notes: Vec::new(),
                     })
                 }
                 None => {
@@ -11281,6 +11423,7 @@ fn run_tactic_step(
                                 target: goal.target,
                             },
                         ],
+                        notes: Vec::new(),
                     })
                 }
             }
@@ -13260,6 +13403,7 @@ fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> 
                 target: goal.target,
             },
             new_goals: Vec::new(),
+            notes: Vec::new(),
         });
     }
 
@@ -13289,6 +13433,7 @@ fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> 
                     target: goal.target,
                 },
                 new_goals: Vec::new(),
+                notes: Vec::new(),
             });
         }
     }
@@ -13327,6 +13472,24 @@ mod tests {
         assert!(
             !result.diagnostics.is_empty(),
             "expected diagnostics, but file checked successfully"
+        );
+        let rendered = format!("{:#?}", result.diagnostics);
+        assert!(
+            rendered.contains(needle),
+            "diagnostics did not contain `{needle}`:\n{rendered}"
+        );
+    }
+
+    fn check_warn_contains(source: &str, needle: &str) {
+        let result = check_file(source);
+        assert!(
+            !diagnostics_have_errors(&result.diagnostics),
+            "unexpected error diagnostics: {:#?}",
+            result.diagnostics
+        );
+        assert!(
+            !result.theorems.is_empty(),
+            "expected theorem to be accepted"
         );
         let rendered = format!("{:#?}", result.diagnostics);
         assert!(
@@ -15713,15 +15876,16 @@ theorem bad : True := by
     }
 
     #[test]
-    fn simp_rejects_no_progress() {
-        check_err_contains(
+    fn simp_warns_on_no_progress() {
+        check_warn_contains(
             r#"
 mode constructive
 
 theorem bad : True := by
   simp
+  trivial
 "#,
-            "simp made no progress on goal `True`",
+            "this `simp` did nothing; consider deleting it",
         );
     }
 
@@ -15936,8 +16100,8 @@ theorem happy_mother_to_happy : Happy(mother(alice)) -> Happy(alice) := by
     }
 
     #[test]
-    fn simp_at_rejects_no_progress() {
-        check_err_contains(
+    fn simp_at_warns_on_no_progress() {
+        check_warn_contains(
             r#"
 mode constructive
 
@@ -15946,13 +16110,13 @@ theorem bad (P : Prop) : P -> P := by
   simp at h
   exact h
 "#,
-            "simp made no progress on hypothesis `h`",
+            "this `simp at h` did nothing; consider deleting it",
         );
     }
 
     #[test]
-    fn simp_with_rules_at_rejects_no_progress() {
-        check_err_contains(
+    fn simp_with_rules_at_warns_on_no_progress() {
+        check_warn_contains(
             r#"
 mode constructive
 
@@ -15969,7 +16133,7 @@ theorem bad : Happy(bob) -> Happy(bob) := by
   simp [mother_alice] at h
   exact h
 "#,
-            "simp made no progress on hypothesis `h`",
+            "this `simp [mother_alice] at h` did nothing; consider deleting it",
         );
     }
 
@@ -16015,8 +16179,8 @@ theorem happy_mother_identity : Happy(mother(alice)) -> Happy(mother(alice)) := 
     }
 
     #[test]
-    fn simp_at_star_rejects_no_progress() {
-        check_err_contains(
+    fn simp_at_star_warns_on_no_progress() {
+        check_warn_contains(
             r#"
 mode constructive
 
@@ -16025,7 +16189,7 @@ theorem bad (P : Prop) : P -> P := by
   simp at *
   exact h
 "#,
-            "simp made no progress on goal or hypotheses",
+            "this `simp at *` did nothing; consider deleting it",
         );
     }
 

@@ -1,7 +1,7 @@
 use cetacea_core::{
     check_file_with_imports, explain_theorem_with_imports, goals_at_with_imports, outline,
-    run_tactic_with_imports, CheckResult, Diagnostic, ExplanationResult, GoalSnapshot,
-    GoalStepResult, LogicMode, Position, SourceOutline, VirtualFile,
+    run_tactic_with_imports, CheckResult, Diagnostic, DiagnosticSeverity, ExplanationResult,
+    GoalSnapshot, GoalStepResult, LogicMode, Position, SourceOutline, VirtualFile,
 };
 
 #[no_mangle]
@@ -217,7 +217,7 @@ fn check_result_json(result: &CheckResult) -> String {
         .join(",");
     format!(
         r#"{{"ok":{},"theorems":[{}],"diagnostics":[{}]}}"#,
-        result.diagnostics.is_empty(),
+        !diagnostics_have_errors(&result.diagnostics),
         theorems,
         diagnostics_json(&result.diagnostics)
     )
@@ -253,7 +253,7 @@ fn outline_json(outline: &SourceOutline) -> String {
         .join(",");
     format!(
         r#"{{"ok":{},"theorems":[{}],"diagnostics":[{}]}}"#,
-        outline.diagnostics.is_empty(),
+        !diagnostics_have_errors(&outline.diagnostics),
         theorems,
         diagnostics_json(&outline.diagnostics)
     )
@@ -263,7 +263,7 @@ fn goal_result_json(result: &GoalStepResult) -> String {
     let goals = goals_json(&result.goals);
     format!(
         r#"{{"ok":{},"theorem":{},"mode":{},"next_tactic_index":{},"tactic_count":{},"completed":{},"goals":[{}],"diagnostics":[{}]}}"#,
-        result.diagnostics.is_empty(),
+        !diagnostics_have_errors(&result.diagnostics),
         option_string_json(result.theorem.as_deref()),
         mode_json(result.mode),
         result.next_tactic_index,
@@ -299,7 +299,7 @@ fn explanation_result_json(result: &ExplanationResult) -> String {
         .join(",");
     format!(
         r#"{{"ok":{},"theorem":{},"statement":{},"mode":{},"completed":{},"steps":[{}],"diagnostics":[{}]}}"#,
-        result.diagnostics.is_empty(),
+        !diagnostics_have_errors(&result.diagnostics),
         option_string_json(result.theorem.as_deref()),
         option_string_json(result.statement.as_deref()),
         mode_json(result.mode),
@@ -387,13 +387,27 @@ fn diagnostic_json(diagnostic: &Diagnostic) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"message":{},"location":{},"span":{},"notes":[{}],"suggestions":[{}]}}"#,
+        r#"{{"severity":{},"message":{},"location":{},"span":{},"notes":[{}],"suggestions":[{}]}}"#,
+        json_string(diagnostic_severity_label(diagnostic.severity)),
         json_string(&diagnostic.message),
         location,
         span,
         notes,
         suggestions
     )
+}
+
+fn diagnostic_severity_label(severity: DiagnosticSeverity) -> &'static str {
+    match severity {
+        DiagnosticSeverity::Error => "error",
+        DiagnosticSeverity::Warning => "warning",
+    }
+}
+
+fn diagnostics_have_errors(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
 }
 
 fn mode_json(mode: Option<LogicMode>) -> String {

@@ -790,8 +790,8 @@ equality theorems or local equality hypotheses as rewrite rules in the goal or
 in hypothesis-targeted forms such as `simp [lemma] at h` and
 `simp [local_eq] at *`. `simp at h` applies built-in normalization to a named
 hypothesis in the local proof state, and `simp at *` normalizes the goal plus
-all named hypotheses. All forms reject no-op calls so users notice when `simp`
-did not change anything.
+all named hypotheses. All forms accept no-op calls but emit a warning note so
+users notice when `simp` did not change anything.
 
 Current design tradeoff:
 

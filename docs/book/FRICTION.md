@@ -66,10 +66,10 @@ stay meaningful.
    identically. Renaming the local variable fixes it. Instantiation
    should rename, or the printer should disambiguate.
 
-10. **`simp made no progress` is an error.** Defensive `simp`s make
-    teaching scripts fragile: a proof breaks when an earlier step
-    already normalized the goal. A no-op `simp` should probably warn,
-    not fail (or a `simp?`/`try simp` form should exist).
+10. **Resolved: no-op `simp` warns instead of failing.** Defensive
+    `simp`s no longer break when an earlier step already normalized the
+    goal. They leave the proof state unchanged and report a warning note
+    such as "this `simp` did nothing; consider deleting it".
 
 11. **`rewrite` direction conventions are non-standard and partly
     undocumented.** Bare `rewrite h` rewrites right-to-left,

@@ -7,8 +7,8 @@ use std::process::{self, Command, Stdio};
 use cetacea_core::{
     check_file_at_path, check_source_at_path, explain_theorem_at_path,
     explain_theorem_in_source_at_path, goals_at_path, goals_at_source_path, outline,
-    run_tactic_at_path, CheckResult, CheckedTheorem, Diagnostic, ExplanationResult, GoalSnapshot,
-    GoalStepResult, Position, SourceOutline,
+    run_tactic_at_path, CheckResult, CheckedTheorem, Diagnostic, DiagnosticSeverity,
+    ExplanationResult, GoalSnapshot, GoalStepResult, Position, SourceOutline,
 };
 
 fn main() {
@@ -73,11 +73,13 @@ fn print_usage() {
 fn run_check(path: &Path) -> i32 {
     let result = check_file_at_path(path);
     print_accepted(&result);
-    if result.diagnostics.is_empty() {
-        0
-    } else {
+    if !result.diagnostics.is_empty() {
         print_diagnostics(&result.diagnostics);
+    }
+    if diagnostics_have_errors(&result.diagnostics) {
         1
+    } else {
+        0
     }
 }
 
@@ -1020,7 +1022,11 @@ impl TuiApp {
         if !self.goals.diagnostics.is_empty() {
             lines.push("Current proof state diagnostics:".to_string());
             for diagnostic in &self.goals.diagnostics {
-                push_wrapped(lines, &format!("error: {}", diagnostic.message), width);
+                push_wrapped(
+                    lines,
+                    &format!("{}: {}", diagnostic_label(diagnostic), diagnostic.message),
+                    width,
+                );
             }
             return;
         }
@@ -1074,7 +1080,11 @@ impl TuiApp {
         if !self.outline.diagnostics.is_empty() {
             lines.push("Outline diagnostics:".to_string());
             for diagnostic in &self.outline.diagnostics {
-                lines.push(format!("error: {}", diagnostic.message));
+                lines.push(format!(
+                    "{}: {}",
+                    diagnostic_label(diagnostic),
+                    diagnostic.message
+                ));
             }
             return;
         }
@@ -1118,7 +1128,11 @@ impl TuiApp {
     fn explain_panel_lines(&self, lines: &mut Vec<String>, width: usize) {
         if !self.explanation.diagnostics.is_empty() && self.explanation.steps.is_empty() {
             for diagnostic in &self.explanation.diagnostics {
-                push_wrapped(lines, &format!("error: {}", diagnostic.message), width);
+                push_wrapped(
+                    lines,
+                    &format!("{}: {}", diagnostic_label(diagnostic), diagnostic.message),
+                    width,
+                );
             }
             return;
         }
@@ -1172,7 +1186,11 @@ impl TuiApp {
                 .unwrap_or_default();
             push_wrapped(
                 lines,
-                &format!("error: {location}{}", diagnostic.message),
+                &format!(
+                    "{}: {location}{}",
+                    diagnostic_label(diagnostic),
+                    diagnostic.message
+                ),
                 width,
             );
             for note in &diagnostic.notes {
@@ -1456,9 +1474,10 @@ fn run_interactive(path: PathBuf) -> io::Result<()> {
     println!("Cetacea interactive mode");
     println!("File: {}", state.path.display());
     println!("Type `help` for commands.");
-    if state.last_check.diagnostics.is_empty() {
+    if !diagnostics_have_errors(&state.last_check.diagnostics) {
         print_accepted_summary(&state.last_check);
-    } else {
+    }
+    if !state.last_check.diagnostics.is_empty() {
         print_diagnostics(&state.last_check.diagnostics);
     }
     if let Some(name) = &state.selected_theorem {
@@ -1498,18 +1517,20 @@ fn handle_interactive_command(state: &mut InteractiveState, line: &str) -> bool 
         "r" | "reload" => {
             state.reload();
             println!("Reloaded {}", state.path.display());
-            if state.last_check.diagnostics.is_empty() {
+            if !diagnostics_have_errors(&state.last_check.diagnostics) {
                 print_accepted_summary(&state.last_check);
-            } else {
+            }
+            if !state.last_check.diagnostics.is_empty() {
                 print_diagnostics(&state.last_check.diagnostics);
             }
             true
         }
         "c" | "check" => {
             state.last_check = check_file_at_path(&state.path);
-            if state.last_check.diagnostics.is_empty() {
+            if !diagnostics_have_errors(&state.last_check.diagnostics) {
                 print_accepted(&state.last_check);
-            } else {
+            }
+            if !state.last_check.diagnostics.is_empty() {
                 print_diagnostics(&state.last_check.diagnostics);
             }
             true
@@ -1604,6 +1625,7 @@ fn load_outline(path: &Path) -> SourceOutline {
         Err(err) => SourceOutline {
             theorems: Vec::new(),
             diagnostics: vec![Diagnostic {
+                severity: DiagnosticSeverity::Error,
                 span: None,
                 location: None,
                 message: format!("could not read `{}`", path.display()),
@@ -1711,7 +1733,7 @@ fn step_selected_theorem(state: &mut InteractiveState, rest: &str) {
     for _ in 0..count {
         let step = run_tactic_at_path(&state.path, &theorem, state.next_tactic_index);
         state.next_tactic_index = step.next_tactic_index;
-        let should_stop = step.completed || !step.diagnostics.is_empty();
+        let should_stop = step.completed || diagnostics_have_errors(&step.diagnostics);
         result = Some(step);
         if should_stop {
             break;
@@ -1817,7 +1839,7 @@ fn search_theorems(state: &mut InteractiveState, query: &str) {
         println!("usage: search <text>");
         return;
     }
-    if !state.last_check.diagnostics.is_empty() {
+    if diagnostics_have_errors(&state.last_check.diagnostics) {
         println!("The last check had diagnostics; search results may be incomplete.");
     }
     let query = query.to_lowercase();
@@ -1874,7 +1896,7 @@ fn explain_selected_or_named_theorem(state: &InteractiveState, name: &str) {
 }
 
 fn print_explanation(result: &ExplanationResult) {
-    if !result.diagnostics.is_empty() && result.steps.is_empty() {
+    if diagnostics_have_errors(&result.diagnostics) && result.steps.is_empty() {
         print_diagnostics(&result.diagnostics);
         return;
     }
@@ -1940,7 +1962,7 @@ fn print_accepted(result: &CheckResult) {
         }
         println!("accepted {kind} {} ({})", theorem.name, notes.join("; "));
     }
-    if !accepted && result.diagnostics.is_empty() {
+    if !accepted && !diagnostics_have_errors(&result.diagnostics) {
         println!("accepted file");
     }
 }
@@ -1955,12 +1977,15 @@ fn theorem_display_label(theorem: &CheckedTheorem) -> String {
 
 fn print_diagnostics(diagnostics: &[Diagnostic]) {
     for diagnostic in diagnostics {
+        let label = diagnostic_label(diagnostic);
         match &diagnostic.location {
             Some(location) => match &location.path {
-                Some(path) => eprintln!("error: {path}:{}: {}", location.line, diagnostic.message),
-                None => eprintln!("error: line {}: {}", location.line, diagnostic.message),
+                Some(path) => {
+                    eprintln!("{label}: {path}:{}: {}", location.line, diagnostic.message)
+                }
+                None => eprintln!("{label}: line {}: {}", location.line, diagnostic.message),
             },
-            None => eprintln!("error: {}", diagnostic.message),
+            None => eprintln!("{label}: {}", diagnostic.message),
         }
         for note in &diagnostic.notes {
             eprintln!("  note: {note}");
@@ -1973,6 +1998,19 @@ fn print_diagnostics(diagnostics: &[Diagnostic]) {
             }
         }
     }
+}
+
+fn diagnostic_label(diagnostic: &Diagnostic) -> &'static str {
+    match diagnostic.severity {
+        DiagnosticSeverity::Error => "error",
+        DiagnosticSeverity::Warning => "warning",
+    }
+}
+
+fn diagnostics_have_errors(diagnostics: &[Diagnostic]) -> bool {
+    diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
 }
 
 fn indent_block(text: &str, prefix: &str) -> String {
