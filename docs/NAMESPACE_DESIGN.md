@@ -157,12 +157,15 @@ subject to the same ambiguity rules.
 3. Done: resolve sibling theorem and formula-definition names in proof/tactic
    contexts (`exact`, `apply`, `unfold`, and `simp [...]`) through the current
    namespace, while storing canonical theorem references in proof terms.
-4. Add `QualifiedName` and resolver helpers while preserving existing
+4. Done: report ambiguous short theorem and formula-definition references
+   when several qualified names share the same leaf.
+5. Add `QualifiedName` and resolver helpers while preserving existing
    unqualified behavior.
-5. Add import aliases and ambiguity diagnostics.
-6. Migrate standard-library declarations gradually, keeping compatibility
+6. Add import aliases and broaden ambiguity diagnostics to all top-level
+   reference kinds.
+7. Migrate standard-library declarations gradually, keeping compatibility
    aliases where needed.
-7. Update book and course examples to use real qualified names instead of
+8. Update book and course examples to use real qualified names instead of
    `_demo` suffixes when the imported library owns the short theorem name.
 
 ## Acceptance Tests

@@ -15,7 +15,9 @@ test. Friction item numbers refer to FRICTION.md.
   inference, positional theorem term arguments, arithmetic countermodels,
   first-order countermodels, decimal numeral display, and no-op `simp`
   warnings, explicit rewrite direction docs, and rewrite occurrence
-  notes, and namespace-scoped proof/tactic references are implemented.
+  notes, namespace-scoped proof/tactic references, and short-name
+  ambiguity diagnostics for qualified theorem/definition leaves are
+  implemented.
 - Next: parked design work (namespaces, aggressive computation revisit,
   polymorphic data types).
 
@@ -210,6 +212,7 @@ Status: done.
   done: dot-qualified top-level names work, `namespace` / `end` blocks
   prefix declarations, and proof/tactic references inside a namespace
   can resolve sibling theorems and formula definitions by short name.
+  Short ambiguous theorem/definition leaves now ask for qualified names.
   Remaining design/implementation note:
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md).
 - **Aggressive goal computation (item 15):** behavior is defensible and

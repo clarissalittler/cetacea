@@ -800,6 +800,23 @@ impl Env {
         self.theorem(name)
     }
 
+    fn ambiguous_theorem_names(&self, name: &str) -> Option<Vec<Name>> {
+        if name.contains('.') || is_builtin_name(name) {
+            return None;
+        }
+        let mut matches: Vec<_> = self
+            .theorems
+            .keys()
+            .filter(|candidate| qualified_name_leaf(candidate) == Some(name))
+            .cloned()
+            .collect();
+        if matches.len() < 2 {
+            return None;
+        }
+        matches.sort();
+        Some(matches)
+    }
+
     pub fn add_theorem(&mut self, theorem: Theorem) {
         self.theorems.insert(theorem.name.clone(), theorem);
     }
@@ -857,6 +874,23 @@ impl Env {
         self.formula_def(name)
     }
 
+    fn ambiguous_formula_def_names(&self, name: &str) -> Option<Vec<Name>> {
+        if name.contains('.') || is_builtin_name(name) {
+            return None;
+        }
+        let mut matches: Vec<_> = self
+            .defs
+            .keys()
+            .filter(|candidate| qualified_name_leaf(candidate) == Some(name))
+            .cloned()
+            .collect();
+        if matches.len() < 2 {
+            return None;
+        }
+        matches.sort();
+        Some(matches)
+    }
+
     fn term_def(&self, name: &str) -> Option<&TermDef> {
         self.term_defs.get(name)
     }
@@ -911,6 +945,31 @@ fn declaration_namespace(name: &str) -> Option<Name> {
     name.rsplit_once('.')
         .filter(|(namespace, leaf)| !namespace.is_empty() && !leaf.is_empty())
         .map(|(namespace, _)| namespace.to_string())
+}
+
+fn qualified_name_leaf(name: &str) -> Option<&str> {
+    name.rsplit_once('.')
+        .and_then(|(_, leaf)| (!leaf.is_empty()).then_some(leaf))
+}
+
+fn ambiguous_reference_message(kind: &str, name: &str, matches: &[Name]) -> String {
+    format!(
+        "ambiguous {kind} `{name}`; use {}",
+        disjoin_backticked_names(matches)
+    )
+}
+
+fn disjoin_backticked_names(names: &[Name]) -> String {
+    match names {
+        [] => "a qualified name".to_string(),
+        [name] => format!("`{name}`"),
+        [left, right] => format!("`{left}` or `{right}`"),
+        _ => {
+            let mut parts: Vec<_> = names.iter().map(|name| format!("`{name}`")).collect();
+            let last = parts.pop().expect("at least one name");
+            format!("{}, or {last}", parts.join(", "))
+        }
+    }
 }
 
 fn is_builtin_name(name: &str) -> bool {
@@ -7902,6 +7961,15 @@ impl ProofExpr {
                     "named arguments like `{P := ...}` can only be used with theorem or axiom names",
                 ));
             }
+            if ctx.lookup(&self.base).is_none() {
+                if let Some(matches) = env.ambiguous_theorem_names(&self.base) {
+                    return Err(TacticError::new(ambiguous_reference_message(
+                        "theorem",
+                        &self.base,
+                        &matches,
+                    )));
+                }
+            }
             Ok(Proof::Hyp(self.base.clone()))
         }
     }
@@ -11123,6 +11191,13 @@ fn run_tactic_step(
         }
         Tactic::Unfold(name) => {
             let Some(def) = env.formula_def_scoped(&goal.context, name) else {
+                if let Some(matches) = env.ambiguous_formula_def_names(name) {
+                    return Err(TacticError::new(ambiguous_reference_message(
+                        "definition",
+                        name,
+                        &matches,
+                    )));
+                }
                 return Err(TacticError::new(format!("unknown definition `{name}`")));
             };
             let (target, changed) =
@@ -11739,6 +11814,13 @@ fn collect_simp_rules(
         }
 
         let Some(formula) = ctx.lookup(name) else {
+            if let Some(matches) = env.ambiguous_theorem_names(name) {
+                return Err(TacticError::new(ambiguous_reference_message(
+                    "theorem",
+                    name,
+                    &matches,
+                )));
+            }
             return Err(TacticError::new(format!(
                 "unknown theorem or hypothesis `{name}`"
             )));
@@ -15714,6 +15796,67 @@ namespace q
 end r
 "#,
             "`end r` does not match open namespace `q`",
+        );
+    }
+
+    #[test]
+    fn ambiguous_qualified_theorem_leaf_reports_qualified_choices() {
+        check_err_contains(
+            r#"
+mode constructive
+
+namespace q
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+end q
+
+namespace r
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+end r
+
+namespace q
+
+theorem use_current_namespace (P : Prop) : P -> P := by
+  intro h
+  exact id h
+
+end q
+
+theorem use_ambiguous_id (P : Prop) : P -> P := by
+  intro h
+  exact id h
+"#,
+            "ambiguous theorem `id`; use `q.id` or `r.id`",
+        );
+    }
+
+    #[test]
+    fn ambiguous_qualified_definition_leaf_reports_qualified_choices() {
+        check_err_contains(
+            r#"
+mode constructive
+
+namespace q
+def Wrap (P : Prop) : Prop := P
+end q
+
+namespace r
+def Wrap (P : Prop) : Prop := P
+end r
+
+theorem use_ambiguous_wrap (P : Prop) : q.Wrap(P) -> P := by
+  intro h
+  unfold Wrap
+  exact h
+"#,
+            "ambiguous definition `Wrap`; use `q.Wrap` or `r.Wrap`",
         );
     }
 
