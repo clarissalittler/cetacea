@@ -398,8 +398,8 @@ three property definitions are at the top of the file. Clear the
 - **Exercise 7.4** divisibility is transitive — `apply divides_trans`
   and let your two hypotheses tell the checker what the middle number
   is.
-- **Exercises 7.5–7.7** *same mood* — the relation
-  `fun x y : Person => Happy(x) <-> Happy(y)` — is an equivalence
+- **Exercises 7.5–7.7** *same mood* — the named relation
+  `SameMood(x, y) := Happy(x) <-> Happy(y)` — is an equivalence
   relation, one property per exercise. Remember `<->` is a conjunction
   of implications: `split` proves it, `.left`/`.right` use it.
   Transitivity is the meatiest: chain the two iffs in both directions.

@@ -18,6 +18,8 @@ def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) 
 
 def Transitive (T : Type) (R : T -> T -> Prop) : Prop := forall x y z : T, R(x, y) -> R(y, z) -> R(x, z)
 
+def SameMood (x y : Person) : Prop := Happy(x) <-> Happy(y)
+
 -- Exercise 7.1 (warm-up). A concrete congruence: find the two witnesses.
 -- You want a and b with 23 + 10*a = 3 + 10*b.
 theorem ex7_1 : ModEq(10, 23, 3) := by
@@ -40,19 +42,19 @@ theorem ex7_4 : Transitive(fun x y : Nat => Divides(x, y)) := by
 -- Exercises 7.5–7.7. "Same mood" — agreeing about happiness — is an
 -- equivalence relation. Remember that <-> is a conjunction of two
 -- implications: split proves it, .left/.right use it.
-theorem ex7_5 : Reflexive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+theorem ex7_5 : Reflexive(SameMood) := by
   sorry
 
-theorem ex7_6 : Symmetric(fun x y : Person => Happy(x) <-> Happy(y)) := by
+theorem ex7_6 : Symmetric(SameMood) := by
   sorry
 
-theorem ex7_7 : Transitive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+theorem ex7_7 : Transitive(SameMood) := by
   sorry
 
 -- Exercise 7.8. Bundle Exercises 7.5–7.7 into one statement, reusing
 -- the three theorems you just proved.
 theorem ex7_8
-  : Reflexive(fun x y : Person => Happy(x) <-> Happy(y))
-    /\ Symmetric(fun x y : Person => Happy(x) <-> Happy(y))
-    /\ Transitive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+  : Reflexive(SameMood)
+    /\ Symmetric(SameMood)
+    /\ Transitive(SameMood) := by
   sorry

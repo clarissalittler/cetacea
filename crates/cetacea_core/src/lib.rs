@@ -4752,16 +4752,27 @@ fn validate_predicate_arg(
 ) -> Result<(), ValidationError> {
     match arg {
         PredicateArg::Named(name) => {
-            let Some(signature) = predicate_signature(env, ctx, name) else {
-                return Err(ValidationError::new(format!("unknown predicate `{name}`")));
-            };
-            if signature == expected {
-                Ok(())
+            if let Some(signature) = predicate_signature(env, ctx, name) {
+                if signature == expected {
+                    Ok(())
+                } else {
+                    Err(ValidationError::new(format!(
+                        "predicate `{name}` does not match expected type `{}`",
+                        predicate_type_display(expected)
+                    )))
+                }
+            } else if let Some(def) = env.formula_def(name) {
+                let signature = formula_def_predicate_signature(def, expected)?;
+                if signature == expected {
+                    Ok(())
+                } else {
+                    Err(ValidationError::new(format!(
+                        "definition `{name}` does not match expected predicate type `{}`",
+                        predicate_type_display(expected)
+                    )))
+                }
             } else {
-                Err(ValidationError::new(format!(
-                    "predicate `{name}` does not match expected type `{}`",
-                    predicate_type_display(expected)
-                )))
+                Err(ValidationError::new(format!("unknown predicate `{name}`")))
             }
         }
         PredicateArg::Lambda { params, body } => {
@@ -5020,6 +5031,60 @@ fn formula_def_predicate_argument(arg: &Term) -> Result<PredicateArg, Validation
     }
 }
 
+fn formula_def_predicate_signature(
+    def: &FormulaDef,
+    expected: &[Type],
+) -> Result<Vec<Type>, ValidationError> {
+    let term_types = formula_def_predicate_term_types(def)?;
+    if term_types.len() != expected.len() {
+        return Err(ValidationError::new(format!(
+            "definition `{}` expects {} argument(s), but predicate type has {}",
+            def.name,
+            term_types.len(),
+            expected.len()
+        )));
+    }
+
+    let mut subst = SchemaSubst::default();
+    for (ty, expected) in term_types.iter().zip(expected) {
+        unify_type(ty, expected, &def.params, &mut subst).map_err(|_| {
+            ValidationError::new(format!(
+                "definition `{}` parameter type `{}` does not match expected `{expected}`",
+                def.name, ty
+            ))
+        })?;
+    }
+    for param in &def.params {
+        if matches!(param.kind, ParamKind::Type) && !subst.type_args.contains_key(&param.name) {
+            return Err(ValidationError::new(format!(
+                "cannot infer type argument `{}` for definition `{}`",
+                param.name, def.name
+            )));
+        }
+    }
+
+    Ok(term_types
+        .iter()
+        .map(|ty| subst_type_schema(ty, &subst))
+        .collect())
+}
+
+fn formula_def_predicate_term_types(def: &FormulaDef) -> Result<Vec<Type>, ValidationError> {
+    def.params
+        .iter()
+        .filter_map(|param| match &param.kind {
+            ParamKind::Type => None,
+            ParamKind::Term(ty) => Some(Ok(ty.clone())),
+            ParamKind::Prop | ParamKind::Predicate(_) => Some(Err(ValidationError::new(
+                format!(
+                    "definition `{}` cannot be used as a predicate argument because it has non-term parameters",
+                    def.name
+                ),
+            ))),
+        })
+        .collect()
+}
+
 fn validate_predicate_schema_arg(
     env: &Env,
     ctx: &Context,
@@ -5030,17 +5095,21 @@ fn validate_predicate_schema_arg(
 ) -> Result<(), ValidationError> {
     match arg {
         PredicateArg::Named(name) => {
-            let Some(signature) = predicate_signature(env, ctx, name) else {
+            let actual_types = if let Some(signature) = predicate_signature(env, ctx, name) {
+                signature.to_vec()
+            } else if let Some(def) = env.formula_def(name) {
+                formula_def_predicate_term_types(def)?
+            } else {
                 return Err(ValidationError::new(format!("unknown predicate `{name}`")));
             };
-            if signature.len() != param_args.len() {
+            if actual_types.len() != param_args.len() {
                 return Err(ValidationError::new(format!(
                     "predicate `{name}` expects {} argument(s), but definition parameter expects {}",
-                    signature.len(),
+                    actual_types.len(),
                     param_args.len()
                 )));
             }
-            for (pattern, actual) in param_args.iter().zip(signature.iter()) {
+            for (pattern, actual) in param_args.iter().zip(actual_types.iter()) {
                 unify_type(pattern, actual, schema_params, schema_subst).map_err(|_| {
                     let expected = subst_type_schema(pattern, schema_subst);
                     ValidationError::new(format!(
@@ -14044,6 +14113,57 @@ theorem reflexive_eq : Reflexive(fun x y : Person => x = y) := by
   simp
   intro x
   refl
+"#,
+        );
+    }
+
+    #[test]
+    fn formula_definition_name_can_be_predicate_argument() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+pred Happy(Person)
+
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+def SameMood (x y : Person) : Prop := Happy(x) <-> Happy(y)
+
+theorem same_mood_reflexive : Reflexive(SameMood) := by
+  unfold Reflexive
+  intro x
+  unfold SameMood
+  split
+  intro h
+  exact h
+  intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn theorem_explicit_schema_accepts_formula_definition_predicate_argument() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+pred Happy(Person)
+
+def SameMood (x y : Person) : Prop := Happy(x) <-> Happy(y)
+
+theorem rel_self
+  (R : Person -> Person -> Prop)
+  (a : Person)
+  : R(a, a) -> R(a, a) := by
+  intro h
+  exact h
+
+theorem use_same_mood
+  : SameMood(alice, alice) -> SameMood(alice, alice) := by
+  exact rel_self {R := SameMood; a := alice}
 "#,
         );
     }

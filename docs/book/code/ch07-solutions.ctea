@@ -18,6 +18,8 @@ def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) 
 
 def Transitive (T : Type) (R : T -> T -> Prop) : Prop := forall x y z : T, R(x, y) -> R(y, z) -> R(x, z)
 
+def SameMood (x y : Person) : Prop := Happy(x) <-> Happy(y)
+
 -- Exercise 7.1. 23 + 10*0 = 23 and 3 + 10*2 = 23.
 theorem ex7_1 : ModEq(10, 23, 3) := by
   unfold ModEq
@@ -54,9 +56,10 @@ theorem ex7_4 : Transitive(fun x y : Nat => Divides(x, y)) := by
   exact h2
 
 -- Exercise 7.5
-theorem ex7_5 : Reflexive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+theorem ex7_5 : Reflexive(SameMood) := by
   unfold Reflexive
   intro x
+  unfold SameMood
   split
   intro h
   exact h
@@ -64,23 +67,25 @@ theorem ex7_5 : Reflexive(fun x y : Person => Happy(x) <-> Happy(y)) := by
   exact h
 
 -- Exercise 7.6
-theorem ex7_6 : Symmetric(fun x y : Person => Happy(x) <-> Happy(y)) := by
+theorem ex7_6 : Symmetric(SameMood) := by
   unfold Symmetric
   intro x
   intro y
   intro h
+  unfold SameMood
   split
   exact h.right
   exact h.left
 
 -- Exercise 7.7
-theorem ex7_7 : Transitive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+theorem ex7_7 : Transitive(SameMood) := by
   unfold Transitive
   intro x
   intro y
   intro z
   intro h1
   intro h2
+  unfold SameMood
   split
   intro hx
   apply h2.left
@@ -93,9 +98,9 @@ theorem ex7_7 : Transitive(fun x y : Person => Happy(x) <-> Happy(y)) := by
 
 -- Exercise 7.8
 theorem ex7_8
-  : Reflexive(fun x y : Person => Happy(x) <-> Happy(y))
-    /\ Symmetric(fun x y : Person => Happy(x) <-> Happy(y))
-    /\ Transitive(fun x y : Person => Happy(x) <-> Happy(y)) := by
+  : Reflexive(SameMood)
+    /\ Symmetric(SameMood)
+    /\ Transitive(SameMood) := by
   split
   exact ex7_5
   split
