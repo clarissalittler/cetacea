@@ -7,8 +7,8 @@ use std::process::{self, Command, Stdio};
 use cetacea_core::{
     check_file_at_path, check_source_at_path, explain_theorem_at_path,
     explain_theorem_in_source_at_path, goals_at_path, goals_at_source_path, outline,
-    run_tactic_at_path, CheckResult, Diagnostic, ExplanationResult, GoalSnapshot, GoalStepResult,
-    Position, SourceOutline,
+    run_tactic_at_path, CheckResult, CheckedTheorem, Diagnostic, ExplanationResult, GoalSnapshot,
+    GoalStepResult, Position, SourceOutline,
 };
 
 fn main() {
@@ -1847,7 +1847,7 @@ fn search_theorems(state: &mut InteractiveState, query: &str) {
             "{:>2}. [{} {kind} {}] {} : {}",
             idx + 1,
             origin,
-            theorem.mode_used,
+            theorem_display_label(theorem),
             theorem.name,
             theorem.statement
         );
@@ -1931,7 +1931,7 @@ fn print_accepted(result: &CheckResult) {
     {
         accepted = true;
         let kind = if theorem.is_axiom { "axiom" } else { "theorem" };
-        let mut notes = vec![theorem.mode_used.to_string()];
+        let mut notes = vec![theorem_display_label(theorem)];
         if theorem.uses_sorry {
             notes.push("incomplete: uses sorry".to_string());
         }
@@ -1942,6 +1942,14 @@ fn print_accepted(result: &CheckResult) {
     }
     if !accepted && result.diagnostics.is_empty() {
         println!("accepted file");
+    }
+}
+
+fn theorem_display_label(theorem: &CheckedTheorem) -> String {
+    if theorem.is_axiom {
+        "trusted".to_string()
+    } else {
+        theorem.mode_used.to_string()
     }
 }
 

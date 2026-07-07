@@ -381,7 +381,7 @@ function renderCheck(result) {
       const item = document.createElement("div");
       item.className = "accepted-item";
       const head = document.createElement("div");
-      head.textContent = `${theorem.is_axiom ? "axiom" : "theorem"} ${theorem.name} (${theorem.mode})`;
+      head.textContent = `${theorem.is_axiom ? "axiom" : "theorem"} ${theorem.name} (${theoremDisplayLabel(theorem)})`;
       if (theoremUsesSorry(theorem)) {
         const incomplete = document.createElement("span");
         incomplete.className = "incomplete-flag";
@@ -807,7 +807,7 @@ function renderTheoremLibrary() {
     badges.className = "library-badges";
     badges.append(
       badge(theorem.is_axiom ? "axiom" : "theorem"),
-      badge(theorem.mode),
+      badge(theoremDisplayLabel(theorem)),
       badge(theorem.is_imported ? "imported" : "local"),
     );
     if (theoremUsesSorry(theorem)) badges.append(badge("incomplete", "badge-warn"));
@@ -844,6 +844,10 @@ function badge(text, extraClass) {
   if (extraClass) element.classList.add(extraClass);
   element.textContent = text;
   return element;
+}
+
+function theoremDisplayLabel(theorem) {
+  return theorem.is_axiom ? "trusted" : theorem.mode;
 }
 
 // The wasm may serialize these per-theorem fields as snake_case (Rust side)
