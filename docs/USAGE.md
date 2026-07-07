@@ -70,8 +70,8 @@ http://localhost:8000/web/
 ```
 
 The browser build embeds the standard library for virtual imports, so tutorial
-sources can still use imports such as `import std/prelude.ctea` or
-`import ../../../std/prelude.ctea`.
+sources can still use imports such as `import std/prelude.ctea`,
+`import std/qualified_prelude.ctea`, or `import ../../../std/prelude.ctea`.
 
 The browser UI also shows the current proof goals, rule-based tactic hints for
 each open goal, diagnostic repair suggestions, a searchable theorem-library
@@ -1273,6 +1273,21 @@ to fill missing parameters. When inference fails, use explicit arguments.
 ## Standard Library
 
 The standard library is in `std/`.
+
+`std/prelude.ctea` imports the library into the legacy global namespace for
+existing examples. `std/qualified_prelude.ctea` imports the same modules under
+aliases (`prop`, `fol`, `eq`, `nat`, `set`, `list`, `fun`, `modular`) so local
+files can reuse short theorem names while referring to library names
+qualified:
+
+```text
+import ../std/qualified_prelude.ctea
+
+mode constructive
+
+theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
+  exact nat.add_comm n m
+```
 
 ### `std/prop.ctea`
 

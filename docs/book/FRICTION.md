@@ -121,10 +121,12 @@ stay meaningful.
     arms, and tactic arguments are canonicalized through the current
     namespace; ambiguous short top-level leaves ask for qualified names, and
     `import path.ctea as alias` exposes imported declarations under an alias
-    namespace. There is still no standard-library namespace migration. The
-    book still cannot let students prove `add_comm` or `length_append` under
-    their real names without colliding with the prelude; hence the pervasive
-    `_demo` suffix convention. The design note in
+    namespace. `std/qualified_prelude.ctea` now exposes the standard library
+    as aliases such as `nat.add_comm` and `list.length_append` while leaving
+    the legacy prelude unchanged. The book and course files still need a
+    migration away from the legacy prelude before students can routinely prove
+    `add_comm` or `length_append` under their real names without colliding;
+    hence the current `_demo` suffix convention. The design note in
     [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the
     remaining environment, import, and proof-projection work.
 

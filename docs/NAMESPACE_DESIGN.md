@@ -165,8 +165,9 @@ subject to the same ambiguity rules.
 6. Done: add import aliases (`import path.ctea as alias`) that check the
    imported file as declarations under the alias namespace while leaving
    unaliased imports compatible.
-7. Migrate standard-library declarations gradually, keeping compatibility
-   aliases where needed.
+7. Started: add `std/qualified_prelude.ctea`, which imports the current
+   standard-library modules under aliases (`nat.add_comm`, `list.length`,
+   `modular.modeq_refl`, etc.) while keeping the legacy prelude unchanged.
 8. Update book and course examples to use real qualified names instead of
    `_demo` suffixes when the imported library owns the short theorem name.
 

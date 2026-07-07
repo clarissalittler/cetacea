@@ -17,7 +17,8 @@ test. Friction item numbers refer to FRICTION.md.
   warnings, explicit rewrite direction docs, and rewrite occurrence
   notes, namespace-scoped proof/tactic references, short-name ambiguity
   diagnostics for qualified top-level leaves, scoped canonicalization for
-  namespace declaration bodies, and import aliases are implemented.
+  namespace declaration bodies, import aliases, and a qualified standard
+  prelude are implemented.
 - Next: parked design work (namespaces, aggressive computation revisit,
   polymorphic data types).
 
@@ -214,9 +215,10 @@ Status: done.
   can resolve sibling theorems and formula definitions by short name.
   Declaration bodies, theorem statements, data constructor types, `defrec`
   arms, and tactic arguments are canonicalized through the current namespace.
-  Short ambiguous top-level leaves now ask for qualified names, and
+  Short ambiguous top-level leaves now ask for qualified names,
   `import path.ctea as alias` checks imported declarations under the alias
-  namespace.
+  namespace, and `std/qualified_prelude.ctea` exposes aliased standard-library
+  names without changing the legacy prelude.
   Remaining design/implementation note:
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md).
 - **Aggressive goal computation (item 15):** behavior is defensible and

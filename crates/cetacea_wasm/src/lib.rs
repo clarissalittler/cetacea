@@ -148,6 +148,10 @@ fn standard_imports() -> Vec<VirtualFile> {
             "std/prelude.ctea",
             include_str!("../../../std/prelude.ctea"),
         ),
+        (
+            "std/qualified_prelude.ctea",
+            include_str!("../../../std/qualified_prelude.ctea"),
+        ),
         ("std/prop.ctea", include_str!("../../../std/prop.ctea")),
         ("std/fol.ctea", include_str!("../../../std/fol.ctea")),
         ("std/eq.ctea", include_str!("../../../std/eq.ctea")),

@@ -914,7 +914,11 @@ Files:
 - `std/eq.ctea`
 - `std/nat.ctea`
 - `std/set.ctea`
+- `std/list.ctea`
+- `std/fun.ctea`
+- `std/modular.ctea`
 - `std/prelude.ctea`
+- `std/qualified_prelude.ctea`
 
 Notable trusted axiom:
 
@@ -990,8 +994,9 @@ keeps the wasm crate dependency-free while still making the browser boundary
 straightforward.
 
 The wasm wrapper embeds the current standard library as virtual imports, so
-browser sources can use paths such as `import std/prelude.ctea` or the
-CS250-style `import ../../../std/prelude.ctea` without filesystem access.
+browser sources can use paths such as `import std/prelude.ctea`,
+`import std/qualified_prelude.ctea`, or the CS250-style
+`import ../../../std/prelude.ctea` without filesystem access.
 
 The static UI in `web/` loads `cetacea_wasm.wasm`, renders diagnostics and
 accepted declarations, and uses the goal-stepping APIs to show the current proof

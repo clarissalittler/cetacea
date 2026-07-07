@@ -1410,6 +1410,7 @@ pub fn check_source_at_path(source: &str, path: impl AsRef<Path>) -> CheckResult
         None,
         false,
         Some(source_path.as_path()),
+        None,
     );
     checker.finish()
 }
@@ -1979,9 +1980,6 @@ fn qualify_imported_command(command: Command, namespace_stack: &[Name]) -> Comma
         }
         Command::DataRecDef(mut decl) => {
             decl.name = qualify_in_namespace(namespace_stack, decl.name);
-            for arm in &mut decl.arms {
-                arm.ctor = qualify_in_namespace(namespace_stack, std::mem::take(&mut arm.ctor));
-            }
             Command::DataRecDef(decl)
         }
         Command::Axiom(mut decl) => {
@@ -2032,7 +2030,7 @@ impl FileChecker {
                 return;
             }
         };
-        self.check_commands(file.commands, base_dir, None, false, None);
+        self.check_commands(file.commands, base_dir, None, false, None, None);
     }
 
     fn check_path(&mut self, path: &Path) {
@@ -2143,6 +2141,7 @@ impl FileChecker {
             None,
             is_imported,
             Some(path.as_path()),
+            alias.as_deref(),
         );
         self.import_stack.pop();
         self.loaded_files.insert(loaded_key);
@@ -2185,7 +2184,14 @@ impl FileChecker {
         self.virtual_import_stack.push(path.to_string());
         let virtual_base = virtual_parent(path);
         let commands = qualify_imported_commands(file.commands, alias.as_deref());
-        self.check_commands(commands, None, virtual_base.as_deref(), is_imported, None);
+        self.check_commands(
+            commands,
+            None,
+            virtual_base.as_deref(),
+            is_imported,
+            None,
+            alias.as_deref(),
+        );
         self.virtual_import_stack.pop();
         self.loaded_virtual_files.insert(loaded_key);
     }
@@ -2197,6 +2203,7 @@ impl FileChecker {
         virtual_base: Option<&str>,
         is_imported: bool,
         source_path: Option<&Path>,
+        inherited_alias: Option<&str>,
     ) {
         let mut mode = LogicMode::Constructive;
 
@@ -2214,7 +2221,10 @@ impl FileChecker {
                                 continue;
                             }
                         };
-                    self.check_resolved_import(resolved_path, true, decl.alias);
+                    let alias = decl
+                        .alias
+                        .or_else(|| inherited_alias.map(str::to_string));
+                    self.check_resolved_import(resolved_path, true, alias);
                 }
                 Command::Mode(next_mode) => mode = next_mode,
                 Command::Sort(name) => {
@@ -2785,7 +2795,8 @@ impl FileChecker {
                     let mut arms = Vec::new();
                     let mut arms_ok = true;
                     for (arm, ctor) in decl.arms.iter().zip(data.ctors.iter()) {
-                        if arm.ctor != ctor.name {
+                        let arm_ctor = resolve_data_ctor_label(&self.env, &rec_ctx, &arm.ctor);
+                        if arm_ctor != ctor.name {
                             self.result.diagnostics.push(
                                 diagnostic_at(
                                     source_path,
@@ -3270,6 +3281,7 @@ fn goals_for_theorem_prefix(
         None,
         false,
         source_path,
+        None,
     );
     if diagnostics_have_errors(&checker.result.diagnostics) {
         return GoalStepResult {
@@ -3437,6 +3449,7 @@ fn explain_theorem_at_index(
         None,
         false,
         source_path,
+        None,
     );
     if diagnostics_have_errors(&checker.result.diagnostics) {
         return ExplanationResult {
@@ -4354,7 +4367,7 @@ fn resolve_top_level_name(
     exists(name).then(|| name.to_string())
 }
 
-fn resolve_induction_arm_ctor(env: &Env, ctx: &Context, name: &str) -> Name {
+fn resolve_data_ctor_label(env: &Env, ctx: &Context, name: &str) -> Name {
     resolve_top_level_name(ctx, name, |candidate| env.has_top_level_name(candidate))
         .unwrap_or_else(|| name.to_string())
 }
@@ -4783,6 +4796,58 @@ fn canonicalize_predicate_arg(
             }
             Ok(PredicateArg::Lambda {
                 params,
+                body: canonicalize_formula(env, &body_ctx, body)?,
+            })
+        }
+    }
+}
+
+fn canonicalize_predicate_arg_with_expected(
+    env: &Env,
+    ctx: &Context,
+    arg: &PredicateArg,
+    expected: &[Type],
+) -> Result<PredicateArg, ValidationError> {
+    match arg {
+        PredicateArg::Named(_) => canonicalize_predicate_arg(env, ctx, arg),
+        PredicateArg::Lambda { params, body } => {
+            validate_distinct_lambda_params(params)?;
+            if params.len() != expected.len() {
+                return Err(ValidationError::new(format!(
+                    "predicate lambda expects {} argument(s), but target predicate type has {}",
+                    params.len(),
+                    expected.len()
+                )));
+            }
+
+            let mut body_ctx = ctx.clone();
+            let mut canonical_params = Vec::new();
+            for (param, expected_ty) in params.iter().zip(expected) {
+                let expected_ty = canonicalize_type(env, ctx, expected_ty)?;
+                validate_type(env, ctx, &expected_ty)?;
+                let ty = param
+                    .ty
+                    .as_ref()
+                    .map(|ty| canonicalize_type(env, ctx, ty))
+                    .transpose()?;
+                if let Some(annotation) = &ty {
+                    validate_type(env, ctx, annotation)?;
+                    if annotation != &expected_ty {
+                        return Err(ValidationError::new(format!(
+                            "predicate lambda parameter `{}` has type `{annotation}`, but expected `{expected_ty}`",
+                            param.name
+                        )));
+                    }
+                }
+                body_ctx.add_term(param.name.clone(), expected_ty);
+                canonical_params.push(LambdaParam {
+                    name: param.name.clone(),
+                    ty,
+                });
+            }
+
+            Ok(PredicateArg::Lambda {
+                params: canonical_params,
                 body: canonicalize_formula(env, &body_ctx, body)?,
             })
         }
@@ -10081,9 +10146,8 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                     break;
                 }
                 let arm_line = i + 1;
-                let mut arm = parse_data_rec_arm(strip_comment(lines[i]).trim(), arm_line)
+                let arm = parse_data_rec_arm(strip_comment(lines[i]).trim(), arm_line)
                     .map_err(|err| err.with_line(arm_line))?;
-                arm.ctor = qualify_in_namespace(&namespace_stack, arm.ctor);
                 arms.push(arm);
                 i += 1;
             }
@@ -12483,8 +12547,7 @@ fn run_tactic_step(
                     let mut proof_arms = Vec::new();
                     let mut notes = Vec::new();
                     for (arm, ctor) in arms.iter().zip(data.ctors.iter()) {
-                        let arm_ctor =
-                            resolve_induction_arm_ctor(env, &goal.context, &arm.ctor);
+                        let arm_ctor = resolve_data_ctor_label(env, &goal.context, &arm.ctor);
                         if arm_ctor != ctor.name {
                             return Err(TacticError::new(format!(
                                 "induction arm `{}` does not match constructor `{}`; arms must follow the declaration order",
@@ -13418,7 +13481,59 @@ fn explicit_schema_subst(
         }
     }
 
+    canonicalize_ready_explicit_predicate_args(env, ctx, theorem, &mut subst)?;
     Ok(subst)
+}
+
+fn canonicalize_ready_explicit_predicate_args(
+    env: &Env,
+    ctx: &Context,
+    theorem: &Theorem,
+    subst: &mut SchemaSubst,
+) -> Result<(), TacticError> {
+    for param in &theorem.params {
+        let ParamKind::Predicate(args) = &param.kind else {
+            continue;
+        };
+        if predicate_expected_types_have_unresolved_schema(args, &theorem.params, subst) {
+            continue;
+        }
+        let Some(arg) = subst.predicate_args.get(&param.name).cloned() else {
+            continue;
+        };
+        let expected: Vec<Type> = args.iter().map(|ty| subst_type_schema(ty, subst)).collect();
+        let canonical = canonicalize_predicate_arg_with_expected(env, ctx, &arg, &expected)
+            .map_err(|err| {
+                TacticError::new(format!(
+                    "invalid value for theorem parameter `{}` in `{}`: {}",
+                    param.name, theorem.name, err.message
+                ))
+            })?;
+        subst.predicate_args.insert(param.name.clone(), canonical);
+    }
+    Ok(())
+}
+
+fn predicate_expected_types_have_unresolved_schema(
+    expected: &[Type],
+    params: &[Param],
+    subst: &SchemaSubst,
+) -> bool {
+    expected
+        .iter()
+        .any(|ty| type_has_unresolved_schema_param(ty, params, subst))
+}
+
+fn type_has_unresolved_schema_param(ty: &Type, params: &[Param], subst: &SchemaSubst) -> bool {
+    match ty {
+        Type::Named(name) if schema_type_param(params, name) => !subst.type_args.contains_key(name),
+        Type::Prod(left, right) => {
+            type_has_unresolved_schema_param(left, params, subst)
+                || type_has_unresolved_schema_param(right, params, subst)
+        }
+        Type::Set(elem) => type_has_unresolved_schema_param(elem, params, subst),
+        Type::Nat | Type::Named(_) => false,
+    }
 }
 
 fn theorem_schema_arg_list(theorem: &Theorem) -> String {
@@ -15321,6 +15436,11 @@ theorem trivial_true : True := by
     }
 
     #[test]
+    fn std_qualified_prelude_checks() {
+        check_path_ok("std/qualified_prelude.ctea");
+    }
+
+    #[test]
     fn example_prop_checks() {
         check_ok(include_str!("../../../examples/prop.ctea"));
     }
@@ -15562,6 +15682,88 @@ theorem use_imported : add(0, 0) = 0 := by
             .theorems
             .iter()
             .any(|theorem| theorem.name == "natproof.add_zero_right" && theorem.is_imported));
+    }
+
+    #[test]
+    fn aliased_import_keeps_transitive_imports_under_alias() {
+        let imports = vec![
+            VirtualFile {
+                path: "a.ctea".to_string(),
+                source: r#"
+import b.ctea
+
+mode constructive
+
+theorem use_id (P : Prop) : P -> P := by
+  intro h
+  exact id h
+"#
+                .to_string(),
+            },
+            VirtualFile {
+                path: "b.ctea".to_string(),
+                source: r#"
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#
+                .to_string(),
+            },
+        ];
+        let result = check_file_with_imports(
+            r#"
+import a.ctea as a
+
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact a.use_id h
+"#,
+            &imports,
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            result.diagnostics
+        );
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "a.id" && theorem.is_imported));
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "id" && !theorem.is_imported));
+        assert!(!result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "id" && theorem.is_imported));
+    }
+
+    #[test]
+    fn qualified_prelude_allows_local_names_to_match_std_leaves() {
+        let import = import_line("std/qualified_prelude.ctea");
+        let result = check_ok(&format!(
+            r#"
+{import}
+
+mode constructive
+
+theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
+  exact nat.add_comm n m
+"#
+        ));
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "nat.add_comm" && theorem.is_imported));
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "add_comm" && !theorem.is_imported));
     }
 
     #[test]
