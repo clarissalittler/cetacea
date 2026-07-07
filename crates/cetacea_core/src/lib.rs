@@ -6932,6 +6932,7 @@ impl ProofExpr {
         for step in &self.steps {
             match step {
                 ProofStep::Arg(arg) => {
+                    let raw_cursor = cursor.clone();
                     let cursor_inst = subst_formula_terms(
                         &subst_formula_schema(&cursor, &schema_subst),
                         &term_subst,
@@ -6948,16 +6949,27 @@ impl ProofExpr {
                                 .map_err(|err| TacticError::new(err.message))?;
                             let actual =
                                 validate_term(env, ctx, &term).map_err(|err| TacticError::new(err.message))?;
-                            unify_type(&var_type, &actual, &theorem.params, &mut schema_subst)
-                                .map_err(|_| {
-                                    let expected = subst_type_schema(&var_type, &schema_subst);
-                                    TacticError::new(format!(
-                                        "term `{term}` has type `{actual}`, but expected `{expected}`"
-                                    ))
-                                })?;
-                            term_subst.insert(var, term.clone());
+                            let unification_params =
+                                remaining_schema_params(&theorem.params, &schema_subst);
+                            unify_type(
+                                &var_type,
+                                &actual,
+                                &unification_params,
+                                &mut schema_subst,
+                            )
+                            .map_err(|_| {
+                                let expected = subst_type_schema(&var_type, &schema_subst);
+                                TacticError::new(format!(
+                                    "term `{term}` has type `{actual}`, but expected `{expected}`"
+                                ))
+                            })?;
+                            let (subst_var, next_cursor) = match raw_cursor {
+                                Formula::Forall { var, body, .. } => (var, *body),
+                                _ => (var, *body),
+                            };
+                            term_subst.insert(subst_var, term.clone());
                             pending.push(PendingProofStep::ForallArg(term));
-                            cursor = *body;
+                            cursor = next_cursor;
                         }
                         Formula::Implies(premise, conclusion) => {
                             let arg_expr = parse_proof_expr(arg)
@@ -6973,28 +6985,31 @@ impl ProofExpr {
                                 })?;
                             let arg_formula = normalize_formula_defs(env, ctx, &checked_arg.formula)
                                 .map_err(|err| TacticError::new(err.message))?;
-                            let premise_pattern =
-                                subst_formula_terms(&premise, &term_subst);
                             {
                                 let mut ignored_term_subst = HashMap::new();
+                                let unification_params =
+                                    remaining_schema_params(&theorem.params, &schema_subst);
                                 let mut unify = UnifyState {
                                     env,
                                     ctx,
                                     term_metas: &[],
-                                    schema_params: &theorem.params,
+                                    schema_params: &unification_params,
                                     term_subst: &mut ignored_term_subst,
                                     schema_subst: &mut schema_subst,
                                 };
-                                unify_formula(&premise_pattern, &arg_formula, &mut unify)
+                                unify_formula(&premise, &arg_formula, &mut unify)
                                     .map_err(|_| {
                                         TacticError::new(format!(
                                             "proof argument has type `{}`, but expected `{}`",
-                                            checked_arg.formula, premise_pattern
+                                            checked_arg.formula, premise
                                         ))
                                     })?;
                             }
                             pending.push(PendingProofStep::ImpArg(proof_arg));
-                            cursor = *conclusion;
+                            cursor = match raw_cursor {
+                                Formula::Implies(_, raw_conclusion) => *raw_conclusion,
+                                _ => *conclusion,
+                            };
                         }
                         other => {
                             return Err(TacticError::new(format!(
@@ -15371,6 +15386,45 @@ theorem subsets_carry
   exact hAB
 "#
         ));
+    }
+
+    #[test]
+    fn explicit_schema_term_arg_name_collision_does_not_reopen_fixed_param() {
+        let import = import_line("std/eq.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem congr_pred_collision
+  (x : Nat)
+  : succ(x) = 0 -> succ(x) = succ(x) -> 0 = succ(x) := by
+  intro hxy
+  intro hp
+  exact congr_pred {{A := Nat; P := fun n : Nat => n = succ(x); x := succ(x); y := 0}} hxy hp
+"#
+        ));
+    }
+
+    #[test]
+    fn explicit_schema_term_arg_name_collision_still_rejects_wrong_premise() {
+        let import = import_line("std/eq.ctea");
+        check_err_contains(
+            &format!(
+                r#"
+{import}
+mode constructive
+
+theorem congr_pred_collision_bad
+  (x : Nat)
+  : succ(x) = 0 -> 0 = succ(x) -> 0 = succ(x) := by
+  intro hxy
+  intro hp
+  exact congr_pred {{A := Nat; P := fun n : Nat => n = succ(x); x := succ(x); y := 0}} hxy hp
+"#
+            ),
+            "proof argument has type `0 = succ(x)`, but expected `succ(x) = succ(x)`",
+        );
     }
 
     #[test]

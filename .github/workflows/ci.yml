@@ -23,3 +23,6 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+      - name: Check Cetacea corpus
+        run: scripts/check_all.sh
