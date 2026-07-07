@@ -46,15 +46,18 @@ does the arithmetic, not you.
 | `divides_add` | $d \mid a$ and $d \mid b$ imply $d \mid a + b$ |
 | `divides_mul` | $d \mid a$ implies $d \mid ak$ |
 
-One usage note: passing premises as proof-expression *arguments* keeps
-the `Divides` goals folded, while `apply` unfolds them into raw
-existentials (where a named theorem like `divides_3_12` no longer
-matches syntactically). So the idiomatic use of the sum and chain rules
-is one `exact`:
+The sum and chain rules can be used either by passing the premise
+proofs as arguments to `exact`, or by `apply` followed by the two
+folded `Divides` subgoals:
 
 ```text
 theorem divides_3_sum : Divides(3, add(12, 9)) := by
   exact divides_add {d := 3; a := 12; b := 9} divides_3_12 divides_3_9
+
+theorem divides_3_sum_by_apply : Divides(3, add(12, 9)) := by
+  apply divides_add
+  exact divides_3_12
+  exact divides_3_9
 
 theorem divides_3_18 : Divides(3, 18) := by
   exact divides_trans {a := 3; b := 6; c := 18} divides_3_6 divides_6_18

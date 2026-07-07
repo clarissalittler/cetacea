@@ -160,6 +160,13 @@ theorem inter_self (T : Type) (A : Set T) : inter(A, A) = A := by
   exact hx
   exact hx
 
+theorem union_empty_right_demo (T : Type) (A : Set T) : A = union(A, empty(T)) := by
+  apply subset_antisymm
+  exact subset_union_left {T := T; A := A; B := empty(T)}
+  apply union_subset
+  exact subset_refl
+  exact empty_subset
+
 -- Section 6.8: the OTHER De Morgan law hides a classical step (Chapter 3
 -- returns). Everything below this line has classical permission.
 mode classical

@@ -8,11 +8,11 @@ test. Friction item numbers refer to FRICTION.md.
 
 ## Status
 
-- Done: Phase 0, Phase 1, and Phase 2. The safety net is in CI; the
+- Done: Phase 0, Phase 1, Phase 2, and Phase 3. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
   def-name arguments, nested lambda propagation, mixed-type lambdas, and
-  book debt repayment are implemented.
-- Next: Phase 3, def-aware matching.
+  book debt repayment, and def-aware matching are implemented.
+- Next: Phase 4, inference and counterexamples.
 
 ## Findings from triage
 
@@ -120,6 +120,8 @@ concrete-composition payoff, and update FRICTION.md's ledger. This is
 where the phase proves it worked.
 
 ## Phase 3 — Def-aware matching (item 4; highest regression risk, do after Phase 2's tests exist)
+
+Status: done.
 
 `apply` normalizes goals (unfolding defs, computing built-ins) while
 theorem statements stay folded, so folded library lemmas stop matching

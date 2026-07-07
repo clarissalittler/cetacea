@@ -25,16 +25,13 @@ stay meaningful.
    `fun x y : T => ...` shorthand still works when all binders share a
    type.
 
-4. **Post-`apply` goal normalization strands library lemmas.** After
-   `apply subset_antisymm`, subgoals arrive with `subset` pre-expanded to
-   its `forall` form, after which `exact subset_union_left {...}` no
-   longer matches even with full explicit arguments (the theorem stays
-   folded, the goal got unfolded). Killed the natural "compose two
-   library lemmas" exercises in chapter 6; same issue bites
-   `apply modeq_zero_to_divides` (chapter 10) and makes `unfold`
-   sometimes-needed-sometimes-an-error depending on how a goal was
-   produced. A def-aware matching pass (fold/unfold to agreement before
-   comparing) would fix a whole class of these.
+4. **Resolved: post-`apply` goals stay usable with folded library lemmas.**
+   `apply subset_antisymm` can now be followed by
+   `exact subset_union_left {...}` against the folded subset subgoal, and
+   `apply modeq_zero_to_divides` works directly against a folded
+   `Divides(5, 20)` goal. Matching tries folded formulas first and then
+   falls back to def-normalized formulas, so `exact` also works when one
+   side is folded and the other is unfolded.
 
 5. **Resolved: composition theorems are usable at concrete graphs.**
    `exact compose_injective {F := fun x y : Nat => succ(x) = y; ...}`

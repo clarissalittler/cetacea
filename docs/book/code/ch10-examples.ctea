@@ -102,9 +102,8 @@ theorem divides_5_20_direct : Divides(5, 20) := by
   refl
 
 theorem divides_5_20_via_modeq : Divides(5, 20) := by
-  have hm : ModEq(5, 20, 0)
+  apply modeq_zero_to_divides
   unfold ModEq
   exists 0
   exists 4
   refl
-  exact modeq_zero_to_divides {m := 5; x := 20} hm

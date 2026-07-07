@@ -380,6 +380,19 @@ prefer this or the extensionality ritual is mostly taste; mutual
 inclusion shines when the two directions need genuinely different
 arguments, or when you already own one of them as a lemma.
 
+Here is the library-lemma version: `A` and `A ∪ empty` are equal
+because one inclusion is `subset_union_left`, and the other follows
+from `union_subset`, `subset_refl`, and `empty_subset`:
+
+```text
+theorem union_empty_right_demo (T : Type) (A : Set T) : A = union(A, empty(T)) := by
+  apply subset_antisymm
+  exact subset_union_left {T := T; A := A; B := empty(T)}
+  apply union_subset
+  exact subset_refl
+  exact empty_subset
+```
+
 ## 6.8 Common mistakes
 
 Run [`code/ch06-mistakes.ctea`](code/ch06-mistakes.ctea) — intended to

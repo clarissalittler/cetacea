@@ -278,8 +278,9 @@ accepted theorem divides_5_20_via_modeq (constructive; axioms: modeq_zero_to_div
 ```
 
 The first proof exhibits the witness directly (`5 * 4 = 20`, `refl`
-does the arithmetic). The second proves `ModEq(5, 20, 0)` and crosses
-the axiom bridge — and the checker *permanently stamps the receipt*.
+does the arithmetic). The second applies the axiom bridge, then proves
+the remaining premise `ModEq(5, 20, 0)` — and the checker
+*permanently stamps the receipt*.
 Any theorem that uses an axiom, directly or through other theorems,
 carries an `axioms:` list on its accepted line. This is Chapter 3's
 nutrition-label idea again: there, the label said which *logic* a

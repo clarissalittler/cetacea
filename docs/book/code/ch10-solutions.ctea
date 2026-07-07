@@ -63,6 +63,7 @@ theorem ex10_5 : Divides(3, 12) := by
 -- on the library's one trusted-not-proved statement.
 theorem ex10_6 : Divides(3, 12) := by
   apply modeq_zero_to_divides {m := 3; x := 12}
+  unfold ModEq
   exists 0
   exists 4
   refl

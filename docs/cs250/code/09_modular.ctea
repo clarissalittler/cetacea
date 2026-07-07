@@ -25,10 +25,14 @@ theorem divides_3_9 : Divides(3, 9) := by
   refl
 
 -- The sum rule: 3 | 12 and 3 | 9, so 3 | (12 + 9). `divides_3_12` comes
--- from std/modular.ctea. Passing the premises as proof-expression
--- arguments keeps the `Divides` goals folded; `apply` would unfold them.
+-- from std/modular.ctea.
 theorem divides_3_sum : Divides(3, add(12, 9)) := by
   exact divides_add {d := 3; a := 12; b := 9} divides_3_12 divides_3_9
+
+theorem divides_3_sum_by_apply : Divides(3, add(12, 9)) := by
+  apply divides_add
+  exact divides_3_12
+  exact divides_3_9
 
 -- The chain rule: 3 | 6 and 6 | 18, so 3 | 18.
 theorem divides_3_6 : Divides(3, 6) := by

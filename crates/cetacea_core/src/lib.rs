@@ -11246,6 +11246,28 @@ struct ApplyPlan {
     premises: Vec<Formula>,
 }
 
+fn decompose_apply_formula(formula: &Formula) -> (Vec<(Name, Type)>, Vec<Formula>, Formula) {
+    let mut forall_vars = Vec::new();
+    let mut cursor = formula;
+    while let Formula::Forall {
+        var,
+        var_type,
+        body,
+    } = cursor
+    {
+        forall_vars.push((var.clone(), var_type.clone()));
+        cursor = body;
+    }
+
+    let mut premises = Vec::new();
+    while let Formula::Implies(premise, conclusion) = cursor {
+        premises.push(*premise.clone());
+        cursor = conclusion;
+    }
+
+    (forall_vars, premises, cursor.clone())
+}
+
 fn apply_plan_for_goal(
     env: &Env,
     ctx: &Context,
@@ -11268,41 +11290,51 @@ fn apply_plan_for_goal(
     let normalized_target =
         normalize_formula_defs(env, ctx, target).map_err(|err| TacticError::new(err.message))?;
 
-    let mut forall_vars = Vec::new();
-    let mut cursor = &normalized_formula;
-    while let Formula::Forall {
-        var,
-        var_type,
-        body,
-    } = cursor
+    let (forall_vars, normalized_premises, cursor) =
+        decompose_apply_formula(&normalized_formula);
+    let (raw_forall_vars, raw_premises, raw_cursor) = decompose_apply_formula(formula);
+    let goal_premises = if raw_forall_vars.len() == forall_vars.len()
+        && raw_premises.len() == normalized_premises.len()
     {
-        forall_vars.push((var.clone(), var_type.clone()));
-        cursor = body;
-    }
-
-    let mut premises = Vec::new();
-    while let Formula::Implies(premise, conclusion) = cursor {
-        premises.push(*premise.clone());
-        cursor = conclusion;
-    }
+        raw_premises
+    } else {
+        normalized_premises.clone()
+    };
 
     let quantified: Vec<Name> = forall_vars.iter().map(|(name, _)| name.clone()).collect();
     let mut term_subst = HashMap::new();
     let mut schema_subst = initial_schema_subst;
     {
-        let cursor = subst_formula_schema(cursor, &schema_subst);
+        let raw_cursor = subst_formula_schema(&raw_cursor, &schema_subst);
+        let cursor = subst_formula_schema(&cursor, &schema_subst);
         let normalized_cursor = normalize_formula_defs(env, formula_ctx, &cursor)
             .map_err(|err| TacticError::new(err.message))?;
-        let unification_params = remaining_schema_params(schema_params, &schema_subst);
-        let mut unify = UnifyState {
-            env,
-            ctx,
-            term_metas: &quantified,
-            schema_params: &unification_params,
-            term_subst: &mut term_subst,
-            schema_subst: &mut schema_subst,
-        };
-        unify_formula(&normalized_cursor, &normalized_target, &mut unify).map_err(|_| {
+        let attempts = [
+            (raw_cursor.clone(), target.clone()),
+            (normalized_cursor.clone(), normalized_target.clone()),
+        ];
+        let mut matched = false;
+        for (pattern, target) in attempts {
+            let mut candidate_term_subst = term_subst.clone();
+            let mut candidate_schema_subst = schema_subst.clone();
+            let unification_params =
+                remaining_schema_params(schema_params, &candidate_schema_subst);
+            let mut unify = UnifyState {
+                env,
+                ctx,
+                term_metas: &quantified,
+                schema_params: &unification_params,
+                term_subst: &mut candidate_term_subst,
+                schema_subst: &mut candidate_schema_subst,
+            };
+            if unify_formula(&pattern, &target, &mut unify).is_ok() {
+                term_subst = candidate_term_subst;
+                schema_subst = candidate_schema_subst;
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
             let subject = theorem_name
                 .map(|name| format!("theorem `{name}`"))
                 .unwrap_or_else(|| "this proof".to_string());
@@ -11312,16 +11344,16 @@ fn apply_plan_for_goal(
             if let Some(suggestion) =
                 predicate_parameter_apply_suggestion(theorem_name, schema_params)
             {
-                err.with_suggestion(suggestion)
+                return Err(err.with_suggestion(suggestion));
             } else {
-                err
+                return Err(err);
             }
-        })?;
+        }
     }
     infer_apply_args_from_context(
         env,
         ctx,
-        &premises,
+        &normalized_premises,
         schema_params,
         &quantified,
         &mut term_subst,
@@ -11339,7 +11371,7 @@ fn apply_plan_for_goal(
         forall_args.push(arg.clone());
     }
 
-    let premises = premises
+    let premises = goal_premises
         .into_iter()
         .map(|premise| {
             subst_formula_terms(&subst_formula_schema(&premise, &schema_subst), &term_subst)
@@ -11425,32 +11457,50 @@ fn infer_schema_subst_for_formula(
 ) -> Result<SchemaSubst, TacticError> {
     let mut schema_subst = initial_schema_subst;
     let pattern = subst_formula_schema(pattern, &schema_subst);
-    let mut term_subst = HashMap::new();
-    let unification_params = remaining_schema_params(params, &schema_subst);
-    let normalize_pattern = schema_subst_uses_predicate_lambda(&schema_subst);
+    let schema_ctx;
+    let pattern_ctx = if params.is_empty() {
+        ctx
+    } else {
+        schema_ctx =
+            build_theorem_context(env, params).map_err(|err| TacticError::new(err.message))?;
+        &schema_ctx
+    };
     {
-        let mut unify = UnifyState {
-            env,
-            ctx,
-            term_metas: &[],
-            schema_params: &unification_params,
-            term_subst: &mut term_subst,
-            schema_subst: &mut schema_subst,
-        };
-        let pattern = if normalize_pattern {
-            normalize_formula_defs(env, ctx, &pattern)
-                .map_err(|err| TacticError::new(err.message))?
-        } else {
-            pattern
-        };
-        unify_formula(&pattern, target, &mut unify).map_err(|_| {
+        let normalized_pattern = normalize_formula_defs(env, pattern_ctx, &pattern)
+            .map_err(|err| TacticError::new(err.message))?;
+        let normalized_target =
+            normalize_formula_defs(env, ctx, target).map_err(|err| TacticError::new(err.message))?;
+        let attempts = [
+            (pattern.clone(), target.clone()),
+            (normalized_pattern.clone(), normalized_target.clone()),
+        ];
+        let mut matched = false;
+        for (pattern, target) in attempts {
+            let mut candidate_term_subst = HashMap::new();
+            let mut candidate_schema_subst = schema_subst.clone();
+            let unification_params = remaining_schema_params(params, &candidate_schema_subst);
+            let mut unify = UnifyState {
+                env,
+                ctx,
+                term_metas: &[],
+                schema_params: &unification_params,
+                term_subst: &mut candidate_term_subst,
+                schema_subst: &mut candidate_schema_subst,
+            };
+            if unify_formula(&pattern, &target, &mut unify).is_ok() {
+                schema_subst = candidate_schema_subst;
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
             let subject = theorem_name
                 .map(|name| format!("theorem `{name}`"))
                 .unwrap_or_else(|| "the theorem".to_string());
-            TacticError::new(format!(
-                "{subject} does not match goal `{target}`; add explicit arguments if this theorem is intended to apply"
-            ))
-        })?;
+            return Err(TacticError::new(format!(
+                "{subject} does not match goal `{normalized_target}`; add explicit arguments if this theorem is intended to apply"
+            )));
+        }
     }
     ensure_schema_subst_complete(params, &schema_subst, theorem_name)?;
     Ok(schema_subst)
@@ -11523,13 +11573,6 @@ fn predicate_lambda_placeholder(args: &[Type]) -> Option<String> {
         .collect::<Vec<_>>()
         .join(" ");
     Some(format!("fun {binders} => ..."))
-}
-
-fn schema_subst_uses_predicate_lambda(subst: &SchemaSubst) -> bool {
-    subst
-        .predicate_args
-        .values()
-        .any(|arg| matches!(arg, PredicateArg::Lambda { .. }))
 }
 
 fn ensure_schema_subst_complete(
@@ -15757,6 +15800,62 @@ theorem subset_apply
   exact ha
 "#,
         );
+    }
+
+    #[test]
+    fn apply_subset_antisymm_keeps_folded_subset_premises() {
+        let import = import_line("std/prelude.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem union_empty_right_by_library
+  (T : Type)
+  (A : Set T)
+  : A = union(A, empty(T)) := by
+  apply subset_antisymm
+  exact subset_union_left {{T := T; A := A; B := empty(T)}}
+  apply union_subset
+  exact subset_refl
+  exact empty_subset
+"#
+        ));
+    }
+
+    #[test]
+    fn apply_modeq_zero_to_divides_keeps_mod_eq_premise_folded() {
+        let import = import_line("std/prelude.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem divides_5_20_by_apply : Divides(5, 20) := by
+  apply modeq_zero_to_divides
+  unfold ModEq
+  exists 0
+  exists 4
+  refl
+"#
+        ));
+    }
+
+    #[test]
+    fn exact_matches_folded_theorem_to_unfolded_goal() {
+        let import = import_line("std/prelude.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem exact_subset_union_left_unfolded_goal
+  (T : Type)
+  (A B : Set T)
+  : forall x : T, x in A -> x in union(A, B) := by
+  exact subset_union_left {{T := T; A := A; B := B}}
+"#
+        ));
     }
 
     #[test]
