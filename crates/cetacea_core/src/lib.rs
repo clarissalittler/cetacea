@@ -6003,6 +6003,7 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             .term_args
             .get(name)
             .cloned()
+            .or_else(|| subst.predicate_args.get(name).map(predicate_arg_as_term))
             .unwrap_or_else(|| Term::Var(name.clone())),
         Term::App(name, args) => Term::App(
             name.clone(),
@@ -6081,6 +6082,16 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
                 body: Box::new(subst_formula_schema(&body, &scoped)),
             }
         }
+    }
+}
+
+fn predicate_arg_as_term(arg: &PredicateArg) -> Term {
+    match arg {
+        PredicateArg::Named(name) => Term::Var(name.clone()),
+        PredicateArg::Lambda { params, body } => Term::PredLambda {
+            params: params.clone(),
+            body: Box::new(body.clone()),
+        },
     }
 }
 
@@ -14140,6 +14151,69 @@ theorem same_mood_reflexive : Reflexive(SameMood) := by
   exact h
 "#,
         );
+    }
+
+    #[test]
+    fn formula_definition_passes_predicate_lambda_to_nested_definition() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+
+def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
+def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
+def PreEquiv (T : Type) (R : T -> T -> Prop) : Prop := Reflexive(R) /\ Symmetric(R)
+
+theorem equality_pre_equiv : PreEquiv(fun x y : Person => x = y) := by
+  unfold PreEquiv
+  split
+  unfold Reflexive
+  intro x
+  refl
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  rewrite h
+  refl
+"#,
+        );
+    }
+
+    #[test]
+    fn explicit_predicate_lambdas_propagate_through_theorem_statement_defs() {
+        let import = import_line("std/prelude.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem succ_graph_injective : Injective(fun x y : Nat => succ(x) = y) := by
+  unfold Injective
+  intro x1
+  intro x2
+  intro y
+  intro h1
+  intro h2
+  apply succ_inj
+  rewrite -> h1
+  exact eq_symm h2
+
+theorem succ_succ_injective
+  : forall x1 x2 : Nat, forall z : Nat,
+      (exists y : Nat, succ(x1) = y /\ succ(y) = z)
+      -> (exists y : Nat, succ(x2) = y /\ succ(y) = z)
+      -> x1 = x2 := by
+  exact compose_injective {{
+    A := Nat;
+    B := Nat;
+    C := Nat;
+    F := fun x y : Nat => succ(x) = y;
+    G := fun y z : Nat => succ(y) = z
+  }} succ_graph_injective succ_graph_injective
+"#
+        ));
     }
 
     #[test]

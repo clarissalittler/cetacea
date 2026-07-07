@@ -219,26 +219,22 @@ with room left over is, in Dedekind's famous definition, precisely an
 **infinite** set. Your two little proofs are a certificate that `Nat`
 is infinite.
 
-## 8.5 Bijections, and a missing word
+## 8.5 Bijections
 
 A graph that is both injective and surjective — no collisions, no
 gaps, a perfect pairing — is called **bijective**. The identity
 function is everyone's first example, and the library proves both
-halves (`id_injective`, `id_surjective`) and staples them:
+halves (`id_injective`, `id_surjective`) and bundles them under the
+definition `Bijective`:
 
 ```text
-theorem identity_bijective_demo
-  : Injective(fun x y : Person => x = y) /\ Surjective(fun x y : Person => x = y) := by
+theorem identity_bijective_demo : Bijective(fun x y : Person => x = y) := by
   exact id_bijective {A := Person}
 ```
 
-You'll notice the statement says `Injective(...) /\ Surjective(...)`
-rather than `Bijective(...)`. Same story as Chapter 7's missing
-`Equivalence`: a `def` can't pass its predicate parameters on to other
-definitions, so there is no `Bijective` definition to invoke — the
-conjunction *is* how "bijective" is written in this language. When you
-read `std/fun.ctea` you'll find a comment saying exactly that. Reading
-a library's apologies is an underrated skill.
+`Bijective(G)` unfolds to `Injective(G) /\ Surjective(G)`, so a proof
+of a bijection is still a proof of the two promises. The definition
+just lets the theorem statement say the mathematical word directly.
 
 ## 8.6 Composition: properties that survive plugging together
 
@@ -279,6 +275,14 @@ here the arguments are whole *proofs*. Do also read the proof of
 `compose_injective` itself in `std/fun.ctea` — it's a `cases` inside a
 `cases` with a `have` at the bottom, every tool from Chapters 4 and 5
 in a dozen lines, and it's pleasant to watch a library earn its keep.
+
+The same theorem can be used with concrete graph lambdas. Since
+`succ_graph_injective` proves the successor graph injective,
+`succ_succ_graph_injective` instantiates `compose_injective` with
+`F := fun x y : Nat => succ(x) = y` and
+`G := fun y z : Nat => succ(y) = z`, then hands the same premise proof
+to both legs. The result says the two-step successor graph is
+injective without reproving the composition argument.
 
 ## 8.7 Common mistakes
 

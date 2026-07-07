@@ -1365,15 +1365,14 @@ Definitions, each with parameters `(A : Type) (B : Type) (G : A -> B -> Prop)`:
 - `SingleValued`
 - `Injective`
 - `Surjective`
+- `Bijective`
 
 Theorems:
 
 - `id_injective`
 - `id_surjective`
-- `id_bijective`, stated as the conjunction
-  `Injective(...) /\ Surjective(...)` — there is no `Bijective` definition
-  because definitions cannot pass their predicate parameters to other
-  definitions
+- `id_bijective`, stated with `Bijective(...)`, which unfolds to
+  `Injective(...) /\ Surjective(...)`
 - `compose_injective`
 - `compose_surjective`
 

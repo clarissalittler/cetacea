@@ -19,14 +19,12 @@ def Total        (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x :
 def SingleValued (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, forall y1 y2 : B, G(x, y1) -> G(x, y2) -> y1 = y2
 def Injective    (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x1 x2 : A, forall y : B, G(x1, y) -> G(x2, y) -> x1 = x2
 def Surjective   (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall y : B, exists x : A, G(x, y)
+def Bijective    (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := Injective(G) /\ Surjective(G)
 ```
 
 These are the course definitions, translated one-for-one: total and
 single-valued make a relation a function; injective and surjective
-classify it. There is deliberately **no** `Bijective` definition —
-Cetacea definitions cannot pass their predicate parameters on to other
-definitions — so "bijective" is always written as the conjunction
-`Injective(G) /\ Surjective(G)`.
+classify it; bijective packages injective and surjective together.
 
 ## Connecting a declared `func` to its graph
 
@@ -58,11 +56,10 @@ companion file.
 
 The identity function's graph relates `x` to `y` exactly when `x = y`.
 The library proves `id_injective` and `id_surjective`, and packages the
-conjunction as `id_bijective`:
+bundle as `id_bijective`:
 
 ```text
-theorem person_id_bijective
-  : Injective(fun x y : Person => x = y) /\ Surjective(fun x y : Person => x = y) := by
+theorem person_id_bijective : Bijective(fun x y : Person => x = y) := by
   exact id_bijective {A := Person}
 ```
 

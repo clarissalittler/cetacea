@@ -71,10 +71,9 @@ theorem succ_not_surjective : not Surjective(fun x y : Nat => succ(x) = y) := by
       apply succ_never_zero {k := w}
       exact hw
 
--- Section 8.5: the identity function is bijective — injective AND
--- surjective, written as the conjunction. Both halves are in std/fun.ctea.
-theorem identity_bijective_demo
-  : Injective(fun x y : Person => x = y) /\ Surjective(fun x y : Person => x = y) := by
+-- Section 8.5: the identity function is bijective. The bundled definition
+-- expands to injective AND surjective, and both halves are in std/fun.ctea.
+theorem identity_bijective_demo : Bijective(fun x y : Person => x = y) := by
   exact id_bijective {A := Person}
 
 -- Section 8.6: composition preserves injectivity. The composite graph
@@ -92,3 +91,17 @@ theorem compose_preserves_injective
   intro hf
   intro hg
   exact compose_injective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
+
+-- A concrete payoff: composing the successor graph with itself is injective.
+theorem succ_succ_graph_injective
+  : forall x1 x2 : Nat, forall z : Nat,
+      (exists y : Nat, succ(x1) = y /\ succ(y) = z)
+      -> (exists y : Nat, succ(x2) = y /\ succ(y) = z)
+      -> x1 = x2 := by
+  exact compose_injective {
+    A := Nat;
+    B := Nat;
+    C := Nat;
+    F := fun x y : Nat => succ(x) = y;
+    G := fun y z : Nat => succ(y) = z
+  } succ_graph_injective succ_graph_injective

@@ -32,11 +32,8 @@ theorem mother_single_valued
   refl
 
 -- The identity function id(x) = x has graph `fun x y : A => x = y`.
--- std/fun.ctea proves it injective and surjective; "bijective" is written
--- as the conjunction because definitions cannot pass predicate parameters
--- to other definitions.
-theorem person_id_bijective
-  : Injective(fun x y : Person => x = y) /\ Surjective(fun x y : Person => x = y) := by
+-- std/fun.ctea proves it bijective.
+theorem person_id_bijective : Bijective(fun x y : Person => x = y) := by
   exact id_bijective {A := Person}
 
 -- The successor function on Nat is injective (but not surjective: nothing

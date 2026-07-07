@@ -15,9 +15,7 @@ def Injective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x1 x2 
 
 def Surjective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall y : B, exists x : A, G(x, y)
 
--- Bijective(G) is written `Injective(G) /\ Surjective(G)` at use sites,
--- because definitions cannot yet pass their predicate parameters to other
--- definitions.
+def Bijective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := Injective(G) /\ Surjective(G)
 
 theorem id_injective (A : Type) : Injective(fun x y : A => x = y) := by
   unfold Injective
@@ -36,8 +34,8 @@ theorem id_surjective (A : Type) : Surjective(fun x y : A => x = y) := by
   exists y
   refl
 
-theorem id_bijective (A : Type)
-  : Injective(fun x y : A => x = y) /\ Surjective(fun x y : A => x = y) := by
+theorem id_bijective (A : Type) : Bijective(fun x y : A => x = y) := by
+  unfold Bijective
   split
   exact id_injective {A := A}
   exact id_surjective {A := A}
