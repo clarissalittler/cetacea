@@ -180,10 +180,11 @@ whose binder names overlap with names introduced later in the proof.
 
 ### 9. Imports and names are global
 
-Dot-qualified top-level names are accepted, but there are no namespace
-blocks or qualified import aliases yet. Imported declarations enter one
-global environment, and built-in names such as `add`, `mul`, `sub`, and
-`le` cannot be reused for local functions or predicates.
+Dot-qualified top-level names and namespace blocks are accepted, but namespace
+blocks do not yet give scoped unqualified lookup, and there are no qualified
+import aliases yet. Imported declarations enter one global environment, and
+built-in names such as `add`, `mul`, `sub`, and `le` cannot be reused for local
+functions or predicates.
 
 This is simple and readable at the current project size, but larger
 course libraries will eventually want namespaces.

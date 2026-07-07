@@ -114,14 +114,15 @@ stay meaningful.
     occurrence should change.
 
 18. **Partially resolved: no namespaces.** Dot-qualified top-level names
-    now parse and resolve, but there are still no namespace blocks,
-    import aliases, ambiguity diagnostics, or standard-library namespace
-    migration. The book still cannot let students prove `add_comm` or
-    `length_append` under their real names without colliding with the
-    prelude; hence the pervasive `_demo` suffix convention. The design note in
-    [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the parser,
-    environment, import, and proof-projection work needed before this is
-    scheduled.
+    now parse and resolve, and `namespace` / `end` blocks can prefix
+    declaration names. There are still no import aliases, scoped
+    unqualified lookup, ambiguity diagnostics, or standard-library
+    namespace migration. The book still cannot let students prove
+    `add_comm` or `length_append` under their real names without
+    colliding with the prelude; hence the pervasive `_demo` suffix
+    convention. The design note in
+    [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the
+    remaining environment, import, and proof-projection work.
 
 ## Already fixed while writing the book
 

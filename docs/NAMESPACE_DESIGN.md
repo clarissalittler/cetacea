@@ -153,10 +153,9 @@ subject to the same ambiguity rules.
 1. Done: allow dot-qualified declaration names and qualified references in the
    current single global environment, while preserving projection syntax such
    as `h.left`.
-2. Add `QualifiedName` and resolver helpers while preserving existing
+2. Done: add `namespace ...` / `end ...` blocks as declaration-prefix sugar.
+3. Add `QualifiedName` and resolver helpers while preserving existing
    unqualified behavior.
-3. Add `namespace ...` / `end ...` blocks as syntax sugar for declaration
-   prefixes.
 4. Add import aliases and ambiguity diagnostics.
 5. Migrate standard-library declarations gradually, keeping compatibility
    aliases where needed.

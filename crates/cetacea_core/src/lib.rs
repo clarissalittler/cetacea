@@ -8802,6 +8802,7 @@ fn finite_set_literal_term(elems: Vec<Term>) -> Term {
 
 fn parse_file(source: &str) -> Result<File, ParseError> {
     let mut commands = Vec::new();
+    let mut namespace_stack = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
     let mut i = 0;
 
@@ -8812,6 +8813,33 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             continue;
         }
         let command_line = i + 1;
+
+        if let Some(rest) = trimmed.strip_prefix("namespace ") {
+            namespace_stack.push(
+                parse_namespace_name(rest).map_err(|err| err.with_line(command_line))?,
+            );
+            i += 1;
+            continue;
+        }
+
+        if trimmed == "end" || trimmed.starts_with("end ") {
+            let Some(opened) = namespace_stack.pop() else {
+                return Err(ParseError::new("`end` without an open namespace")
+                    .with_line(command_line));
+            };
+            if let Some(rest) = trimmed.strip_prefix("end ") {
+                let closed =
+                    parse_namespace_name(rest).map_err(|err| err.with_line(command_line))?;
+                if closed != opened {
+                    return Err(ParseError::new(format!(
+                        "`end {closed}` does not match open namespace `{opened}`"
+                    ))
+                    .with_line(command_line));
+                }
+            }
+            i += 1;
+            continue;
+        }
 
         if let Some(rest) = trimmed.strip_prefix("import ") {
             commands.push(located_command(
@@ -8840,7 +8868,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         }
 
         if let Some(rest) = trimmed.strip_prefix("sort ") {
-            let name = rest.trim();
+            let name = rest.trim().to_string();
             if name.is_empty() {
                 return Err(
                     ParseError::new("sort declaration needs a name").with_line(command_line)
@@ -8848,7 +8876,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             }
             commands.push(located_command(
                 command_line,
-                Command::Sort(name.to_string()),
+                Command::Sort(qualify_in_namespace(&namespace_stack, name)),
             ));
             i += 1;
             continue;
@@ -8862,7 +8890,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             commands.push(located_command(
                 command_line,
                 Command::Const(
-                    name.trim().to_string(),
+                    qualify_in_namespace(&namespace_stack, name.trim().to_string()),
                     parse_type_str(ty.trim()).map_err(|err| err.with_line(command_line))?,
                 ),
             ));
@@ -8879,7 +8907,11 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 parse_function_type_str(ty.trim()).map_err(|err| err.with_line(command_line))?;
             commands.push(located_command(
                 command_line,
-                Command::Func(name.trim().to_string(), args, result),
+                Command::Func(
+                    qualify_in_namespace(&namespace_stack, name.trim().to_string()),
+                    args,
+                    result,
+                ),
             ));
             i += 1;
             continue;
@@ -8888,7 +8920,10 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         if let Some(rest) = trimmed.strip_prefix("pred ") {
             let (name, args) =
                 parse_pred_decl(rest.trim()).map_err(|err| err.with_line(command_line))?;
-            commands.push(located_command(command_line, Command::Pred(name, args)));
+            commands.push(located_command(
+                command_line,
+                Command::Pred(qualify_in_namespace(&namespace_stack, name), args),
+            ));
             i += 1;
             continue;
         }
@@ -8897,6 +8932,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             let rest = trimmed.strip_prefix("data ").unwrap_or_default();
             let name =
                 expect_single_name(rest, "data").map_err(|err| err.with_line(command_line))?;
+            let name = qualify_in_namespace(&namespace_stack, name);
             i += 1;
             let mut ctors = Vec::new();
             loop {
@@ -8907,10 +8943,10 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                     break;
                 }
                 let ctor_line = i + 1;
-                ctors.push(
-                    parse_data_ctor_arm(strip_comment(lines[i]).trim())
-                        .map_err(|err| err.with_line(ctor_line))?,
-                );
+                let mut ctor = parse_data_ctor_arm(strip_comment(lines[i]).trim())
+                    .map_err(|err| err.with_line(ctor_line))?;
+                ctor.name = qualify_in_namespace(&namespace_stack, ctor.name);
+                ctors.push(ctor);
                 i += 1;
             }
             if ctors.is_empty() {
@@ -8926,6 +8962,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         if trimmed.starts_with("defrec ") {
             let (name, param, param_type, extra_params, result_type) =
                 parse_defrec_header(trimmed).map_err(|err| err.with_line(command_line))?;
+            let name = qualify_in_namespace(&namespace_stack, name);
 
             i += 1;
             let mut arms = Vec::new();
@@ -8937,10 +8974,10 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                     break;
                 }
                 let arm_line = i + 1;
-                arms.push(
-                    parse_data_rec_arm(strip_comment(lines[i]).trim(), arm_line)
-                        .map_err(|err| err.with_line(arm_line))?,
-                );
+                let mut arm = parse_data_rec_arm(strip_comment(lines[i]).trim(), arm_line)
+                    .map_err(|err| err.with_line(arm_line))?;
+                arm.ctor = qualify_in_namespace(&namespace_stack, arm.ctor);
+                arms.push(arm);
                 i += 1;
             }
             if arms.is_empty() {
@@ -8979,6 +9016,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             };
             let (name, params, result) =
                 parse_def_header(header).map_err(|err| err.with_line(command_line))?;
+            let name = qualify_in_namespace(&namespace_stack, name);
             let body = match &result {
                 DefResult::Formula => DefBody::Formula(
                     parse_formula_str(body.trim()).map_err(|err| err.with_line(command_line))?,
@@ -9014,6 +9052,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             }
             let (name, params, statement) =
                 parse_axiom_header(&header).map_err(|err| err.with_line(command_line))?;
+            let name = qualify_in_namespace(&namespace_stack, name);
             commands.push(located_command(
                 command_line,
                 Command::Axiom(AxiomDecl {
@@ -9044,6 +9083,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             };
             let (name, params, statement) =
                 parse_theorem_header(header).map_err(|err| err.with_line(command_line))?;
+            let name = qualify_in_namespace(&namespace_stack, name);
 
             i += 1;
             let mut tactic_lines = Vec::new();
@@ -9065,7 +9105,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                     name,
                     params,
                     statement,
-                    tactics: parse_tactic_lines(&tactic_lines)
+                    tactics: parse_tactic_lines(&tactic_lines, &namespace_stack)
                         .map_err(|err| err.with_line(command_line))?,
                 }),
             ));
@@ -9075,6 +9115,13 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         return Err(
             ParseError::new(format!("unsupported command `{trimmed}`")).with_line(command_line)
         );
+    }
+
+    if let Some(opened) = namespace_stack.last() {
+        return Err(ParseError::new(format!(
+            "unterminated namespace `{opened}`"
+        ))
+        .with_line(lines.len().max(1)));
     }
 
     Ok(File { commands })
@@ -9091,7 +9138,10 @@ fn strip_comment(line: &str) -> &str {
 }
 
 fn is_command_start(trimmed: &str) -> bool {
-    trimmed.starts_with("import ")
+    trimmed.starts_with("namespace ")
+        || trimmed == "end"
+        || trimmed.starts_with("end ")
+        || trimmed.starts_with("import ")
         || trimmed.starts_with("mode ")
         || trimmed.starts_with("theorem ")
         || trimmed.starts_with("sort ")
@@ -9102,6 +9152,21 @@ fn is_command_start(trimmed: &str) -> bool {
         || trimmed.starts_with("def ")
         || trimmed.starts_with("data ")
         || trimmed.starts_with("axiom ")
+}
+
+fn parse_namespace_name(input: &str) -> Result<Name, ParseError> {
+    let mut tokens = Tokens::new(input.trim())?;
+    let name = tokens.parse_qualified_ident()?;
+    tokens.expect_eof()?;
+    Ok(name)
+}
+
+fn qualify_in_namespace(namespace_stack: &[Name], name: Name) -> Name {
+    if namespace_stack.is_empty() || name.contains('.') {
+        name
+    } else {
+        format!("{}.{}", namespace_stack.join("."), name)
+    }
 }
 
 fn parse_import_path(rest: &str) -> Result<String, ParseError> {
@@ -9323,7 +9388,10 @@ fn parse_pred_decl(input: &str) -> Result<(Name, Vec<Type>), ParseError> {
     Ok((name, args))
 }
 
-fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, ParseError> {
+fn parse_tactic_lines(
+    lines: &[RawTacticLine],
+    namespace_stack: &[Name],
+) -> Result<Vec<LocatedTactic>, ParseError> {
     let mut tactics = Vec::new();
     let mut i = 0;
 
@@ -9355,7 +9423,7 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, Par
                     .map_err(|err| err.with_line(arm_line))?;
                 i += 1;
                 let body_end = case_body_end(lines, i, arm_indent);
-                let body_tactics = parse_tactic_lines(&lines[i..body_end])?;
+                let body_tactics = parse_tactic_lines(&lines[i..body_end], namespace_stack)?;
                 i = body_end;
 
                 tactics.push(LocatedTactic {
@@ -9382,7 +9450,7 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, Par
             if i >= lines.len() {
                 return Err(ParseError::new("expected right case arm").with_line(left_line));
             }
-            let left_tactics = parse_tactic_lines(&lines[left_start..left_end])?;
+            let left_tactics = parse_tactic_lines(&lines[left_start..left_end], namespace_stack)?;
 
             let right_line = lines[i].line;
             let right_indent = line_indent(&lines[i].text);
@@ -9391,7 +9459,8 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, Par
             i += 1;
             let right_start = i;
             let right_end = case_body_end(lines, i, right_indent);
-            let right_tactics = parse_tactic_lines(&lines[right_start..right_end])?;
+            let right_tactics =
+                parse_tactic_lines(&lines[right_start..right_end], namespace_stack)?;
             i = right_end;
 
             tactics.push(LocatedTactic {
@@ -9430,10 +9499,12 @@ fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, Par
                 let arm_indent = line_indent(&lines[i].text);
                 let (ctor, binders) = parse_induction_arm(lines[i].text.trim())
                     .map_err(|err| err.with_line(arm_line))?;
+                let ctor = qualify_in_namespace(namespace_stack, ctor);
                 i += 1;
                 let body_start = i;
                 let body_end = case_body_end(lines, i, arm_indent);
-                let arm_tactics = parse_tactic_lines(&lines[body_start..body_end])?;
+                let arm_tactics =
+                    parse_tactic_lines(&lines[body_start..body_end], namespace_stack)?;
                 arms.push(TacticInductionArm {
                     ctor,
                     binders,
@@ -15534,6 +15605,56 @@ theorem q.simp_rule : q.Happy(q.alice) -> q.Happy(q.mother(q.alice)) := by
     }
 
     #[test]
+    fn namespace_blocks_prefix_declaration_names() {
+        check_ok(
+            r#"
+mode constructive
+
+namespace q
+
+sort Person
+const alice : q.Person
+func mother : q.Person -> q.Person
+pred Happy(q.Person)
+
+def HappyMother (x : q.Person) : Prop := q.Happy(q.mother(x))
+
+axiom mother_id (x : q.Person) : q.mother(x) = x
+
+theorem def_intro : q.Happy(q.mother(q.alice)) -> q.HappyMother(q.alice) := by
+  intro h
+  unfold q.HappyMother
+  exact h
+
+theorem simp_rule : q.Happy(q.alice) -> q.Happy(q.mother(q.alice)) := by
+  intro h
+  simp [q.mother_id]
+  exact h
+
+end q
+
+theorem use_prefixed_theorem
+  : q.Happy(q.alice) -> q.Happy(q.mother(q.alice)) := by
+  intro h
+  exact q.simp_rule h
+"#,
+        );
+    }
+
+    #[test]
+    fn namespace_end_must_match_open_namespace() {
+        check_err_contains(
+            r#"
+mode constructive
+
+namespace q
+end r
+"#,
+            "`end r` does not match open namespace `q`",
+        );
+    }
+
+    #[test]
     fn formula_definition_accepts_prop_and_predicate_parameters() {
         check_ok(
             r#"
@@ -16577,6 +16698,37 @@ theorem q.len_self (l : q.List) : q.len(l) = q.len(l) := by
       refl
   | q.cons h t ih =>
       refl
+"#,
+        );
+    }
+
+    #[test]
+    fn namespace_blocks_prefix_data_constructors_and_induction_arms() {
+        check_ok(
+            r#"
+mode constructive
+
+namespace q
+
+data List
+| nil
+| cons(Nat, q.List)
+
+defrec len (l : q.List) : Nat
+| nil => 0
+| cons h t rec => succ(rec)
+
+theorem len_nil : q.len(q.nil) = 0 := by
+  refl
+
+theorem len_self (l : q.List) : q.len(l) = q.len(l) := by
+  induction l with
+  | nil =>
+      refl
+  | cons h t ih =>
+      refl
+
+end q
 "#,
         );
     }

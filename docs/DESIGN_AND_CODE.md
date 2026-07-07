@@ -375,7 +375,8 @@ pub struct Env {
 
 The environment is global for a checking session. Imports add declarations to
 the same environment as the root file. Dot-qualified top-level names are
-accepted, but namespace blocks and import aliases are not implemented yet.
+accepted, and namespace blocks prefix declaration names, but imports remain
+unqualified and namespace blocks do not yet give scoped unqualified lookup.
 
 The context is local to a theorem proof or definition body. It is built from
 the declaration parameters and extended by tactics such as `intro`, `cases`,
@@ -1120,8 +1121,9 @@ The existing `Span` field in `Diagnostic` is a placeholder for this direction.
 Important limitations to account for when extending the system:
 
 - Imports are global and unqualified.
-- Dot-qualified top-level names are accepted, but there are no namespace
-  blocks or import aliases yet.
+- Dot-qualified top-level names and namespace blocks are accepted, but namespace
+  blocks do not yet give scoped unqualified lookup and there are no import
+  aliases yet.
 - Namespace implementation should follow
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md); qualified names affect
   the parser, environment lookup, imports, theorem search, and proof

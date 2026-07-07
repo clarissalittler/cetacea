@@ -491,9 +491,24 @@ theorem use_nat_name (n : Nat) : add(n, 0) = n := by
 
 The same form works for sorts, constants, functions, predicates,
 definitions, data constructors, `unfold`, `rewrite`, and `simp [name]`.
-Local binders and hypotheses remain ordinary short names. Namespace blocks
-and import aliases are not implemented yet, so imports still load declarations
-into one environment.
+
+Namespace blocks prefix declaration names:
+
+```text
+namespace nat
+
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  simp
+  refl
+
+end nat
+```
+
+The theorem above is stored as `nat.add_zero_right`. References inside a
+namespace block are not scoped yet, so use explicit names such as
+`nat.add_zero_right` when referring to names declared in the block. Local
+binders and hypotheses remain ordinary short names. Import aliases are not
+implemented yet, so imports still load declarations into one environment.
 
 ## Definitions
 
@@ -1573,8 +1588,9 @@ theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
 
 Cetacea is intentionally small. Important current limitations:
 
-- Dot-qualified top-level names are accepted, but there are no namespace blocks
-  or qualified import aliases yet.
+- Dot-qualified top-level names and namespace blocks are accepted, but namespace
+  blocks do not yet give scoped unqualified lookup.
+- There are no qualified import aliases yet.
 - Imported declarations enter one global environment.
 - The parser is line-oriented and intentionally simple.
 - Parse diagnostics carry line-local token spans where possible, but checked
