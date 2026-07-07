@@ -7790,6 +7790,41 @@ impl ProofExpr {
         !self.explicit_args.is_empty()
     }
 
+    fn resolve_dotted_projection_base(&self, env: &Env, ctx: &Context) -> Self {
+        if proof_base_is_known(env, ctx, &self.base) {
+            return self.clone();
+        }
+
+        let mut parts: Vec<&str> = self.base.split('.').collect();
+        let mut projections = Vec::new();
+        while let Some(part) = parts.last().copied() {
+            let projection = match part {
+                "left" => Projection::Left,
+                "right" => Projection::Right,
+                _ => break,
+            };
+            parts.pop();
+            projections.push(ProofStep::Projection(projection));
+        }
+        projections.reverse();
+
+        if parts.is_empty() {
+            return self.clone();
+        }
+        let base = parts.join(".");
+        if !proof_base_is_known(env, ctx, &base) {
+            return self.clone();
+        }
+
+        let mut steps = projections;
+        steps.extend(self.steps.clone());
+        Self {
+            base,
+            explicit_args: self.explicit_args.clone(),
+            steps,
+        }
+    }
+
     fn base_proof(&self, env: &Env, ctx: &Context) -> Result<Proof, TacticError> {
         if self.is_true_intro() {
             return Ok(Proof::TrueIntro);
@@ -7829,6 +7864,11 @@ impl ProofExpr {
         ctx: &Context,
         allowed_mode: LogicMode,
     ) -> Result<Proof, TacticError> {
+        let resolved = self.resolve_dotted_projection_base(env, ctx);
+        if &resolved != self {
+            return resolved.to_proof(env, ctx, allowed_mode);
+        }
+
         if ctx.lookup(&self.base).is_none() {
             if let Some(theorem) = env.theorem(&self.base) {
                 if !self.steps.is_empty() {
@@ -8027,6 +8067,10 @@ impl ProofExpr {
         }
         Ok(proof)
     }
+}
+
+fn proof_base_is_known(env: &Env, ctx: &Context, name: &str) -> bool {
+    name == "True" || ctx.lookup(name).is_some() || env.theorem(name).is_some()
 }
 
 fn consume_positional_schema_term_arg(
@@ -9772,10 +9816,11 @@ fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
             Some(brace_start) => (&tokens[0][..brace_start], Some(&tokens[0][brace_start..])),
             None => (tokens[0].as_str(), None),
         };
-        let (base, mut steps) = split_proof_base_and_projections(name_part)?;
+        let base = parse_proof_base_name(name_part)?;
         if base.is_empty() {
             return Err(ParseError::new("expected proof expression"));
         }
+        let mut steps = Vec::new();
 
         // Explicit theorem arguments: either attached to the name token or
         // the next token, but only directly after the bare theorem name.
@@ -9872,30 +9917,12 @@ fn push_projection_parts<'a>(
     Ok(())
 }
 
-fn split_proof_base_and_projections(
-    name_part: &str,
-) -> Result<(Name, Vec<ProofStep>), ParseError> {
-    let mut parts: Vec<&str> = name_part.split('.').collect();
-    if parts.iter().any(|part| part.trim().is_empty()) {
+fn parse_proof_base_name(name_part: &str) -> Result<Name, ParseError> {
+    let name = name_part.trim();
+    if name.is_empty() || name.split('.').any(|part| part.is_empty()) {
         return Err(ParseError::new("expected identifier in proof expression"));
     }
-
-    let mut projections = Vec::new();
-    while let Some(part) = parts.last().copied() {
-        let projection = match part {
-            "left" => Projection::Left,
-            "right" => Projection::Right,
-            _ => break,
-        };
-        parts.pop();
-        projections.push(ProofStep::Projection(projection));
-    }
-    projections.reverse();
-
-    if parts.is_empty() {
-        return Err(ParseError::new("proof projection needs a base expression"));
-    }
-    Ok((parts.join("."), projections))
+    Ok(name.to_string())
 }
 
 fn append_projection_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), ParseError> {
@@ -15455,6 +15482,10 @@ theorem ns.id (P : Prop) : P -> P := by
   intro h
   exact h
 
+theorem ns.left (P : Prop) : P -> P := by
+  intro h
+  exact h
+
 theorem id (P : Prop) : P -> P := by
   intro h
   exact h
@@ -15462,6 +15493,10 @@ theorem id (P : Prop) : P -> P := by
 theorem use_qualified (P : Prop) : P -> P := by
   intro h
   exact ns.id h
+
+theorem use_qualified_left_name (P : Prop) : P -> P := by
+  intro h
+  exact ns.left h
 
 theorem projection_still_works (P Q : Prop) : P /\ Q -> P := by
   intro h
