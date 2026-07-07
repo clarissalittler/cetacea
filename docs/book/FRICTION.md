@@ -59,12 +59,12 @@ stay meaningful.
    arguments fill theorem parameters left-to-right before ordinary
    forall or implication arguments are processed.
 
-9. **Explicit-instantiation name capture.** With a theorem parameter
-   named `x`, `congr_pred {...; x := succ(x); ...}` fails with the
-   absurd-looking ``proof argument has type `succ(x) = 0`, but expected
-   `succ(x) = 0` `` — the two `x`s are different variables printed
-   identically. Renaming the local variable fixes it. Instantiation
-   should rename, or the printer should disambiguate.
+9. **Resolved: explicit-instantiation name capture.** Explicit theorem
+   arguments that fix a schema parameter no longer reopen that parameter
+   during premise matching. The colliding
+   `congr_pred {...; x := succ(x); ...}` probe now checks, while the
+   adversarial wrong-premise variant still fails with an accurate type
+   mismatch.
 
 10. **Resolved: no-op `simp` warns instead of failing.** Defensive
     `simp`s no longer break when an earlier step already normalized the
@@ -77,16 +77,15 @@ stay meaningful.
     Chapter 5 now warns Lean/Rocq readers directly, and normal book
     examples use explicit arrows.
 
-12. **`strong_induction`'s failure doesn't teach its fix.** Applying it
-    without `{P := fun m : Nat => ...}` produces a correct but unhelpful
-    conclusion-mismatch error; unlike the binder-count errors, there is
-    no `try:` hint. `P` is never inferable, so the error site knows
-    exactly what to suggest.
+12. **Resolved: `strong_induction` failures teach the explicit
+    predicate fix.** A bare `apply strong_induction` now carries a
+    "Provide the predicate parameter" help entry with a `try:` block
+    like `apply strong_induction {P := fun m : Nat => ...}`.
 
-13. **`induction` refusal doesn't suggest the standard fix.** ``cannot
-    induct on `n` while hypothesis `h` depends on it`` is a good
-    teachable refusal, but the message should suggest the classic move:
-    induct before `intro`, or restate with `forall`.
+13. **Resolved: `induction` dependency refusals suggest the standard
+    fix.** ``cannot induct on `n` while hypothesis `h` depends on it``
+    now explains that the hypothesis should be introduced inside the
+    induction arms and shows the corresponding tactic skeleton.
 
 ## Lower impact / polish
 
@@ -101,9 +100,9 @@ stay meaningful.
     `False` making a planned `rewrite` miss. Narrated explicitly in
     chapters 7–8.
 
-16. **`accepted axiom foo (constructive)`** — a mode certification on an
-    unproved statement reads oddly next to the book's "nutrition label"
-    story about the mode tags. Suggest `accepted axiom foo (trusted)`.
+16. **Resolved: axioms print as trusted.** Accepted axioms now display
+    `accepted axiom foo (trusted)`, keeping proof-mode labels for proved
+    theorems and using theorem dependency output for later axiom use.
 
 17. **Resolved: ambiguous one-occurrence rewrites report the selected
     occurrence.** When a non-`all` `rewrite` has several candidates,
