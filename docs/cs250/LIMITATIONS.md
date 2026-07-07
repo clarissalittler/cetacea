@@ -225,32 +225,27 @@ where a term is expected.
 
 ## Smaller gripes
 
-### Folded definitions must be unfolded before structural tactics
+### Folded definitions are now unfolded automatically by structural tactics
 
-When a goal is a *defined* predicate applied to arguments — `Symmetric(R)`,
-`Transitive(R)`, `Bijective(G)` — the structural tactics do not look inside the
-definition. A student who states the goal `Symmetric(R)` and immediately writes
-`intro x` gets `intro expects an implication or universal goal`, because the
-`forall` is hidden one `def` layer down. The fix is a one-liner — `unfold
-Symmetric` (or `simp`, which also unfolds it) — before `intro`/`split`:
+*(Resolved.)* When a goal is a *defined* predicate applied to arguments —
+`Symmetric(R)`, `Transitive(R)`, `Bijective(G)` — the structural tactics
+(`intro`, `split`, `left`, `right`, `exists`) now transparently unfold the
+definition's head and retry, so a student can state and prove the natural goal
+directly:
 
 ```text
 theorem sym (R : U -> U -> Prop)
   : (forall x y : U, R(x, y) -> R(y, x)) -> Symmetric(R) := by
   intro h
-  unfold Symmetric
-  intro x
+  intro x    -- `Symmetric(R)` is unfolded to its `forall` automatically
   ...
 ```
 
-The `intro` diagnostic now carries a "Unfold a defined predicate first"
-suggestion with a `try:` block, so the repair is discoverable, but the tool does
-*not* auto-unfold. This showed up all over `examples/fol_advanced.ctea`'s
-relation-classification theorems and is the single most common first-try failure
-when proving `Reflexive`/`Symmetric`/`Transitive`/`Euclidean` goals.
-
-**Possible improvement:** have `intro`/`split` transparently unfold a
-single-layer definitional goal before reporting a shape mismatch.
+Nested definitions are peeled as far as needed — `split` on `Bijective(G)`
+reaches the `Injective(G) /\ Surjective(G)` conjunction underneath. Explicit
+`unfold Symmetric` and `simp` still work if a proof wants to make the step
+visible. Earlier drafts of `examples/fol_advanced.ctea` needed an explicit
+`unfold` before every relation-classification `intro`; those are gone now.
 
 ### `have` with a tactic proof needs the bare subgoal form
 

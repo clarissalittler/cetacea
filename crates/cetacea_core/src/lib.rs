@@ -1140,17 +1140,6 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
             ),
             None,
         );
-        if matches!(target, Formula::Atom(_) | Formula::PredApp(_, _)) {
-            push(
-                &mut suggestions,
-                "Unfold a defined predicate first",
-                "If the target is a defined predicate such as `Symmetric(R)`, \
-                 `intro` cannot see the quantifier hidden inside its definition. \
-                 Run `unfold <name>` (or `simp`) to expose the `forall`/`->`, then `intro`."
-                    .to_string(),
-                Some("unfold Symmetric\nintro x"),
-            );
-        }
     }
     if message.contains("split expects") {
         push(
@@ -11777,7 +11766,90 @@ fn ordinal(value: usize) -> String {
     format!("{value}{suffix}")
 }
 
+/// Tactics that inspect the *shape* of the goal (implication, conjunction,
+/// disjunction, existential). When one of these fails because the goal is a
+/// folded definition such as `Symmetric(R)`, we transparently unfold the
+/// definition's head and retry, wrapping the result in a `Convert` node so the
+/// kernel still checks against the original folded statement.
+fn tactic_unfolds_goal_head(tactic: &Tactic) -> bool {
+    matches!(
+        tactic,
+        Tactic::Intro(_) | Tactic::Split | Tactic::Left | Tactic::Right | Tactic::Exists(_)
+    )
+}
+
+/// Repeatedly expand the transparent definition at the head of `formula` until
+/// the head is a logical connective/quantifier or no longer a definition. This
+/// is a weak-head normalization over formula definitions only.
+fn unfold_head_formula_defs(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+) -> Result<(Formula, bool), ValidationError> {
+    let mut current = formula.clone();
+    let mut changed = false;
+    for _ in 0..64 {
+        let head = match &current {
+            Formula::Atom(name) | Formula::PredApp(name, _) => name.clone(),
+            _ => break,
+        };
+        let Some(def_name) = env.formula_def_scoped(ctx, &head).map(|def| def.name.clone()) else {
+            break;
+        };
+        let (next, did_change) = unfold_named_formula_def(env, ctx, &current, &def_name)?;
+        if !did_change {
+            break;
+        }
+        current = next;
+        changed = true;
+    }
+    Ok((current, changed))
+}
+
 fn run_tactic_step(
+    env: &Env,
+    goal: Goal,
+    tactic: &Tactic,
+    allowed_mode: LogicMode,
+    next_goal_id: &mut usize,
+) -> Result<StepResult, TacticError> {
+    match run_tactic_step_inner(env, goal.clone(), tactic, allowed_mode, next_goal_id) {
+        Ok(result) => Ok(result),
+        Err(original_err) => {
+            if !tactic_unfolds_goal_head(tactic) {
+                return Err(original_err);
+            }
+            match unfold_head_formula_defs(env, &goal.context, &goal.target) {
+                Ok((unfolded, true)) => {
+                    let original_target = goal.target.clone();
+                    let unfolded_goal = Goal {
+                        id: goal.id,
+                        context: goal.context.clone(),
+                        target: unfolded,
+                    };
+                    let inner = run_tactic_step_inner(
+                        env,
+                        unfolded_goal,
+                        tactic,
+                        allowed_mode,
+                        next_goal_id,
+                    )?;
+                    Ok(StepResult {
+                        replacement: PartialProof::Convert {
+                            proof_body: Box::new(inner.replacement),
+                            target: original_target,
+                        },
+                        new_goals: inner.new_goals,
+                        notes: inner.notes,
+                    })
+                }
+                _ => Err(original_err),
+            }
+        }
+    }
+}
+
+fn run_tactic_step_inner(
     env: &Env,
     goal: Goal,
     tactic: &Tactic,
@@ -15336,8 +15408,10 @@ theorem bad (P : Prop) : P -> P := by
     }
 
     #[test]
-    fn intro_on_folded_def_suggests_unfold() {
-        let result = check_file(
+    fn intro_transparently_unfolds_folded_def_goal() {
+        // `intro`/`split` peel a folded definitional goal such as `Symmetric(R)`
+        // without an explicit `unfold`, wrapping the proof in a `Convert` node.
+        check_ok(
             r#"
 mode constructive
 
@@ -15345,17 +15419,39 @@ sort U
 
 def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
 
-theorem bad (R : U -> U -> Prop)
+theorem sym (R : U -> U -> Prop)
   : (forall x y : U, R(x, y) -> R(y, x)) -> Symmetric(R) := by
   intro h
   intro x
+  intro y
+  exact h x y
 "#,
         );
-        assert!(!result.diagnostics.is_empty());
-        assert!(result.diagnostics[0]
-            .suggestions
-            .iter()
-            .any(|suggestion| suggestion.title == "Unfold a defined predicate first"));
+    }
+
+    #[test]
+    fn split_transparently_unfolds_folded_def_goal() {
+        // A nested definition (`Bijective` -> `Injective /\ Surjective`) is
+        // unfolded to its `And` head so `split` applies directly.
+        check_ok(
+            r#"
+mode constructive
+
+sort U
+
+def Injective (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
+def Surjective (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
+def Bijective (A : Type) (R : A -> A -> Prop) : Prop := Injective(R) /\ Surjective(R)
+
+theorem bij (R : U -> U -> Prop)
+  : Injective(R) -> Surjective(R) -> Bijective(R) := by
+  intro hi
+  intro hs
+  split
+  exact hi
+  exact hs
+"#,
+        );
     }
 
     #[test]

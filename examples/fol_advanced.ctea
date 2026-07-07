@@ -118,7 +118,6 @@ theorem refl_euclid_symmetric
   : Reflexive(R) -> Euclidean(R) -> Symmetric(R) := by
   intro hrefl
   intro heuc
-  unfold Symmetric
   intro x
   intro y
   intro hxy
@@ -133,7 +132,6 @@ theorem refl_euclid_transitive
   : Reflexive(R) -> Euclidean(R) -> Transitive(R) := by
   intro hrefl
   intro heuc
-  unfold Transitive
   intro x
   intro y
   intro z
@@ -146,12 +144,12 @@ theorem refl_euclid_transitive
   exact hyz
 
 -- The converse of a transitive relation is transitive. The converse is
--- written as an inline predicate lambda that flips the arguments.
+-- written as an inline predicate lambda that flips the arguments. The folded
+-- `Transitive(...)` goal is unfolded automatically by the first `intro`.
 theorem converse_transitive
   (R : U -> U -> Prop)
   : Transitive(R) -> Transitive(fun a b : U => R(b, a)) := by
   intro htrans
-  unfold Transitive
   intro x
   intro y
   intro z

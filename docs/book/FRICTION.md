@@ -138,15 +138,18 @@ and the quantifier De Morgan biconditionals) exercised the first-order
 layer harder than the book chapters did. It held up well — all fifteen
 theorems check — but three things stood out.
 
-19. **Improved: `intro` on a folded definitional goal now points at
-    `unfold`.** A goal like `Symmetric(R)` is a `def` applied to
-    arguments, so `intro`/`split` cannot see the `forall`/`->` inside it
-    and previously failed with a bare "intro expects an implication or
-    universal goal". The diagnostic now carries an "Unfold a defined
-    predicate first" suggestion with a `try: unfold Symmetric / intro x`
-    block. The remaining friction is that the fix is still manual —
-    `intro` does not transparently unfold one definitional layer. This is
-    the most common first-try failure across the relation theorems.
+19. **Resolved: structural tactics auto-unfold a folded definitional
+    goal.** A goal like `Symmetric(R)` is a `def` applied to arguments,
+    so `intro`/`split` could not see the `forall`/`->` inside it and
+    failed with "intro expects an implication or universal goal" — the
+    most common first-try failure across the relation theorems. Now
+    `intro`, `split`, `left`, `right`, and `exists` weak-head-normalize
+    the goal's definitional head on failure and retry, wrapping the proof
+    in a kernel-checked `Convert` node. Nested definitions are peeled as
+    far as needed (`split` reaches through `Bijective` to
+    `Injective /\ Surjective`). `examples/fol_advanced.ctea` now proves
+    `Reflexive`/`Symmetric`/`Transitive`/`Euclidean` goals with no
+    explicit `unfold`.
 
 20. **Documented: `have h : P := by ...` is not a thing.** A stated
     `have` either opens a subgoal (`have h : P`, discharged by the

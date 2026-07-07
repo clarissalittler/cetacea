@@ -654,6 +654,14 @@ theorem forall_self
   exact h x
 ```
 
+If the goal is a defined predicate whose body is an implication or universal —
+for example `Symmetric(R)` where
+`def Symmetric (A) (R) := forall x y : A, R(x, y) -> R(y, x)` — `intro` unfolds
+the definition automatically and then opens the exposed binder, so no explicit
+`unfold` is needed first. The same automatic unfolding applies to `split`,
+`left`, `right`, and `exists`. Explicit `unfold` and `simp` remain available
+when you want the step to be visible in the proof text.
+
 ### `exact`
 
 Use `exact proof_expr` when a hypothesis or theorem has exactly the target
