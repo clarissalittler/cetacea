@@ -154,12 +154,15 @@ subject to the same ambiguity rules.
    current single global environment, while preserving projection syntax such
    as `h.left`.
 2. Done: add `namespace ...` / `end ...` blocks as declaration-prefix sugar.
-3. Add `QualifiedName` and resolver helpers while preserving existing
+3. Done: resolve sibling theorem and formula-definition names in proof/tactic
+   contexts (`exact`, `apply`, `unfold`, and `simp [...]`) through the current
+   namespace, while storing canonical theorem references in proof terms.
+4. Add `QualifiedName` and resolver helpers while preserving existing
    unqualified behavior.
-4. Add import aliases and ambiguity diagnostics.
-5. Migrate standard-library declarations gradually, keeping compatibility
+5. Add import aliases and ambiguity diagnostics.
+6. Migrate standard-library declarations gradually, keeping compatibility
    aliases where needed.
-6. Update book and course examples to use real qualified names instead of
+7. Update book and course examples to use real qualified names instead of
    `_demo` suffixes when the imported library owns the short theorem name.
 
 ## Acceptance Tests

@@ -630,6 +630,7 @@ fn data_def_for_type(env: &Env, ty: &Type) -> Option<DataDef> {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Context {
+    namespace: Option<Name>,
     type_vars: Vec<Name>,
     prop_vars: Vec<Name>,
     pred_vars: HashMap<Name, Vec<Type>>,
@@ -642,6 +643,11 @@ pub struct Context {
 impl Context {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn with_namespace(mut self, namespace: Option<Name>) -> Self {
+        self.namespace = namespace;
+        self
     }
 
     pub fn add_proof(&mut self, name: Name, formula: Formula) {
@@ -785,6 +791,15 @@ impl Env {
         self.theorems.get(name)
     }
 
+    fn theorem_scoped<'a>(&'a self, ctx: &Context, name: &str) -> Option<&'a Theorem> {
+        if let Some(scoped) = scoped_top_level_name(ctx, name) {
+            if let Some(theorem) = self.theorem(&scoped) {
+                return Some(theorem);
+            }
+        }
+        self.theorem(name)
+    }
+
     pub fn add_theorem(&mut self, theorem: Theorem) {
         self.theorems.insert(theorem.name.clone(), theorem);
     }
@@ -833,6 +848,15 @@ impl Env {
         self.defs.get(name)
     }
 
+    fn formula_def_scoped<'a>(&'a self, ctx: &Context, name: &str) -> Option<&'a FormulaDef> {
+        if let Some(scoped) = scoped_top_level_name(ctx, name) {
+            if let Some(def) = self.formula_def(&scoped) {
+                return Some(def);
+            }
+        }
+        self.formula_def(name)
+    }
+
     fn term_def(&self, name: &str) -> Option<&TermDef> {
         self.term_defs.get(name)
     }
@@ -872,6 +896,21 @@ impl Env {
             || self.has_def(name)
             || self.has_theorem(name)
     }
+}
+
+fn scoped_top_level_name(ctx: &Context, name: &str) -> Option<Name> {
+    if name.contains('.') || is_builtin_name(name) {
+        return None;
+    }
+    ctx.namespace
+        .as_ref()
+        .map(|namespace| format!("{namespace}.{name}"))
+}
+
+fn declaration_namespace(name: &str) -> Option<Name> {
+    name.rsplit_once('.')
+        .filter(|(namespace, leaf)| !namespace.is_empty() && !leaf.is_empty())
+        .map(|(namespace, _)| namespace.to_string())
 }
 
 fn is_builtin_name(name: &str) -> bool {
@@ -2588,9 +2627,12 @@ impl FileChecker {
                         );
                         continue;
                     }
+                    let proof_ctx = theorem_ctx
+                        .clone()
+                        .with_namespace(declaration_namespace(&decl.name));
                     let proved = match prove(
                         &self.env,
-                        theorem_ctx.clone(),
+                        proof_ctx,
                         decl.statement.clone(),
                         &decl.tactics,
                         mode,
@@ -2862,7 +2904,10 @@ fn goals_for_theorem_prefix(
         };
     }
 
-    let mut session = ProofSession::new(theorem_ctx.clone(), decl.statement.clone());
+    let proof_ctx = theorem_ctx
+        .clone()
+        .with_namespace(declaration_namespace(&decl.name));
+    let mut session = ProofSession::new(proof_ctx, decl.statement.clone());
     for tactic in decl.tactics.iter().take(tactic_count) {
         if let Err(err) = session.step(&checker.env, tactic, mode) {
             let target = err.target.as_deref().unwrap_or(&decl.statement);
@@ -3008,7 +3053,10 @@ fn explain_theorem_at_index(
         };
     }
 
-    let mut session = ProofSession::new(theorem_ctx.clone(), decl.statement.clone());
+    let proof_ctx = theorem_ctx
+        .clone()
+        .with_namespace(declaration_namespace(&decl.name));
+    let mut session = ProofSession::new(proof_ctx, decl.statement.clone());
     let mut steps = Vec::new();
     for (index, tactic) in decl.tactics.iter().enumerate() {
         let Some(before_goal) = session.goals.first().cloned() else {
@@ -7783,7 +7831,7 @@ impl ProofExpr {
     fn is_bare_theorem_ref(&self, env: &Env, ctx: &Context) -> bool {
         self.steps.is_empty()
             && ctx.lookup(&self.base).is_none()
-            && env.theorem(&self.base).is_some()
+            && env.theorem_scoped(ctx, &self.base).is_some()
     }
 
     fn has_explicit_args(&self) -> bool {
@@ -7836,7 +7884,7 @@ impl ProofExpr {
                 ));
             }
             Ok(proof.clone())
-        } else if let Some(theorem) = env.theorem(&self.base) {
+        } else if let Some(theorem) = env.theorem_scoped(ctx, &self.base) {
             let subst = if self.has_explicit_args() {
                 let subst = explicit_schema_subst(env, ctx, theorem, &self.explicit_args)?;
                 ensure_schema_subst_complete(&theorem.params, &subst, Some(theorem.name.as_str()))?;
@@ -7845,7 +7893,7 @@ impl ProofExpr {
                 SchemaSubst::default()
             };
             Ok(Proof::TheoremRef {
-                name: self.base.clone(),
+                name: theorem.name.clone(),
                 subst,
             })
         } else {
@@ -7870,7 +7918,7 @@ impl ProofExpr {
         }
 
         if ctx.lookup(&self.base).is_none() {
-            if let Some(theorem) = env.theorem(&self.base) {
+            if let Some(theorem) = env.theorem_scoped(ctx, &self.base) {
                 if !self.steps.is_empty() {
                     return self.theorem_application_to_proof(env, ctx, theorem, allowed_mode);
                 }
@@ -8070,7 +8118,7 @@ impl ProofExpr {
 }
 
 fn proof_base_is_known(env: &Env, ctx: &Context, name: &str) -> bool {
-    name == "True" || ctx.lookup(name).is_some() || env.theorem(name).is_some()
+    name == "True" || ctx.lookup(name).is_some() || env.theorem_scoped(ctx, name).is_some()
 }
 
 fn consume_positional_schema_term_arg(
@@ -11074,11 +11122,11 @@ fn run_tactic_step(
             })
         }
         Tactic::Unfold(name) => {
-            if env.formula_def(name).is_none() {
+            let Some(def) = env.formula_def_scoped(&goal.context, name) else {
                 return Err(TacticError::new(format!("unknown definition `{name}`")));
-            }
+            };
             let (target, changed) =
-                unfold_named_formula_def(env, &goal.context, &goal.target, name).map_err(
+                unfold_named_formula_def(env, &goal.context, &goal.target, &def.name).map_err(
                     |err| TacticError::new(format!("cannot unfold `{name}`: {}", err.message)),
                 )?;
             if !changed {
@@ -11674,14 +11722,14 @@ fn collect_simp_rules(
 ) -> Result<Vec<SimpRule>, TacticError> {
     let mut rules = Vec::new();
     for name in names {
-        if let Some(theorem) = env.theorem(name) {
+        if let Some(theorem) = env.theorem_scoped(ctx, name) {
             let Formula::Eq(lhs, rhs) = &theorem.statement else {
                 return Err(TacticError::new(format!(
                     "simp rule `{name}` must prove a term equality"
                 )));
             };
             rules.push(SimpRule {
-                name: name.clone(),
+                name: theorem.name.clone(),
                 proof: SimpRuleProof::Theorem,
                 params: theorem.params.clone(),
                 lhs: lhs.clone(),
@@ -12182,12 +12230,12 @@ fn proof_expr_for_inferred(
 
     if expr.is_bare_theorem_ref(env, ctx) {
         let theorem = env
-            .theorem(&expr.base)
+            .theorem_scoped(ctx, &expr.base)
             .ok_or_else(|| TacticError::new(format!("unknown theorem `{}`", expr.base)))?;
         let subst = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
         ensure_schema_subst_complete(&theorem.params, &subst, Some(theorem.name.as_str()))?;
         return Ok(Proof::TheoremRef {
-            name: expr.base.clone(),
+            name: theorem.name.clone(),
             subst,
         });
     }
@@ -12316,7 +12364,7 @@ fn proof_expr_for_expected(
 
     if expr.is_bare_theorem_ref(env, ctx) {
         let theorem = env
-            .theorem(&expr.base)
+            .theorem_scoped(ctx, &expr.base)
             .ok_or_else(|| TacticError::new(format!("unknown theorem `{}`", expr.base)))?;
         let explicit = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
         let subst = infer_schema_subst_for_formula(
@@ -12329,7 +12377,7 @@ fn proof_expr_for_expected(
             Some(theorem.name.as_str()),
         )?;
         return Ok(Proof::TheoremRef {
-            name: expr.base.clone(),
+            name: theorem.name.clone(),
             subst,
         });
     }
@@ -12346,7 +12394,7 @@ fn proof_expr_for_apply(
 ) -> Result<(Proof, Vec<Term>, Vec<Formula>), TacticError> {
     if expr.is_bare_theorem_ref(env, ctx) {
         let theorem = env
-            .theorem(&expr.base)
+            .theorem_scoped(ctx, &expr.base)
             .ok_or_else(|| TacticError::new(format!("unknown theorem `{}`", expr.base)))?;
         let explicit = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
         let plan = apply_plan_for_goal(
@@ -12360,7 +12408,7 @@ fn proof_expr_for_apply(
         )?;
         return Ok((
             Proof::TheoremRef {
-                name: expr.base.clone(),
+                name: theorem.name.clone(),
                 subst: plan.schema_subst,
             },
             plan.forall_args,
@@ -15621,14 +15669,29 @@ def HappyMother (x : q.Person) : Prop := q.Happy(q.mother(x))
 
 axiom mother_id (x : q.Person) : q.mother(x) = x
 
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem use_scoped_exact
+  : q.Happy(q.alice) -> q.Happy(q.alice) := by
+  intro h
+  exact id h
+
+theorem use_scoped_apply
+  : q.Happy(q.alice) -> q.Happy(q.alice) := by
+  intro h
+  apply id
+  exact h
+
 theorem def_intro : q.Happy(q.mother(q.alice)) -> q.HappyMother(q.alice) := by
   intro h
-  unfold q.HappyMother
+  unfold HappyMother
   exact h
 
 theorem simp_rule : q.Happy(q.alice) -> q.Happy(q.mother(q.alice)) := by
   intro h
-  simp [q.mother_id]
+  simp [mother_id]
   exact h
 
 end q
