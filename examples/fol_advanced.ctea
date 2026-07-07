@@ -1,0 +1,286 @@
+mode constructive
+
+-- A generic nonempty domain of discourse. `a0` witnesses nonemptiness,
+-- which several existence proofs below rely on.
+sort U
+const a0 : U
+
+-- ===========================================================================
+-- Quantifier structure: how forall / exists interact with /\ and \/.
+-- These are the "distribution laws" from a discrete-math logic chapter,
+-- proved in full as biconditionals.
+-- ===========================================================================
+
+-- forall distributes over conjunction, both directions.
+theorem forall_and_distrib
+  (R S : U -> Prop)
+  : (forall x : U, R(x) /\ S(x)) <-> (forall x : U, R(x)) /\ (forall x : U, S(x)) := by
+  split
+  intro h
+  split
+  intro x
+  exact (h x).left
+  intro x
+  exact (h x).right
+  intro h
+  intro x
+  split
+  exact h.left x
+  exact h.right x
+
+-- exists distributes over disjunction, both directions.
+theorem exists_or_distrib
+  (R S : U -> Prop)
+  : (exists x : U, R(x) \/ S(x)) <-> (exists x : U, R(x)) \/ (exists x : U, S(x)) := by
+  split
+  intro h
+  cases h with
+  | intro x hx =>
+      cases hx with
+      | left hr =>
+          left
+          exists x
+          exact hr
+      | right hs =>
+          right
+          exists x
+          exact hs
+  intro h
+  cases h with
+  | left he =>
+      cases he with
+      | intro x hx =>
+          exists x
+          left
+          exact hx
+  | right he =>
+      cases he with
+      | intro x hx =>
+          exists x
+          right
+          exact hx
+
+-- One valid direction that students routinely get backwards: an existential
+-- of universals implies the universal of existentials, but NOT conversely.
+theorem exists_forall_swap
+  (R : U -> U -> Prop)
+  : (exists x : U, forall y : U, R(x, y)) -> forall y : U, exists x : U, R(x, y) := by
+  intro h
+  intro y
+  cases h with
+  | intro x hx =>
+      exists x
+      exact hx y
+
+-- forall weakens over an implication chain under the binder.
+theorem forall_imp_mono
+  (R S T : U -> Prop)
+  : (forall x : U, R(x) -> S(x))
+    -> (forall x : U, S(x) -> T(x))
+    -> forall x : U, R(x) -> T(x) := by
+  intro hrs
+  intro hst
+  intro x
+  intro hr
+  apply hst x
+  apply hrs x
+  exact hr
+
+-- ===========================================================================
+-- Relations as predicates: the standard classification properties, defined
+-- inline, plus theorems that combine them the way a relations chapter does.
+-- ===========================================================================
+
+def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
+def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
+def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(y, z) -> R(x, z)
+def Antisymmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x) -> x = y
+def Euclidean (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(x, z) -> R(y, z)
+
+-- A relation that is both antisymmetric and symmetric is the discrete order:
+-- it only ever relates an element to itself.
+theorem antisym_and_sym_is_diagonal
+  (R : U -> U -> Prop)
+  : Antisymmetric(R) -> Symmetric(R) -> forall x y : U, R(x, y) -> x = y := by
+  intro hanti
+  intro hsym
+  intro x
+  intro y
+  intro hxy
+  apply hanti x y
+  exact hxy
+  apply hsym x y
+  exact hxy
+
+-- The classic exam problem: reflexive + Euclidean implies symmetric.
+theorem refl_euclid_symmetric
+  (R : U -> U -> Prop)
+  : Reflexive(R) -> Euclidean(R) -> Symmetric(R) := by
+  intro hrefl
+  intro heuc
+  unfold Symmetric
+  intro x
+  intro y
+  intro hxy
+  apply heuc x y x
+  exact hxy
+  exact hrefl x
+
+-- ...and reflexive + Euclidean implies transitive, so together an
+-- equivalence relation. This is the "Euclidean characterization."
+theorem refl_euclid_transitive
+  (R : U -> U -> Prop)
+  : Reflexive(R) -> Euclidean(R) -> Transitive(R) := by
+  intro hrefl
+  intro heuc
+  unfold Transitive
+  intro x
+  intro y
+  intro z
+  intro hxy
+  intro hyz
+  apply heuc y x z
+  apply heuc x y x
+  exact hxy
+  exact hrefl x
+  exact hyz
+
+-- The converse of a transitive relation is transitive. The converse is
+-- written as an inline predicate lambda that flips the arguments.
+theorem converse_transitive
+  (R : U -> U -> Prop)
+  : Transitive(R) -> Transitive(fun a b : U => R(b, a)) := by
+  intro htrans
+  unfold Transitive
+  intro x
+  intro y
+  intro z
+  intro hyx
+  intro hzy
+  apply htrans z y x
+  exact hzy
+  exact hyx
+
+-- ===========================================================================
+-- Uniqueness: packaging "there is exactly one" from existence plus a
+-- functionality hypothesis. This is the exists-unique idiom spelled out.
+-- ===========================================================================
+
+theorem exists_unique_from_functional
+  (P : U -> Prop)
+  : (exists x : U, P(x))
+    -> (forall x y : U, P(x) -> P(y) -> x = y)
+    -> exists x : U, P(x) /\ forall y : U, P(y) -> y = x := by
+  intro hex
+  intro hfun
+  cases hex with
+  | intro x hx =>
+      exists x
+      split
+      exact hx
+      intro y
+      intro hy
+      apply hfun y x
+      exact hy
+      exact hx
+
+-- ===========================================================================
+-- Self-reference: the barber paradox. No one shaves exactly those who do
+-- not shave themselves. Pure predicate logic, no classical reasoning.
+-- ===========================================================================
+
+theorem no_barber
+  (Shaves : U -> U -> Prop)
+  : not (exists b : U, forall x : U, Shaves(b, x) <-> not Shaves(x, x)) := by
+  intro h
+  cases h with
+  | intro b hb =>
+      have hbb : Shaves(b, b) <-> not Shaves(b, b) := hb b
+      have hnot : not Shaves(b, b)
+      intro hs
+      apply hbb.left hs
+      exact hs
+      apply hnot
+      apply hbb.right
+      exact hnot
+
+-- ===========================================================================
+-- Classical predicate logic. The quantifier De Morgan laws (the hard
+-- directions need excluded middle) and the drinker's paradox.
+-- ===========================================================================
+
+mode classical
+
+-- The constructive-easy direction, restated here so the biconditional
+-- below can lean on it.
+theorem forall_not_to_not_exists
+  (P : U -> Prop)
+  : (forall x : U, not P(x)) -> not (exists x : U, P(x)) := by
+  intro h
+  intro hex
+  cases hex with
+  | intro x hx =>
+      apply h x
+      exact hx
+
+-- not (exists x, P(x))  <->  forall x, not P(x). Both directions are
+-- constructive, but stated as a biconditional to match the textbook rule.
+theorem not_exists_iff_forall_not
+  (P : U -> Prop)
+  : not (exists x : U, P(x)) <-> forall x : U, not P(x) := by
+  split
+  intro h
+  intro x
+  intro hp
+  apply h
+  exists x
+  exact hp
+  intro h
+  exact forall_not_to_not_exists h
+
+-- The genuinely classical De Morgan law: not (forall x, P(x)) implies
+-- there is a counterexample.
+theorem not_forall_to_exists_not
+  (P : U -> Prop)
+  : not (forall x : U, P(x)) -> exists x : U, not P(x) := by
+  intro h
+  by_contra hn
+  apply h
+  intro x
+  by_contra hpx
+  apply hn
+  exists x
+  exact hpx
+
+-- not (forall x, P(x))  <->  exists x, not P(x), the full biconditional.
+theorem not_forall_iff_exists_not
+  (P : U -> Prop)
+  : not (forall x : U, P(x)) <-> exists x : U, not P(x) := by
+  split
+  exact not_forall_to_exists_not
+  intro h
+  intro hall
+  cases h with
+  | intro x hnx =>
+      apply hnx
+      exact hall x
+
+-- The drinker's paradox: in any nonempty domain there is someone such that,
+-- if they drink, then everyone drinks. `a0` supplies the nonempty witness.
+theorem drinkers_paradox
+  (Drinks : U -> Prop)
+  : exists x : U, Drinks(x) -> forall y : U, Drinks(y) := by
+  by_cases h : forall y : U, Drinks(y)
+  exists a0
+  intro hd
+  exact h
+  have hcounter : exists y : U, not Drinks(y)
+  apply not_forall_to_exists_not
+  exact h
+  cases hcounter with
+  | intro y hny =>
+      exists y
+      intro hy
+      exfalso
+      apply hny
+      exact hy

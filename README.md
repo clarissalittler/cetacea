@@ -32,6 +32,10 @@ compatibility, and argument type compatibility.
   theorems.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
+- `examples/fol_advanced.ctea`: harder first-order examples — quantifier
+  distribution laws, the drinker's paradox, the barber paradox, relation
+  classification (reflexive/symmetric/transitive/antisymmetric/Euclidean),
+  exists-unique packaging, and the quantifier De Morgan biconditionals.
 - `examples/set_nat.ctea`: typed set and natural-number simplification examples.
 - `examples/library_patterns.ctea`: larger standalone proof patterns over a
   small first-order domain.
@@ -43,6 +47,7 @@ compatibility, and argument type compatibility.
 cargo test
 cargo run -p cetacea_cli -- examples/prop.ctea
 cargo run -p cetacea_cli -- examples/fol.ctea
+cargo run -p cetacea_cli -- examples/fol_advanced.ctea
 cargo run -p cetacea_cli -- examples/set_nat.ctea
 cargo run -p cetacea_cli -- examples/library_patterns.ctea
 cargo run -p cetacea_cli -- examples/imports.ctea

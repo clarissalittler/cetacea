@@ -1140,6 +1140,17 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
             ),
             None,
         );
+        if matches!(target, Formula::Atom(_) | Formula::PredApp(_, _)) {
+            push(
+                &mut suggestions,
+                "Unfold a defined predicate first",
+                "If the target is a defined predicate such as `Symmetric(R)`, \
+                 `intro` cannot see the quantifier hidden inside its definition. \
+                 Run `unfold <name>` (or `simp`) to expose the `forall`/`->`, then `intro`."
+                    .to_string(),
+                Some("unfold Symmetric\nintro x"),
+            );
+        }
     }
     if message.contains("split expects") {
         push(
@@ -15325,6 +15336,29 @@ theorem bad (P : Prop) : P -> P := by
     }
 
     #[test]
+    fn intro_on_folded_def_suggests_unfold() {
+        let result = check_file(
+            r#"
+mode constructive
+
+sort U
+
+def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
+
+theorem bad (R : U -> U -> Prop)
+  : (forall x y : U, R(x, y) -> R(y, x)) -> Symmetric(R) := by
+  intro h
+  intro x
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        assert!(result.diagnostics[0]
+            .suggestions
+            .iter()
+            .any(|suggestion| suggestion.title == "Unfold a defined predicate first"));
+    }
+
+    #[test]
     fn apply_predicate_parameter_failure_suggests_explicit_lambda() {
         let import = import_line("std/nat.ctea");
         let result = check_file(&format!(
@@ -15458,6 +15492,11 @@ theorem trivial_true : True := by
     #[test]
     fn example_library_patterns_checks() {
         check_ok(include_str!("../../../examples/library_patterns.ctea"));
+    }
+
+    #[test]
+    fn example_fol_advanced_checks() {
+        check_ok(include_str!("../../../examples/fol_advanced.ctea"));
     }
 
     #[test]

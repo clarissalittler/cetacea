@@ -137,6 +137,24 @@ arithmetic goals, and bounded first-order formulas over abstract sorts,
 declared predicates, and equality. The checker still bails silently on
 sets, graph-property definitions, and richer terms.
 
+The first-order search is genuinely useful for the "quantifier order matters"
+lesson. A student who assumes the invalid converse of the quantifier swap,
+
+```text
+theorem bad_swap (R : U -> U -> Prop)
+  : (forall y : U, exists x : U, R(x, y)) -> exists x : U, forall y : U, R(x, y)
+```
+
+gets told exactly why it is false:
+
+```text
+note: the first-order statement is false in a 2-element domain where
+R = {(a,b), (b,a)}. No proof can close it; check the statement itself.
+```
+
+That two-element countermodel is precisely the picture the textbook draws by
+hand.
+
 The useful bridge remains: formulas classified by truth tables can often
 be re-derived as Cetacea theorems using the proof rules from Module 3.
 
@@ -206,6 +224,64 @@ arguments only. They are not general function values, and they cannot be passed
 where a term is expected.
 
 ## Smaller gripes
+
+### Folded definitions must be unfolded before structural tactics
+
+When a goal is a *defined* predicate applied to arguments — `Symmetric(R)`,
+`Transitive(R)`, `Bijective(G)` — the structural tactics do not look inside the
+definition. A student who states the goal `Symmetric(R)` and immediately writes
+`intro x` gets `intro expects an implication or universal goal`, because the
+`forall` is hidden one `def` layer down. The fix is a one-liner — `unfold
+Symmetric` (or `simp`, which also unfolds it) — before `intro`/`split`:
+
+```text
+theorem sym (R : U -> U -> Prop)
+  : (forall x y : U, R(x, y) -> R(y, x)) -> Symmetric(R) := by
+  intro h
+  unfold Symmetric
+  intro x
+  ...
+```
+
+The `intro` diagnostic now carries a "Unfold a defined predicate first"
+suggestion with a `try:` block, so the repair is discoverable, but the tool does
+*not* auto-unfold. This showed up all over `examples/fol_advanced.ctea`'s
+relation-classification theorems and is the single most common first-try failure
+when proving `Reflexive`/`Symmetric`/`Transitive`/`Euclidean` goals.
+
+**Possible improvement:** have `intro`/`split` transparently unfold a
+single-layer definitional goal before reporting a shape mismatch.
+
+### `have` with a tactic proof needs the bare subgoal form
+
+`have` accepts either a stated formula that opens a subgoal (`have h : P`) or a
+formula with a one-expression proof (`have h : P := h.left`). It does *not*
+accept a stated formula with an inline tactic block:
+
+```text
+have hnot : not Shaves(b, b) := by   -- ERROR: unknown hypothesis `by`
+  intro hs
+  ...
+```
+
+Write the subgoal form instead — drop the `:= by` and let the following indented
+tactics discharge the new goal:
+
+```text
+have hnot : not Shaves(b, b)
+intro hs
+...
+```
+
+The error message (`unknown hypothesis \`by\``) does not point at the real
+problem, so this is worth flagging to students who reach for a nested tactic
+proof. It came up writing the barber-paradox proof.
+
+### Disjunction case arms are `left`/`right`, not `inl`/`inr`
+
+`cases h with | left ... => | right ... =>` destructures a disjunction; the
+Lean/Rocq spelling `inl`/`inr` is a parse error (`expected \`left\` case arm`).
+Existentials and conjunctions both use `| intro ... =>`.
 
 ### Indentation is forgiving but under-specified
 

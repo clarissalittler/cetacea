@@ -130,6 +130,40 @@ stay meaningful.
     [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the
     remaining environment, import, and proof-projection work.
 
+## Surfaced writing the advanced FOL examples
+
+Writing `examples/fol_advanced.ctea` (quantifier distribution laws, the
+drinker's and barber paradoxes, relation classification, exists-unique,
+and the quantifier De Morgan biconditionals) exercised the first-order
+layer harder than the book chapters did. It held up well — all fifteen
+theorems check — but three things stood out.
+
+19. **Improved: `intro` on a folded definitional goal now points at
+    `unfold`.** A goal like `Symmetric(R)` is a `def` applied to
+    arguments, so `intro`/`split` cannot see the `forall`/`->` inside it
+    and previously failed with a bare "intro expects an implication or
+    universal goal". The diagnostic now carries an "Unfold a defined
+    predicate first" suggestion with a `try: unfold Symmetric / intro x`
+    block. The remaining friction is that the fix is still manual —
+    `intro` does not transparently unfold one definitional layer. This is
+    the most common first-try failure across the relation theorems.
+
+20. **Documented: `have h : P := by ...` is not a thing.** A stated
+    `have` either opens a subgoal (`have h : P`, discharged by the
+    following indented tactics) or takes a single proof expression
+    (`have h : P := h.left`). The mixed form `have h : P := by <tactics>`
+    fails with the misleading `unknown hypothesis \`by\``. The barber
+    proof wanted an inline tactic-proved `not Shaves(b, b)` lemma and had
+    to use the subgoal form. A clearer parse error, or supporting the
+    `:= by` form, would remove a genuine stumble.
+
+21. **Works well: countermodels catch invalid quantifier statements.**
+    The invalid converse of the quantifier swap,
+    `(forall y, exists x, R(x, y)) -> exists x, forall y, R(x, y)`,
+    reports "false in a 2-element domain where R = {(a,b), (b,a)}". The
+    finite-world search is exactly the right pedagogical tool for the
+    "order of quantifiers matters" lesson.
+
 ## Already fixed while writing the book
 
 - `le_trans` was missing from `std/nat.ctea` (chapter 7 needed it) —
