@@ -841,6 +841,11 @@ Use `rewrite -> h` for the reverse tactic direction. Compound proof expressions
 such as `rewrite <- eq_symm h` are also accepted when schema arguments can be
 inferred from the supplied proof arguments.
 
+For a non-`all` rewrite with several matching occurrences, the checker keeps
+the existing selection rule and records a warning note naming the occurrence it
+chose. This makes accidental wrong-direction or wrong-occurrence rewrites
+visible at the tactic line without rejecting an otherwise valid proof.
+
 Use `rewrite all <- h` or `rewrite all -> h` to rewrite every matching
 occurrence in the target. This form rejects expanding rewrites where the
 replacement would introduce new occurrences of the term being rewritten.

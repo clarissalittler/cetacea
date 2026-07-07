@@ -284,8 +284,7 @@ theorem modeq_scale (m x y k : Nat)
           exists mul(k, b)
           rewrite mul_assoc {n := m; m := k; k := a}
           rewrite mul_assoc {n := m; m := k; k := b}
-          rewrite -> mul_comm {n := m; m := k}
-          rewrite -> mul_comm {n := m; m := k}
+          rewrite all -> mul_comm {n := m; m := k}
           rewrite -> mul_assoc {n := k; m := m; k := a}
           rewrite -> mul_assoc {n := k; m := m; k := b}
           rewrite mul_add_right {a := k; b := x; c := mul(m, a)}

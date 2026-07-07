@@ -123,7 +123,7 @@ theorem myadd_zero_n (n : Nat) : myadd(0, n) = n := by
       exact myadd_zero_right
   | succ k ih =>
       rewrite myadd_succ_right_rev {n := 0; m := k}
-      rewrite ih
+      rewrite -> ih
       refl
 ```
 

@@ -159,8 +159,9 @@ message (Section 5.8) tells you precisely which term it went looking
 for and couldn't find.
 
 One more variant. `rewrite` replaces *one* occurrence at a time
-(handy for precision); `rewrite all <-` sweeps the whole goal in the
-right-to-left direction:
+(handy for precision). If several occurrences match, Cetacea accepts
+the step but warns which occurrence it chose. `rewrite all <-` sweeps
+the whole goal in the right-to-left direction:
 
 ```text
 theorem rewrite_all_demo

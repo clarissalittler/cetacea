@@ -1150,12 +1150,13 @@ fn tactic_note_diagnostic(
     theorem_name: &str,
     note: TacticNote,
 ) -> Diagnostic {
-    warning_at(
-        source_path,
-        note.line,
-        format!("theorem `{theorem_name}` has a no-op tactic"),
-    )
-    .with_note(note.message)
+    let message = match note.kind {
+        TacticNoteKind::NoOpTactic => format!("theorem `{theorem_name}` has a no-op tactic"),
+        TacticNoteKind::RewriteOccurrence => {
+            format!("theorem `{theorem_name}` has an ambiguous rewrite")
+        }
+    };
+    warning_at(source_path, note.line, message).with_note(note.message)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10390,7 +10391,14 @@ struct ProofResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TacticNote {
     line: usize,
+    kind: TacticNoteKind,
     message: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TacticNoteKind {
+    NoOpTactic,
+    RewriteOccurrence,
 }
 
 struct StepResult {
@@ -10410,9 +10418,34 @@ fn simp_no_progress_result(goal: Goal, next_goal_id: &mut usize, tactic: &str) -
         }],
         notes: vec![TacticNote {
             line: 0,
+            kind: TacticNoteKind::NoOpTactic,
             message: format!("this `{tactic}` did nothing; consider deleting it"),
         }],
     }
+}
+
+fn rewrite_occurrence_note(needle: &Term, occurrence_index: usize) -> TacticNote {
+    TacticNote {
+        line: 0,
+        kind: TacticNoteKind::RewriteOccurrence,
+        message: format!(
+            "rewrote the {} occurrence of `{needle}`",
+            ordinal(occurrence_index + 1)
+        ),
+    }
+}
+
+fn ordinal(value: usize) -> String {
+    let suffix = match value % 100 {
+        11..=13 => "th",
+        _ => match value % 10 {
+            1 => "st",
+            2 => "nd",
+            3 => "rd",
+            _ => "th",
+        },
+    };
+    format!("{value}{suffix}")
 }
 
 fn run_tactic_step(
@@ -10880,14 +10913,23 @@ fn run_tactic_step(
                     notes: Vec::new(),
                 });
             }
-            let Some(source_target) = formula_rewrite_sources(&goal.target, needle, replacement)
-                .into_iter()
-                .min_by_key(rewrite_source_score)
-            else {
+            let sources = formula_rewrite_sources(&goal.target, needle, replacement);
+            if sources.is_empty() {
                 return Err(TacticError::new(format!(
                     "rewrite could not find `{needle}` in goal `{}`",
                     goal.target
                 )));
+            }
+            let source_count = sources.len();
+            let (occurrence_index, source_target) = sources
+                .into_iter()
+                .enumerate()
+                .min_by_key(|(_, source)| rewrite_source_score(source))
+                .expect("sources is not empty");
+            let notes = if source_count > 1 {
+                vec![rewrite_occurrence_note(needle, occurrence_index)]
+            } else {
+                Vec::new()
             };
 
             let body_id = fresh_goal(next_goal_id);
@@ -10902,7 +10944,7 @@ fn run_tactic_step(
                     context: goal.context,
                     target: source_target,
                 }],
-                notes: Vec::new(),
+                notes,
             })
         }
         Tactic::Unfold(name) => {
@@ -15112,6 +15154,30 @@ theorem rewrite_backward
   rewrite <- h
   exact ha
 "#,
+        );
+    }
+
+    #[test]
+    fn rewrite_reports_selected_occurrence_when_ambiguous() {
+        check_warn_contains(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Related(Person, Person)
+
+theorem rewrite_first_occurrence
+  : alice = mother(alice)
+    -> Related(alice, mother(alice))
+    -> Related(mother(alice), mother(alice)) := by
+  intro h
+  intro hr
+  rewrite <- h
+  exact hr
+"#,
+            "rewrote the 1st occurrence of `mother(alice)`",
         );
     }
 

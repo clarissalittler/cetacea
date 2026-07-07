@@ -858,6 +858,11 @@ rewrite -> h   -- left-to-right
 If you are used to Lean or Rocq, do not infer Cetacea's bare direction from
 those systems: in Cetacea, bare `rewrite h` is not the same as `rewrite -> h`.
 
+When a one-occurrence `rewrite` has several possible matches, Cetacea accepts
+the proof but emits a warning note such as
+``rewrote the 1st occurrence of `mother(alice)` ``. Use that note to confirm
+that the intended occurrence changed.
+
 Use `rewrite all <- h` or `rewrite all -> h` to rewrite every matching
 occurrence in the target. To keep this form finite and predictable, Cetacea
 rejects `rewrite all` when the replacement would introduce new occurrences of

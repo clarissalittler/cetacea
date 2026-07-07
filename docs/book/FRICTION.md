@@ -105,11 +105,13 @@ stay meaningful.
     unproved statement reads oddly next to the book's "nutrition label"
     story about the mode tags. Suggest `accepted axiom foo (trusted)`.
 
-17. **Wrong-direction `rewrite ih` often succeeds anyway** when the goal
-    contains both sides of the equation, and occurrence selection can
-    rewrite a literal `0` rather than the intended subterm, deferring
-    the error to a later line. Makes some planned "mistakes" entries
-    undemonstrable and real mistakes harder to localize.
+17. **Resolved: ambiguous one-occurrence rewrites report the selected
+    occurrence.** When a non-`all` `rewrite` has several candidates,
+    Cetacea accepts the proof but emits a warning note such as
+    ``rewrote the 1st occurrence of `mother(alice)` ``. That keeps
+    wrong-direction rewrites and accidental literal rewrites localized
+    to the tactic line; `rewrite all` remains available when every
+    occurrence should change.
 
 18. **No namespaces** means the book can never let students prove
     `add_comm` or `length_append` under their real names (prelude
