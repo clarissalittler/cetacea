@@ -162,7 +162,9 @@ subject to the same ambiguity rules.
 5. Done: canonicalize scoped declaration bodies, theorem statements, data
    constructor types, `defrec` arms, and tactic arguments so short names inside
    a namespace are stored as canonical top-level references.
-6. Add import aliases.
+6. Done: add import aliases (`import path.ctea as alias`) that check the
+   imported file as declarations under the alias namespace while leaving
+   unaliased imports compatible.
 7. Migrate standard-library declarations gradually, keeping compatibility
    aliases where needed.
 8. Update book and course examples to use real qualified names instead of
@@ -179,5 +181,7 @@ subject to the same ambiguity rules.
   while `nat.comm` and `set.comm` work.
 - A data declaration in a namespace gives qualified constructor names and those
   names work in terms, `defrec` arms, and structural induction arms.
+- `import lib.ctea as lib` exposes imported declarations as `lib.name`
+  without also exposing the same import's short top-level names.
 - Theorem search and outline display canonical qualified names while keeping
   imported/root status visible.

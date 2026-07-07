@@ -15,9 +15,9 @@ test. Friction item numbers refer to FRICTION.md.
   inference, positional theorem term arguments, arithmetic countermodels,
   first-order countermodels, decimal numeral display, and no-op `simp`
   warnings, explicit rewrite direction docs, and rewrite occurrence
-  notes, namespace-scoped proof/tactic references, and short-name
-  ambiguity diagnostics for qualified top-level leaves, and scoped
-  canonicalization for namespace declaration bodies are implemented.
+  notes, namespace-scoped proof/tactic references, short-name ambiguity
+  diagnostics for qualified top-level leaves, scoped canonicalization for
+  namespace declaration bodies, and import aliases are implemented.
 - Next: parked design work (namespaces, aggressive computation revisit,
   polymorphic data types).
 
@@ -214,7 +214,9 @@ Status: done.
   can resolve sibling theorems and formula definitions by short name.
   Declaration bodies, theorem statements, data constructor types, `defrec`
   arms, and tactic arguments are canonicalized through the current namespace.
-  Short ambiguous top-level leaves now ask for qualified names.
+  Short ambiguous top-level leaves now ask for qualified names, and
+  `import path.ctea as alias` checks imported declarations under the alias
+  namespace.
   Remaining design/implementation note:
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md).
 - **Aggressive goal computation (item 15):** behavior is defensible and

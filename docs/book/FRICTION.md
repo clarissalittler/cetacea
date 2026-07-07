@@ -119,11 +119,12 @@ stay meaningful.
     resolve sibling theorems and formula definitions by short name.
     Declaration bodies, theorem statements, data constructor types, `defrec`
     arms, and tactic arguments are canonicalized through the current
-    namespace; ambiguous short top-level leaves ask for qualified names.
-    There are still no import aliases or standard-library namespace
-    migration. The book still cannot let students prove `add_comm` or
-    `length_append` under their real names without colliding with the
-    prelude; hence the pervasive `_demo` suffix convention. The design note in
+    namespace; ambiguous short top-level leaves ask for qualified names, and
+    `import path.ctea as alias` exposes imported declarations under an alias
+    namespace. There is still no standard-library namespace migration. The
+    book still cannot let students prove `add_comm` or `length_append` under
+    their real names without colliding with the prelude; hence the pervasive
+    `_demo` suffix convention. The design note in
     [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the
     remaining environment, import, and proof-projection work.
 

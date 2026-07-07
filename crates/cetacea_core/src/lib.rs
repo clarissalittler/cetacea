@@ -883,11 +883,11 @@ impl Env {
 
     fn ambiguous_term_names(&self, name: &str) -> Option<Vec<Name>> {
         ambiguous_leaf_names(
-            self.consts
-                .keys()
-                .chain(self.term_defs.iter().filter_map(|(name, def)| {
-                    (term_def_expected_args(def) == 0).then_some(name)
-                })),
+            self.consts.keys().chain(
+                self.term_defs
+                    .iter()
+                    .filter_map(|(name, def)| (term_def_expected_args(def) == 0).then_some(name)),
+            ),
             name,
         )
     }
@@ -1893,10 +1893,10 @@ fn editor_source_context(path: &Path) -> (PathBuf, Option<PathBuf>) {
 struct FileChecker {
     env: Env,
     result: CheckResult,
-    loaded_files: HashSet<PathBuf>,
+    loaded_files: HashSet<(PathBuf, Option<Name>)>,
     import_stack: Vec<PathBuf>,
     virtual_files: HashMap<String, String>,
-    loaded_virtual_files: HashSet<String>,
+    loaded_virtual_files: HashSet<(String, Option<Name>)>,
     virtual_import_stack: Vec<String>,
 }
 
@@ -1935,6 +1935,64 @@ fn virtual_parent(path: &str) -> Option<String> {
         .rsplit_once('/')
         .map(|(parent, _)| parent.to_string())
         .filter(|parent| !parent.is_empty())
+}
+
+fn qualify_imported_commands(
+    commands: Vec<LocatedCommand>,
+    alias: Option<&str>,
+) -> Vec<LocatedCommand> {
+    let Some(alias) = alias else {
+        return commands;
+    };
+    let namespace_stack = vec![alias.to_string()];
+    commands
+        .into_iter()
+        .map(|located| LocatedCommand {
+            line: located.line,
+            command: qualify_imported_command(located.command, &namespace_stack),
+        })
+        .collect()
+}
+
+fn qualify_imported_command(command: Command, namespace_stack: &[Name]) -> Command {
+    match command {
+        Command::Import(decl) => Command::Import(decl),
+        Command::Mode(mode) => Command::Mode(mode),
+        Command::Sort(name) => Command::Sort(qualify_in_namespace(namespace_stack, name)),
+        Command::Const(name, ty) => Command::Const(qualify_in_namespace(namespace_stack, name), ty),
+        Command::Func(name, args, result) => {
+            Command::Func(qualify_in_namespace(namespace_stack, name), args, result)
+        }
+        Command::Pred(name, args) => {
+            Command::Pred(qualify_in_namespace(namespace_stack, name), args)
+        }
+        Command::Def(mut decl) => {
+            decl.name = qualify_in_namespace(namespace_stack, decl.name);
+            Command::Def(decl)
+        }
+        Command::Data(mut decl) => {
+            decl.name = qualify_in_namespace(namespace_stack, decl.name);
+            for ctor in &mut decl.ctors {
+                ctor.name = qualify_in_namespace(namespace_stack, std::mem::take(&mut ctor.name));
+            }
+            Command::Data(decl)
+        }
+        Command::DataRecDef(mut decl) => {
+            decl.name = qualify_in_namespace(namespace_stack, decl.name);
+            for arm in &mut decl.arms {
+                arm.ctor = qualify_in_namespace(namespace_stack, std::mem::take(&mut arm.ctor));
+            }
+            Command::DataRecDef(decl)
+        }
+        Command::Axiom(mut decl) => {
+            decl.name = qualify_in_namespace(namespace_stack, decl.name);
+            Command::Axiom(decl)
+        }
+        Command::Theorem(mut decl) => {
+            decl.name = qualify_in_namespace(namespace_stack, decl.name);
+            Command::Theorem(decl)
+        }
+    }
 }
 
 impl FileChecker {
@@ -1988,7 +2046,7 @@ impl FileChecker {
                 return;
             }
         };
-        self.check_canonical_path(canonical_path, false);
+        self.check_canonical_path(canonical_path, false, None);
     }
 
     fn resolve_import_path(
@@ -2029,15 +2087,21 @@ impl FileChecker {
         Err(diagnostic)
     }
 
-    fn check_resolved_import(&mut self, import: ResolvedImport, is_imported: bool) {
+    fn check_resolved_import(
+        &mut self,
+        import: ResolvedImport,
+        is_imported: bool,
+        alias: Option<Name>,
+    ) {
         match import {
-            ResolvedImport::File(path) => self.check_canonical_path(path, is_imported),
-            ResolvedImport::Virtual(path) => self.check_virtual_path(&path, is_imported),
+            ResolvedImport::File(path) => self.check_canonical_path(path, is_imported, alias),
+            ResolvedImport::Virtual(path) => self.check_virtual_path(&path, is_imported, alias),
         }
     }
 
-    fn check_canonical_path(&mut self, path: PathBuf, is_imported: bool) {
-        if self.loaded_files.contains(&path) {
+    fn check_canonical_path(&mut self, path: PathBuf, is_imported: bool, alias: Option<Name>) {
+        let loaded_key = (path.clone(), alias.clone());
+        if self.loaded_files.contains(&loaded_key) {
             return;
         }
         if self.import_stack.contains(&path) {
@@ -2072,19 +2136,21 @@ impl FileChecker {
 
         self.import_stack.push(path.clone());
         let base_dir = path.parent().map(Path::to_path_buf);
+        let commands = qualify_imported_commands(file.commands, alias.as_deref());
         self.check_commands(
-            file.commands,
+            commands,
             base_dir.as_deref(),
             None,
             is_imported,
             Some(path.as_path()),
         );
         self.import_stack.pop();
-        self.loaded_files.insert(path);
+        self.loaded_files.insert(loaded_key);
     }
 
-    fn check_virtual_path(&mut self, path: &str, is_imported: bool) {
-        if self.loaded_virtual_files.contains(path) {
+    fn check_virtual_path(&mut self, path: &str, is_imported: bool, alias: Option<Name>) {
+        let loaded_key = (path.to_string(), alias.clone());
+        if self.loaded_virtual_files.contains(&loaded_key) {
             return;
         }
         if self
@@ -2118,15 +2184,10 @@ impl FileChecker {
 
         self.virtual_import_stack.push(path.to_string());
         let virtual_base = virtual_parent(path);
-        self.check_commands(
-            file.commands,
-            None,
-            virtual_base.as_deref(),
-            is_imported,
-            None,
-        );
+        let commands = qualify_imported_commands(file.commands, alias.as_deref());
+        self.check_commands(commands, None, virtual_base.as_deref(), is_imported, None);
         self.virtual_import_stack.pop();
-        self.loaded_virtual_files.insert(path.to_string());
+        self.loaded_virtual_files.insert(loaded_key);
     }
 
     fn check_commands(
@@ -2143,9 +2204,9 @@ impl FileChecker {
             let line = located.line;
             let command = located.command;
             match command {
-                Command::Import(path) => {
+                Command::Import(decl) => {
                     let resolved_path =
-                        match self.resolve_import_path(&path, base_dir, virtual_base) {
+                        match self.resolve_import_path(&decl.path, base_dir, virtual_base) {
                             Ok(path) => path,
                             Err(mut diagnostic) => {
                                 diagnostic = diagnostic.with_location(source_path, line);
@@ -2153,7 +2214,7 @@ impl FileChecker {
                                 continue;
                             }
                         };
-                    self.check_resolved_import(resolved_path, true);
+                    self.check_resolved_import(resolved_path, true, decl.alias);
                 }
                 Command::Mode(next_mode) => mode = next_mode,
                 Command::Sort(name) => {
@@ -2232,21 +2293,20 @@ impl FileChecker {
                             continue;
                         }
                     };
-                    let result_type =
-                        match canonicalize_type(&self.env, &empty_ctx, &result_type) {
-                            Ok(result_type) => result_type,
-                            Err(err) => {
-                                self.result.diagnostics.push(
-                                    diagnostic_at(
-                                        source_path,
-                                        line,
-                                        format!("function `{name}` has invalid type"),
-                                    )
-                                    .with_note(err.message),
-                                );
-                                continue;
-                            }
-                        };
+                    let result_type = match canonicalize_type(&self.env, &empty_ctx, &result_type) {
+                        Ok(result_type) => result_type,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("function `{name}` has invalid type"),
+                                )
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
                     let mut invalid_type = None;
                     for ty in args.iter().chain(std::iter::once(&result_type)) {
                         if let Err(err) = validate_type(&self.env, &empty_ctx, ty) {
@@ -2347,10 +2407,7 @@ impl FileChecker {
                                         diagnostic_at(
                                             source_path,
                                             line,
-                                            format!(
-                                                "definition `{}` has invalid body",
-                                                decl.name
-                                            ),
+                                            format!("definition `{}` has invalid body", decl.name),
                                         )
                                         .with_note(err.message)
                                         .with_note(format!("body: {body}")),
@@ -2409,10 +2466,7 @@ impl FileChecker {
                                         diagnostic_at(
                                             source_path,
                                             line,
-                                            format!(
-                                                "definition `{}` has invalid body",
-                                                decl.name
-                                            ),
+                                            format!("definition `{}` has invalid body", decl.name),
                                         )
                                         .with_note(err.message)
                                         .with_note(format!("body: {body}")),
@@ -2477,7 +2531,9 @@ impl FileChecker {
                     for (idx, ctor) in decl.ctors.iter().enumerate() {
                         if self.env.has_top_level_name(&ctor.name)
                             || ctor.name == decl.name
-                            || decl.ctors[..idx].iter().any(|other| other.name == ctor.name)
+                            || decl.ctors[..idx]
+                                .iter()
+                                .any(|other| other.name == ctor.name)
                         {
                             self.result.diagnostics.push(diagnostic_at(
                                 source_path,
@@ -2566,24 +2622,24 @@ impl FileChecker {
                         continue;
                     }
                     let rec_ctx = declaration_context(&decl.name);
-                    decl.param_type =
-                        match canonicalize_type(&self.env, &rec_ctx, &decl.param_type) {
-                            Ok(param_type) => param_type,
-                            Err(err) => {
-                                self.result.diagnostics.push(
-                                    diagnostic_at(
-                                        source_path,
-                                        line,
-                                        format!(
-                                            "recursive definition `{}` has invalid parameter type",
-                                            decl.name
-                                        ),
-                                    )
-                                    .with_note(err.message),
-                                );
-                                continue;
-                            }
-                        };
+                    decl.param_type = match canonicalize_type(&self.env, &rec_ctx, &decl.param_type)
+                    {
+                        Ok(param_type) => param_type,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!(
+                                        "recursive definition `{}` has invalid parameter type",
+                                        decl.name
+                                    ),
+                                )
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
                     let Some(data) = data_def_for_type(&self.env, &decl.param_type) else {
                         self.result.diagnostics.push(diagnostic_at(
                             source_path,
@@ -2690,8 +2746,7 @@ impl FileChecker {
                         .extra_params
                         .iter()
                         .map(|(name, ty)| {
-                            canonicalize_type(&self.env, &rec_ctx, ty)
-                                .map(|ty| (name.clone(), ty))
+                            canonicalize_type(&self.env, &rec_ctx, ty).map(|ty| (name.clone(), ty))
                         })
                         .collect::<Result<Vec<_>, _>>()
                     {
@@ -3011,22 +3066,15 @@ impl FileChecker {
                                     "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
                                     countermodel_note(&model)
                                 ));
-                            } else if let Some(model) = arithmetic_countermodel(
-                                &[],
-                                &statement,
-                                &theorem_ctx.term_vars,
-                            )
+                            } else if let Some(model) =
+                                arithmetic_countermodel(&[], &statement, &theorem_ctx.term_vars)
                             {
                                 diagnostic = diagnostic.with_note(format!(
                                     "the arithmetic statement is false when {}. No proof can close it; check the statement itself.",
                                     arithmetic_countermodel_note(&model)
                                 ));
-                            } else if let Some(model) = first_order_countermodel(
-                                &self.env,
-                                &theorem_ctx,
-                                &[],
-                                &statement,
-                            )
+                            } else if let Some(model) =
+                                first_order_countermodel(&self.env, &theorem_ctx, &[], &statement)
                             {
                                 diagnostic = diagnostic.with_note(format!(
                                     "the first-order statement is false in {}. No proof can close it; check the statement itself.",
@@ -3101,9 +3149,11 @@ impl FileChecker {
                     }
 
                     for note in proved.notes {
-                        self.result
-                            .diagnostics
-                            .push(tactic_note_diagnostic(source_path, &decl.name, note));
+                        self.result.diagnostics.push(tactic_note_diagnostic(
+                            source_path,
+                            &decl.name,
+                            note,
+                        ));
                     }
 
                     let uses_sorry = proof_uses_sorry(&self.env, &proof);
@@ -3231,27 +3281,24 @@ fn goals_for_theorem_prefix(
         };
     }
 
-    let (_params, theorem_ctx) = match canonicalize_params(
-        &checker.env,
-        declaration_context(&decl.name),
-        &decl.params,
-    ) {
-        Ok(canonical) => canonical,
-        Err(err) => {
-            return GoalStepResult {
-                theorem: Some(decl.name.clone()),
-                mode: Some(mode),
-                tactic_count: decl.tactics.len(),
-                diagnostics: vec![diagnostic_at(
-                    source_path,
-                    located.line,
-                    format!("theorem `{}` has invalid parameters", decl.name),
-                )
-                .with_note(err.message)],
-                ..GoalStepResult::default()
-            };
-        }
-    };
+    let (_params, theorem_ctx) =
+        match canonicalize_params(&checker.env, declaration_context(&decl.name), &decl.params) {
+            Ok(canonical) => canonical,
+            Err(err) => {
+                return GoalStepResult {
+                    theorem: Some(decl.name.clone()),
+                    mode: Some(mode),
+                    tactic_count: decl.tactics.len(),
+                    diagnostics: vec![diagnostic_at(
+                        source_path,
+                        located.line,
+                        format!("theorem `{}` has invalid parameters", decl.name),
+                    )
+                    .with_note(err.message)],
+                    ..GoalStepResult::default()
+                };
+            }
+        };
     let statement = match canonicalize_formula(&checker.env, &theorem_ctx, &decl.statement) {
         Ok(statement) => statement,
         Err(err) => {
@@ -3326,8 +3373,7 @@ fn goals_for_theorem_prefix(
     if session.goals.is_empty() && tactic_count == decl.tactics.len() {
         match session.root.clone().complete() {
             Ok(proof) => {
-                if let Err(err) =
-                    check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
+                if let Err(err) = check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
                 {
                     diagnostics.push(
                         diagnostic_at(
@@ -3402,27 +3448,24 @@ fn explain_theorem_at_index(
         };
     }
 
-    let (_params, theorem_ctx) = match canonicalize_params(
-        &checker.env,
-        declaration_context(&decl.name),
-        &decl.params,
-    ) {
-        Ok(canonical) => canonical,
-        Err(err) => {
-            return ExplanationResult {
-                theorem: Some(decl.name.clone()),
-                statement: Some(decl.statement.to_string()),
-                mode: Some(mode),
-                diagnostics: vec![diagnostic_at(
-                    source_path,
-                    located.line,
-                    format!("theorem `{}` has invalid parameters", decl.name),
-                )
-                .with_note(err.message)],
-                ..ExplanationResult::default()
-            };
-        }
-    };
+    let (_params, theorem_ctx) =
+        match canonicalize_params(&checker.env, declaration_context(&decl.name), &decl.params) {
+            Ok(canonical) => canonical,
+            Err(err) => {
+                return ExplanationResult {
+                    theorem: Some(decl.name.clone()),
+                    statement: Some(decl.statement.to_string()),
+                    mode: Some(mode),
+                    diagnostics: vec![diagnostic_at(
+                        source_path,
+                        located.line,
+                        format!("theorem `{}` has invalid parameters", decl.name),
+                    )
+                    .with_note(err.message)],
+                    ..ExplanationResult::default()
+                };
+            }
+        };
     let statement = match canonicalize_formula(&checker.env, &theorem_ctx, &decl.statement) {
         Ok(statement) => statement,
         Err(err) => {
@@ -3528,8 +3571,7 @@ fn explain_theorem_at_index(
     if completed {
         match session.root.clone().complete() {
             Ok(proof) => {
-                if let Err(err) =
-                    check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
+                if let Err(err) = check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
                 {
                     diagnostics.push(
                         diagnostic_at(
@@ -4158,7 +4200,11 @@ fn tactic_label(tactic: &Tactic) -> String {
     match tactic {
         Tactic::Intro(name) => format!("intro {name}"),
         Tactic::Sorry => "sorry".to_string(),
-        Tactic::Have { name, formula, expr } => match (formula, expr) {
+        Tactic::Have {
+            name,
+            formula,
+            expr,
+        } => match (formula, expr) {
             (Some(formula), Some(expr)) => {
                 format!("have {name} : {formula} := {}", proof_expr_label(expr))
             }
@@ -4308,6 +4354,11 @@ fn resolve_top_level_name(
     exists(name).then(|| name.to_string())
 }
 
+fn resolve_induction_arm_ctor(env: &Env, ctx: &Context, name: &str) -> Name {
+    resolve_top_level_name(ctx, name, |candidate| env.has_top_level_name(candidate))
+        .unwrap_or_else(|| name.to_string())
+}
+
 fn canonicalize_params(
     env: &Env,
     mut ctx: Context,
@@ -4363,7 +4414,8 @@ fn canonicalize_type(env: &Env, ctx: &Context, ty: &Type) -> Result<Type, Valida
         Type::Set(elem) => Ok(Type::Set(Box::new(canonicalize_type(env, ctx, elem)?))),
         Type::Named(name) if ctx.has_type_var(name) => Ok(Type::Named(name.clone())),
         Type::Named(name) => {
-            if let Some(name) = resolve_top_level_name(ctx, name, |candidate| env.has_sort(candidate))
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.has_sort(candidate))
             {
                 return Ok(Type::Named(name));
             }
@@ -4503,7 +4555,9 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
         Term::Snd(term) => Ok(Term::Snd(Box::new(canonicalize_term(env, ctx, term)?))),
         Term::EmptySet(ty) => Ok(Term::EmptySet(canonicalize_type(env, ctx, ty)?)),
         Term::Universe(ty) => Ok(Term::Universe(canonicalize_type(env, ctx, ty)?)),
-        Term::Singleton(term) => Ok(Term::Singleton(Box::new(canonicalize_term(env, ctx, term)?))),
+        Term::Singleton(term) => Ok(Term::Singleton(Box::new(canonicalize_term(
+            env, ctx, term,
+        )?))),
         Term::Union(left, right) => Ok(Term::Union(
             Box::new(canonicalize_term(env, ctx, left)?),
             Box::new(canonicalize_term(env, ctx, right)?),
@@ -4516,9 +4570,9 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
             Box::new(canonicalize_term(env, ctx, left)?),
             Box::new(canonicalize_term(env, ctx, right)?),
         )),
-        Term::Complement(term) => {
-            Ok(Term::Complement(Box::new(canonicalize_term(env, ctx, term)?)))
-        }
+        Term::Complement(term) => Ok(Term::Complement(Box::new(canonicalize_term(
+            env, ctx, term,
+        )?))),
         Term::CartProd(left, right) => Ok(Term::CartProd(
             Box::new(canonicalize_term(env, ctx, left)?),
             Box::new(canonicalize_term(env, ctx, right)?),
@@ -4957,9 +5011,7 @@ pub fn propositional_countermodel(hyps: &[Formula], target: &Formula) -> Option<
     }
     let atoms: Vec<Name> = atom_set.into_iter().collect();
     for bits in 0..(1u32 << atoms.len()) {
-        let hyps_hold = hyps
-            .iter()
-            .all(|hyp| eval_propositional(hyp, &atoms, bits));
+        let hyps_hold = hyps.iter().all(|hyp| eval_propositional(hyp, &atoms, bits));
         if hyps_hold && !eval_propositional(target, &atoms, bits) {
             return Some(
                 atoms
@@ -5018,8 +5070,7 @@ fn find_arithmetic_countermodel(
     let var = vars[idx].clone();
     for value in 0..=ARITH_COUNTERMODEL_BOUND {
         assignment.insert(var.clone(), value);
-        if let Some(model) = find_arithmetic_countermodel(vars, idx + 1, assignment, hyps, target)
-        {
+        if let Some(model) = find_arithmetic_countermodel(vars, idx + 1, assignment, hyps, target) {
             return Some(model);
         }
     }
@@ -5098,23 +5149,17 @@ fn collect_arithmetic_term_vars(
     }
 }
 
-fn eval_arithmetic_formula(
-    formula: &Formula,
-    assignment: &HashMap<Name, usize>,
-) -> Option<bool> {
+fn eval_arithmetic_formula(formula: &Formula, assignment: &HashMap<Name, usize>) -> Option<bool> {
     match formula {
         Formula::True => Some(true),
         Formula::False => Some(false),
         Formula::Eq(left, right) => Some(
-            eval_arithmetic_term(left, assignment)?
-                == eval_arithmetic_term(right, assignment)?,
+            eval_arithmetic_term(left, assignment)? == eval_arithmetic_term(right, assignment)?,
         ),
-        Formula::PredApp(name, args) if name == "le" && args.len() == 2 => {
-            Some(
-                eval_arithmetic_term(&args[0], assignment)?
-                    <= eval_arithmetic_term(&args[1], assignment)?,
-            )
-        }
+        Formula::PredApp(name, args) if name == "le" && args.len() == 2 => Some(
+            eval_arithmetic_term(&args[0], assignment)?
+                <= eval_arithmetic_term(&args[1], assignment)?,
+        ),
         Formula::And(left, right) => Some(
             eval_arithmetic_formula(left, assignment)?
                 && eval_arithmetic_formula(right, assignment)?,
@@ -5325,9 +5370,9 @@ fn find_first_order_countermodel(
     }
 
     for bits in 0..(1u64 << search.slot_count) {
-        let hyps_hold = hyps.iter().all(|hyp| {
-            eval_first_order_formula(hyp, assignment, search, bits) == Some(true)
-        });
+        let hyps_hold = hyps
+            .iter()
+            .all(|hyp| eval_first_order_formula(hyp, assignment, search, bits) == Some(true));
         if hyps_hold && eval_first_order_formula(target, assignment, search, bits) == Some(false) {
             return Some(first_order_model_from_bits(search, assignment, bits));
         }
@@ -5423,8 +5468,7 @@ fn collect_first_order_formula_signature(
             var_type,
             body,
         } => {
-            sig.sorts
-                .insert(first_order_sort_name(var_type).ok_or(())?);
+            sig.sorts.insert(first_order_sort_name(var_type).ok_or(())?);
             bound.push(TermBinding {
                 name: var.clone(),
                 ty: var_type.clone(),
@@ -5503,8 +5547,7 @@ fn eval_first_order_formula(
         Formula::True => Some(true),
         Formula::False => Some(false),
         Formula::Eq(left, right) => Some(
-            eval_first_order_term(left, assignment)?
-                == eval_first_order_term(right, assignment)?,
+            eval_first_order_term(left, assignment)? == eval_first_order_term(right, assignment)?,
         ),
         Formula::PredApp(name, args) => {
             let values = args
@@ -6193,12 +6236,7 @@ pub fn infer_proof(
                         ctor.name
                     )));
                 }
-                for (idx, name) in arm
-                    .arg_names
-                    .iter()
-                    .chain(arm.ih_names.iter())
-                    .enumerate()
-                {
+                for (idx, name) in arm.arg_names.iter().chain(arm.ih_names.iter()).enumerate() {
                     let seen: Vec<&Name> = arm
                         .arg_names
                         .iter()
@@ -8033,7 +8071,8 @@ fn formula_mentions_schema_name(formula: &Formula, name: &str, kind: SchemaNameK
         Formula::True | Formula::False => false,
         Formula::Atom(atom) => matches!(kind, SchemaNameKind::Atom) && atom == name,
         Formula::Eq(left, right) | Formula::In(left, right) | Formula::Subset(left, right) => {
-            term_mentions_schema_name(left, name, kind) || term_mentions_schema_name(right, name, kind)
+            term_mentions_schema_name(left, name, kind)
+                || term_mentions_schema_name(right, name, kind)
         }
         Formula::PredApp(pred, args) => {
             (matches!(kind, SchemaNameKind::Predicate) && pred == name)
@@ -8095,7 +8134,11 @@ fn formula_mentions_schema_subst(formula: &Formula, subst: &SchemaSubst) -> bool
             .any(|key| formula_mentions_schema_name(formula, key, SchemaNameKind::Predicate))
 }
 
-fn rename_schema_binder_if_needed(var: &str, body: &Formula, scoped: &SchemaSubst) -> (Name, Formula) {
+fn rename_schema_binder_if_needed(
+    var: &str,
+    body: &Formula,
+    scoped: &SchemaSubst,
+) -> (Name, Formula) {
     if !formula_mentions_schema_subst(body, scoped) {
         return (var.to_string(), body.clone());
     }
@@ -8664,7 +8707,7 @@ struct AxiomDecl {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Command {
-    Import(String),
+    Import(ImportDecl),
     Mode(LogicMode),
     Sort(Name),
     Const(Name, Type),
@@ -8675,6 +8718,12 @@ enum Command {
     DataRecDef(DataRecDefDecl),
     Axiom(AxiomDecl),
     Theorem(TheoremDecl),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ImportDecl {
+    path: String,
+    alias: Option<Name>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8895,9 +8944,7 @@ impl ProofExpr {
             if ctx.lookup(&self.base).is_none() {
                 if let Some(matches) = env.ambiguous_theorem_names(&self.base) {
                     return Err(TacticError::new(ambiguous_reference_message(
-                        "theorem",
-                        &self.base,
-                        &matches,
+                        "theorem", &self.base, &matches,
                     )));
                 }
             }
@@ -9762,7 +9809,10 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
         if let Some(kind) = unicode_alias {
             tokens.push(Token {
                 kind,
-                span: Span { start: i, end: i + 1 },
+                span: Span {
+                    start: i,
+                    end: i + 1,
+                },
             });
             i += 1;
             continue;
@@ -9869,17 +9919,17 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         let command_line = i + 1;
 
         if let Some(rest) = trimmed.strip_prefix("namespace ") {
-            namespace_stack.push(
-                parse_namespace_name(rest).map_err(|err| err.with_line(command_line))?,
-            );
+            namespace_stack
+                .push(parse_namespace_name(rest).map_err(|err| err.with_line(command_line))?);
             i += 1;
             continue;
         }
 
         if trimmed == "end" || trimmed.starts_with("end ") {
             let Some(opened) = namespace_stack.pop() else {
-                return Err(ParseError::new("`end` without an open namespace")
-                    .with_line(command_line));
+                return Err(
+                    ParseError::new("`end` without an open namespace").with_line(command_line)
+                );
             };
             if let Some(rest) = trimmed.strip_prefix("end ") {
                 let closed =
@@ -9899,7 +9949,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
             commands.push(located_command(
                 command_line,
                 Command::Import(
-                    parse_import_path(rest).map_err(|err| err.with_line(command_line))?,
+                    parse_import_decl(rest).map_err(|err| err.with_line(command_line))?,
                 ),
             ));
             i += 1;
@@ -10004,12 +10054,15 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 i += 1;
             }
             if ctors.is_empty() {
-                return Err(
-                    ParseError::new("data declaration needs at least one `| constructor` case")
-                        .with_line(command_line),
-                );
+                return Err(ParseError::new(
+                    "data declaration needs at least one `| constructor` case",
+                )
+                .with_line(command_line));
             }
-            commands.push(located_command(command_line, Command::Data(DataDecl { name, ctors })));
+            commands.push(located_command(
+                command_line,
+                Command::Data(DataDecl { name, ctors }),
+            ));
             continue;
         }
 
@@ -10172,10 +10225,10 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
     }
 
     if let Some(opened) = namespace_stack.last() {
-        return Err(ParseError::new(format!(
-            "unterminated namespace `{opened}`"
-        ))
-        .with_line(lines.len().max(1)));
+        return Err(
+            ParseError::new(format!("unterminated namespace `{opened}`"))
+                .with_line(lines.len().max(1)),
+        );
     }
 
     Ok(File { commands })
@@ -10223,28 +10276,50 @@ fn qualify_in_namespace(namespace_stack: &[Name], name: Name) -> Name {
     }
 }
 
-fn parse_import_path(rest: &str) -> Result<String, ParseError> {
-    let path = rest.trim();
-    if path.is_empty() {
+fn parse_import_decl(rest: &str) -> Result<ImportDecl, ParseError> {
+    let rest = rest.trim();
+    if rest.is_empty() {
         return Err(ParseError::new("import declaration needs a path"));
     }
 
-    if let Some(quoted) = path.strip_prefix('"') {
-        let Some(quoted) = quoted.strip_suffix('"') else {
+    let (path, trailing) = if let Some(after_open) = rest.strip_prefix('"') {
+        let Some(end_quote) = after_open.find('"') else {
             return Err(ParseError::new("quoted import path must end with `\"`"));
         };
+        let quoted = &after_open[..end_quote];
         if quoted.is_empty() {
             return Err(ParseError::new("import declaration needs a path"));
         }
-        return Ok(quoted.to_string());
-    }
+        (quoted.to_string(), after_open[end_quote + 1..].trim())
+    } else {
+        let split = rest
+            .char_indices()
+            .find(|(_, ch)| ch.is_whitespace())
+            .map(|(idx, _)| idx);
+        match split {
+            Some(idx) => (rest[..idx].to_string(), rest[idx..].trim()),
+            None => (rest.to_string(), ""),
+        }
+    };
 
-    if path.contains(char::is_whitespace) {
+    let alias = if trailing.is_empty() {
+        None
+    } else if let Some(alias) = trailing.strip_prefix("as ") {
+        let alias = alias.trim();
+        if alias.is_empty() {
+            return Err(ParseError::new("import alias needs a name"));
+        }
+        Some(parse_namespace_name(alias)?)
+    } else {
         return Err(ParseError::new(
-            "unquoted import paths cannot contain whitespace",
+            "unexpected text after import path; use `as name` for an alias",
         ));
+    };
+
+    if path.is_empty() {
+        return Err(ParseError::new("import declaration needs a path"));
     }
-    Ok(path.to_string())
+    Ok(ImportDecl { path, alias })
 }
 
 fn parse_theorem_header(header: &str) -> Result<(Name, Vec<Param>, Formula), ParseError> {
@@ -10540,10 +10615,10 @@ fn parse_tactic_lines(
                 let next = skip_empty_tactic_lines(lines, i);
                 if next >= lines.len() || !lines[next].text.trim().starts_with('|') {
                     if arms.is_empty() {
-                        return Err(
-                            ParseError::new("expected at least one `| constructor =>` case arm")
-                                .with_line(line_no),
-                        );
+                        return Err(ParseError::new(
+                            "expected at least one `| constructor =>` case arm",
+                        )
+                        .with_line(line_no));
                     }
                     // Do not consume trailing blank lines past the last arm.
                     break;
@@ -10553,7 +10628,6 @@ fn parse_tactic_lines(
                 let arm_indent = line_indent(&lines[i].text);
                 let (ctor, binders) = parse_induction_arm(lines[i].text.trim())
                     .map_err(|err| err.with_line(arm_line))?;
-                let ctor = qualify_in_namespace(namespace_stack, ctor);
                 i += 1;
                 let body_start = i;
                 let body_end = case_body_end(lines, i, arm_indent);
@@ -11953,9 +12027,7 @@ fn run_tactic_step(
                     let applied = Proof::ImpElim {
                         proof_imp: Box::new(Proof::ImpElim {
                             proof_imp: Box::new(lambda),
-                            proof_arg: Box::new(Proof::AndElimLeft(Box::new(
-                                proof_exists.clone(),
-                            ))),
+                            proof_arg: Box::new(Proof::AndElimLeft(Box::new(proof_exists.clone()))),
                         }),
                         proof_arg: Box::new(Proof::AndElimRight(Box::new(proof_exists))),
                     };
@@ -12411,7 +12483,9 @@ fn run_tactic_step(
                     let mut proof_arms = Vec::new();
                     let mut notes = Vec::new();
                     for (arm, ctor) in arms.iter().zip(data.ctors.iter()) {
-                        if arm.ctor != ctor.name {
+                        let arm_ctor =
+                            resolve_induction_arm_ctor(env, &goal.context, &arm.ctor);
+                        if arm_ctor != ctor.name {
                             return Err(TacticError::new(format!(
                                 "induction arm `{}` does not match constructor `{}`; arms must follow the declaration order",
                                 arm.ctor, ctor.name
@@ -12577,16 +12651,16 @@ fn run_tactic_step(
             formula,
             expr,
         } => {
-            ensure_intro_name_unused(&goal.context, name).map_err(|err| {
-                TacticError::new(err.message.replace("`intro`", "`have`"))
-            })?;
+            ensure_intro_name_unused(&goal.context, name)
+                .map_err(|err| TacticError::new(err.message.replace("`intro`", "`have`")))?;
             if let Some(formula) = formula {
-                let canonical = canonicalize_formula(env, &goal.context, formula).map_err(|err| {
-                    TacticError::new(format!(
-                        "have formula `{formula}` is not valid here: {}",
-                        err.message
-                    ))
-                })?;
+                let canonical =
+                    canonicalize_formula(env, &goal.context, formula).map_err(|err| {
+                        TacticError::new(format!(
+                            "have formula `{formula}` is not valid here: {}",
+                            err.message
+                        ))
+                    })?;
                 validate_formula(env, &goal.context, &canonical).map_err(|err| {
                     TacticError::new(format!(
                         "have formula `{formula}` is not valid here: {}",
@@ -12773,9 +12847,7 @@ fn collect_simp_rules(
         let Some(formula) = ctx.lookup(name) else {
             if let Some(matches) = env.ambiguous_theorem_names(name) {
                 return Err(TacticError::new(ambiguous_reference_message(
-                    "theorem",
-                    name,
-                    &matches,
+                    "theorem", name, &matches,
                 )));
             }
             return Err(TacticError::new(format!(
@@ -13535,8 +13607,7 @@ fn apply_plan_for_goal(
     let normalized_target =
         normalize_formula_defs(env, ctx, target).map_err(|err| TacticError::new(err.message))?;
 
-    let (forall_vars, normalized_premises, cursor) =
-        decompose_apply_formula(&normalized_formula);
+    let (forall_vars, normalized_premises, cursor) = decompose_apply_formula(&normalized_formula);
     let (raw_forall_vars, raw_premises, raw_cursor) = decompose_apply_formula(formula);
     let goal_premises = if raw_forall_vars.len() == forall_vars.len()
         && raw_premises.len() == normalized_premises.len()
@@ -13713,8 +13784,8 @@ fn infer_schema_subst_for_formula(
     {
         let normalized_pattern = normalize_formula_defs(env, pattern_ctx, &pattern)
             .map_err(|err| TacticError::new(err.message))?;
-        let normalized_target =
-            normalize_formula_defs(env, ctx, target).map_err(|err| TacticError::new(err.message))?;
+        let normalized_target = normalize_formula_defs(env, ctx, target)
+            .map_err(|err| TacticError::new(err.message))?;
         let attempts = [
             (pattern.clone(), target.clone()),
             (normalized_pattern.clone(), normalized_target.clone()),
@@ -15369,6 +15440,131 @@ theorem use_imported_id (P : Prop) : P -> P := by
     }
 
     #[test]
+    fn aliased_virtual_import_exposes_qualified_names() {
+        let imports = vec![VirtualFile {
+            path: "lib.ctea".to_string(),
+            source: r#"
+mode constructive
+
+sort Person
+const alice : Person
+pred Happy(Person)
+axiom all_happy (x : Person) : Happy(x)
+
+theorem happy_alice : Happy(alice) := by
+  exact all_happy alice
+"#
+            .to_string(),
+        }];
+        let result = check_file_with_imports(
+            r#"
+import lib.ctea as people
+
+mode constructive
+
+theorem use_imported : people.Happy(people.alice) := by
+  exact people.happy_alice
+"#,
+            &imports,
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            result.diagnostics
+        );
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "people.happy_alice" && theorem.is_imported));
+        assert!(!result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "happy_alice"));
+    }
+
+    #[test]
+    fn aliased_import_can_coexist_with_unaliased_same_file() {
+        let imports = vec![VirtualFile {
+            path: "lib.ctea".to_string(),
+            source: r#"
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#
+            .to_string(),
+        }];
+        let result = check_file_with_imports(
+            r#"
+import lib.ctea
+import lib.ctea as aliased
+
+mode constructive
+
+theorem use_both (P : Prop) : P -> P := by
+  intro h
+  have h2 := id h
+  exact aliased.id h2
+"#,
+            &imports,
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            result.diagnostics
+        );
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "id" && theorem.is_imported));
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "aliased.id" && theorem.is_imported));
+    }
+
+    #[test]
+    fn aliased_import_preserves_nat_induction_arm_names() {
+        let imports = vec![VirtualFile {
+            path: "natproof.ctea".to_string(),
+            source: r#"
+mode constructive
+
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      refl
+"#
+            .to_string(),
+        }];
+        let result = check_file_with_imports(
+            r#"
+import natproof.ctea as natproof
+
+mode constructive
+
+theorem use_imported : add(0, 0) = 0 := by
+  exact natproof.add_zero_right 0
+"#,
+            &imports,
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            result.diagnostics
+        );
+        assert!(result
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "natproof.add_zero_right" && theorem.is_imported));
+    }
+
+    #[test]
     fn imports_mark_imported_and_root_theorems() {
         let result = check_path_ok("examples/imports.ctea");
         let imported = result
@@ -15598,7 +15794,10 @@ theorem honest (P : Prop) : P -> P := by
             .iter()
             .find(|t| t.name == "uses_hole")
             .unwrap();
-        assert!(uses_hole.uses_sorry, "sorry should taint dependent theorems");
+        assert!(
+            uses_hole.uses_sorry,
+            "sorry should taint dependent theorems"
+        );
         let honest = result.theorems.iter().find(|t| t.name == "honest").unwrap();
         assert!(!honest.uses_sorry);
     }
@@ -16793,6 +16992,28 @@ theorem outside_scoped_statement : q.Happy(q.alice) := by
 
 theorem outside_len_nil : q.len(q.nil) = 0 := by
   exact q.len_nil
+"#,
+        );
+    }
+
+    #[test]
+    fn namespace_blocks_keep_builtin_nat_induction_arm_names() {
+        check_ok(
+            r#"
+mode constructive
+
+namespace q
+
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  induction n with
+  | zero =>
+      simp
+      refl
+  | succ k ih =>
+      simp
+      refl
+
+end q
 "#,
         );
     }
