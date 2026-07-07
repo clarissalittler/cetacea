@@ -476,6 +476,25 @@ axiom set_ext
   : (forall x : T, x in A <-> x in B) -> A = B
 ```
 
+## Qualified Top-Level Names
+
+Top-level declarations and references may use dot-qualified names:
+
+```text
+theorem nat.add_zero_right (n : Nat) : add(n, 0) = n := by
+  simp
+  refl
+
+theorem use_nat_name (n : Nat) : add(n, 0) = n := by
+  exact nat.add_zero_right
+```
+
+The same form works for sorts, constants, functions, predicates,
+definitions, data constructors, `unfold`, `rewrite`, and `simp [name]`.
+Local binders and hypotheses remain ordinary short names. Namespace blocks
+and import aliases are not implemented yet, so imports still load declarations
+into one environment.
+
 ## Definitions
 
 Formula definitions are transparent. They can be unfolded explicitly with
@@ -1554,7 +1573,8 @@ theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
 
 Cetacea is intentionally small. Important current limitations:
 
-- There are no namespaces or qualified imports.
+- Dot-qualified top-level names are accepted, but there are no namespace blocks
+  or qualified import aliases yet.
 - Imported declarations enter one global environment.
 - The parser is line-oriented and intentionally simple.
 - Parse diagnostics carry line-local token spans where possible, but checked

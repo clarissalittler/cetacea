@@ -140,6 +140,8 @@ loaded once.
   arity, inferred type parameters, and proposition/predicate parameters
 - validation for primitive recursive definitions, including per-constructor
   case coverage and binder counts
+- dot-qualified top-level declaration and reference names, such as
+  `nat.add_comm`, while namespace blocks and import aliases remain future work
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
@@ -200,4 +202,5 @@ loaded once.
 3. Cardinality and counting support for the combinatorics side of a discrete
    math course.
 4. Decision procedures for modular arithmetic goals.
-5. Namespaces and qualified imports.
+5. Namespace blocks, qualified imports, and standard-library namespace
+   migration.

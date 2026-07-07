@@ -113,10 +113,12 @@ stay meaningful.
     to the tactic line; `rewrite all` remains available when every
     occurrence should change.
 
-18. **Parked: no namespaces.** The book still cannot let students prove
-    `add_comm` or `length_append` under their real names without
-    colliding with the prelude; hence the pervasive `_demo` suffix
-    convention. The design note in
+18. **Partially resolved: no namespaces.** Dot-qualified top-level names
+    now parse and resolve, but there are still no namespace blocks,
+    import aliases, ambiguity diagnostics, or standard-library namespace
+    migration. The book still cannot let students prove `add_comm` or
+    `length_append` under their real names without colliding with the
+    prelude; hence the pervasive `_demo` suffix convention. The design note in
     [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the parser,
     environment, import, and proof-projection work needed before this is
     scheduled.

@@ -8217,6 +8217,15 @@ impl Tokens {
         }
     }
 
+    fn parse_qualified_ident(&mut self) -> Result<String, ParseError> {
+        let mut name = self.expect_ident()?;
+        while self.eat_sym(".") {
+            name.push('.');
+            name.push_str(&self.expect_ident()?);
+        }
+        Ok(name)
+    }
+
     fn expect_keyword(&mut self, keyword: &str) -> Result<(), ParseError> {
         if self.eat_ident(keyword) {
             Ok(())
@@ -8249,7 +8258,7 @@ impl Tokens {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
-        let name = self.expect_ident()?;
+        let name = self.parse_qualified_ident()?;
         match name.as_str() {
             "Prop" | "Type" => Err(ParseError::new(format!(
                 "`{name}` is not a first-order type"
@@ -8349,7 +8358,7 @@ impl Tokens {
             }
             return Ok(finite_set_literal_term(elems));
         }
-        let name = self.expect_ident()?;
+        let name = self.parse_qualified_ident()?;
         if self.eat_sym("(") {
             if name == "empty" || name == "univ" {
                 let ty = self.parse_type()?;
@@ -9078,7 +9087,7 @@ fn parse_import_path(rest: &str) -> Result<String, ParseError> {
 fn parse_theorem_header(header: &str) -> Result<(Name, Vec<Param>, Formula), ParseError> {
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("theorem")?;
-    let name = tokens.expect_ident()?;
+    let name = tokens.parse_qualified_ident()?;
     let params = parse_decl_params(&mut tokens)?;
 
     tokens.expect_sym(":")?;
@@ -9090,7 +9099,7 @@ fn parse_theorem_header(header: &str) -> Result<(Name, Vec<Param>, Formula), Par
 fn parse_axiom_header(header: &str) -> Result<(Name, Vec<Param>, Formula), ParseError> {
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("axiom")?;
-    let name = tokens.expect_ident()?;
+    let name = tokens.parse_qualified_ident()?;
     let params = parse_decl_params(&mut tokens)?;
     tokens.expect_sym(":")?;
     let statement = tokens.parse_formula()?;
@@ -9101,7 +9110,7 @@ fn parse_axiom_header(header: &str) -> Result<(Name, Vec<Param>, Formula), Parse
 fn parse_def_header(header: &str) -> Result<(Name, Vec<Param>, DefResult), ParseError> {
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("def")?;
-    let name = tokens.expect_ident()?;
+    let name = tokens.parse_qualified_ident()?;
     let params = parse_decl_params(&mut tokens)?;
     tokens.expect_sym(":")?;
     let result = if tokens.eat_ident("Prop") {
@@ -9118,7 +9127,7 @@ type DefrecHeader = (Name, Name, Type, Vec<(Name, Type)>, Type);
 fn parse_defrec_header(header: &str) -> Result<DefrecHeader, ParseError> {
     let mut tokens = Tokens::new(header)?;
     tokens.expect_keyword("defrec")?;
-    let name = tokens.expect_ident()?;
+    let name = tokens.parse_qualified_ident()?;
     tokens.expect_sym("(")?;
     let param = tokens.expect_ident()?;
     tokens.expect_sym(":")?;
@@ -9153,7 +9162,7 @@ fn parse_data_ctor_arm(line: &str) -> Result<DataCtor, ParseError> {
         ));
     };
     let mut tokens = Tokens::new(rest.trim())?;
-    let name = tokens.expect_ident()?;
+    let name = tokens.parse_qualified_ident()?;
     let mut arg_types = Vec::new();
     if tokens.eat_sym("(") {
         loop {
@@ -9254,7 +9263,7 @@ fn parse_term_str(input: &str) -> Result<Term, ParseError> {
 
 fn parse_pred_decl(input: &str) -> Result<(Name, Vec<Type>), ParseError> {
     let mut tokens = Tokens::new(input)?;
-    let name = tokens.expect_ident()?;
+    let name = tokens.parse_qualified_ident()?;
     tokens.expect_sym("(")?;
     let mut args = Vec::new();
     if !tokens.eat_sym(")") {
@@ -9763,17 +9772,10 @@ fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
             Some(brace_start) => (&tokens[0][..brace_start], Some(&tokens[0][brace_start..])),
             None => (tokens[0].as_str(), None),
         };
-        let mut parts = name_part.split('.');
-        let base = parts
-            .next()
-            .ok_or_else(|| ParseError::new("expected proof expression"))?
-            .trim()
-            .to_string();
+        let (base, mut steps) = split_proof_base_and_projections(name_part)?;
         if base.is_empty() {
             return Err(ParseError::new("expected proof expression"));
         }
-        let mut steps = Vec::new();
-        push_projection_parts(parts, &mut steps)?;
 
         // Explicit theorem arguments: either attached to the name token or
         // the next token, but only directly after the bare theorem name.
@@ -9868,6 +9870,32 @@ fn push_projection_parts<'a>(
         }
     }
     Ok(())
+}
+
+fn split_proof_base_and_projections(
+    name_part: &str,
+) -> Result<(Name, Vec<ProofStep>), ParseError> {
+    let mut parts: Vec<&str> = name_part.split('.').collect();
+    if parts.iter().any(|part| part.trim().is_empty()) {
+        return Err(ParseError::new("expected identifier in proof expression"));
+    }
+
+    let mut projections = Vec::new();
+    while let Some(part) = parts.last().copied() {
+        let projection = match part {
+            "left" => Projection::Left,
+            "right" => Projection::Right,
+            _ => break,
+        };
+        parts.pop();
+        projections.push(ProofStep::Projection(projection));
+    }
+    projections.reverse();
+
+    if parts.is_empty() {
+        return Err(ParseError::new("proof projection needs a base expression"));
+    }
+    Ok((parts.join("."), projections))
 }
 
 fn append_projection_suffix(expr: &mut ProofExpr, suffix: &str) -> Result<(), ParseError> {
@@ -15418,6 +15446,59 @@ theorem def_intro : Happy(mother(alice)) -> HappyMother(alice) := by
     }
 
     #[test]
+    fn qualified_theorem_names_preserve_projection_syntax() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem ns.id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem use_qualified (P : Prop) : P -> P := by
+  intro h
+  exact ns.id h
+
+theorem projection_still_works (P Q : Prop) : P /\ Q -> P := by
+  intro h
+  exact h.left
+"#,
+        );
+    }
+
+    #[test]
+    fn qualified_top_level_names_work_in_terms_formulas_unfold_and_simp() {
+        check_ok(
+            r#"
+mode constructive
+
+sort q.Person
+const q.alice : q.Person
+func q.mother : q.Person -> q.Person
+pred q.Happy(q.Person)
+
+def q.HappyMother (x : q.Person) : Prop := q.Happy(q.mother(x))
+
+axiom q.mother_id (x : q.Person) : q.mother(x) = x
+
+theorem q.def_intro : q.Happy(q.mother(q.alice)) -> q.HappyMother(q.alice) := by
+  intro h
+  unfold q.HappyMother
+  exact h
+
+theorem q.simp_rule : q.Happy(q.alice) -> q.Happy(q.mother(q.alice)) := by
+  intro h
+  simp [q.mother_id]
+  exact h
+"#,
+        );
+    }
+
+    #[test]
     fn formula_definition_accepts_prop_and_predicate_parameters() {
         check_ok(
             r#"
@@ -16433,6 +16514,33 @@ theorem len_snoc_one (l : NatList) : len(snoc_one(l)) = succ(len(l)) := by
   | cons h t ih =>
       simp
       rewrite ih
+      refl
+"#,
+        );
+    }
+
+    #[test]
+    fn qualified_data_constructors_work_in_defrec_and_induction() {
+        check_ok(
+            r#"
+mode constructive
+
+data q.List
+| q.nil
+| q.cons(Nat, q.List)
+
+defrec q.len (l : q.List) : Nat
+| q.nil => 0
+| q.cons h t rec => succ(rec)
+
+theorem q.len_nil : q.len(q.nil) = 0 := by
+  refl
+
+theorem q.len_self (l : q.List) : q.len(l) = q.len(l) := by
+  induction l with
+  | q.nil =>
+      refl
+  | q.cons h t ih =>
       refl
 "#,
         );

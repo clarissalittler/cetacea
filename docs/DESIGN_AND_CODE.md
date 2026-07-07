@@ -374,7 +374,8 @@ pub struct Env {
 - theorem schema predicate variables
 
 The environment is global for a checking session. Imports add declarations to
-the same environment as the root file. There are no namespaces yet.
+the same environment as the root file. Dot-qualified top-level names are
+accepted, but namespace blocks and import aliases are not implemented yet.
 
 The context is local to a theorem proof or definition body. It is built from
 the declaration parameters and extended by tactics such as `intro`, `cases`,
@@ -1010,7 +1011,7 @@ Cetacea is not trying to be Lean, Coq, or Agda. The implementation favors:
 
 That explains several current choices:
 
-- no namespaces yet
+- dot-qualified top-level names, but no namespace blocks or import aliases yet
 - no tactic language expressions
 - no theorem-driven simplifier yet
 - no dependent type theory
@@ -1119,7 +1120,8 @@ The existing `Span` field in `Diagnostic` is a placeholder for this direction.
 Important limitations to account for when extending the system:
 
 - Imports are global and unqualified.
-- There are no namespaces.
+- Dot-qualified top-level names are accepted, but there are no namespace
+  blocks or import aliases yet.
 - Namespace implementation should follow
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md); qualified names affect
   the parser, environment lookup, imports, theorem search, and proof

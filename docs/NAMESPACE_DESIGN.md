@@ -150,10 +150,11 @@ subject to the same ambiguity rules.
 
 ## Migration Plan
 
-1. Add `QualifiedName`, parser helpers, and resolver helpers while preserving
-   existing unqualified behavior.
-2. Allow qualified declaration names and qualified references without adding
-   `namespace` blocks.
+1. Done: allow dot-qualified declaration names and qualified references in the
+   current single global environment, while preserving projection syntax such
+   as `h.left`.
+2. Add `QualifiedName` and resolver helpers while preserving existing
+   unqualified behavior.
 3. Add `namespace ...` / `end ...` blocks as syntax sugar for declaration
    prefixes.
 4. Add import aliases and ambiguity diagnostics.
