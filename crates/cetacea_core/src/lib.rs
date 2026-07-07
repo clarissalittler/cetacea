@@ -10949,6 +10949,13 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         let (binding, expr) = match rest.split_once(":=") {
             Some((binding, expr)) => {
                 let expr = expr.trim();
+                if expr == "by" || expr.starts_with("by ") || expr.starts_with("by\t") {
+                    return Err(ParseError::new(
+                        "have does not take a `:= by` tactic block; use the subgoal form \
+                         `have name : formula` and prove it with the following indented tactics, \
+                         or supply a single proof expression with `have name : formula := proof`",
+                    ));
+                }
                 let offset = line.find(expr).unwrap_or(0);
                 (
                     binding.trim(),
@@ -18844,6 +18851,22 @@ theorem chain (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
   apply hqr
   exact hq
 "#,
+        );
+    }
+
+    #[test]
+    fn have_with_tactic_block_reports_clear_error() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem t (P : Prop) : P -> P := by
+  intro h
+  have hp : P := by
+    exact h
+  exact hp
+"#,
+            "have does not take a `:= by` tactic block",
         );
     }
 

@@ -151,14 +151,15 @@ theorems check — but three things stood out.
     `Reflexive`/`Symmetric`/`Transitive`/`Euclidean` goals with no
     explicit `unfold`.
 
-20. **Documented: `have h : P := by ...` is not a thing.** A stated
+20. **Improved: `have h : P := by ...` gives a clear error.** A stated
     `have` either opens a subgoal (`have h : P`, discharged by the
     following indented tactics) or takes a single proof expression
     (`have h : P := h.left`). The mixed form `have h : P := by <tactics>`
-    fails with the misleading `unknown hypothesis \`by\``. The barber
-    proof wanted an inline tactic-proved `not Shaves(b, b)` lemma and had
-    to use the subgoal form. A clearer parse error, or supporting the
-    `:= by` form, would remove a genuine stumble.
+    used to fail with the misleading `unknown hypothesis \`by\``; it now
+    reports "have does not take a `:= by` tactic block" and names both
+    working forms. The barber proof wanted an inline tactic-proved
+    `not Shaves(b, b)` lemma and used the subgoal form. Supporting the
+    `:= by` block itself remains a possible future ergonomic win.
 
 21. **Works well: countermodels catch invalid quantifier statements.**
     The invalid converse of the quantifier swap,

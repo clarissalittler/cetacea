@@ -268,9 +268,10 @@ intro hs
 ...
 ```
 
-The error message (`unknown hypothesis \`by\``) does not point at the real
-problem, so this is worth flagging to students who reach for a nested tactic
-proof. It came up writing the barber-paradox proof.
+This came up writing the barber-paradox proof. The diagnostic now names the
+real problem — "have does not take a `:= by` tactic block; use the subgoal
+form ..." — instead of the old baffling `unknown hypothesis \`by\``. Supporting
+an inline `:= by` block outright is still a possible future ergonomic win.
 
 ### Disjunction case arms are `left`/`right`, not `inl`/`inr`
 
