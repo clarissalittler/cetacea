@@ -8,14 +8,14 @@ test. Friction item numbers refer to FRICTION.md.
 
 ## Status
 
-- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5.1, and Phase 5.2. The safety net is in CI; the
+- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, Phase 5.1, Phase 5.2, and Phase 5.3. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
   def-name arguments, nested lambda propagation, mixed-type lambdas, and
   book debt repayment, def-aware matching, and annotation-driven `have`
   inference, positional theorem term arguments, arithmetic countermodels,
   first-order countermodels, decimal numeral display, and no-op `simp`
-  warnings are implemented.
-- Next: Phase 5.3, rewrite directions.
+  warnings, and explicit rewrite direction docs are implemented.
+- Next: Phase 5.4, occurrence-selection transparency.
 
 ## Findings from triage
 
@@ -193,6 +193,7 @@ bare `rewrite` would silently re-orient every existing proof).
 Document all three forms in USAGE.md — explicitly stating `<-` ≡ bare ≡
 right-to-left — and adopt explicit arrows as house style in the book
 with one clear warning box for Lean-habituated readers.
+Status: done.
 **5.4 Occurrence-selection transparency (item 17).** When `rewrite`
 has several candidate occurrences, note which was rewritten
 ("rewrote the first occurrence of `0`") so mistakes localize to the

@@ -76,13 +76,13 @@ theorem double_is_add (n : Nat) : double(n) = add(n, n) := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl
 ```
 
 In the `succ` arm, `simp` computes `double(succ(k))` to
 `succ(succ(double(k)))` and `add(succ(k), succ(k))` to
-`succ(succ(add(k, k)))`, and `rewrite ih` bridges the gap. Recursion
+`succ(succ(add(k, k)))`, and `rewrite <- ih` bridges the gap. Recursion
 and induction are twins: one builds along the structure, the other
 climbs it.
 

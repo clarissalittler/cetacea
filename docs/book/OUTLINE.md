@@ -84,8 +84,8 @@ with an equation, and the library lemmas `eq_symm` and `eq_trans`, then
 practices equational reasoning as chains of rewrites — the formal
 version of the "= ... = ..." calculations students already do.
 
-**Cetacea features:** `=`, `refl`, `rewrite` / `rewrite ->` /
-`rewrite all`, `simp [lemma]`, `simp at h`, `std/eq.ctea`
+**Cetacea features:** `=`, `refl`, `rewrite <-` / `rewrite ->` /
+`rewrite all <-`, `simp [lemma]`, `simp at h`, `std/eq.ctea`
 (`eq_symm`, `eq_trans`, `congr_pred`, substitution lemmas), Nat
 computation (`add`, `mul` simplification).
 
@@ -149,7 +149,7 @@ first proofs in the book where the statement is obvious and the proof
 is genuinely work.
 
 **Cetacea features:** `Nat`, `induction ... with | zero | succ k ih`,
-`simp` for the `add`/`mul` equations, `rewrite ih`, `std/nat.ctea`,
+`simp` for the `add`/`mul` equations, `rewrite <- ih`, `std/nat.ctea`,
 the "induction binder would shadow" and hypothesis-dependence
 restrictions.
 

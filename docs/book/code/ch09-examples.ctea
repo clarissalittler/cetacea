@@ -40,5 +40,5 @@ theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl

@@ -26,7 +26,7 @@ theorem ex8_2 : SingleValued(fun x y : Nat => mul(x, x) = y) := by
   intro y2
   intro h1
   intro h2
-  rewrite h1
+  rewrite <- h1
   exact h2
 
 -- Exercise 8.3. simp computes add(x, 2) to succ(succ(x)), and then

@@ -3732,7 +3732,7 @@ fn tactic_label(tactic: &Tactic) -> String {
         } => {
             let all = if *all { "all " } else { "" };
             let direction = match direction {
-                RewriteDirection::Backward => "",
+                RewriteDirection::Backward => "<- ",
                 RewriteDirection::Forward => "-> ",
             };
             format!("rewrite {all}{direction}{}", proof_expr_label(expr))
@@ -15095,6 +15095,27 @@ theorem rewrite_predicate
     }
 
     #[test]
+    fn rewrite_backward_arrow_matches_bare_rewrite() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+theorem rewrite_backward
+  : alice = mother(alice) -> Happy(alice) -> Happy(mother(alice)) := by
+  intro h
+  intro ha
+  rewrite <- h
+  exact ha
+"#,
+        );
+    }
+
+    #[test]
     fn rewrite_proves_equality_goal() {
         check_ok(
             r#"
@@ -15176,6 +15197,29 @@ theorem rewrite_all_backward
   intro h
   intro hr
   rewrite all h
+  exact hr
+"#,
+        );
+    }
+
+    #[test]
+    fn rewrite_all_backward_arrow_rewrites_multiple_occurrences() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Related(Person, Person)
+
+theorem rewrite_all_backward_arrow
+  : alice = mother(alice)
+    -> Related(alice, alice)
+    -> Related(mother(alice), mother(alice)) := by
+  intro h
+  intro hr
+  rewrite all <- h
   exact hr
 "#,
         );

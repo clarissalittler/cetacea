@@ -131,29 +131,36 @@ and `exact hs` closes it. One substitution, exactly what you'd do on
 paper — except the checker made sure you substituted a thing that's
 actually equal.
 
-The arrow matters. **Bare `rewrite h` goes the other way**: it hunts
-for the equation's *right* side in the goal and replaces it with the
-left side.
+The arrow matters. **`rewrite <- h` goes the other way**: it hunts for
+the equation's *right* side in the goal and replaces it with the left
+side.
 
 ```text
 theorem secret_identity_back
   : clark = superman -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hc
-  rewrite h
+  rewrite <- h
   exact hc
 ```
 
 Here the goal `Flies(superman)` contains the equation's right side, so
-bare `rewrite h` turns it back into `Flies(clark)`. A useful way to
+`rewrite <- h` turns it back into `Flies(clark)`. A useful way to
 keep the two straight: **look at your goal, find which side of the
 equation appears in it, and pick the form that hunts for that side** —
-`->` hunts left sides, bare hunts right sides. Getting this backwards
-is this chapter's Mistake 1, and the error message (Section 5.8) tells
-you precisely which term it went looking for and couldn't find.
+`->` hunts left sides, `<-` hunts right sides.
+
+**Warning for Lean/Rocq readers.** Cetacea also accepts bare
+`rewrite h` as a legacy shorthand for `rewrite <- h`, not for
+`rewrite -> h`. This book uses explicit arrows from here on: write
+`rewrite -> h` for left-to-right and `rewrite <- h` for right-to-left.
+Getting this backwards is this chapter's Mistake 1, and the error
+message (Section 5.8) tells you precisely which term it went looking
+for and couldn't find.
 
 One more variant. `rewrite` replaces *one* occurrence at a time
-(handy for precision); `rewrite all` sweeps the whole goal:
+(handy for precision); `rewrite all <-` sweeps the whole goal in the
+right-to-left direction:
 
 ```text
 theorem rewrite_all_demo
@@ -162,7 +169,7 @@ theorem rewrite_all_demo
     -> Flies(superman) /\ Reporter(superman) := by
   intro h
   intro hc
-  rewrite all h
+  rewrite all <- h
   exact hc
 ```
 
@@ -210,7 +217,7 @@ theorem rewrite_symm_inline
   : superman = clark -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hc
-  rewrite eq_symm h
+  rewrite <- eq_symm h
   exact hc
 ```
 
@@ -367,7 +374,8 @@ fail, as always.
 
 **Mistake 1: rewriting against the grain.** The proof holds
 `h : clark = superman` and a goal about `clark`, and reaches for bare
-`rewrite h` — which hunts for the equation's *right* side:
+`rewrite h` — legacy shorthand for `rewrite <- h`, which hunts for the
+equation's *right* side:
 
 ```text
 error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:21: theorem `wrong_direction` failed: rewrite could not find `superman` in goal `Flies(clark)`
@@ -454,7 +462,7 @@ the `sorry` flags.
   Reporter(clark)` — substitution into a predicate. Check which side
   of the equation your goal mentions before picking a direction.
 - **Exercise 5.6** the same, but with `Flies(...) /\ Reporter(...)` on
-  both sides — one `rewrite all` handles it.
+  both sides — one explicit `rewrite all <-` handles it.
 - **Exercise 5.7** `superman = kal_el -> mother(superman) =
   mother(kal_el)` — equal people, equal mothers: the rewrite-then-refl
   rhythm.

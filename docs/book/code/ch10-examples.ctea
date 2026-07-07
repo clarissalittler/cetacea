@@ -28,7 +28,7 @@ theorem double_is_add (n : Nat) : double(n) = add(n, n) := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl
 
 -- Section 10.2: summing 1 + 2 + ... + n.

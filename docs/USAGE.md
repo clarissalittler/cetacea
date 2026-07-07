@@ -828,27 +828,41 @@ see the simplified goal, but it is no longer required for computation.
 
 ### `rewrite`
 
-Use `rewrite h` when `h` proves an equality and the target contains the right
-side of that equality. The tactic creates a subgoal where one occurrence has
-been rewritten back to the left side.
+Use `rewrite <- h` when `h` proves an equality and the target contains the
+right side of that equality. The tactic creates a subgoal where one occurrence
+has been rewritten back to the left side.
 
 ```text
 theorem rewrite_happy
   : alice = mother(alice) -> Happy(alice) -> Happy(mother(alice)) := by
   intro h
   intro ha
-  rewrite h
+  rewrite <- h
   exact ha
 ```
 
 Here the target is `Happy(mother(alice))`, and `h` is
-`alice = mother(alice)`. `rewrite h` changes the subgoal to `Happy(alice)`.
-Use `rewrite -> h` for the opposite direction, where the target contains the
-left side and the new subgoal contains the right side.
+`alice = mother(alice)`. `rewrite <- h` changes the subgoal to
+`Happy(alice)`. Bare `rewrite h` is accepted as a legacy shorthand for the
+same right-to-left direction.
 
-Use `rewrite all h` to rewrite every matching occurrence in the target. To
-keep this form finite and predictable, Cetacea rejects `rewrite all` when the
-replacement would introduce new occurrences of the term being rewritten.
+Use `rewrite -> h` for the opposite direction, where the target contains the
+left side and the new subgoal contains the right side. In short:
+
+```text
+rewrite <- h   -- right-to-left
+rewrite h      -- right-to-left, same as <-
+rewrite -> h   -- left-to-right
+```
+
+If you are used to Lean or Rocq, do not infer Cetacea's bare direction from
+those systems: in Cetacea, bare `rewrite h` is not the same as `rewrite -> h`.
+
+Use `rewrite all <- h` or `rewrite all -> h` to rewrite every matching
+occurrence in the target. To keep this form finite and predictable, Cetacea
+rejects `rewrite all` when the replacement would introduce new occurrences of
+the term being rewritten. Bare `rewrite all h` is accepted as shorthand for
+`rewrite all <- h`.
 
 For theorems with parameters, explicit instantiation is sometimes needed:
 
@@ -860,7 +874,7 @@ Compound proof expressions are allowed, so equality lemmas can be applied
 inline:
 
 ```text
-rewrite eq_symm h
+rewrite <- eq_symm h
 ```
 
 ### `unfold`

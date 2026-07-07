@@ -209,7 +209,7 @@ theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl
 ```
 
@@ -232,7 +232,7 @@ ih : add(k, m) = add(m, k)  |-  succ(add(k, m)) = succ(add(m, k))
 
 So close! The two sides differ only in that one says `add(k, m)` where
 the other says `add(m, k)` — and `ih` says those are *equal*. This is
-Chapter 5's move: `rewrite ih` finds the right-hand side of `ih` in
+Chapter 5's move: `rewrite <- ih` finds the right-hand side of `ih` in
 the goal — the `add(m, k)` — and rewrites it back to `add(k, m)`,
 leaving `succ(add(k, m)) = succ(add(k, m))`. `refl`. The ladder is
 climbed: computation does the bookkeeping at each rung, and the
@@ -266,7 +266,7 @@ side by side — the error *is* the
 lesson. What you hold is the claim at `k`; what you owe is the claim
 at `succ(k)`. They are one rung apart, and the whole job of the step
 case is to build that rung (here: `simp` to expose the `succ`s, then
-`rewrite ih`). If `exact ih` ever closes a step case immediately,
+`rewrite <- ih`). If `exact ih` ever closes a step case immediately,
 either the statement didn't depend on `n` at all, or something is
 wrong.
 

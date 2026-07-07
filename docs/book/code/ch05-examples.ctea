@@ -45,13 +45,14 @@ theorem secret_identity_used
   rewrite -> h
   exact hs
 
--- Bare `rewrite h` goes the other way: it finds the RIGHT side of h in
--- the goal and replaces it with the left side.
+-- `rewrite <- h` goes the other way: it finds the RIGHT side of h in
+-- the goal and replaces it with the left side. Bare `rewrite h` is the
+-- same direction, but the explicit arrow is book style.
 theorem secret_identity_back
   : clark = superman -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hc
-  rewrite h
+  rewrite <- h
   exact hc
 
 -- Section 5.3: rewrite all rewrites every occurrence at once.
@@ -61,7 +62,7 @@ theorem rewrite_all_demo
     -> Flies(superman) /\ Reporter(superman) := by
   intro h
   intro hc
-  rewrite all h
+  rewrite all <- h
   exact hc
 
 -- Section 5.4: symmetry and transitivity are theorems, not new rules.
@@ -80,7 +81,7 @@ theorem rewrite_symm_inline
   : superman = clark -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hc
-  rewrite eq_symm h
+  rewrite <- eq_symm h
   exact hc
 
 -- Section 5.5: have names a waypoint — the := form takes a proof directly.

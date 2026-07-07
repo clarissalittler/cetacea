@@ -38,7 +38,7 @@ theorem ex10_3 (n : Nat) : triple(n) = add(n, double(n)) := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl
 
 -- Exercise 10.4. Induction on n -- replicate recurses on its first
@@ -49,7 +49,7 @@ theorem ex10_4 (n : Nat) (x : Nat) : length(replicate(n, x)) = n := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl
 
 -- Exercise 10.5. No axioms: the accepted line is bare.

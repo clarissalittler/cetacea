@@ -71,12 +71,11 @@ stay meaningful.
     goal. They leave the proof state unchanged and report a warning note
     such as "this `simp` did nothing; consider deleting it".
 
-11. **`rewrite` direction conventions are non-standard and partly
-    undocumented.** Bare `rewrite h` rewrites right-to-left,
-    `rewrite -> h` left-to-right, and `rewrite <- h` is an undocumented
-    synonym for *bare* rewrite rather than the opposite of `->`. Anyone
-    coming from Lean/Rocq will guess wrong. Chapter 5 teaches only bare
-    and `->` and makes the confusion a worked mistake.
+11. **Resolved: rewrite directions are explicit in docs and book
+    style.** `rewrite <- h` and bare `rewrite h` are documented as the
+    same right-to-left direction, while `rewrite -> h` is left-to-right.
+    Chapter 5 now warns Lean/Rocq readers directly, and normal book
+    examples use explicit arrows.
 
 12. **`strong_induction`'s failure doesn't teach its fix.** Applying it
     without `{P := fun m : Nat => ...}` produces a correct but unhelpful

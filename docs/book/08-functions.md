@@ -110,13 +110,13 @@ theorem mother_graph_single_valued
   intro y2
   intro h1
   intro h2
-  rewrite h1
+  rewrite <- h1
   exact h2
 ```
 
 "At most one": we hold `h1 : mother(x) = y1` and `h2 : mother(x) = y2`
-and owe `y1 = y2`. Bare `rewrite h1` — hunt the goal for `h1`'s right
-side, `y1`, and fold it back to `mother(x)` — leaves
+and owe `y1 = y2`. `rewrite <- h1` hunts the goal for `h1`'s right
+side, `y1`, and folds it back to `mother(x)`, leaving
 `mother(x) = y2`, which is `h2`. Both claimed outputs collapse into
 the term they came from.
 

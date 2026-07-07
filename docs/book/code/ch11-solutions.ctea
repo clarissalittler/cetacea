@@ -51,7 +51,7 @@ theorem ex11_3 (l1 : List) (l2 : List)
   | cons h t ih =>
       simp
       rewrite -> ih
-      rewrite add_assoc {n := h; m := sum(t); k := sum(l2)}
+      rewrite <- add_assoc {n := h; m := sum(t); k := sum(l2)}
       refl
 
 -- Exercise 11.4

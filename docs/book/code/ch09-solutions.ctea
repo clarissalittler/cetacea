@@ -54,5 +54,5 @@ theorem ex9_6 (n m p : Nat) : add(add(n, m), p) = add(n, add(m, p)) := by
       refl
   | succ k ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl

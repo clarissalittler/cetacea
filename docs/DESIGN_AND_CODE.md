@@ -520,7 +520,7 @@ Proof expressions are parsed separately. They support:
 
 For theorem references with inline arguments, elaboration can infer schema
 arguments from supplied proof arguments before building the final `TheoremRef`.
-This supports expressions such as `rewrite eq_symm h`.
+This supports expressions such as `rewrite <- eq_symm h`.
 
 ## Tactic Parsing
 
@@ -536,7 +536,7 @@ assumption
 apply h
 exists x
 refl
-rewrite h
+rewrite <- h
 unfold Name
 simp
 simp at h
@@ -818,8 +818,10 @@ proof has type:
 left = right
 ```
 
-then the current goal must contain `right`. The tactic creates a subgoal with
-that occurrence changed to `left`.
+then `rewrite <- h` expects the current goal to contain `right`. The tactic
+creates a subgoal with that occurrence changed to `left`. Bare `rewrite h`
+parses to the same right-to-left direction and remains supported for backward
+compatibility, but docs and examples prefer the explicit arrow.
 
 This supports examples like:
 
@@ -828,7 +830,7 @@ theorem rewrite_happy
   : alice = mother(alice) -> Happy(alice) -> Happy(mother(alice)) := by
   intro h
   intro ha
-  rewrite h
+  rewrite <- h
   exact ha
 ```
 
@@ -836,12 +838,12 @@ The target contains `mother(alice)`, the right side of `h`, so the subgoal
 becomes `Happy(alice)`.
 
 Use `rewrite -> h` for the reverse tactic direction. Compound proof expressions
-such as `rewrite eq_symm h` are also accepted when schema arguments can be
+such as `rewrite <- eq_symm h` are also accepted when schema arguments can be
 inferred from the supplied proof arguments.
 
-Use `rewrite all h` to rewrite every matching occurrence in the target. This
-form rejects expanding rewrites where the replacement would introduce new
-occurrences of the term being rewritten.
+Use `rewrite all <- h` or `rewrite all -> h` to rewrite every matching
+occurrence in the target. This form rejects expanding rewrites where the
+replacement would introduce new occurrences of the term being rewritten.
 
 ## Natural-Number Induction
 

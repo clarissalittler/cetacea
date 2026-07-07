@@ -35,7 +35,7 @@ theorem mother_graph_single_valued
   intro y2
   intro h1
   intro h2
-  rewrite h1
+  rewrite <- h1
   exact h2
 
 -- Section 8.4: the successor function is injective...
