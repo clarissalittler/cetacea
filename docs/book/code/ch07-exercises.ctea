@@ -18,6 +18,8 @@ def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) 
 
 def Transitive (T : Type) (R : T -> T -> Prop) : Prop := forall x y z : T, R(x, y) -> R(y, z) -> R(x, z)
 
+def Equivalence (T : Type) (R : T -> T -> Prop) : Prop := Reflexive(R) /\ Symmetric(R) /\ Transitive(R)
+
 def SameMood (x y : Person) : Prop := Happy(x) <-> Happy(y)
 
 -- Exercise 7.1 (warm-up). A concrete congruence: find the two witnesses.
@@ -53,8 +55,5 @@ theorem ex7_7 : Transitive(SameMood) := by
 
 -- Exercise 7.8. Bundle Exercises 7.5–7.7 into one statement, reusing
 -- the three theorems you just proved.
-theorem ex7_8
-  : Reflexive(SameMood)
-    /\ Symmetric(SameMood)
-    /\ Transitive(SameMood) := by
+theorem ex7_8 : Equivalence(SameMood) := by
   sorry

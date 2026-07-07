@@ -12,6 +12,8 @@ def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) 
 
 def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(y, z) -> R(x, z)
 
+def Equivalence (A : Type) (R : A -> A -> Prop) : Prop := Reflexive(R) /\ Symmetric(R) /\ Transitive(R)
+
 theorem refl_self
   (A : Type)
   (R : A -> A -> Prop)
@@ -27,6 +29,24 @@ theorem equality_relation_reflexive : Reflexive(fun x y : Thing => x = y) := by
   simp
   intro x
   refl
+
+theorem equality_relation_equivalence : Equivalence(fun x y : Thing => x = y) := by
+  unfold Equivalence
+  split
+  exact equality_relation_reflexive
+  split
+  unfold Symmetric
+  intro x
+  intro y
+  intro h
+  exact eq_symm h
+  unfold Transitive
+  intro x
+  intro y
+  intro z
+  intro h1
+  intro h2
+  exact eq_trans h1 h2
 
 -- "If R is symmetric and transitive AND there's some witness y with
 -- R(x, y), then R(x, x)." The flawed argument from Module 1 §6 is

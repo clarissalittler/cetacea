@@ -53,6 +53,8 @@ def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
 def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
 
 def Transitive (T : Type) (R : T -> T -> Prop) : Prop := forall x y z : T, R(x, y) -> R(y, z) -> R(x, z)
+
+def Equivalence (T : Type) (R : T -> T -> Prop) : Prop := Reflexive(R) /\ Symmetric(R) /\ Transitive(R)
 ```
 
 Read the parameter list of `Reflexive`: give me a type `T` and a
@@ -219,21 +221,15 @@ you want?
 
 ## 7.6 The payoff: clock arithmetic is an equivalence relation
 
-A relation with all three properties is an **equivalence relation**,
-and it's hard to overstate how load-bearing that concept is. An
-equivalence relation is a machine for *deliberately forgetting*: it
+A relation with all three properties is an **equivalence relation**.
+That is why the examples file defines `Equivalence(R)` as the bundle
+`Reflexive(R) /\ Symmetric(R) /\ Transitive(R)`. It is hard to
+overstate how load-bearing that concept is. An equivalence relation is
+a machine for *deliberately forgetting*: it
 sorts a type into buckets ("equivalence classes") of things you've
 chosen not to distinguish. Same birthday. Same remainder. Same shape.
 Reflexivity, symmetry, and transitivity are exactly the axioms that
 make "same bucket" coherent.
-
-One aside before the main event, in the spirit of full disclosure:
-you might want to write `def Equivalence (T : Type) (R : ...) :=
-Reflexive(R) /\ Symmetric(R) /\ Transitive(R)` — one name for the
-bundle. Cetacea's definitions can't do that: a `def` cannot pass its
-predicate parameters along to *other* definitions. So this book writes
-the bundle as an explicit conjunction at each use site. Mildly
-annoying, entirely workable.
 
 Now the star witness: **congruence mod m**, the clock relation. Two
 numbers are congruent mod 12 when they land on the same hour: 14
@@ -287,9 +283,8 @@ stapled together, quantified over *every* modulus at once:
 
 ```text
 theorem modeq_equivalence (m : Nat)
-  : Reflexive(fun x y : Nat => ModEq(m, x, y))
-    /\ Symmetric(fun x y : Nat => ModEq(m, x, y))
-    /\ Transitive(fun x y : Nat => ModEq(m, x, y)) := by
+  : Equivalence(fun x y : Nat => ModEq(m, x, y)) := by
+  unfold Equivalence
   split
   exact modeq_reflexive {m := m}
   split
@@ -403,8 +398,8 @@ three property definitions are at the top of the file. Clear the
   relation, one property per exercise. Remember `<->` is a conjunction
   of implications: `split` proves it, `.left`/`.right` use it.
   Transitivity is the meatiest: chain the two iffs in both directions.
-- **Exercise 7.8** staple 7.5–7.7 into the equivalence bundle,
-  `modeq_equivalence`-style — and enjoy that the proof is three
+- **Exercise 7.8** prove `Equivalence(SameMood)`, reusing 7.5–7.7
+  after `unfold Equivalence` — and enjoy that the proof is three
   `exact`s naming theorems *you* proved.
 
 Solutions: [`code/ch07-solutions.ctea`](code/ch07-solutions.ctea).

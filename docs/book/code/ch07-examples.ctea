@@ -18,6 +18,8 @@ def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) 
 
 def Transitive (T : Type) (R : T -> T -> Prop) : Prop := forall x y z : T, R(x, y) -> R(y, z) -> R(x, z)
 
+def Equivalence (T : Type) (R : T -> T -> Prop) : Prop := Reflexive(R) /\ Symmetric(R) /\ Transitive(R)
+
 -- Section 7.3: equality passes all three tests — Chapter 5 as a report card.
 theorem eq_reflexive (T : Type) : Reflexive(fun x y : T => x = y) := by
   unfold Reflexive
@@ -93,10 +95,8 @@ theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => ModEq(m, x, y))
   exact h2
 
 -- The whole bundle in one statement: an equivalence relation.
-theorem modeq_equivalence (m : Nat)
-  : Reflexive(fun x y : Nat => ModEq(m, x, y))
-    /\ Symmetric(fun x y : Nat => ModEq(m, x, y))
-    /\ Transitive(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_equivalence (m : Nat) : Equivalence(fun x y : Nat => ModEq(m, x, y)) := by
+  unfold Equivalence
   split
   exact modeq_reflexive {m := m}
   split

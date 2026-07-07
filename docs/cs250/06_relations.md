@@ -22,11 +22,15 @@ def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
 def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
 
 def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(y, z) -> R(x, z)
+
+def Equivalence (A : Type) (R : A -> A -> Prop) : Prop := Reflexive(R) /\ Symmetric(R) /\ Transitive(R)
 ```
 
 When you use `Reflexive(R)`, the type parameter `A` is inferred from
 the predicate argument `R`. You can also pass a small inline predicate
-lambda, such as `Reflexive(fun x y : Person => x = y)`.
+lambda, such as `Reflexive(fun x y : Person => x = y)`. A relation
+that is all three properties can be named directly as
+`Equivalence(R)`.
 
 ## Reflexivity, symmetry, transitivity inline
 
@@ -42,6 +46,8 @@ def Reflexive (A : Type) (R : A -> A -> Prop) : Prop := forall x : A, R(x, x)
 def Symmetric (A : Type) (R : A -> A -> Prop) : Prop := forall x y : A, R(x, y) -> R(y, x)
 
 def Transitive (A : Type) (R : A -> A -> Prop) : Prop := forall x y z : A, R(x, y) -> R(y, z) -> R(x, z)
+
+def Equivalence (A : Type) (R : A -> A -> Prop) : Prop := Reflexive(R) /\ Symmetric(R) /\ Transitive(R)
 
 -- A theorem with R abstract: if R is reflexive, every R(a, a) holds.
 theorem refl_self
@@ -119,9 +125,14 @@ theorem eq_sym_demo (A : Type) (x y : A) : x = y -> y = x := by
 theorem eq_trans_demo (A : Type) (x y z : A)
   : x = y -> y = z -> x = z := by
   exact eq_trans
+
+theorem equality_relation_equivalence : Equivalence(fun x y : Thing => x = y) := by
+  unfold Equivalence
+  ...
 ```
 
-`eq_symm` and `eq_trans` are imported from `std/eq.ctea`.
+`eq_symm` and `eq_trans` are imported from `std/eq.ctea`; the
+companion file fills in the omitted proof body.
 
 If you have your own equivalence relation (say, modular congruence,
 which CS 250 Module 6 introduces), you can axiomatize its three

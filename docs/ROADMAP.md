@@ -6,6 +6,14 @@ probes of each item (July 2026). Ordered into phases by
 (teaching impact × regression risk); every item names its acceptance
 test. Friction item numbers refer to FRICTION.md.
 
+## Status
+
+- Done: Phase 0, Phase 1, and Phase 2. The safety net is in CI; the
+  instantiation collision, targeted hints, axiom labeling, predicate
+  def-name arguments, nested lambda propagation, mixed-type lambdas, and
+  book debt repayment are implemented.
+- Next: Phase 3, def-aware matching.
+
 ## Findings from triage
 
 - **Item 9 (instantiation "expected X, got X") is a completeness bug,
