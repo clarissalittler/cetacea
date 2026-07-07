@@ -55,14 +55,12 @@ theorem two_plus_three : add(2, 3) = 5 := by
 
 `add(2, 3)` and `5` are not the same expression — one is a sum, the
 other a numeral. But Cetacea's natural numbers *compute*: `add` has
-built-in equations, and under the hood the numeral `5` is shorthand
-for `succ(succ(succ(succ(succ(0)))))` — "the successor of the
-successor of ... of zero," five layers deep. (You'll meet this
-succ-tower notation properly in Chapter 9; today it's enough to know
-that it's there, because error messages sometimes show it.) `refl`
-evaluates `add(2, 3)`, evaluates `5`, sees the same tower of `succ`s
-on both sides, and accepts. One line, and the checker did the
-arithmetic.
+built-in equations, and under the hood the numeral `5` is shorthand for
+a five-layer tower of successors over `0`. (You'll meet this structure
+properly in Chapter 9; today it's enough to know that numerals are not
+magic.) `refl` evaluates `add(2, 3)`, evaluates `5`, sees the same
+natural number on both sides, and accepts. One line, and the checker did
+the arithmetic.
 
 This makes `refl` a tiny calculator that only ever says "yes" when the
 answer is right:
@@ -387,8 +385,9 @@ sides and compares. If the equation is false, no tactic can help, and
 the error shows you the computation-eye view:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: refl cannot prove `add(succ(succ(0)), succ(succ(0))) = succ(succ(succ(succ(succ(0)))))` because the sides are not identical
-  note: target: add(succ(succ(0)), succ(succ(0))) = succ(succ(succ(succ(succ(0)))))
+error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides are not identical
+  note: target: add(2, 2) = 5
+  note: the arithmetic statement is false when it is false outright. No proof can close it; check the statement itself.
   help: Use equality simplification first
     `refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.
     try:
@@ -396,10 +395,10 @@ error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:26: theorem 
       refl
 ```
 
-There are the succ-towers from Section 5.2: `add(2, 2)` on the left,
-`5` spelled out as five `succ`s on the right, and no way to make them
-the same height. Two lessons. First, this is what numerals *are*
-underneath. Second, note that the `help:` block suggests `simp` before
+The goal now prints with the same decimals you wrote: `add(2, 2)` on
+the left, `5` on the right, and no way to make them equal. Two lessons.
+First, numerals still have successor structure underneath. Second, note
+that the `help:` block suggests `simp` before
 `refl` — good advice when the sides *should* compute to the same term
 and you're one simplification away, but no rescue for an equation
 that's simply false. The checker flags the failed step; deciding

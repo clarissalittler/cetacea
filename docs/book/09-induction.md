@@ -291,7 +291,7 @@ attempt `intro`s the premise `le(1, n)` and *then* starts induction:
 
 ```text
 error: /home/left_adjoint/cetacea/docs/book/code/ch09-mistakes.ctea:43: theorem `square_positive` failed: cannot induct on `n` while hypothesis `h` depends on it
-  note: target: le(succ(0), mul(n, n))
+  note: target: le(1, mul(n, n))
   help: Induct before introducing dependent hypotheses
     Hypothesis `h` mentions `n`, so it cannot be kept unchanged while `n` is split into cases. Leave the implication or forall in the goal, run induction first, then introduce `h` inside each arm.
     try:

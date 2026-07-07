@@ -82,7 +82,13 @@ impl fmt::Display for Term {
                 write!(f, " => {body}")
             }
             Term::Zero => write!(f, "0"),
-            Term::Succ(term) => write!(f, "succ({term})"),
+            Term::Succ(term) => {
+                if let Some(value) = term_decimal_value(self) {
+                    write!(f, "{value}")
+                } else {
+                    write!(f, "succ({term})")
+                }
+            }
             Term::Add(left, right) => write!(f, "add({left}, {right})"),
             Term::Mul(left, right) => write!(f, "mul({left}, {right})"),
             Term::Sub(left, right) => write!(f, "sub({left}, {right})"),
@@ -103,6 +109,21 @@ impl fmt::Display for Term {
                 var_type,
                 body,
             } => write!(f, "{{ {var} : {var_type} | {body} }}"),
+        }
+    }
+}
+
+fn term_decimal_value(term: &Term) -> Option<usize> {
+    let mut value = 0usize;
+    let mut current = term;
+    loop {
+        match current {
+            Term::Zero => return Some(value),
+            Term::Succ(inner) => {
+                value = value.checked_add(1)?;
+                current = inner;
+            }
+            _ => return None,
         }
     }
 }
@@ -15743,6 +15764,16 @@ theorem two_plus_one : add(2, 1) = 3 := by
   simp
   refl
 "#,
+        );
+    }
+
+    #[test]
+    fn term_display_prints_closed_succ_towers_as_decimals() {
+        assert_eq!(parse_term_str("succ(succ(0))").unwrap().to_string(), "2");
+        assert_eq!(parse_term_str("succ(n)").unwrap().to_string(), "succ(n)");
+        assert_eq!(
+            parse_term_str("succ(succ(n))").unwrap().to_string(),
+            "succ(succ(n))"
         );
     }
 

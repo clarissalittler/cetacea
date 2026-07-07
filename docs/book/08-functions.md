@@ -334,8 +334,8 @@ column each quantifier ranges over.*
 `sub(y, 1)` as the preimage and asks `refl` to check:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch08-mistakes.ctea:45: theorem `succ_surjective_wish` failed: refl cannot prove `succ(sub(y, succ(0))) = y` because the sides are not identical
-  note: target: succ(sub(y, succ(0))) = y
+error: /home/left_adjoint/cetacea/docs/book/code/ch08-mistakes.ctea:45: theorem `succ_surjective_wish` failed: refl cannot prove `succ(sub(y, 1)) = y` because the sides are not identical
+  note: target: succ(sub(y, 1)) = y
   note: the open arithmetic goal does not follow from the current hypotheses: it is false when y = 0. Reconsider the earlier proof steps.
   help: Use equality simplification first
     `refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.

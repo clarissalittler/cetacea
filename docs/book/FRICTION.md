@@ -91,10 +91,10 @@ stay meaningful.
 
 ## Lower impact / polish
 
-14. **Numerals print as `succ` towers in error messages**
-    (`succ(succ(succ(succ(succ(0)))))` for 5) while goals display
-    decimals elsewhere. Chapters worked around it by choosing 0/1 in
-    error-adjacent examples.
+14. **Resolved: closed successor numerals print as decimals.** Error
+    messages now display closed `succ` towers as numerals (`5` instead
+    of `succ(succ(succ(succ(succ(0)))))`), while mixed terms such as
+    `succ(n)` remain symbolic.
 
 15. **Aggressive goal computation surprises.** `apply h 0 1` can leave
     the goal `True` (premise computed away) — delightful once understood,
