@@ -194,10 +194,10 @@ theorem no_barber
   cases h with
   | intro b hb =>
       have hbb : Shaves(b, b) <-> not Shaves(b, b) := hb b
-      have hnot : not Shaves(b, b)
-      intro hs
-      apply hbb.left hs
-      exact hs
+      have hnot : not Shaves(b, b) := by
+        intro hs
+        apply hbb.left hs
+        exact hs
       apply hnot
       apply hbb.right
       exact hnot

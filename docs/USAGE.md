@@ -1180,6 +1180,26 @@ reports a mismatch as `have proof has type ..., but the stated formula
 is ...`. The name must be fresh; shadowing an existing hypothesis or variable
 is rejected.
 
+A stated `have` can also be proved by an inline `:= by` tactic block on the
+following indented lines. This is the subgoal form written explicitly, and it
+keeps the intermediate proof visually scoped:
+
+```text
+theorem chain (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
+  intro hpq
+  intro hqr
+  intro hp
+  have hq : Q := by
+    apply hpq
+    exact hp
+  apply hqr
+  exact hq
+```
+
+The block may contain any tactics, including nested `cases`, `induction`, or
+further `have := by` blocks. It must prove exactly the stated formula, and it
+must be non-empty.
+
 ### `by_cases`
 
 Classical case split:

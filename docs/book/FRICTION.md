@@ -151,15 +151,16 @@ theorems check — but three things stood out.
     `Reflexive`/`Symmetric`/`Transitive`/`Euclidean` goals with no
     explicit `unfold`.
 
-20. **Improved: `have h : P := by ...` gives a clear error.** A stated
-    `have` either opens a subgoal (`have h : P`, discharged by the
-    following indented tactics) or takes a single proof expression
-    (`have h : P := h.left`). The mixed form `have h : P := by <tactics>`
-    used to fail with the misleading `unknown hypothesis \`by\``; it now
-    reports "have does not take a `:= by` tactic block" and names both
-    working forms. The barber proof wanted an inline tactic-proved
-    `not Shaves(b, b)` lemma and used the subgoal form. Supporting the
-    `:= by` block itself remains a possible future ergonomic win.
+20. **Resolved: `have h : P := by ...` now runs an inline tactic block.**
+    A stated `have` used to accept only a subgoal (`have h : P`,
+    discharged by the following indented tactics) or a single proof
+    expression (`have h : P := h.left`); the `:= by` block form failed
+    with the baffling `unknown hypothesis \`by\``. It now parses the
+    indented block, proves the stated formula with it via the same
+    machinery as `cases`/`induction` arms, and continues. Blocks nest
+    (a `have := by` can contain `cases` or another `have := by`). The
+    barber proof in `examples/fol_advanced.ctea` uses the block form for
+    its `not Shaves(b, b)` lemma.
 
 21. **Works well: countermodels catch invalid quantifier statements.**
     The invalid converse of the quantifier swap,

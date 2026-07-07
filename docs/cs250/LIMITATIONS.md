@@ -247,31 +247,24 @@ reaches the `Injective(G) /\ Surjective(G)` conjunction underneath. Explicit
 visible. Earlier drafts of `examples/fol_advanced.ctea` needed an explicit
 `unfold` before every relation-classification `intro`; those are gone now.
 
-### `have` with a tactic proof needs the bare subgoal form
+### `have` supports an inline `:= by` tactic block
 
-`have` accepts either a stated formula that opens a subgoal (`have h : P`) or a
-formula with a one-expression proof (`have h : P := h.left`). It does *not*
-accept a stated formula with an inline tactic block:
+*(Resolved.)* `have` accepts three forms now: a stated formula that opens a
+subgoal (`have h : P`), a formula with a one-expression proof
+(`have h : P := h.left`), and a stated formula with an inline tactic block:
 
 ```text
-have hnot : not Shaves(b, b) := by   -- ERROR: unknown hypothesis `by`
+have hnot : not Shaves(b, b) := by
   intro hs
-  ...
+  apply hbb.left hs
+  exact hs
 ```
 
-Write the subgoal form instead — drop the `:= by` and let the following indented
-tactics discharge the new goal:
-
-```text
-have hnot : not Shaves(b, b)
-intro hs
-...
-```
-
-This came up writing the barber-paradox proof. The diagnostic now names the
-real problem — "have does not take a `:= by` tactic block; use the subgoal
-form ..." — instead of the old baffling `unknown hypothesis \`by\``. Supporting
-an inline `:= by` block outright is still a possible future ergonomic win.
+The block may contain any tactics, including nested `cases`, `induction`, or
+further `have := by` blocks; it must prove exactly the stated formula and be
+non-empty. This is the form Lean/Rocq users reach for first, and the barber
+proof in `examples/fol_advanced.ctea` now uses it. The bare subgoal form
+(`have h : P` followed by un-indented tactics) still works.
 
 ### Disjunction case arms are `left`/`right`, not `inl`/`inr`
 

@@ -4185,7 +4185,7 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
             format!("Give up on the goal `{}` for now.", goal.target),
             "`sorry` closes the goal without a proof, so the theorem is only provisionally accepted.".to_string(),
         ],
-        Tactic::Have { name, formula, expr } => {
+        Tactic::Have { name, formula, expr, block } => {
             let mut sentences = Vec::new();
             match formula {
                 Some(formula) => sentences.push(format!(
@@ -4198,6 +4198,10 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
             if expr.is_some() {
                 sentences.push(
                     "The supplied proof establishes the fact immediately.".to_string(),
+                );
+            } else if !block.is_empty() {
+                sentences.push(
+                    "The indented `by` block proves the stated fact, then the original goal continues with the new hypothesis available.".to_string(),
                 );
             } else {
                 sentences.push(
@@ -4217,9 +4221,13 @@ fn tactic_label(tactic: &Tactic) -> String {
             name,
             formula,
             expr,
+            block,
         } => match (formula, expr) {
             (Some(formula), Some(expr)) => {
                 format!("have {name} : {formula} := {}", proof_expr_label(expr))
+            }
+            (Some(formula), None) if !block.is_empty() => {
+                format!("have {name} : {formula} := by ...")
             }
             (Some(formula), None) => format!("have {name} : {formula}"),
             (None, Some(expr)) => format!("have {name} := {}", proof_expr_label(expr)),
@@ -9328,6 +9336,7 @@ enum Tactic {
         name: Name,
         formula: Option<Formula>,
         expr: Option<ProofExpr>,
+        block: Vec<LocatedTactic>,
     },
 }
 
@@ -10717,6 +10726,59 @@ fn parse_tactic_lines(
             continue;
         }
 
+        // `have name : formula := by` followed by an indented tactic block.
+        if let Some(rest) = trimmed.strip_prefix("have ") {
+            let is_block = trimmed
+                .strip_suffix("by")
+                .map(str::trim_end)
+                .map(|head| head.ends_with(":="))
+                .unwrap_or(false);
+            if is_block {
+                let have_indent = line_indent(&lines[i].text);
+                let binding = rest
+                    .trim_end()
+                    .strip_suffix("by")
+                    .and_then(|head| head.trim_end().strip_suffix(":="))
+                    .unwrap_or("")
+                    .trim();
+                let (name, formula_str) = binding.split_once(':').ok_or_else(|| {
+                    ParseError::new(
+                        "`have ... := by` needs a stated formula, as in `have h : P := by`",
+                    )
+                    .with_line(line_no)
+                })?;
+                let name = name.trim();
+                if name.is_empty() || name.contains(char::is_whitespace) {
+                    return Err(ParseError::new(
+                        "have expects `have name : formula := by` before an indented block",
+                    )
+                    .with_line(line_no));
+                }
+                let formula = parse_formula_str(formula_str.trim())
+                    .map_err(|err| err.with_line(line_no))?;
+                i += 1;
+                let body_end = case_body_end(lines, i, have_indent);
+                let block = parse_tactic_lines(&lines[i..body_end], namespace_stack)?;
+                i = body_end;
+                if block.is_empty() {
+                    return Err(ParseError::new(
+                        "`have ... := by` must be followed by an indented tactic block",
+                    )
+                    .with_line(line_no));
+                }
+                tactics.push(LocatedTactic {
+                    line: line_no,
+                    tactic: Tactic::Have {
+                        name: name.to_string(),
+                        formula: Some(formula),
+                        expr: None,
+                        block,
+                    },
+                });
+                continue;
+            }
+        }
+
         let (tactic_text, next_i) =
             collect_continued_tactic_line(lines, i).map_err(|err| err.with_line(line_no))?;
         let offset = lines[i].text.find(trimmed).unwrap_or(0);
@@ -10951,9 +11013,8 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
                 let expr = expr.trim();
                 if expr == "by" || expr.starts_with("by ") || expr.starts_with("by\t") {
                     return Err(ParseError::new(
-                        "have does not take a `:= by` tactic block; use the subgoal form \
-                         `have name : formula` and prove it with the following indented tactics, \
-                         or supply a single proof expression with `have name : formula := proof`",
+                        "`have name : formula := by` must be followed by an indented tactic block \
+                         on the next lines",
                     ));
                 }
                 let offset = line.find(expr).unwrap_or(0);
@@ -10989,6 +11050,7 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
             name: name.to_string(),
             formula,
             expr,
+            block: Vec::new(),
         });
     }
 
@@ -12803,6 +12865,7 @@ fn run_tactic_step_inner(
             name,
             formula,
             expr,
+            block,
         } => {
             ensure_intro_name_unused(&goal.context, name)
                 .map_err(|err| TacticError::new(err.message.replace("`intro`", "`have`")))?;
@@ -12826,6 +12889,37 @@ fn run_tactic_step_inner(
                 .map(|formula| canonicalize_formula(env, &goal.context, formula))
                 .transpose()
                 .map_err(|err| TacticError::new(err.message))?;
+            if !block.is_empty() {
+                let stated = formula.ok_or_else(|| {
+                    TacticError::new("`have ... := by` needs a stated formula")
+                })?;
+                let claim = prove(
+                    env,
+                    goal.context.clone(),
+                    stated.clone(),
+                    block,
+                    allowed_mode,
+                )?;
+                let rest_id = fresh_goal(next_goal_id);
+                let mut rest_ctx = goal.context.clone();
+                rest_ctx.add_proof(name.clone(), stated.clone());
+                return Ok(StepResult {
+                    replacement: PartialProof::ImpElim {
+                        proof_imp: Box::new(PartialProof::ImpIntro {
+                            hyp_name: name.clone(),
+                            hyp_formula: stated,
+                            body: Box::new(PartialProof::Hole(rest_id)),
+                        }),
+                        proof_arg: Box::new(PartialProof::Done(claim.proof)),
+                    },
+                    new_goals: vec![Goal {
+                        id: rest_id,
+                        context: rest_ctx,
+                        target: goal.target,
+                    }],
+                    notes: claim.notes,
+                });
+            }
             match expr {
                 Some(expr) => {
                     let proof = if let Some(stated) = &formula {
@@ -18855,18 +18949,71 @@ theorem chain (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
     }
 
     #[test]
-    fn have_with_tactic_block_reports_clear_error() {
+    fn have_with_tactic_block_proves_intermediate_fact() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem t (P Q : Prop) : P -> (P -> Q) -> Q := by
+  intro hp
+  intro hpq
+  have hq : Q := by
+    apply hpq
+    exact hp
+  exact hq
+"#,
+        );
+    }
+
+    #[test]
+    fn have_tactic_block_can_nest_cases() {
+        check_ok(
+            r#"
+mode constructive
+
+sort U
+
+theorem t (P Q : U -> Prop)
+  : (exists x : U, P(x) /\ Q(x)) -> exists x : U, P(x) := by
+  intro h
+  have hp : exists x : U, P(x) := by
+    cases h with
+    | intro x hx =>
+        exists x
+        exact hx.left
+  exact hp
+"#,
+        );
+    }
+
+    #[test]
+    fn have_tactic_block_requires_a_body() {
         check_err_contains(
             r#"
 mode constructive
 
 theorem t (P : Prop) : P -> P := by
-  intro h
-  have hp : P := by
-    exact h
-  exact hp
+  intro hp
+  have hq : P := by
+  exact hq
 "#,
-            "have does not take a `:= by` tactic block",
+            "must be followed by an indented tactic block",
+        );
+    }
+
+    #[test]
+    fn have_tactic_block_reports_failure_inside_block() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem t (P Q : Prop) : P -> Q := by
+  intro hp
+  have hq : Q := by
+    exact hp
+  exact hq
+"#,
+            "but expected `Q`",
         );
     }
 
