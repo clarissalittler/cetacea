@@ -38,13 +38,13 @@ stay meaningful.
    now checks, and Chapter 8 includes the "succ ∘ succ is injective"
    payoff against the library theorem.
 
-6. **Countermodel notes stop at propositional logic.** For false
-   quantified or arithmetic statements the checker only reports the
-   failed tactic, so the "the statement is wrong, stop proving" signal —
-   the best pedagogy in chapters 1–3 — is absent for the entire second
-   half of the book. A finite-domain first-order countermodel search
-   (even domains of size 2–3) and a small-number arithmetic search would
-   transform the mistakes sections of chapters 6–12.
+6. **Partly resolved: countermodel notes now cover small Nat arithmetic.**
+   False pure `Nat` arithmetic goals with free variables report concrete
+   assignments such as `n = 0`, both for theorem statements and open
+   goals. The remaining gap is quantified/first-order countermodels:
+   finite-domain search over small abstract sorts and predicates would
+   bring the same "the statement is wrong, stop proving" signal to
+   relation-heavy chapters.
 
 ## Medium impact
 

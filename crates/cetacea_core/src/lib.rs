@@ -2545,12 +2545,29 @@ impl FileChecker {
                                     "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
                                     countermodel_note(&model)
                                 ));
+                            } else if let Some(model) = arithmetic_countermodel(
+                                &[],
+                                &decl.statement,
+                                &theorem_ctx.term_vars,
+                            )
+                            {
+                                diagnostic = diagnostic.with_note(format!(
+                                    "the arithmetic statement is false when {}. No proof can close it; check the statement itself.",
+                                    arithmetic_countermodel_note(&model)
+                                ));
                             } else if let Some(model) =
                                 propositional_countermodel(&err.hyps, target)
                             {
                                 diagnostic = diagnostic.with_note(format!(
                                     "the open goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
                                     countermodel_note(&model)
+                                ));
+                            } else if let Some(model) =
+                                arithmetic_countermodel(&err.hyps, target, &err.terms)
+                            {
+                                diagnostic = diagnostic.with_note(format!(
+                                    "the open arithmetic goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
+                                    arithmetic_countermodel_note(&model)
                                 ));
                             }
                             self.result
@@ -3045,6 +3062,18 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
             format!(
                 "The goal does not follow from the current hypotheses: it is false when {}. Revisit the earlier proof steps or the theorem statement.",
                 countermodel_note(&model)
+            ),
+        );
+    } else if let Some(model) =
+        arithmetic_countermodel(&hyp_formulas, &goal.target, &goal.context.term_vars)
+    {
+        push_goal_hint(
+            &mut hints,
+            "Warning: this arithmetic goal is not provable",
+            "show_goal".to_string(),
+            format!(
+                "The arithmetic goal does not follow from the current hypotheses: it is false when {}. Revisit the earlier proof steps or the theorem statement.",
+                arithmetic_countermodel_note(&model)
             ),
         );
     }
@@ -3824,6 +3853,200 @@ pub fn propositional_countermodel(hyps: &[Formula], target: &Formula) -> Option<
     None
 }
 
+const MAX_ARITH_COUNTERMODEL_VARS: usize = 4;
+const ARITH_COUNTERMODEL_BOUND: usize = 8;
+
+fn arithmetic_countermodel(
+    hyps: &[Formula],
+    target: &Formula,
+    terms: &[TermBinding],
+) -> Option<Vec<(Name, usize)>> {
+    let mut vars = BTreeSet::new();
+    for hyp in hyps {
+        collect_arithmetic_formula_vars(hyp, terms, &mut vars).ok()?;
+    }
+    collect_arithmetic_formula_vars(target, terms, &mut vars).ok()?;
+    if vars.len() > MAX_ARITH_COUNTERMODEL_VARS {
+        return None;
+    }
+    let vars: Vec<Name> = vars.into_iter().collect();
+    let mut assignment = HashMap::new();
+    find_arithmetic_countermodel(&vars, 0, &mut assignment, hyps, target)
+}
+
+fn find_arithmetic_countermodel(
+    vars: &[Name],
+    idx: usize,
+    assignment: &mut HashMap<Name, usize>,
+    hyps: &[Formula],
+    target: &Formula,
+) -> Option<Vec<(Name, usize)>> {
+    if idx == vars.len() {
+        let hyps_hold = hyps
+            .iter()
+            .all(|hyp| eval_arithmetic_formula(hyp, assignment) == Some(true));
+        if hyps_hold && eval_arithmetic_formula(target, assignment) == Some(false) {
+            return Some(
+                vars.iter()
+                    .map(|var| (var.clone(), *assignment.get(var).unwrap_or(&0)))
+                    .collect(),
+            );
+        }
+        return None;
+    }
+
+    let var = vars[idx].clone();
+    for value in 0..=ARITH_COUNTERMODEL_BOUND {
+        assignment.insert(var.clone(), value);
+        if let Some(model) = find_arithmetic_countermodel(vars, idx + 1, assignment, hyps, target)
+        {
+            return Some(model);
+        }
+    }
+    assignment.remove(&var);
+    None
+}
+
+fn collect_arithmetic_formula_vars(
+    formula: &Formula,
+    terms: &[TermBinding],
+    vars: &mut BTreeSet<Name>,
+) -> Result<(), ()> {
+    match formula {
+        Formula::True | Formula::False => Ok(()),
+        Formula::Eq(left, right) => {
+            collect_arithmetic_term_vars(left, terms, vars)?;
+            collect_arithmetic_term_vars(right, terms, vars)
+        }
+        Formula::PredApp(name, args) if name == "le" && args.len() == 2 => {
+            collect_arithmetic_term_vars(&args[0], terms, vars)?;
+            collect_arithmetic_term_vars(&args[1], terms, vars)
+        }
+        Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
+            collect_arithmetic_formula_vars(left, terms, vars)?;
+            collect_arithmetic_formula_vars(right, terms, vars)
+        }
+        Formula::Atom(_)
+        | Formula::PredApp(_, _)
+        | Formula::In(_, _)
+        | Formula::Subset(_, _)
+        | Formula::Forall { .. }
+        | Formula::Exists { .. } => Err(()),
+    }
+}
+
+fn collect_arithmetic_term_vars(
+    term: &Term,
+    terms: &[TermBinding],
+    vars: &mut BTreeSet<Name>,
+) -> Result<(), ()> {
+    match term {
+        Term::Var(name) => {
+            if terms
+                .iter()
+                .rev()
+                .find(|binding| binding.name == *name)
+                .is_some_and(|binding| binding.ty == Type::Nat)
+            {
+                vars.insert(name.clone());
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+        Term::Zero => Ok(()),
+        Term::Succ(term) => collect_arithmetic_term_vars(term, terms, vars),
+        Term::Add(left, right) | Term::Mul(left, right) | Term::Sub(left, right) => {
+            collect_arithmetic_term_vars(left, terms, vars)?;
+            collect_arithmetic_term_vars(right, terms, vars)
+        }
+        Term::App(_, _)
+        | Term::PredLambda { .. }
+        | Term::Pair(_, _)
+        | Term::Fst(_)
+        | Term::Snd(_)
+        | Term::EmptySet(_)
+        | Term::Universe(_)
+        | Term::Singleton(_)
+        | Term::Union(_, _)
+        | Term::Inter(_, _)
+        | Term::Diff(_, _)
+        | Term::Complement(_)
+        | Term::CartProd(_, _)
+        | Term::Powerset(_)
+        | Term::SetBuilder { .. } => Err(()),
+    }
+}
+
+fn eval_arithmetic_formula(
+    formula: &Formula,
+    assignment: &HashMap<Name, usize>,
+) -> Option<bool> {
+    match formula {
+        Formula::True => Some(true),
+        Formula::False => Some(false),
+        Formula::Eq(left, right) => Some(
+            eval_arithmetic_term(left, assignment)?
+                == eval_arithmetic_term(right, assignment)?,
+        ),
+        Formula::PredApp(name, args) if name == "le" && args.len() == 2 => {
+            Some(
+                eval_arithmetic_term(&args[0], assignment)?
+                    <= eval_arithmetic_term(&args[1], assignment)?,
+            )
+        }
+        Formula::And(left, right) => Some(
+            eval_arithmetic_formula(left, assignment)?
+                && eval_arithmetic_formula(right, assignment)?,
+        ),
+        Formula::Or(left, right) => Some(
+            eval_arithmetic_formula(left, assignment)?
+                || eval_arithmetic_formula(right, assignment)?,
+        ),
+        Formula::Implies(left, right) => Some(
+            !eval_arithmetic_formula(left, assignment)?
+                || eval_arithmetic_formula(right, assignment)?,
+        ),
+        Formula::Atom(_)
+        | Formula::PredApp(_, _)
+        | Formula::In(_, _)
+        | Formula::Subset(_, _)
+        | Formula::Forall { .. }
+        | Formula::Exists { .. } => None,
+    }
+}
+
+fn eval_arithmetic_term(term: &Term, assignment: &HashMap<Name, usize>) -> Option<usize> {
+    match term {
+        Term::Var(name) => assignment.get(name).copied(),
+        Term::Zero => Some(0),
+        Term::Succ(term) => eval_arithmetic_term(term, assignment)?.checked_add(1),
+        Term::Add(left, right) => eval_arithmetic_term(left, assignment)?
+            .checked_add(eval_arithmetic_term(right, assignment)?),
+        Term::Mul(left, right) => eval_arithmetic_term(left, assignment)?
+            .checked_mul(eval_arithmetic_term(right, assignment)?),
+        Term::Sub(left, right) => Some(
+            eval_arithmetic_term(left, assignment)?
+                .saturating_sub(eval_arithmetic_term(right, assignment)?),
+        ),
+        Term::App(_, _)
+        | Term::PredLambda { .. }
+        | Term::Pair(_, _)
+        | Term::Fst(_)
+        | Term::Snd(_)
+        | Term::EmptySet(_)
+        | Term::Universe(_)
+        | Term::Singleton(_)
+        | Term::Union(_, _)
+        | Term::Inter(_, _)
+        | Term::Diff(_, _)
+        | Term::Complement(_)
+        | Term::CartProd(_, _)
+        | Term::Powerset(_)
+        | Term::SetBuilder { .. } => None,
+    }
+}
+
 fn countermodel_note(model: &[(Name, bool)]) -> String {
     if model.is_empty() {
         return "it is false outright".to_string();
@@ -3831,6 +4054,17 @@ fn countermodel_note(model: &[(Name, bool)]) -> String {
     model
         .iter()
         .map(|(atom, value)| format!("{atom} = {value}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn arithmetic_countermodel_note(model: &[(Name, usize)]) -> String {
+    if model.is_empty() {
+        return "it is false outright".to_string();
+    }
+    model
+        .iter()
+        .map(|(name, value)| format!("{name} = {value}"))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -9141,6 +9375,7 @@ struct TacticError {
     message: String,
     target: Option<Box<Formula>>,
     hyps: Vec<Formula>,
+    terms: Vec<TermBinding>,
     line: Option<usize>,
     suggestions: Vec<DiagnosticSuggestion>,
 }
@@ -9151,6 +9386,7 @@ impl TacticError {
             message: message.into(),
             target: None,
             hyps: Vec::new(),
+            terms: Vec::new(),
             line: None,
             suggestions: Vec::new(),
         }
@@ -9166,6 +9402,13 @@ impl TacticError {
     fn with_hyps(mut self, hyps: Vec<Formula>) -> Self {
         if self.hyps.is_empty() {
             self.hyps = hyps;
+        }
+        self
+    }
+
+    fn with_terms(mut self, terms: Vec<TermBinding>) -> Self {
+        if self.terms.is_empty() {
+            self.terms = terms;
         }
         self
     }
@@ -9232,6 +9475,7 @@ impl ProofSession {
             .iter()
             .map(|binding| binding.formula.clone())
             .collect();
+        let goal_terms = goal.context.term_vars.clone();
         let StepResult {
             replacement,
             new_goals,
@@ -9245,6 +9489,7 @@ impl ProofSession {
         .map_err(|err| {
             err.with_target(goal_target)
                 .with_hyps(goal_hyps)
+                .with_terms(goal_terms)
                 .with_line(located.line)
         })?;
         if !self.root.replace_hole(goal_id, &replacement) {
@@ -9266,7 +9511,8 @@ impl ProofSession {
                         .iter()
                         .map(|binding| binding.formula.clone())
                         .collect(),
-                ));
+                )
+                .with_terms(goal.context.term_vars.clone()));
         }
         self.root.complete()
     }
@@ -13488,6 +13734,45 @@ theorem wrong_branch (P Q : Prop) : Q -> P \/ Q := by
         assert!(
             notes.contains("does not follow from the current hypotheses"),
             "expected goal countermodel note, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn arithmetic_countermodel_reported_for_false_nat_statement() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem succ_fixed_point (n : Nat) : succ(n) = n := by
+  refl
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            notes.contains("arithmetic statement") && notes.contains("n = 0"),
+            "expected arithmetic countermodel note, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn arithmetic_countermodel_reported_for_unprovable_open_goal() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem wrong_nat_subgoal (n : Nat) : n = 0 -> n = 0 := by
+  intro h
+  have impossible : succ(n) = 0
+  exact h
+  exact h
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            notes.contains("open arithmetic goal") && notes.contains("n = 0"),
+            "expected open arithmetic countermodel note, got: {notes}"
         );
     }
 

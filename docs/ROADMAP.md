@@ -8,11 +8,12 @@ test. Friction item numbers refer to FRICTION.md.
 
 ## Status
 
-- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4.1, and Phase 4.2. The safety net is in CI; the
+- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4.1, Phase 4.2, and Phase 4.4. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
   def-name arguments, nested lambda propagation, mixed-type lambdas, and
   book debt repayment, def-aware matching, and annotation-driven `have`
-  inference, and positional theorem term arguments are implemented.
+  inference, positional theorem term arguments, and arithmetic
+  countermodels are implemented.
 - Next: Phase 4.3, first-order countermodels.
 
 ## Findings from triage
@@ -170,6 +171,7 @@ with free variables, test all assignments over 0..8; report "false
 when n = 2". Trigger wherever the propositional countermodel hook
 already fires. Together 4.3/4.4 extend the book's best pedagogical
 device ("the statement is wrong — stop proving") past chapter 3.
+Status: done.
 
 ## Phase 5 — Papercuts (each small; batch with book re-verification)
 
