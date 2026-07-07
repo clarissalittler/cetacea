@@ -261,7 +261,7 @@ theorem modeq_symmetric (m : Nat) : Symmetric(fun x y : Nat => ModEq(m, x, y)) :
   intro x
   intro y
   intro h
-  exact modeq_sym {m := m; x := x; y := y} h
+  exact modeq_sym m x y h
 
 theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => ModEq(m, x, y)) := by
   unfold Transitive
@@ -275,10 +275,9 @@ theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => ModEq(m, x, y))
   exact h2
 ```
 
-(Note the middle proof needed explicit braces — the checker couldn't
-infer `modeq_sym`'s parameters from the goal alone — while the other
-two got by on inference. Chapter 4's advice stands: try bare first,
-add braces when asked.) And the bundle, all three certificates
+The middle proof passes `modeq_sym` its three term parameters
+positionally, then the proof `h`; this is the same left-to-right habit
+as applying a hypothesis to an argument. And the bundle, all three certificates
 stapled together, quantified over *every* modulus at once:
 
 ```text

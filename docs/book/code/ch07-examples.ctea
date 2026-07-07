@@ -81,7 +81,7 @@ theorem modeq_symmetric (m : Nat) : Symmetric(fun x y : Nat => ModEq(m, x, y)) :
   intro x
   intro y
   intro h
-  exact modeq_sym {m := m; x := x; y := y} h
+  exact modeq_sym m x y h
 
 theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => ModEq(m, x, y)) := by
   unfold Transitive

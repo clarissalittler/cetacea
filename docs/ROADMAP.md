@@ -8,12 +8,12 @@ test. Friction item numbers refer to FRICTION.md.
 
 ## Status
 
-- Done: Phase 0, Phase 1, Phase 2, Phase 3, and Phase 4.1. The safety net is in CI; the
+- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4.1, and Phase 4.2. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
   def-name arguments, nested lambda propagation, mixed-type lambdas, and
   book debt repayment, def-aware matching, and annotation-driven `have`
-  inference are implemented.
-- Next: Phase 4.2, positional theorem arguments.
+  inference, and positional theorem term arguments are implemented.
+- Next: Phase 4.3, first-order countermodels.
 
 ## Findings from triage
 
@@ -156,6 +156,7 @@ Status: done.
 Phases 2–3 (the `modeq_refl m x` failure routes through def-unfolded
 statements); if still broken, either walk positional args through the
 *folded* statement or emit a targeted error suggesting braces.
+Status: done.
 
 **4.3 First-order countermodels (item 6).** For failed goals whose
 signature is small (abstract sorts, declared predicates, equality, no

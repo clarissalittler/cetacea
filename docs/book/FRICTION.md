@@ -53,12 +53,10 @@ stay meaningful.
    `le_refl`'s theorem parameter, matching the way `exact le_refl`
    works against the same goal.
 
-8. **Positional term arguments to theorem references misbehave.**
-   `exact modeq_refl m x` errors confusingly (the argument is matched
-   against the def-unfolded statement's `exists` body). Students learn
-   `h alice` for hypotheses in chapter 4 and expect theorems to work the
-   same way. Either support it or produce a targeted error suggesting
-   braces.
+8. **Resolved: theorem references accept positional term arguments.**
+   `exact modeq_refl m x` and `exact modeq_sym m x y h` now work. Term
+   arguments fill theorem parameters left-to-right before ordinary
+   forall or implication arguments are processed.
 
 9. **Explicit-instantiation name capture.** With a theorem parameter
    named `x`, `congr_pred {...; x := succ(x); ...}` fails with the

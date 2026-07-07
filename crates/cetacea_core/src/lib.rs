@@ -7067,6 +7067,16 @@ impl ProofExpr {
         for step in &self.steps {
             match step {
                 ProofStep::Arg(arg) => {
+                    if consume_positional_schema_term_arg(
+                        env,
+                        ctx,
+                        theorem,
+                        arg,
+                        &mut schema_subst,
+                    )? {
+                        continue;
+                    }
+
                     let raw_cursor = cursor.clone();
                     let cursor_inst = subst_formula_terms(
                         &subst_formula_schema(&cursor, &schema_subst),
@@ -7185,6 +7195,39 @@ impl ProofExpr {
         }
         Ok(proof)
     }
+}
+
+fn consume_positional_schema_term_arg(
+    env: &Env,
+    ctx: &Context,
+    theorem: &Theorem,
+    arg: &str,
+    subst: &mut SchemaSubst,
+) -> Result<bool, TacticError> {
+    let Some(param) = theorem.params.iter().find(|param| {
+        matches!(param.kind, ParamKind::Term(_)) && !subst.term_args.contains_key(&param.name)
+    }) else {
+        return Ok(false);
+    };
+    let ParamKind::Term(expected_ty) = &param.kind else {
+        unreachable!("filtered for term parameters")
+    };
+    let Ok(term) = parse_term_str(arg) else {
+        return Ok(false);
+    };
+    let Ok(actual_ty) = validate_term(env, ctx, &term) else {
+        return Ok(false);
+    };
+
+    let unification_params = remaining_schema_params(&theorem.params, subst);
+    unify_type(expected_ty, &actual_ty, &unification_params, subst).map_err(|_| {
+        let expected = subst_type_schema(expected_ty, subst);
+        TacticError::new(format!(
+            "term `{term}` has type `{actual_ty}`, but expected `{expected}`"
+        ))
+    })?;
+    subst.term_args.insert(param.name.clone(), term);
+    Ok(true)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15488,6 +15531,24 @@ mode constructive
 theorem have_le_refl_annotation : le(2, 2) := by
   have hle : le(2, 2) := le_refl
   exact hle
+"#
+        ));
+    }
+
+    #[test]
+    fn theorem_refs_accept_positional_term_schema_arguments() {
+        let import = import_line("std/prelude.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem modeq_refl_positional (m x : Nat) : ModEq(m, x, x) := by
+  exact modeq_refl m x
+
+theorem modeq_sym_positional (m x y : Nat) : ModEq(m, y, x) -> ModEq(m, x, y) := by
+  intro h
+  exact modeq_sym m y x h
 "#
         ));
     }
