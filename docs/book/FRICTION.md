@@ -169,6 +169,11 @@ theorems check — but three things stood out.
     finite-world search is exactly the right pedagogical tool for the
     "order of quantifiers matters" lesson.
 
+22. **Resolved: `inl`/`inr` are accepted as disjunction arm aliases.**
+    `cases h with | inl hp => ... | inr hq => ...` now checks, alongside
+    the native `| left ... => | right ... =>`, so Lean/Rocq muscle memory
+    no longer trips on `expected \`left\` case arm`.
+
 ## Already fixed while writing the book
 
 - `le_trans` was missing from `std/nat.ctea` (chapter 7 needed it) —

@@ -266,10 +266,10 @@ non-empty. This is the form Lean/Rocq users reach for first, and the barber
 proof in `examples/fol_advanced.ctea` now uses it. The bare subgoal form
 (`have h : P` followed by un-indented tactics) still works.
 
-### Disjunction case arms are `left`/`right`, not `inl`/`inr`
+### Disjunction case arms are `left`/`right` (or `inl`/`inr`)
 
-`cases h with | left ... => | right ... =>` destructures a disjunction; the
-Lean/Rocq spelling `inl`/`inr` is a parse error (`expected \`left\` case arm`).
+`cases h with | left ... => | right ... =>` destructures a disjunction. The
+Lean/Rocq spelling `| inl ... => | inr ... =>` is accepted as an alias.
 Existentials and conjunctions both use `| intro ... =>`.
 
 ### Indentation is forgiving but under-specified

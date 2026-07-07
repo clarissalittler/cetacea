@@ -802,6 +802,9 @@ theorem or_comm (P Q : Prop) : P \/ Q -> Q \/ P := by
       exact hq
 ```
 
+The arm keywords `inl` and `inr` are accepted as aliases for `left` and
+`right`.
+
 For existential:
 
 ```text

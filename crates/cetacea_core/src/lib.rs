@@ -10850,18 +10850,27 @@ fn line_indent(line: &str) -> usize {
 }
 
 fn parse_case_arm(line: &str, side: &str) -> Result<Name, ParseError> {
-    let prefix = format!("| {side} ");
-    let Some(rest) = line.strip_prefix(&prefix) else {
-        return Err(ParseError::new(format!("expected `{side}` case arm")));
+    // `inl`/`inr` are accepted as aliases for `left`/`right`, for readers with
+    // Lean/Rocq muscle memory.
+    let aliases: &[&str] = match side {
+        "left" => &["left", "inl"],
+        "right" => &["right", "inr"],
+        _ => std::slice::from_ref(&side),
     };
-    let Some(name) = rest.strip_suffix("=>") else {
-        return Err(ParseError::new("case arm must end with `=>`"));
-    };
-    let name = name.trim();
-    if name.is_empty() {
-        return Err(ParseError::new("case arm needs a hypothesis name"));
+    for alias in aliases {
+        let prefix = format!("| {alias} ");
+        if let Some(rest) = line.strip_prefix(&prefix) {
+            let Some(name) = rest.strip_suffix("=>") else {
+                return Err(ParseError::new("case arm must end with `=>`"));
+            };
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(ParseError::new("case arm needs a hypothesis name"));
+            }
+            return Ok(name.to_string());
+        }
     }
-    Ok(name.to_string())
+    Err(ParseError::new(format!("expected `{side}` case arm")))
 }
 
 fn parse_exists_case_arm(line: &str) -> Result<(Name, Name), ParseError> {
@@ -16668,6 +16677,25 @@ theorem cases_then_next_goal (P Q : Prop) : (P \/ Q) -> (Q \/ P) /\ (P \/ Q) := 
       left
       exact hq
   exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn cases_accepts_inl_inr_arm_aliases() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem or_comm (P Q : Prop) : P \/ Q -> Q \/ P := by
+  intro h
+  cases h with
+  | inl hp =>
+      right
+      exact hp
+  | inr hq =>
+      left
+      exact hq
 "#,
         );
     }
