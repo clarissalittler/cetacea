@@ -1120,6 +1120,10 @@ Important limitations to account for when extending the system:
 
 - Imports are global and unqualified.
 - There are no namespaces.
+- Namespace implementation should follow
+  [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md); qualified names affect
+  the parser, environment lookup, imports, theorem search, and proof
+  projections.
 - The parser is line-oriented and only parse errors carry token spans.
 - Formula and term definitions are transparent and simple.
 - Recursive definitions are limited to unary primitive recursion over `Nat`.

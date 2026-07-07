@@ -94,11 +94,12 @@ stay meaningful.
     of `succ(succ(succ(succ(succ(0)))))`), while mixed terms such as
     `succ(n)` remain symbolic.
 
-15. **Aggressive goal computation surprises.** `apply h 0 1` can leave
-    the goal `True` (premise computed away) — delightful once understood,
-    disorienting the first time; conversely goals sometimes normalize to
-    `False` making a planned `rewrite` miss. Narrated explicitly in
-    chapters 7–8.
+15. **Parked: aggressive goal computation surprises.** `apply h 0 1`
+    can leave the goal `True` (premise computed away) - delightful once
+    understood, disorienting the first time; conversely goals sometimes
+    normalize to `False` making a planned `rewrite` miss. This is now
+    narrated explicitly in chapters 7-8, and folded matching has softened
+    the worst surprises.
 
 16. **Resolved: axioms print as trusted.** Accepted axioms now display
     `accepted axiom foo (trusted)`, keeping proof-mode labels for proved
@@ -112,9 +113,13 @@ stay meaningful.
     to the tactic line; `rewrite all` remains available when every
     occurrence should change.
 
-18. **No namespaces** means the book can never let students prove
-    `add_comm` or `length_append` under their real names (prelude
-    collision); hence the pervasive `_demo` suffix convention.
+18. **Parked: no namespaces.** The book still cannot let students prove
+    `add_comm` or `length_append` under their real names without
+    colliding with the prelude; hence the pervasive `_demo` suffix
+    convention. The design note in
+    [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the parser,
+    environment, import, and proof-projection work needed before this is
+    scheduled.
 
 ## Already fixed while writing the book
 

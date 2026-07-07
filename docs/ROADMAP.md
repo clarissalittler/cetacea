@@ -206,7 +206,8 @@ Status: done.
 
 - **Namespaces (item 18):** qualified names (`nat.add_comm`) and import
   aliasing touch the parser, `Env`, and every lookup; the `_demo`
-  convention holds until Phases 2–4 land. Design note first.
+  convention holds until implementation lands. Design note:
+  [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md).
 - **Aggressive goal computation (item 15):** behavior is defensible and
   chapters now narrate it; revisit only if Phase 3 doesn't already
   soften the surprise (folded display should).
