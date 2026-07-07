@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -2555,6 +2555,17 @@ impl FileChecker {
                                     "the arithmetic statement is false when {}. No proof can close it; check the statement itself.",
                                     arithmetic_countermodel_note(&model)
                                 ));
+                            } else if let Some(model) = first_order_countermodel(
+                                &self.env,
+                                &theorem_ctx,
+                                &[],
+                                &decl.statement,
+                            )
+                            {
+                                diagnostic = diagnostic.with_note(format!(
+                                    "the first-order statement is false in {}. No proof can close it; check the statement itself.",
+                                    first_order_countermodel_note(&model)
+                                ));
                             } else if let Some(model) =
                                 propositional_countermodel(&err.hyps, target)
                             {
@@ -2569,6 +2580,15 @@ impl FileChecker {
                                     "the open arithmetic goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
                                     arithmetic_countermodel_note(&model)
                                 ));
+                            } else if let Some(err_ctx) = err.context.as_ref() {
+                                if let Some(model) =
+                                    first_order_countermodel(&self.env, err_ctx, &err.hyps, target)
+                                {
+                                    diagnostic = diagnostic.with_note(format!(
+                                        "the open first-order goal does not follow from the current hypotheses: it is false in {}. Reconsider the earlier proof steps.",
+                                        first_order_countermodel_note(&model)
+                                    ));
+                                }
                             }
                             self.result
                                 .diagnostics
@@ -3074,6 +3094,18 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
             format!(
                 "The arithmetic goal does not follow from the current hypotheses: it is false when {}. Revisit the earlier proof steps or the theorem statement.",
                 arithmetic_countermodel_note(&model)
+            ),
+        );
+    } else if let Some(model) =
+        first_order_countermodel(env, &goal.context, &hyp_formulas, &goal.target)
+    {
+        push_goal_hint(
+            &mut hints,
+            "Warning: this first-order goal is not provable",
+            "show_goal".to_string(),
+            format!(
+                "The first-order goal does not follow from the current hypotheses: it is false in {}. Revisit the earlier proof steps or the theorem statement.",
+                first_order_countermodel_note(&model)
             ),
         );
     }
@@ -4067,6 +4099,487 @@ fn arithmetic_countermodel_note(model: &[(Name, usize)]) -> String {
         .map(|(name, value)| format!("{name} = {value}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+const MAX_FO_COUNTERMODEL_SORTS: usize = 2;
+const MAX_FO_COUNTERMODEL_PREDS: usize = 3;
+const MAX_FO_COUNTERMODEL_SLOTS: usize = 12;
+
+#[derive(Clone, Debug)]
+struct FirstOrderCountermodel {
+    domain_size: usize,
+    assignments: Vec<(Name, usize)>,
+    predicates: Vec<(Name, Vec<Vec<usize>>)>,
+}
+
+#[derive(Default)]
+struct FirstOrderSignature {
+    sorts: BTreeSet<Name>,
+    predicates: BTreeMap<Name, Vec<Type>>,
+    free_vars: BTreeMap<Name, Type>,
+    consts: BTreeMap<Name, Type>,
+}
+
+#[derive(Clone)]
+struct PredicateSlots {
+    name: Name,
+    tuples: Vec<Vec<usize>>,
+    offset: usize,
+}
+
+struct FirstOrderSearch {
+    domain_size: usize,
+    terms: Vec<Name>,
+    slots: Vec<PredicateSlots>,
+    slot_count: usize,
+}
+
+fn first_order_countermodel(
+    env: &Env,
+    ctx: &Context,
+    hyps: &[Formula],
+    target: &Formula,
+) -> Option<FirstOrderCountermodel> {
+    let mut sig = FirstOrderSignature::default();
+    let mut bound = Vec::new();
+    for hyp in hyps {
+        collect_first_order_formula_signature(env, ctx, hyp, &mut bound, &mut sig).ok()?;
+    }
+    collect_first_order_formula_signature(env, ctx, target, &mut bound, &mut sig).ok()?;
+    if sig.sorts.is_empty()
+        || sig.sorts.len() > MAX_FO_COUNTERMODEL_SORTS
+        || sig.predicates.len() > MAX_FO_COUNTERMODEL_PREDS
+    {
+        return None;
+    }
+
+    for domain_size in 1..=3 {
+        let Some(search) = build_first_order_search(&sig, domain_size) else {
+            continue;
+        };
+        let mut assignment = HashMap::new();
+        if let Some(model) =
+            find_first_order_countermodel(&search, 0, &mut assignment, hyps, target)
+        {
+            return Some(model);
+        }
+    }
+    None
+}
+
+fn build_first_order_search(
+    sig: &FirstOrderSignature,
+    domain_size: usize,
+) -> Option<FirstOrderSearch> {
+    let mut slot_count = 0usize;
+    let mut slots = Vec::new();
+    for (name, arg_types) in &sig.predicates {
+        let tuple_count = domain_size.checked_pow(arg_types.len() as u32)?;
+        if slot_count + tuple_count > MAX_FO_COUNTERMODEL_SLOTS {
+            return None;
+        }
+        slots.push(PredicateSlots {
+            name: name.clone(),
+            tuples: first_order_tuples(domain_size, arg_types.len()),
+            offset: slot_count,
+        });
+        slot_count += tuple_count;
+    }
+
+    let mut terms: BTreeSet<Name> = sig.free_vars.keys().cloned().collect();
+    terms.extend(sig.consts.keys().cloned());
+
+    Some(FirstOrderSearch {
+        domain_size,
+        terms: terms.into_iter().collect(),
+        slots,
+        slot_count,
+    })
+}
+
+fn first_order_tuples(domain_size: usize, arity: usize) -> Vec<Vec<usize>> {
+    fn go(domain_size: usize, arity: usize, current: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+        if current.len() == arity {
+            out.push(current.clone());
+            return;
+        }
+        for value in 0..domain_size {
+            current.push(value);
+            go(domain_size, arity, current, out);
+            current.pop();
+        }
+    }
+
+    let mut out = Vec::new();
+    go(domain_size, arity, &mut Vec::new(), &mut out);
+    out
+}
+
+fn find_first_order_countermodel(
+    search: &FirstOrderSearch,
+    var_idx: usize,
+    assignment: &mut HashMap<Name, usize>,
+    hyps: &[Formula],
+    target: &Formula,
+) -> Option<FirstOrderCountermodel> {
+    if var_idx < search.terms.len() {
+        let var = search.terms[var_idx].clone();
+        for value in 0..search.domain_size {
+            assignment.insert(var.clone(), value);
+            if let Some(model) =
+                find_first_order_countermodel(search, var_idx + 1, assignment, hyps, target)
+            {
+                return Some(model);
+            }
+        }
+        assignment.remove(&var);
+        return None;
+    }
+
+    for bits in 0..(1u64 << search.slot_count) {
+        let hyps_hold = hyps.iter().all(|hyp| {
+            eval_first_order_formula(hyp, assignment, search, bits) == Some(true)
+        });
+        if hyps_hold && eval_first_order_formula(target, assignment, search, bits) == Some(false) {
+            return Some(first_order_model_from_bits(search, assignment, bits));
+        }
+    }
+    None
+}
+
+fn first_order_model_from_bits(
+    search: &FirstOrderSearch,
+    assignment: &HashMap<Name, usize>,
+    bits: u64,
+) -> FirstOrderCountermodel {
+    let assignments = search
+        .terms
+        .iter()
+        .filter_map(|name| assignment.get(name).map(|value| (name.clone(), *value)))
+        .collect();
+    let predicates = search
+        .slots
+        .iter()
+        .map(|slots| {
+            let tuples = slots
+                .tuples
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, tuple)| {
+                    if bits & (1u64 << (slots.offset + idx)) != 0 {
+                        Some(tuple.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            (slots.name.clone(), tuples)
+        })
+        .collect();
+    FirstOrderCountermodel {
+        domain_size: search.domain_size,
+        assignments,
+        predicates,
+    }
+}
+
+fn collect_first_order_formula_signature(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+    bound: &mut Vec<TermBinding>,
+    sig: &mut FirstOrderSignature,
+) -> Result<(), ()> {
+    match formula {
+        Formula::True | Formula::False => Ok(()),
+        Formula::Eq(left, right) => {
+            let left_ty = collect_first_order_term_signature(env, ctx, left, bound, sig)?;
+            let right_ty = collect_first_order_term_signature(env, ctx, right, bound, sig)?;
+            if left_ty == right_ty && first_order_sort_name(&left_ty).is_some() {
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+        Formula::PredApp(name, args) => {
+            let signature = ctx
+                .lookup_predicate_var(name)
+                .or_else(|| env.preds.get(name).map(Vec::as_slice))
+                .ok_or(())?;
+            if signature.len() != args.len() {
+                return Err(());
+            }
+            for ty in signature {
+                sig.sorts.insert(first_order_sort_name(ty).ok_or(())?);
+            }
+            for (arg, expected) in args.iter().zip(signature) {
+                let actual = collect_first_order_term_signature(env, ctx, arg, bound, sig)?;
+                if &actual != expected {
+                    return Err(());
+                }
+            }
+            sig.predicates.insert(name.clone(), signature.to_vec());
+            Ok(())
+        }
+        Formula::And(left, right) | Formula::Or(left, right) | Formula::Implies(left, right) => {
+            collect_first_order_formula_signature(env, ctx, left, bound, sig)?;
+            collect_first_order_formula_signature(env, ctx, right, bound, sig)
+        }
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        }
+        | Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            sig.sorts
+                .insert(first_order_sort_name(var_type).ok_or(())?);
+            bound.push(TermBinding {
+                name: var.clone(),
+                ty: var_type.clone(),
+            });
+            let result = collect_first_order_formula_signature(env, ctx, body, bound, sig);
+            bound.pop();
+            result
+        }
+        Formula::Atom(_) | Formula::In(_, _) | Formula::Subset(_, _) => Err(()),
+    }
+}
+
+fn collect_first_order_term_signature(
+    env: &Env,
+    ctx: &Context,
+    term: &Term,
+    bound: &[TermBinding],
+    sig: &mut FirstOrderSignature,
+) -> Result<Type, ()> {
+    match term {
+        Term::Var(name) => {
+            if let Some(binding) = bound.iter().rev().find(|binding| binding.name == *name) {
+                sig.sorts
+                    .insert(first_order_sort_name(&binding.ty).ok_or(())?);
+                return Ok(binding.ty.clone());
+            }
+            if let Some(ty) = ctx.lookup_term(name) {
+                sig.sorts.insert(first_order_sort_name(ty).ok_or(())?);
+                sig.free_vars.insert(name.clone(), ty.clone());
+                return Ok(ty.clone());
+            }
+            if let Some(ty) = env.consts.get(name) {
+                sig.sorts.insert(first_order_sort_name(ty).ok_or(())?);
+                sig.consts.insert(name.clone(), ty.clone());
+                return Ok(ty.clone());
+            }
+            Err(())
+        }
+        Term::App(_, _)
+        | Term::PredLambda { .. }
+        | Term::Zero
+        | Term::Succ(_)
+        | Term::Add(_, _)
+        | Term::Mul(_, _)
+        | Term::Sub(_, _)
+        | Term::Pair(_, _)
+        | Term::Fst(_)
+        | Term::Snd(_)
+        | Term::EmptySet(_)
+        | Term::Universe(_)
+        | Term::Singleton(_)
+        | Term::Union(_, _)
+        | Term::Inter(_, _)
+        | Term::Diff(_, _)
+        | Term::Complement(_)
+        | Term::CartProd(_, _)
+        | Term::Powerset(_)
+        | Term::SetBuilder { .. } => Err(()),
+    }
+}
+
+fn first_order_sort_name(ty: &Type) -> Option<Name> {
+    match ty {
+        Type::Named(name) => Some(name.clone()),
+        Type::Nat | Type::Prod(_, _) | Type::Set(_) => None,
+    }
+}
+
+fn eval_first_order_formula(
+    formula: &Formula,
+    assignment: &mut HashMap<Name, usize>,
+    search: &FirstOrderSearch,
+    bits: u64,
+) -> Option<bool> {
+    match formula {
+        Formula::True => Some(true),
+        Formula::False => Some(false),
+        Formula::Eq(left, right) => Some(
+            eval_first_order_term(left, assignment)?
+                == eval_first_order_term(right, assignment)?,
+        ),
+        Formula::PredApp(name, args) => {
+            let values = args
+                .iter()
+                .map(|arg| eval_first_order_term(arg, assignment))
+                .collect::<Option<Vec<_>>>()?;
+            eval_first_order_predicate(name, &values, search, bits)
+        }
+        Formula::And(left, right) => Some(
+            eval_first_order_formula(left, assignment, search, bits)?
+                && eval_first_order_formula(right, assignment, search, bits)?,
+        ),
+        Formula::Or(left, right) => Some(
+            eval_first_order_formula(left, assignment, search, bits)?
+                || eval_first_order_formula(right, assignment, search, bits)?,
+        ),
+        Formula::Implies(left, right) => Some(
+            !eval_first_order_formula(left, assignment, search, bits)?
+                || eval_first_order_formula(right, assignment, search, bits)?,
+        ),
+        Formula::Forall { var, body, .. } => {
+            let old = assignment.get(var).copied();
+            for value in 0..search.domain_size {
+                assignment.insert(var.clone(), value);
+                if !eval_first_order_formula(body, assignment, search, bits)? {
+                    restore_first_order_assignment(assignment, var, old);
+                    return Some(false);
+                }
+            }
+            restore_first_order_assignment(assignment, var, old);
+            Some(true)
+        }
+        Formula::Exists { var, body, .. } => {
+            let old = assignment.get(var).copied();
+            for value in 0..search.domain_size {
+                assignment.insert(var.clone(), value);
+                if eval_first_order_formula(body, assignment, search, bits)? {
+                    restore_first_order_assignment(assignment, var, old);
+                    return Some(true);
+                }
+            }
+            restore_first_order_assignment(assignment, var, old);
+            Some(false)
+        }
+        Formula::Atom(_) | Formula::In(_, _) | Formula::Subset(_, _) => None,
+    }
+}
+
+fn restore_first_order_assignment(
+    assignment: &mut HashMap<Name, usize>,
+    var: &str,
+    old: Option<usize>,
+) {
+    if let Some(old) = old {
+        assignment.insert(var.to_string(), old);
+    } else {
+        assignment.remove(var);
+    }
+}
+
+fn eval_first_order_term(term: &Term, assignment: &HashMap<Name, usize>) -> Option<usize> {
+    match term {
+        Term::Var(name) => assignment.get(name).copied(),
+        Term::App(_, _)
+        | Term::PredLambda { .. }
+        | Term::Zero
+        | Term::Succ(_)
+        | Term::Add(_, _)
+        | Term::Mul(_, _)
+        | Term::Sub(_, _)
+        | Term::Pair(_, _)
+        | Term::Fst(_)
+        | Term::Snd(_)
+        | Term::EmptySet(_)
+        | Term::Universe(_)
+        | Term::Singleton(_)
+        | Term::Union(_, _)
+        | Term::Inter(_, _)
+        | Term::Diff(_, _)
+        | Term::Complement(_)
+        | Term::CartProd(_, _)
+        | Term::Powerset(_)
+        | Term::SetBuilder { .. } => None,
+    }
+}
+
+fn eval_first_order_predicate(
+    name: &str,
+    values: &[usize],
+    search: &FirstOrderSearch,
+    bits: u64,
+) -> Option<bool> {
+    for slots in &search.slots {
+        if slots.name != name {
+            continue;
+        }
+        for (idx, tuple) in slots.tuples.iter().enumerate() {
+            if tuple == values {
+                return Some(bits & (1u64 << (slots.offset + idx)) != 0);
+            }
+        }
+    }
+    None
+}
+
+fn first_order_countermodel_note(model: &FirstOrderCountermodel) -> String {
+    let domain = if model.domain_size == 1 {
+        "a 1-element domain".to_string()
+    } else {
+        format!("a {}-element domain", model.domain_size)
+    };
+
+    let assignments = model
+        .assignments
+        .iter()
+        .map(|(name, value)| format!("{name} = {}", first_order_element_name(*value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let predicates = model
+        .predicates
+        .iter()
+        .map(|(name, tuples)| format!("{name} = {}", first_order_relation_display(tuples)))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    match (assignments.is_empty(), predicates.is_empty()) {
+        (true, true) => domain,
+        (false, true) => format!("{domain} with {assignments}"),
+        (true, false) => format!("{domain} where {predicates}"),
+        (false, false) => format!("{domain} with {assignments}, where {predicates}"),
+    }
+}
+
+fn first_order_relation_display(tuples: &[Vec<usize>]) -> String {
+    if tuples.is_empty() {
+        return "{}".to_string();
+    }
+    format!(
+        "{{{}}}",
+        tuples
+            .iter()
+            .map(|tuple| {
+                format!(
+                    "({})",
+                    tuple
+                        .iter()
+                        .map(|value| first_order_element_name(*value))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn first_order_element_name(value: usize) -> String {
+    match value {
+        0 => "a".to_string(),
+        1 => "b".to_string(),
+        2 => "c".to_string(),
+        other => format!("e{other}"),
+    }
 }
 
 fn ensure_kernel_binder_unused(ctx: &Context, name: &str) -> Result<(), KernelError> {
@@ -9376,6 +9889,7 @@ struct TacticError {
     target: Option<Box<Formula>>,
     hyps: Vec<Formula>,
     terms: Vec<TermBinding>,
+    context: Option<Context>,
     line: Option<usize>,
     suggestions: Vec<DiagnosticSuggestion>,
 }
@@ -9387,6 +9901,7 @@ impl TacticError {
             target: None,
             hyps: Vec::new(),
             terms: Vec::new(),
+            context: None,
             line: None,
             suggestions: Vec::new(),
         }
@@ -9409,6 +9924,13 @@ impl TacticError {
     fn with_terms(mut self, terms: Vec<TermBinding>) -> Self {
         if self.terms.is_empty() {
             self.terms = terms;
+        }
+        self
+    }
+
+    fn with_context(mut self, context: Context) -> Self {
+        if self.context.is_none() {
+            self.context = Some(context);
         }
         self
     }
@@ -9476,6 +9998,7 @@ impl ProofSession {
             .map(|binding| binding.formula.clone())
             .collect();
         let goal_terms = goal.context.term_vars.clone();
+        let goal_context = goal.context.clone();
         let StepResult {
             replacement,
             new_goals,
@@ -9490,6 +10013,7 @@ impl ProofSession {
             err.with_target(goal_target)
                 .with_hyps(goal_hyps)
                 .with_terms(goal_terms)
+                .with_context(goal_context)
                 .with_line(located.line)
         })?;
         if !self.root.replace_hole(goal_id, &replacement) {
@@ -9512,7 +10036,8 @@ impl ProofSession {
                         .map(|binding| binding.formula.clone())
                         .collect(),
                 )
-                .with_terms(goal.context.term_vars.clone()));
+                .with_terms(goal.context.term_vars.clone())
+                .with_context(goal.context.clone()));
         }
         self.root.complete()
     }
@@ -13773,6 +14298,82 @@ theorem wrong_nat_subgoal (n : Nat) : n = 0 -> n = 0 := by
         assert!(
             notes.contains("open arithmetic goal") && notes.contains("n = 0"),
             "expected open arithmetic countermodel note, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn first_order_countermodel_reported_for_false_statement() {
+        let result = check_file(
+            r#"
+mode constructive
+
+sort Person
+pred Knows(Person, Person)
+
+theorem knows_symmetric_wish
+  : forall x y : Person, Knows(x, y) -> Knows(y, x) := by
+  intro x
+  intro y
+  intro h
+  exact h
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            notes.contains("first-order statement")
+                && notes.contains("2-element domain")
+                && notes.contains("Knows = {(a,b)}"),
+            "expected first-order countermodel note, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn first_order_countermodel_assigns_declared_consts() {
+        let result = check_file(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+const bob : Person
+
+theorem alice_is_bob : alice = bob := by
+  refl
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            notes.contains("first-order statement")
+                && notes.contains("2-element domain with alice = a, bob = b"),
+            "expected first-order countermodel note for declared constants, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn first_order_countermodel_reported_for_unprovable_open_goal() {
+        let result = check_file(
+            r#"
+mode constructive
+
+sort Person
+pred Knows(Person, Person)
+
+theorem wrong_relation_branch
+  (x y : Person)
+  : Knows(x, y) -> Knows(x, y) \/ Knows(y, x) := by
+  intro h
+  right
+  exact h
+"#,
+        );
+        assert!(!result.diagnostics.is_empty());
+        let notes = result.diagnostics[0].notes.join("\n");
+        assert!(
+            notes.contains("open first-order goal")
+                && notes.contains("2-element domain with x = a, y = b, where Knows = {(a,b)}"),
+            "expected open first-order countermodel note, got: {notes}"
         );
     }
 

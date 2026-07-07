@@ -440,13 +440,11 @@ error: /home/left_adjoint/cetacea/docs/book/code/ch06-mistakes.ctea:35: theorem 
 ```
 
 The hypothesis concludes *in B*; the goal wants *in A*; `apply` won't
-bridge them. Note what's missing, though: no "statement is not a
-tautology" note. Chapter 2's countermodel detector only covers
-propositional statements, and this one is quantified — so the checker
-reports the local dead end and leaves the verdict to you. (The
-statement is indeed false: take `A` empty and `B` not.) Rejection plus
-your own counterexample is how a quantified case gets closed —
-Chapter 4 said the same about the quantifier-swap.
+bridge them. Note what's missing, though: no countermodel note. The
+checker now searches small first-order worlds, but set membership and
+subset formulas are outside that fragment, so this one still reports
+the local dead end and leaves the verdict to you. The statement is
+indeed false: take `A` empty and `B` not.
 
 **Mistake 4: an element is not a one-element set.**
 

@@ -38,13 +38,14 @@ stay meaningful.
    now checks, and Chapter 8 includes the "succ ∘ succ is injective"
    payoff against the library theorem.
 
-6. **Partly resolved: countermodel notes now cover small Nat arithmetic.**
-   False pure `Nat` arithmetic goals with free variables report concrete
-   assignments such as `n = 0`, both for theorem statements and open
-   goals. The remaining gap is quantified/first-order countermodels:
-   finite-domain search over small abstract sorts and predicates would
-   bring the same "the statement is wrong, stop proving" signal to
-   relation-heavy chapters.
+6. **Resolved: countermodel notes cover small Nat arithmetic and
+   bounded first-order worlds.** False pure `Nat` arithmetic goals with
+   free variables report assignments such as `n = 0`, both for theorem
+   statements and open goals. Relation-heavy statements over abstract
+   sorts, declared predicates, and equality now get the same signal via
+   a finite-domain search over worlds of size 1-3. The search is
+   intentionally bounded, and still bails silently on sets, functions,
+   and richer terms.
 
 ## Medium impact
 

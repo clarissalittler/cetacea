@@ -363,18 +363,17 @@ in reach is `h` itself:
 ```text
 error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:34: theorem `le_symmetric_wish` failed: exact proof does not solve the goal: proof has type `le(x, y)`, but expected `le(y, x)`
   note: target: le(y, x)
+  note: the open arithmetic goal does not follow from the current hypotheses: it is false when x = 0, y = 1. Reconsider the earlier proof steps.
 ```
 
 (The `help:` paragraph is Chapter 2's usual `exact` advice — check
 your terminal.) Look at the failure point: the proof dies *exactly
 where the two arguments trade places* — `le(x, y)` offered, `le(y, x)`
-owed. And note what the error *doesn't* say: no "statement is not a
-tautology," because the countermodel detector from Chapter 2 is
-propositional-only and this statement is quantified. The checker
-reports the dead end; producing the counterexample is on you — which
-is precisely what `le_not_symmetric` in Section 7.4 did, with `0` and
-`1`. Failed wish, then proved refutation: that pair of theorems is the
-complete etiquette for suspicion.
+owed. The extra note also gives the concrete failed branch: `x = 0`
+and `y = 1` make `le(x, y)` true and `le(y, x)` false. That is
+precisely what `le_not_symmetric` in Section 7.4 proves. Failed wish,
+then proved refutation: that pair of theorems is the complete
+etiquette for suspicion.
 
 ## 7.8 Exercises
 

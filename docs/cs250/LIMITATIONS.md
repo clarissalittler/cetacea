@@ -115,10 +115,10 @@ Cetacea is a proof system, not a truth-table evaluator, and it still
 does not print truth tables. Module 2's full-table exercises should
 still be done on paper or with the course Python tools.
 
-However, the checker now runs a truth-table check behind the scenes when
-a proof fails: if the statement (or the open goal, given its hypotheses)
-is purely propositional and classically falsifiable, the error says so
-and gives the falsifying row:
+However, the checker now runs small countermodel searches behind the
+scenes when a proof fails. If the statement, or the open goal given its
+hypotheses, is in a supported false fragment, the error says so and
+gives the falsifying row, assignment, or finite world:
 
 ```text
 note: the statement is not a tautology: it is false when P = false, Q = true.
@@ -131,6 +131,11 @@ told *there is a countermodel* instead of grinding on tactics forever.
 The variant wording "the open goal does not follow from the current
 hypotheses ... Reconsider the earlier proof steps" distinguishes a wrong
 statement from a wrong turn in the proof.
+
+The supported fragments are propositional formulas, small pure `Nat`
+arithmetic goals, and bounded first-order formulas over abstract sorts,
+declared predicates, and equality. The checker still bails silently on
+sets, graph-property definitions, and richer terms.
 
 The useful bridge remains: formulas classified by truth tables can often
 be re-derived as Cetacea theorems using the proof rules from Module 3.
@@ -287,9 +292,11 @@ are now implemented:
   transitively, as in
   `accepted theorem length_append (constructive; axioms: append_cons,
   append_nil)`.
-- Failed propositional proofs get countermodel notes ("the statement is
-  not a tautology: it is false when ..."), also surfaced as a
-  "Warning: this goal is not provable" hint in the Goals panel.
+- Failed proofs in supported countermodel fragments get notes ("the
+  statement is not a tautology: it is false when ...", "the arithmetic
+  statement is false when ...", or "the first-order statement is false
+  in ..."), also surfaced as a "Warning: this goal is not provable" hint
+  in the Goals panel.
 - Inductive data types can be declared with `data`, with structural
   `induction ... with` over them, including two-recursive-argument
   constructors such as tree nodes.

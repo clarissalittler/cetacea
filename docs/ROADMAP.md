@@ -8,13 +8,13 @@ test. Friction item numbers refer to FRICTION.md.
 
 ## Status
 
-- Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4.1, Phase 4.2, and Phase 4.4. The safety net is in CI; the
+- Done: Phase 0, Phase 1, Phase 2, Phase 3, and Phase 4. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
   def-name arguments, nested lambda propagation, mixed-type lambdas, and
   book debt repayment, def-aware matching, and annotation-driven `have`
-  inference, positional theorem term arguments, and arithmetic
-  countermodels are implemented.
-- Next: Phase 4.3, first-order countermodels.
+  inference, positional theorem term arguments, arithmetic countermodels,
+  and first-order countermodels are implemented.
+- Next: Phase 5.1, decimal numerals in output.
 
 ## Findings from triage
 
@@ -165,6 +165,7 @@ arithmetic): enumerate domains of size 1–3 and all predicate
 interpretations under a strict budget (≤ 2 sorts, ≤ 3 predicates,
 ≤ 2^12 interpretations); report in the established voice — "false in a
 2-element domain where Knows = {(a,b)}". Bail silently over budget.
+Status: done.
 
 **4.4 Arithmetic countermodels.** For pure `Nat` (in)equality goals
 with free variables, test all assignments over 0..8; report "false

@@ -339,6 +339,7 @@ to shake a single witness out of it:
 ```text
 error: /home/left_adjoint/cetacea/docs/book/code/ch04-mistakes.ctea:31: theorem `everyone_has_an_admirer_so_someone_admires_everyone` failed: cases with `| intro a b` expects an existential or conjunction proof
   note: target: exists x : A, forall y : A, R(x, y)
+  note: the first-order statement is false in a 2-element domain where R = {(a,b), (b,a)}. No proof can close it; check the statement itself.
 ```
 
 `cases ... with | intro ...` opens things that *contain* something — an
@@ -349,12 +350,12 @@ invalid argument ever had. When you're genuinely unsure which way a
 quantifier swap goes, this is the cheapest experiment in the world: try
 to prove it, and see whether the rules cooperate.
 
-(One caveat from Chapter 2 applies here too: a *failed proof* isn't by
-itself a refutation — maybe you just proved it badly. The checker's
-propositional countermodel notes don't extend to quantified statements,
-so for those, rejection plus a hand-built counterexample — here, a
-two-person world where each admires only themselves — is how you close
-the case.)
+Chapter 2's caveat still applies: a *failed proof* isn't by itself a
+refutation, because maybe you just proved it badly. Here the checker
+has more evidence. The first-order note is a concrete two-person world:
+each person admires the other, so everyone has an admirer, but no one
+admires everyone. For small abstract sorts and predicates, Cetacea can
+now close this kind of case without making you build the world by hand.
 
 ## 4.10 Exercises
 

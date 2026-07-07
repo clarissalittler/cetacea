@@ -124,15 +124,18 @@ A few things to know:
 
 Two more things the checker does when you're stuck:
 
-- **Countermodel notes.** If what you're trying to prove is purely
-  propositional and *actually false*, the error says so and gives the
-  falsifying assignment:
+- **Countermodel notes.** If what you're trying to prove is in a
+  supported small fragment and *actually false*, the error says so and
+  gives the falsifying assignment or world:
 
   ```
   note: the statement is not a tautology: it is false when P = false, Q = true.
   No proof can close it; check the statement itself.
   ```
 
+  The supported fragments include propositional formulas, small `Nat`
+  arithmetic goals, and bounded first-order goals over abstract sorts
+  and declared predicates.
   No amount of tactic cleverness will fix that — re-read the statement.
   The variant "the open goal does not follow from the current
   hypotheses ... Reconsider the earlier proof steps" means the statement

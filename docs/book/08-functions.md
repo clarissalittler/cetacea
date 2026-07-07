@@ -322,11 +322,12 @@ checker now expects evidence `G(x1, x2)`, "input x1 yields output x2."
 We offered `G(x1, y)` instead, and the mismatch names the exact spot
 where the two definitions' columns cross. The statement itself is
 false, not just badly proved — a constant graph is single-valued but
-maximally collision-prone — and as in Chapter 7, the quantified
-statement earns no countermodel note, so the counterexample lives in
-your head. This error message is the one to remember: *when arguments
-seem to be in the wrong slots, re-read which column each quantifier
-ranges over.*
+maximally collision-prone. This one still earns no countermodel note:
+the relevant facts are wrapped in graph-property definitions, which
+are outside the small first-order fragment the checker searches. The
+counterexample lives in your head, and the error message is the one to
+remember: *when arguments seem to be in the wrong slots, re-read which
+column each quantifier ranges over.*
 
 **Mistake 3: "inverting" succ with truncated subtraction.** Surely
 `succ` is surjective — every `y` is hit by `y - 1`? The proof offers
@@ -335,6 +336,7 @@ ranges over.*
 ```text
 error: /home/left_adjoint/cetacea/docs/book/code/ch08-mistakes.ctea:45: theorem `succ_surjective_wish` failed: refl cannot prove `succ(sub(y, succ(0))) = y` because the sides are not identical
   note: target: succ(sub(y, succ(0))) = y
+  note: the open arithmetic goal does not follow from the current hypotheses: it is false when y = 0. Reconsider the earlier proof steps.
   help: Use equality simplification first
     `refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.
     try:
