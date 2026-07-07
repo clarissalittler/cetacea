@@ -51,24 +51,28 @@ if `x` yields `y1` and `x` yields `y2`, then `y1 = y2` — you can
 *claim* two outputs, but they were the same output all along. A graph
 with both properties deserves the word "function."
 
-Let's keep the age promise formally. `AgeIs(Person, Nat)` is a
-declared relation — note the two *different* types, person in, number
-out — and if every person has a recorded age, `AgeIs` is total:
+Let's keep the age promise formally. Declare `age` as a function
+symbol:
 
 ```text
-theorem age_relation_total
-  : (forall p : Person, exists n : Nat, AgeIs(p, n)) -> Total(AgeIs) := by
-  intro h
+func age : Person -> Nat
+```
+
+Its graph has two *different* types, person in and number out, so the
+lambda gives each binder its own annotation:
+
+```text
+theorem age_graph_total : Total(fun (p : Person) (n : Nat) => age(p) = n) := by
   unfold Total
-  exact h
+  intro p
+  exists age(p)
+  refl
 ```
 
 After `unfold Total` the goal is
-`forall x : Person, exists y : Nat, AgeIs(x, y)` — which is the
-hypothesis `h`, letter for letter except the letters: `h` says it with
-`p` and `n`, the goal with `x` and `y`. `exact h` doesn't blink,
-because bound variables are pronouns (Chapter 4), not identities. A
-definition unfolded, an alpha-shrug, done.
+`forall x : Person, exists y : Nat, age(x) = y`. For an arbitrary
+person `p`, the witness is the term `age(p)` itself, and `refl` closes
+`age(p) = age(p)`.
 
 ## 8.3 Declared functions and their graphs
 
@@ -116,12 +120,9 @@ side, `y1`, and fold it back to `mother(x)` — leaves
 `mother(x) = y2`, which is `h2`. Both claimed outputs collapse into
 the term they came from.
 
-(A note on the lambda's typing, in the interest of honesty: the
-annotation `fun x y : Person => ...` gives *both* variables one type,
-which is why this section's examples are Person-to-Person and
-Nat-to-Nat. For a mixed-type function like age — Person in, Nat out —
-use a declared relation such as `AgeIs`, as Section 8.2 did; that's
-the idiom this book will stick to.)
+When all binders have one type, the shorthand `fun x y : Person => ...`
+keeps examples compact. For mixed graphs, use the parenthesized form
+from `age`: `fun (p : Person) (n : Nat) => ...`.
 
 ## 8.4 Injective and surjective: the two aristocrats
 

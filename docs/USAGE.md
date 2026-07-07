@@ -289,6 +289,21 @@ theorem equality_reflexive : Reflexive(fun x y : Person => x = y) := by
   refl
 ```
 
+The shorthand `fun x y : Person => ...` gives every listed binder the same
+type. For mixed predicate signatures, annotate binders individually:
+
+```text
+func age : Person -> Nat
+
+theorem age_graph_single_valued
+  : SingleValued(fun (x : Person) (n : Nat) => age(x) = n) := by
+  ...
+```
+
+When the expected predicate signature is already concrete, annotations may be
+omitted and filled from that signature, as in `fun x n => AgeIs(x, n)` for an
+expected `Person -> Nat -> Prop` argument.
+
 Lambda parameters must be distinct. They are substituted simultaneously, so
 using names such as `x` and `y` in both the lambda and the surrounding theorem
 is safe.
@@ -1356,8 +1371,9 @@ axioms are involved.
 Functions `f : A -> B` modeled by their graphs, following the
 functions-as-relations treatment: a graph is a predicate
 `G : A -> B -> Prop`, and `G(x, y)` means `f(x) = y`. For a declared
-`func f : A -> B`, the graph is the lambda `fun x y : A => f(x) = y` (the
-checker gives `y` its type `B` from context).
+`func f : A -> B`, the graph is the lambda `fun x y : A => f(x) = y`
+when `A` and `B` are the same type, or
+`fun (x : A) (y : B) => f(x) = y` when the graph has mixed types.
 
 Definitions, each with parameters `(A : Type) (B : Type) (G : A -> B -> Prop)`:
 

@@ -7,9 +7,11 @@ mode constructive
 sort Person
 
 func mother : Person -> Person
+func age : Person -> Nat
 
 -- The graph of a declared `func f : A -> B` is the predicate lambda
--- `fun x y : A => f(x) = y` (the checker gives `y` type B from context).
+-- `fun x y : A => f(x) = y` when A and B are the same type, or
+-- `fun (x : A) (y : B) => f(x) = y` for mixed types.
 -- Every declared func is total and single-valued, and both facts are
 -- provable from its graph.
 
@@ -25,6 +27,24 @@ theorem mother_single_valued
   intro x
   intro y1
   intro y2
+  intro h1
+  intro h2
+  rewrite <- h1
+  rewrite <- h2
+  refl
+
+theorem age_total : Total(fun (x : Person) (n : Nat) => age(x) = n) := by
+  unfold Total
+  intro x
+  exists age(x)
+  refl
+
+theorem age_single_valued
+  : SingleValued(fun (x : Person) (n : Nat) => age(x) = n) := by
+  unfold SingleValued
+  intro x
+  intro n1
+  intro n2
   intro h1
   intro h2
   rewrite <- h1

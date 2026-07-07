@@ -29,11 +29,14 @@ classify it; bijective packages injective and surjective together.
 ## Connecting a declared `func` to its graph
 
 When you declare a function symbol, its graph is the predicate lambda
-`fun x y : A => f(x) = y` (the checker gives `y` its type `B` from
-context, so only the domain type is annotated):
+`fun x y : A => f(x) = y` when the input and output types are both
+`A`. For mixed types, annotate each binder:
 
 ```text
 func mother : Person -> Person
+func age : Person -> Nat
+
+fun (x : Person) (n : Nat) => age(x) = n
 ```
 
 Any declared `func` is automatically total and single-valued in the
@@ -49,8 +52,8 @@ theorem mother_total : Total(fun x y : Person => mother(x) = y) := by
 
 Totality is a one-witness proof: the image of `x` is `mother(x)` itself.
 Single-valuedness is two rewrites — if `mother(x) = y1` and
-`mother(x) = y2` then `y1 = y2`; see `mother_single_valued` in the
-companion file.
+`mother(x) = y2` then `y1 = y2`. The companion file also proves
+`age_total` and `age_single_valued` using the mixed graph syntax.
 
 ## The identity function
 

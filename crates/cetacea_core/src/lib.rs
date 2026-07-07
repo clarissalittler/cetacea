@@ -78,15 +78,7 @@ impl fmt::Display for Term {
             }
             Term::PredLambda { params, body } => {
                 write!(f, "fun ")?;
-                for (idx, param) in params.iter().enumerate() {
-                    if idx > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", param.name)?;
-                }
-                if let Some(ty) = params.first().and_then(|param| param.ty.as_ref()) {
-                    write!(f, " : {ty}")?;
-                }
+                fmt_lambda_params(f, params)?;
                 write!(f, " => {body}")
             }
             Term::Zero => write!(f, "0"),
@@ -113,6 +105,45 @@ impl fmt::Display for Term {
             } => write!(f, "{{ {var} : {var_type} | {body} }}"),
         }
     }
+}
+
+fn fmt_lambda_params(f: &mut fmt::Formatter<'_>, params: &[LambdaParam]) -> fmt::Result {
+    let all_untyped = params.iter().all(|param| param.ty.is_none());
+    if all_untyped {
+        for (idx, param) in params.iter().enumerate() {
+            if idx > 0 {
+                write!(f, " ")?;
+            }
+            write!(f, "{}", param.name)?;
+        }
+        return Ok(());
+    }
+
+    if let Some(first_ty) = params.first().and_then(|param| param.ty.as_ref()) {
+        if params
+            .iter()
+            .all(|param| param.ty.as_ref() == Some(first_ty))
+        {
+            for (idx, param) in params.iter().enumerate() {
+                if idx > 0 {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", param.name)?;
+            }
+            return write!(f, " : {first_ty}");
+        }
+    }
+
+    for (idx, param) in params.iter().enumerate() {
+        if idx > 0 {
+            write!(f, " ")?;
+        }
+        match &param.ty {
+            Some(ty) => write!(f, "({} : {ty})", param.name)?,
+            None => write!(f, "{}", param.name)?,
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -7408,35 +7439,7 @@ impl Tokens {
             return Ok(nat_literal_term(value));
         }
         if self.eat_ident("fun") {
-            let mut names = Vec::new();
-            loop {
-                names.push(self.expect_ident()?);
-                if self.eat_sym("=>") {
-                    let body = self.parse_formula()?;
-                    return Ok(Term::PredLambda {
-                        params: names
-                            .into_iter()
-                            .map(|name| LambdaParam { name, ty: None })
-                            .collect(),
-                        body: Box::new(body),
-                    });
-                }
-                if self.eat_sym(":") {
-                    let ty = self.parse_type()?;
-                    self.expect_sym("=>")?;
-                    let body = self.parse_formula()?;
-                    return Ok(Term::PredLambda {
-                        params: names
-                            .into_iter()
-                            .map(|name| LambdaParam {
-                                name,
-                                ty: Some(ty.clone()),
-                            })
-                            .collect(),
-                        body: Box::new(body),
-                    });
-                }
-            }
+            return self.parse_predicate_lambda();
         }
         if self.eat_sym("{") {
             if matches!(self.peek(), TokenKind::Sym(sym) if sym == "}") {
@@ -7664,6 +7667,58 @@ impl Tokens {
             }
         }
         Ok(vars)
+    }
+
+    fn parse_predicate_lambda(&mut self) -> Result<Term, ParseError> {
+        let params = if matches!(self.peek(), TokenKind::Sym(sym) if sym == "(") {
+            self.parse_parenthesized_lambda_params()?
+        } else {
+            self.parse_shorthand_lambda_params()?
+        };
+        self.expect_sym("=>")?;
+        let body = self.parse_formula()?;
+        Ok(Term::PredLambda {
+            params,
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_shorthand_lambda_params(&mut self) -> Result<Vec<LambdaParam>, ParseError> {
+        let mut names = Vec::new();
+        loop {
+            names.push(self.expect_ident()?);
+            if self.eat_sym(":") {
+                let ty = self.parse_type()?;
+                return Ok(names
+                    .into_iter()
+                    .map(|name| LambdaParam {
+                        name,
+                        ty: Some(ty.clone()),
+                    })
+                    .collect());
+            }
+            if matches!(self.peek(), TokenKind::Sym(sym) if sym == "=>") {
+                return Ok(names
+                    .into_iter()
+                    .map(|name| LambdaParam { name, ty: None })
+                    .collect());
+            }
+        }
+    }
+
+    fn parse_parenthesized_lambda_params(&mut self) -> Result<Vec<LambdaParam>, ParseError> {
+        let mut params = Vec::new();
+        while self.eat_sym("(") {
+            let names = self.parse_binder_names()?;
+            self.expect_sym(":")?;
+            let ty = self.parse_type()?;
+            self.expect_sym(")")?;
+            params.extend(names.into_iter().map(|name| LambdaParam {
+                name,
+                ty: Some(ty.clone()),
+            }));
+        }
+        Ok(params)
     }
 }
 
@@ -11461,7 +11516,13 @@ fn predicate_lambda_placeholder(args: &[Type]) -> Option<String> {
         return Some(format!("fun {binders} : {} => ...", args[0]));
     }
 
-    None
+    let binders = args
+        .iter()
+        .enumerate()
+        .map(|(idx, ty)| format!("({} : {ty})", names.get(idx).copied().unwrap_or("x")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(format!("fun {binders} => ..."))
 }
 
 fn schema_subst_uses_predicate_lambda(subst: &SchemaSubst) -> bool {
@@ -14290,6 +14351,62 @@ def NatPred (P : Nat -> Prop) : Prop := forall n : Nat, P(n)
 theorem bad : NatPred(fun x : Person => x = x) := by
 "#,
             "predicate lambda parameter `x` has type `Person`, but expected `Nat`",
+        );
+    }
+
+    #[test]
+    fn mixed_type_predicate_lambda_displays_with_per_binder_annotations() {
+        let term = parse_term_str("fun (x : Person) (y : Nat) => AgeIs(x, y)")
+            .expect("mixed lambda parses");
+        assert_eq!(
+            term.to_string(),
+            "fun (x : Person) (y : Nat) => AgeIs(x, y)"
+        );
+    }
+
+    #[test]
+    fn formula_definition_accepts_mixed_type_predicate_lambda() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+func age : Person -> Nat
+
+def SingleValued (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, forall y1 y2 : B, G(x, y1) -> G(x, y2) -> y1 = y2
+
+theorem age_graph_single_valued
+  : SingleValued(fun (x : Person) (y : Nat) => age(x) = y) := by
+  unfold SingleValued
+  intro x
+  intro y1
+  intro y2
+  intro h1
+  intro h2
+  rewrite h1
+  exact h2
+"#,
+        );
+    }
+
+    #[test]
+    fn fixed_expected_predicate_signature_fills_omitted_lambda_annotations() {
+        check_ok(
+            r#"
+mode constructive
+
+sort Person
+pred AgeIs(Person, Nat)
+
+def SelfPreserving (G : Person -> Nat -> Prop) : Prop := forall x : Person, forall n : Nat, G(x, n) -> G(x, n)
+
+theorem age_is_self_preserving : SelfPreserving(fun x n => AgeIs(x, n)) := by
+  unfold SelfPreserving
+  intro x
+  intro n
+  intro h
+  exact h
+"#,
         );
     }
 

@@ -10,19 +10,15 @@ mode constructive
 sort Person
 
 func mother : Person -> Person
+func age : Person -> Nat
 
 -- Section 8.1: a function is a relation that keeps two promises.
--- AgeIs(p, n) reads "person p is n years old."
-pred AgeIs(Person, Nat)
-
--- If every person has a recorded age, the age relation is Total.
--- Total, SingleValued, Injective, and Surjective all come from
--- std/fun.ctea, already loaded by the prelude.
-theorem age_relation_total
-  : (forall p : Person, exists n : Nat, AgeIs(p, n)) -> Total(AgeIs) := by
-  intro h
+-- The graph of age has mixed types: Person in, Nat out.
+theorem age_graph_total : Total(fun (p : Person) (n : Nat) => age(p) = n) := by
   unfold Total
-  exact h
+  intro p
+  exists age(p)
+  refl
 
 -- Section 8.3: a declared func's graph keeps both promises, provably.
 theorem mother_graph_total : Total(fun x y : Person => mother(x) = y) := by
