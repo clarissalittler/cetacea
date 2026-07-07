@@ -48,11 +48,10 @@ stay meaningful.
 
 ## Medium impact
 
-7. **`have` with a stated formula does not drive parameter inference.**
-   `have hle : le(2, 2) := le_refl` fails with ``cannot infer theorem
-   parameter `n` `` even though the annotation determines it; the same
-   bare `le_refl` works via `exact` against the same goal. The annotated
-   form should unify the statement against the theorem before giving up.
+7. **Resolved: `have` with a stated formula drives parameter inference.**
+   `have hle : le(2, 2) := le_refl` now uses the annotation to infer
+   `le_refl`'s theorem parameter, matching the way `exact le_refl`
+   works against the same goal.
 
 8. **Positional term arguments to theorem references misbehave.**
    `exact modeq_refl m x` errors confusingly (the argument is matched

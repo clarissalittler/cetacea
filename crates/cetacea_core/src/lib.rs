@@ -10377,7 +10377,11 @@ fn run_tactic_step(
             }
             match expr {
                 Some(expr) => {
-                    let proof = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
+                    let proof = if let Some(stated) = formula {
+                        proof_expr_for_expected(env, &goal.context, expr, stated, allowed_mode)?
+                    } else {
+                        proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?
+                    };
                     let checked = infer_proof(env, &goal.context, &proof, allowed_mode)
                         .map_err(|err| TacticError::new(err.message))?;
                     let hyp_formula = match formula {
@@ -15471,6 +15475,21 @@ theorem use_have (P Q : Prop) : P /\ Q -> Q /\ P := by
   exact hp
 "#,
         );
+    }
+
+    #[test]
+    fn have_annotation_infers_theorem_parameters() {
+        let import = import_line("std/prelude.ctea");
+        check_ok(&format!(
+            r#"
+{import}
+mode constructive
+
+theorem have_le_refl_annotation : le(2, 2) := by
+  have hle : le(2, 2) := le_refl
+  exact hle
+"#
+        ));
     }
 
     #[test]

@@ -8,11 +8,12 @@ test. Friction item numbers refer to FRICTION.md.
 
 ## Status
 
-- Done: Phase 0, Phase 1, Phase 2, and Phase 3. The safety net is in CI; the
+- Done: Phase 0, Phase 1, Phase 2, Phase 3, and Phase 4.1. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
   def-name arguments, nested lambda propagation, mixed-type lambdas, and
-  book debt repayment, and def-aware matching are implemented.
-- Next: Phase 4, inference and counterexamples.
+  book debt repayment, def-aware matching, and annotation-driven `have`
+  inference are implemented.
+- Next: Phase 4.2, positional theorem arguments.
 
 ## Findings from triage
 
@@ -149,6 +150,7 @@ the entire book corpus.
 `have h : F := thm` by unifying `thm`'s statement against `F` (reuse
 the `apply` machinery with `F` as the target) instead of bare
 inference. Acceptance: `have hle : le(2, 2) := le_refl`.
+Status: done.
 
 **4.2 Positional args to theorem references (item 8).** Re-test after
 Phases 2–3 (the `modeq_refl m x` failure routes through def-unfolded
