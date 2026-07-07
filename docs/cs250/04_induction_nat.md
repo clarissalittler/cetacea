@@ -34,14 +34,16 @@ add(n, succ(m)) = succ(add(n, m))
 ```
 
 The standard library has both worked out as `add_zero_left` and
-`add_zero_right`.
+`add_zero_right`. The companion file imports
+`std/qualified_prelude.ctea`, so the library theorem is available as
+`nat.add_zero_right` and this chapter can reuse the short name below.
 
 ## A direct computation proof: `add(n, 0) = n`
 
 The companion file is [`code/04_induction_nat.ctea`](code/04_induction_nat.ctea).
 
 ```text
-theorem add_zero_right_demo (n : Nat) : add(n, 0) = n := by
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
   simp
   refl
 ```
@@ -52,7 +54,7 @@ identity.
 ## Commutativity of addition
 
 ```text
-theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
+theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
   induction n with
   | zero =>
       simp
@@ -63,9 +65,10 @@ theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
       refl
 ```
 
-The full proof is also in `std/nat.ctea` as `add_comm`. The neat thing
-to notice: `simp` handles the recursive computation in each branch, and
-the induction hypothesis supplies the remaining algebraic step.
+The full proof is also in `std/nat.ctea` as `nat.add_comm` when imported
+through the qualified prelude. The neat thing to notice: `simp` handles
+the recursive computation in each branch, and the induction hypothesis
+supplies the remaining algebraic step.
 
 ## A custom unary recursive definition
 
@@ -172,16 +175,16 @@ theorem zero_mymul_n (n : Nat) : mymul(0, n) = 0 := by
       --   = add(mymul(0, k), 0)   by mymul_succ_right
       --   = mymul(0, k)           by add_zero_right
       --   = 0                   by ih
-      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := mymul(0, k); z := 0}
-      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := add(mymul(0, k), 0); z := mymul(0, k)}
+      apply eq.eq_trans {A := Nat; x := mymul(0, succ(k)); y := mymul(0, k); z := 0}
+      apply eq.eq_trans {A := Nat; x := mymul(0, succ(k)); y := add(mymul(0, k), 0); z := mymul(0, k)}
       exact mymul_succ_right
       exact add_zero_right
       exact ih
 ```
 
-The proof is a pure equational chain. `eq_trans` from `std/eq.ctea`
+The proof is a pure equational chain. `eq.eq_trans` from `std/eq.ctea`
 takes you from `x = y` and `y = z` to `x = z`. Stitching three
-equational steps takes two `eq_trans` invocations.
+equational steps takes two `eq.eq_trans` invocations.
 
 The high-level point is the same as in the textbook once you use the
 textbook recursion convention: you can't get $0 \cdot n = 0$ for free

@@ -1,14 +1,14 @@
 -- Companion file for docs/cs250/04_induction_nat.md.
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
-theorem add_zero_right_demo (n : Nat) : add(n, 0) = n := by
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
   simp
   refl
 
-theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
+theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
   induction n with
   | zero =>
       simp
@@ -70,9 +70,9 @@ theorem zero_mymul_n (n : Nat) : mymul(0, n) = 0 := by
       --   mymul(0, succ(k)) = add(mymul(0, k), 0)     by mymul_succ_right
       --                     = mymul(0, k)             by add_zero_right
       --                     = 0                       by ih
-      -- We chain via eq_trans from std/eq.ctea.
-      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := mymul(0, k); z := 0}
-      apply eq_trans {A := Nat; x := mymul(0, succ(k)); y := add(mymul(0, k), 0); z := mymul(0, k)}
+      -- We chain via eq.eq_trans from std/eq.ctea.
+      apply eq.eq_trans {A := Nat; x := mymul(0, succ(k)); y := mymul(0, k); z := 0}
+      apply eq.eq_trans {A := Nat; x := mymul(0, succ(k)); y := add(mymul(0, k), 0); z := mymul(0, k)}
       exact mymul_succ_right
       exact add_zero_right
       exact ih
