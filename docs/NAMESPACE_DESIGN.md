@@ -159,8 +159,9 @@ subject to the same ambiguity rules.
    namespace, while storing canonical theorem references in proof terms.
 4. Done: report ambiguous short references when several qualified top-level
    names share the same leaf.
-5. Add `QualifiedName` and resolver helpers while preserving existing
-   unqualified behavior.
+5. Done: canonicalize scoped declaration bodies, theorem statements, data
+   constructor types, `defrec` arms, and tactic arguments so short names inside
+   a namespace are stored as canonical top-level references.
 6. Add import aliases.
 7. Migrate standard-library declarations gradually, keeping compatibility
    aliases where needed.

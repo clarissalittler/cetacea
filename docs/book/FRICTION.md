@@ -117,12 +117,13 @@ stay meaningful.
     names now parse and resolve, `namespace` / `end` blocks can prefix
     declaration names, and proof/tactic references inside a namespace can
     resolve sibling theorems and formula definitions by short name.
-    Ambiguous short top-level leaves now ask for qualified names.
-    There are still no import aliases, full scoped lookup for
-    term/formula/type references, or standard-library namespace migration.
-    The book still cannot let students prove `add_comm` or `length_append`
-    under their real names without colliding with the prelude; hence the
-    pervasive `_demo` suffix convention. The design note in
+    Declaration bodies, theorem statements, data constructor types, `defrec`
+    arms, and tactic arguments are canonicalized through the current
+    namespace; ambiguous short top-level leaves ask for qualified names.
+    There are still no import aliases or standard-library namespace
+    migration. The book still cannot let students prove `add_comm` or
+    `length_append` under their real names without colliding with the
+    prelude; hence the pervasive `_demo` suffix convention. The design note in
     [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the
     remaining environment, import, and proof-projection work.
 

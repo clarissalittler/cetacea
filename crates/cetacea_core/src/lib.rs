@@ -2176,7 +2176,22 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    if let Err(err) = validate_type(&self.env, &Context::new(), &ty) {
+                    let ctx = declaration_context(&name);
+                    let ty = match canonicalize_type(&self.env, &ctx, &ty) {
+                        Ok(ty) => ty,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("constant `{name}` has invalid type"),
+                                )
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(err) = validate_type(&self.env, &ctx, &ty) {
                         self.result.diagnostics.push(
                             diagnostic_at(
                                 source_path,
@@ -2198,7 +2213,40 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    let empty_ctx = Context::new();
+                    let empty_ctx = declaration_context(&name);
+                    let args = match args
+                        .iter()
+                        .map(|arg| canonicalize_type(&self.env, &empty_ctx, arg))
+                        .collect::<Result<Vec<_>, _>>()
+                    {
+                        Ok(args) => args,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("function `{name}` has invalid type"),
+                                )
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
+                    let result_type =
+                        match canonicalize_type(&self.env, &empty_ctx, &result_type) {
+                            Ok(result_type) => result_type,
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!("function `{name}` has invalid type"),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                continue;
+                            }
+                        };
                     let mut invalid_type = None;
                     for ty in args.iter().chain(std::iter::once(&result_type)) {
                         if let Err(err) = validate_type(&self.env, &empty_ctx, ty) {
@@ -2228,7 +2276,25 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    let empty_ctx = Context::new();
+                    let empty_ctx = declaration_context(&name);
+                    let args = match args
+                        .iter()
+                        .map(|arg| canonicalize_type(&self.env, &empty_ctx, arg))
+                        .collect::<Result<Vec<_>, _>>()
+                    {
+                        Ok(args) => args,
+                        Err(err) => {
+                            self.result.diagnostics.push(
+                                diagnostic_at(
+                                    source_path,
+                                    line,
+                                    format!("predicate `{name}` has invalid argument type"),
+                                )
+                                .with_note(err.message),
+                            );
+                            continue;
+                        }
+                    };
                     if let Err(err) = args
                         .iter()
                         .try_for_each(|arg| validate_type(&self.env, &empty_ctx, arg))
@@ -2254,8 +2320,12 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    let def_ctx = match build_theorem_context(&self.env, &decl.params) {
-                        Ok(ctx) => ctx,
+                    let (params, def_ctx) = match canonicalize_params(
+                        &self.env,
+                        declaration_context(&decl.name),
+                        &decl.params,
+                    ) {
+                        Ok(canonical) => canonical,
                         Err(err) => {
                             self.result.diagnostics.push(
                                 diagnostic_at(
@@ -2270,6 +2340,24 @@ impl FileChecker {
                     };
                     match (decl.result, decl.body) {
                         (DefResult::Formula, DefBody::Formula(body)) => {
+                            let body = match canonicalize_formula(&self.env, &def_ctx, &body) {
+                                Ok(body) => body,
+                                Err(err) => {
+                                    self.result.diagnostics.push(
+                                        diagnostic_at(
+                                            source_path,
+                                            line,
+                                            format!(
+                                                "definition `{}` has invalid body",
+                                                decl.name
+                                            ),
+                                        )
+                                        .with_note(err.message)
+                                        .with_note(format!("body: {body}")),
+                                    );
+                                    continue;
+                                }
+                            };
                             if let Err(err) = validate_formula(&self.env, &def_ctx, &body) {
                                 self.result.diagnostics.push(
                                     diagnostic_at(
@@ -2284,11 +2372,25 @@ impl FileChecker {
                             }
                             self.env.add_def(FormulaDef {
                                 name: decl.name,
-                                params: decl.params,
+                                params,
                                 body,
                             });
                         }
                         (DefResult::Term(ty), DefBody::Term(body)) => {
+                            let ty = match canonicalize_type(&self.env, &def_ctx, &ty) {
+                                Ok(ty) => ty,
+                                Err(err) => {
+                                    self.result.diagnostics.push(
+                                        diagnostic_at(
+                                            source_path,
+                                            line,
+                                            format!("definition `{}` has invalid type", decl.name),
+                                        )
+                                        .with_note(err.message),
+                                    );
+                                    continue;
+                                }
+                            };
                             if let Err(err) = validate_type(&self.env, &def_ctx, &ty) {
                                 self.result.diagnostics.push(
                                     diagnostic_at(
@@ -2300,11 +2402,29 @@ impl FileChecker {
                                 );
                                 continue;
                             }
+                            let body = match canonicalize_term(&self.env, &def_ctx, &body) {
+                                Ok(body) => body,
+                                Err(err) => {
+                                    self.result.diagnostics.push(
+                                        diagnostic_at(
+                                            source_path,
+                                            line,
+                                            format!(
+                                                "definition `{}` has invalid body",
+                                                decl.name
+                                            ),
+                                        )
+                                        .with_note(err.message)
+                                        .with_note(format!("body: {body}")),
+                                    );
+                                    continue;
+                                }
+                            };
                             match validate_term(&self.env, &def_ctx, &body) {
                                 Ok(actual) if actual == ty => {
                                     self.env.add_term_def(TermDef {
                                         name: decl.name,
-                                        params: decl.params,
+                                        params,
                                         ty,
                                         body,
                                     });
@@ -2344,6 +2464,7 @@ impl FileChecker {
                     }
                 }
                 Command::Data(decl) => {
+                    let mut decl = decl;
                     if self.env.has_top_level_name(&decl.name) {
                         self.result.diagnostics.push(diagnostic_at(
                             source_path,
@@ -2376,10 +2497,29 @@ impl FileChecker {
                     // Register the sort first so recursive constructor
                     // arguments such as `cons(Nat, NatList)` validate.
                     self.env.add_sort(decl.name.clone());
+                    let data_ctx = declaration_context(&decl.name);
                     let mut types_ok = true;
-                    for ctor in &decl.ctors {
-                        for ty in &ctor.arg_types {
-                            if let Err(err) = validate_type(&self.env, &Context::new(), ty) {
+                    for ctor in &mut decl.ctors {
+                        for ty in &mut ctor.arg_types {
+                            match canonicalize_type(&self.env, &data_ctx, ty) {
+                                Ok(canonical) => *ty = canonical,
+                                Err(err) => {
+                                    self.result.diagnostics.push(
+                                        diagnostic_at(
+                                            source_path,
+                                            line,
+                                            format!(
+                                                "constructor `{}` of data type `{}` has an invalid argument type",
+                                                ctor.name, decl.name
+                                            ),
+                                        )
+                                        .with_note(err.message),
+                                    );
+                                    types_ok = false;
+                                    continue;
+                                }
+                            }
+                            if let Err(err) = validate_type(&self.env, &data_ctx, ty) {
                                 self.result.diagnostics.push(
                                     diagnostic_at(
                                         source_path,
@@ -2416,6 +2556,7 @@ impl FileChecker {
                     });
                 }
                 Command::DataRecDef(decl) => {
+                    let mut decl = decl;
                     if self.env.has_top_level_name(&decl.name) {
                         self.result.diagnostics.push(diagnostic_at(
                             source_path,
@@ -2424,6 +2565,25 @@ impl FileChecker {
                         ));
                         continue;
                     }
+                    let rec_ctx = declaration_context(&decl.name);
+                    decl.param_type =
+                        match canonicalize_type(&self.env, &rec_ctx, &decl.param_type) {
+                            Ok(param_type) => param_type,
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!(
+                                            "recursive definition `{}` has invalid parameter type",
+                                            decl.name
+                                        ),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                continue;
+                            }
+                        };
                     let Some(data) = data_def_for_type(&self.env, &decl.param_type) else {
                         self.result.diagnostics.push(diagnostic_at(
                             source_path,
@@ -2435,7 +2595,25 @@ impl FileChecker {
                         ));
                         continue;
                     };
-                    if let Err(err) = validate_type(&self.env, &Context::new(), &decl.result_type) {
+                    decl.result_type =
+                        match canonicalize_type(&self.env, &rec_ctx, &decl.result_type) {
+                            Ok(result_type) => result_type,
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!(
+                                            "recursive definition `{}` has invalid result type",
+                                            decl.name
+                                        ),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                continue;
+                            }
+                        };
+                    if let Err(err) = validate_type(&self.env, &rec_ctx, &decl.result_type) {
                         self.result.diagnostics.push(
                             diagnostic_at(
                                 source_path,
@@ -2470,7 +2648,55 @@ impl FileChecker {
                             extras_ok = false;
                             break;
                         }
-                        if let Err(err) = validate_type(&self.env, &Context::new(), extra_type) {
+                        match canonicalize_type(&self.env, &rec_ctx, extra_type) {
+                            Ok(canonical) => {
+                                if let Err(err) = validate_type(&self.env, &rec_ctx, &canonical) {
+                                    self.result.diagnostics.push(
+                                        diagnostic_at(
+                                            source_path,
+                                            line,
+                                            format!(
+                                                "recursive definition `{}` has an invalid parameter type",
+                                                decl.name
+                                            ),
+                                        )
+                                        .with_note(err.message),
+                                    );
+                                    extras_ok = false;
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!(
+                                            "recursive definition `{}` has an invalid parameter type",
+                                            decl.name
+                                        ),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                extras_ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if !extras_ok {
+                        continue;
+                    }
+                    decl.extra_params = match decl
+                        .extra_params
+                        .iter()
+                        .map(|(name, ty)| {
+                            canonicalize_type(&self.env, &rec_ctx, ty)
+                                .map(|ty| (name.clone(), ty))
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                    {
+                        Ok(extra_params) => extra_params,
+                        Err(err) => {
                             self.result.diagnostics.push(
                                 diagnostic_at(
                                     source_path,
@@ -2482,13 +2708,9 @@ impl FileChecker {
                                 )
                                 .with_note(err.message),
                             );
-                            extras_ok = false;
-                            break;
+                            continue;
                         }
-                    }
-                    if !extras_ok {
-                        continue;
-                    }
+                    };
                     if decl.arms.len() != data.ctors.len() {
                         let expected: Vec<&str> =
                             data.ctors.iter().map(|ctor| ctor.name.as_str()).collect();
@@ -2551,7 +2773,7 @@ impl FileChecker {
                         }
                         let arg_names = arm.binders[..ctor.arg_types.len()].to_vec();
                         let rec_names = arm.binders[ctor.arg_types.len()..].to_vec();
-                        let mut arm_ctx = Context::new();
+                        let mut arm_ctx = declaration_context(&decl.name);
                         for (extra_name, extra_type) in &decl.extra_params {
                             arm_ctx.add_term(extra_name.clone(), extra_type.clone());
                         }
@@ -2561,7 +2783,25 @@ impl FileChecker {
                         for name in &rec_names {
                             arm_ctx.add_term(name.clone(), decl.result_type.clone());
                         }
-                        match validate_term(&self.env, &arm_ctx, &arm.body) {
+                        let body = match canonicalize_term(&self.env, &arm_ctx, &arm.body) {
+                            Ok(body) => body,
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        arm.line,
+                                        format!(
+                                            "recursive definition case `{}` has invalid body",
+                                            ctor.name
+                                        ),
+                                    )
+                                    .with_note(err.message),
+                                );
+                                arms_ok = false;
+                                break;
+                            }
+                        };
+                        match validate_term(&self.env, &arm_ctx, &body) {
                             Ok(actual) if actual == decl.result_type => {}
                             Ok(actual) => {
                                 self.result.diagnostics.push(
@@ -2601,7 +2841,7 @@ impl FileChecker {
                             ctor: ctor.name.clone(),
                             arg_names,
                             rec_names,
-                            body: arm.body.clone(),
+                            body,
                         });
                     }
                     if !arms_ok {
@@ -2625,8 +2865,12 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    let axiom_ctx = match build_theorem_context(&self.env, &decl.params) {
-                        Ok(ctx) => ctx,
+                    let (params, axiom_ctx) = match canonicalize_params(
+                        &self.env,
+                        declaration_context(&decl.name),
+                        &decl.params,
+                    ) {
+                        Ok(canonical) => canonical,
                         Err(err) => {
                             self.result.diagnostics.push(
                                 diagnostic_at(
@@ -2639,7 +2883,23 @@ impl FileChecker {
                             continue;
                         }
                     };
-                    if let Err(err) = validate_formula(&self.env, &axiom_ctx, &decl.statement) {
+                    let statement =
+                        match canonicalize_formula(&self.env, &axiom_ctx, &decl.statement) {
+                            Ok(statement) => statement,
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!("axiom `{}` has invalid statement", decl.name),
+                                    )
+                                    .with_note(err.message)
+                                    .with_note(format!("target: {}", decl.statement)),
+                                );
+                                continue;
+                            }
+                        };
+                    if let Err(err) = validate_formula(&self.env, &axiom_ctx, &statement) {
                         self.result.diagnostics.push(
                             diagnostic_at(
                                 source_path,
@@ -2647,15 +2907,15 @@ impl FileChecker {
                                 format!("axiom `{}` has invalid statement", decl.name),
                             )
                             .with_note(err.message)
-                            .with_note(format!("target: {}", decl.statement)),
+                            .with_note(format!("target: {}", statement)),
                         );
                         continue;
                     }
 
                     self.env.add_theorem(Theorem {
                         name: decl.name.clone(),
-                        params: decl.params,
-                        statement: decl.statement.clone(),
+                        params,
+                        statement: statement.clone(),
                         proof: None,
                         mode_used: mode,
                         is_axiom: true,
@@ -2664,7 +2924,7 @@ impl FileChecker {
                     });
                     self.result.theorems.push(CheckedTheorem {
                         name: decl.name.clone(),
-                        statement: decl.statement.to_string(),
+                        statement: statement.to_string(),
                         mode_used: mode,
                         is_axiom: true,
                         is_imported,
@@ -2681,8 +2941,12 @@ impl FileChecker {
                         ));
                         continue;
                     }
-                    let theorem_ctx = match build_theorem_context(&self.env, &decl.params) {
-                        Ok(ctx) => ctx,
+                    let (params, theorem_ctx) = match canonicalize_params(
+                        &self.env,
+                        declaration_context(&decl.name),
+                        &decl.params,
+                    ) {
+                        Ok(canonical) => canonical,
                         Err(err) => {
                             self.result.diagnostics.push(
                                 diagnostic_at(
@@ -2695,7 +2959,23 @@ impl FileChecker {
                             continue;
                         }
                     };
-                    if let Err(err) = validate_formula(&self.env, &theorem_ctx, &decl.statement) {
+                    let statement =
+                        match canonicalize_formula(&self.env, &theorem_ctx, &decl.statement) {
+                            Ok(statement) => statement,
+                            Err(err) => {
+                                self.result.diagnostics.push(
+                                    diagnostic_at(
+                                        source_path,
+                                        line,
+                                        format!("theorem `{}` has invalid statement", decl.name),
+                                    )
+                                    .with_note(err.message)
+                                    .with_note(format!("target: {}", decl.statement)),
+                                );
+                                continue;
+                            }
+                        };
+                    if let Err(err) = validate_formula(&self.env, &theorem_ctx, &statement) {
                         self.result.diagnostics.push(
                             diagnostic_at(
                                 source_path,
@@ -2703,7 +2983,7 @@ impl FileChecker {
                                 format!("theorem `{}` has invalid statement", decl.name),
                             )
                             .with_note(err.message)
-                            .with_note(format!("target: {}", decl.statement)),
+                            .with_note(format!("target: {}", statement)),
                         );
                         continue;
                     }
@@ -2713,27 +2993,27 @@ impl FileChecker {
                     let proved = match prove(
                         &self.env,
                         proof_ctx,
-                        decl.statement.clone(),
+                        statement.clone(),
                         &decl.tactics,
                         mode,
                     ) {
                         Ok(proof) => proof,
                         Err(err) => {
-                            let target = err.target.as_deref().unwrap_or(&decl.statement);
+                            let target = err.target.as_deref().unwrap_or(&statement);
                             let mut diagnostic = diagnostic_at(
                                 source_path,
                                 err.line.unwrap_or(line),
                                 format!("theorem `{}` failed: {}", decl.name, err.message),
                             )
                             .with_note(format!("target: {target}"));
-                            if let Some(model) = propositional_countermodel(&[], &decl.statement) {
+                            if let Some(model) = propositional_countermodel(&[], &statement) {
                                 diagnostic = diagnostic.with_note(format!(
                                     "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
                                     countermodel_note(&model)
                                 ));
                             } else if let Some(model) = arithmetic_countermodel(
                                 &[],
-                                &decl.statement,
+                                &statement,
                                 &theorem_ctx.term_vars,
                             )
                             {
@@ -2745,7 +3025,7 @@ impl FileChecker {
                                 &self.env,
                                 &theorem_ctx,
                                 &[],
-                                &decl.statement,
+                                &statement,
                             )
                             {
                                 diagnostic = diagnostic.with_note(format!(
@@ -2785,7 +3065,7 @@ impl FileChecker {
                     let proof = proved.proof;
 
                     let mode_used =
-                        match check_proof(&self.env, &theorem_ctx, &proof, &decl.statement, mode) {
+                        match check_proof(&self.env, &theorem_ctx, &proof, &statement, mode) {
                             Ok(mode_used) => mode_used,
                             Err(err) => {
                                 self.result.diagnostics.push(
@@ -2797,7 +3077,7 @@ impl FileChecker {
                                             decl.name, err.message
                                         ),
                                     )
-                                    .with_note(format!("target: {}", decl.statement)),
+                                    .with_note(format!("target: {}", statement)),
                                 );
                                 continue;
                             }
@@ -2830,8 +3110,8 @@ impl FileChecker {
                     let axiom_deps = proof_axiom_deps(&self.env, &proof);
                     self.env.add_theorem(Theorem {
                         name: decl.name.clone(),
-                        params: decl.params,
-                        statement: decl.statement.clone(),
+                        params,
+                        statement: statement.clone(),
                         proof: Some(proof),
                         mode_used,
                         is_axiom: false,
@@ -2840,7 +3120,7 @@ impl FileChecker {
                     });
                     self.result.theorems.push(CheckedTheorem {
                         name: decl.name,
-                        statement: decl.statement.to_string(),
+                        statement: statement.to_string(),
                         mode_used,
                         is_axiom: false,
                         is_imported,
@@ -2951,8 +3231,12 @@ fn goals_for_theorem_prefix(
         };
     }
 
-    let theorem_ctx = match build_theorem_context(&checker.env, &decl.params) {
-        Ok(ctx) => ctx,
+    let (_params, theorem_ctx) = match canonicalize_params(
+        &checker.env,
+        declaration_context(&decl.name),
+        &decl.params,
+    ) {
+        Ok(canonical) => canonical,
         Err(err) => {
             return GoalStepResult {
                 theorem: Some(decl.name.clone()),
@@ -2968,7 +3252,25 @@ fn goals_for_theorem_prefix(
             };
         }
     };
-    if let Err(err) = validate_formula(&checker.env, &theorem_ctx, &decl.statement) {
+    let statement = match canonicalize_formula(&checker.env, &theorem_ctx, &decl.statement) {
+        Ok(statement) => statement,
+        Err(err) => {
+            return GoalStepResult {
+                theorem: Some(decl.name.clone()),
+                mode: Some(mode),
+                tactic_count: decl.tactics.len(),
+                diagnostics: vec![diagnostic_at(
+                    source_path,
+                    located.line,
+                    format!("theorem `{}` has invalid statement", decl.name),
+                )
+                .with_note(err.message)
+                .with_note(format!("target: {}", decl.statement))],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+    if let Err(err) = validate_formula(&checker.env, &theorem_ctx, &statement) {
         return GoalStepResult {
             theorem: Some(decl.name.clone()),
             mode: Some(mode),
@@ -2979,7 +3281,7 @@ fn goals_for_theorem_prefix(
                 format!("theorem `{}` has invalid statement", decl.name),
             )
             .with_note(err.message)
-            .with_note(format!("target: {}", decl.statement))],
+            .with_note(format!("target: {}", statement))],
             ..GoalStepResult::default()
         };
     }
@@ -2987,10 +3289,10 @@ fn goals_for_theorem_prefix(
     let proof_ctx = theorem_ctx
         .clone()
         .with_namespace(declaration_namespace(&decl.name));
-    let mut session = ProofSession::new(proof_ctx, decl.statement.clone());
+    let mut session = ProofSession::new(proof_ctx, statement.clone());
     for tactic in decl.tactics.iter().take(tactic_count) {
         if let Err(err) = session.step(&checker.env, tactic, mode) {
-            let target = err.target.as_deref().unwrap_or(&decl.statement);
+            let target = err.target.as_deref().unwrap_or(&statement);
             return GoalStepResult {
                 theorem: Some(decl.name.clone()),
                 mode: Some(mode),
@@ -3025,7 +3327,7 @@ fn goals_for_theorem_prefix(
         match session.root.clone().complete() {
             Ok(proof) => {
                 if let Err(err) =
-                    check_proof(&checker.env, &theorem_ctx, &proof, &decl.statement, mode)
+                    check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
                 {
                     diagnostics.push(
                         diagnostic_at(
@@ -3036,7 +3338,7 @@ fn goals_for_theorem_prefix(
                                 decl.name, err.message
                             ),
                         )
-                        .with_note(format!("target: {}", decl.statement)),
+                        .with_note(format!("target: {}", statement)),
                     );
                 }
             }
@@ -3047,7 +3349,7 @@ fn goals_for_theorem_prefix(
                         err.line.unwrap_or(located.line),
                         format!("theorem `{}` failed: {}", decl.name, err.message),
                     )
-                    .with_note(format!("target: {}", decl.statement)),
+                    .with_note(format!("target: {}", statement)),
                 );
             }
         }
@@ -3100,8 +3402,12 @@ fn explain_theorem_at_index(
         };
     }
 
-    let theorem_ctx = match build_theorem_context(&checker.env, &decl.params) {
-        Ok(ctx) => ctx,
+    let (_params, theorem_ctx) = match canonicalize_params(
+        &checker.env,
+        declaration_context(&decl.name),
+        &decl.params,
+    ) {
+        Ok(canonical) => canonical,
         Err(err) => {
             return ExplanationResult {
                 theorem: Some(decl.name.clone()),
@@ -3117,10 +3423,28 @@ fn explain_theorem_at_index(
             };
         }
     };
-    if let Err(err) = validate_formula(&checker.env, &theorem_ctx, &decl.statement) {
+    let statement = match canonicalize_formula(&checker.env, &theorem_ctx, &decl.statement) {
+        Ok(statement) => statement,
+        Err(err) => {
+            return ExplanationResult {
+                theorem: Some(decl.name.clone()),
+                statement: Some(decl.statement.to_string()),
+                mode: Some(mode),
+                diagnostics: vec![diagnostic_at(
+                    source_path,
+                    located.line,
+                    format!("theorem `{}` has invalid statement", decl.name),
+                )
+                .with_note(err.message)
+                .with_note(format!("target: {}", decl.statement))],
+                ..ExplanationResult::default()
+            };
+        }
+    };
+    if let Err(err) = validate_formula(&checker.env, &theorem_ctx, &statement) {
         return ExplanationResult {
             theorem: Some(decl.name.clone()),
-            statement: Some(decl.statement.to_string()),
+            statement: Some(statement.to_string()),
             mode: Some(mode),
             diagnostics: vec![diagnostic_at(
                 source_path,
@@ -3128,7 +3452,7 @@ fn explain_theorem_at_index(
                 format!("theorem `{}` has invalid statement", decl.name),
             )
             .with_note(err.message)
-            .with_note(format!("target: {}", decl.statement))],
+            .with_note(format!("target: {}", statement))],
             ..ExplanationResult::default()
         };
     }
@@ -3136,7 +3460,7 @@ fn explain_theorem_at_index(
     let proof_ctx = theorem_ctx
         .clone()
         .with_namespace(declaration_namespace(&decl.name));
-    let mut session = ProofSession::new(proof_ctx, decl.statement.clone());
+    let mut session = ProofSession::new(proof_ctx, statement.clone());
     let mut steps = Vec::new();
     for (index, tactic) in decl.tactics.iter().enumerate() {
         let Some(before_goal) = session.goals.first().cloned() else {
@@ -3159,10 +3483,10 @@ fn explain_theorem_at_index(
         let before_snapshot = snapshot_goal(&checker.env, &before_goal, mode);
         let explanation = explain_tactic_step(&tactic.tactic, &before_goal);
         if let Err(err) = session.step(&checker.env, tactic, mode) {
-            let target = err.target.as_deref().unwrap_or(&decl.statement);
+            let target = err.target.as_deref().unwrap_or(&statement);
             return ExplanationResult {
                 theorem: Some(decl.name.clone()),
-                statement: Some(decl.statement.to_string()),
+                statement: Some(statement.to_string()),
                 mode: Some(mode),
                 steps,
                 diagnostics: vec![diagnostic_at(
@@ -3205,7 +3529,7 @@ fn explain_theorem_at_index(
         match session.root.clone().complete() {
             Ok(proof) => {
                 if let Err(err) =
-                    check_proof(&checker.env, &theorem_ctx, &proof, &decl.statement, mode)
+                    check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
                 {
                     diagnostics.push(
                         diagnostic_at(
@@ -3216,7 +3540,7 @@ fn explain_theorem_at_index(
                                 decl.name, err.message
                             ),
                         )
-                        .with_note(format!("target: {}", decl.statement)),
+                        .with_note(format!("target: {}", statement)),
                     );
                 }
             }
@@ -3226,7 +3550,7 @@ fn explain_theorem_at_index(
                     err.line.unwrap_or(located.line),
                     format!("theorem `{}` failed: {}", decl.name, err.message),
                 )
-                .with_note(format!("target: {}", decl.statement)),
+                .with_note(format!("target: {}", statement)),
             ),
         }
     } else if let Some(goal) = session.goals.first() {
@@ -3242,7 +3566,7 @@ fn explain_theorem_at_index(
 
     ExplanationResult {
         theorem: Some(decl.name),
-        statement: Some(decl.statement.to_string()),
+        statement: Some(statement.to_string()),
         mode: Some(mode),
         completed: completed && !diagnostics_have_errors(&diagnostics),
         steps,
@@ -3962,6 +4286,557 @@ fn build_theorem_context(env: &Env, params: &[Param]) -> Result<Context, Validat
         }
     }
     Ok(ctx)
+}
+
+fn declaration_context(name: &str) -> Context {
+    Context::new().with_namespace(declaration_namespace(name))
+}
+
+fn resolve_top_level_name(
+    ctx: &Context,
+    name: &str,
+    exists: impl Fn(&str) -> bool,
+) -> Option<Name> {
+    if name.contains('.') {
+        return exists(name).then(|| name.to_string());
+    }
+    if let Some(scoped) = scoped_top_level_name(ctx, name) {
+        if exists(&scoped) {
+            return Some(scoped);
+        }
+    }
+    exists(name).then(|| name.to_string())
+}
+
+fn canonicalize_params(
+    env: &Env,
+    mut ctx: Context,
+    params: &[Param],
+) -> Result<(Vec<Param>, Context), ValidationError> {
+    let mut canonical = Vec::new();
+    for param in params {
+        if env.has_top_level_name(&param.name) || ctx.has_schema_name(&param.name) {
+            return Err(ValidationError::new(format!(
+                "parameter `{}` is already declared",
+                param.name
+            )));
+        }
+
+        let kind = match &param.kind {
+            ParamKind::Prop => {
+                ctx.add_prop_var(param.name.clone());
+                ParamKind::Prop
+            }
+            ParamKind::Predicate(args) => {
+                let args = args
+                    .iter()
+                    .map(|arg| canonicalize_type(env, &ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                ctx.add_predicate_var(param.name.clone(), args.clone());
+                ParamKind::Predicate(args)
+            }
+            ParamKind::Type => {
+                ctx.add_type_var(param.name.clone());
+                ParamKind::Type
+            }
+            ParamKind::Term(ty) => {
+                let ty = canonicalize_type(env, &ctx, ty)?;
+                ctx.add_term(param.name.clone(), ty.clone());
+                ParamKind::Term(ty)
+            }
+        };
+        canonical.push(Param {
+            name: param.name.clone(),
+            kind,
+        });
+    }
+    Ok((canonical, ctx))
+}
+
+fn canonicalize_type(env: &Env, ctx: &Context, ty: &Type) -> Result<Type, ValidationError> {
+    match ty {
+        Type::Nat => Ok(Type::Nat),
+        Type::Prod(left, right) => Ok(Type::Prod(
+            Box::new(canonicalize_type(env, ctx, left)?),
+            Box::new(canonicalize_type(env, ctx, right)?),
+        )),
+        Type::Set(elem) => Ok(Type::Set(Box::new(canonicalize_type(env, ctx, elem)?))),
+        Type::Named(name) if ctx.has_type_var(name) => Ok(Type::Named(name.clone())),
+        Type::Named(name) => {
+            if let Some(name) = resolve_top_level_name(ctx, name, |candidate| env.has_sort(candidate))
+            {
+                return Ok(Type::Named(name));
+            }
+            if let Some(matches) = env.ambiguous_sort_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "type", name, &matches,
+                )));
+            }
+            Err(ValidationError::new(format!("unknown type `{name}`")))
+        }
+    }
+}
+
+fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, ValidationError> {
+    match term {
+        Term::Var(name) => {
+            if ctx.lookup_term(name).is_some() {
+                return Ok(term.clone());
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.consts.contains_key(candidate))
+            {
+                return Ok(Term::Var(name));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.term_def(candidate).is_some())
+            {
+                let def = env.term_def(&name).expect("resolved term def");
+                let expected = term_def_expected_args(def);
+                if expected == 0 {
+                    return Ok(Term::Var(name));
+                }
+                return Err(ValidationError::new(format!(
+                    "definition `{name}` expects {expected} argument(s), but got 0"
+                )));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.data_rec_def(candidate).is_some())
+            {
+                let def = env.data_rec_def(&name).expect("resolved data rec def");
+                return Err(ValidationError::new(format!(
+                    "recursive definition `{name}` expects {} argument(s), but got 0",
+                    1 + def.extra_params.len()
+                )));
+            }
+            if let Some(matches) = env.ambiguous_term_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "term", name, &matches,
+                )));
+            }
+            Err(ValidationError::new(format!("unknown term `{name}`")))
+        }
+        Term::App(name, args) => {
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.funcs.contains_key(candidate))
+            {
+                let args = args
+                    .iter()
+                    .map(|arg| canonicalize_term(env, ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Term::App(name, args));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.term_def(candidate).is_some())
+            {
+                let def = env.term_def(&name).expect("resolved term def");
+                let args = canonicalize_term_def_args(env, ctx, def, args)?;
+                return Ok(Term::App(name, args));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.data_rec_def(candidate).is_some())
+            {
+                let args = args
+                    .iter()
+                    .map(|arg| canonicalize_term(env, ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Term::App(name, args));
+            }
+            if let Some(matches) = env.ambiguous_function_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "function", name, &matches,
+                )));
+            }
+            Err(ValidationError::new(format!("unknown function `{name}`")))
+        }
+        Term::PredLambda { params, body } => {
+            let params = params
+                .iter()
+                .map(|param| {
+                    let ty = param
+                        .ty
+                        .as_ref()
+                        .map(|ty| canonicalize_type(env, ctx, ty))
+                        .transpose()?;
+                    Ok(LambdaParam {
+                        name: param.name.clone(),
+                        ty,
+                    })
+                })
+                .collect::<Result<Vec<_>, ValidationError>>()?;
+            if params.iter().any(|param| param.ty.is_none()) {
+                return Ok(Term::PredLambda {
+                    params,
+                    body: body.clone(),
+                });
+            }
+            let mut body_ctx = ctx.clone();
+            for param in &params {
+                if let Some(ty) = &param.ty {
+                    body_ctx.add_term(param.name.clone(), ty.clone());
+                }
+            }
+            Ok(Term::PredLambda {
+                params,
+                body: Box::new(canonicalize_formula(env, &body_ctx, body)?),
+            })
+        }
+        Term::Zero => Ok(Term::Zero),
+        Term::Succ(term) => Ok(Term::Succ(Box::new(canonicalize_term(env, ctx, term)?))),
+        Term::Add(left, right) => Ok(Term::Add(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Mul(left, right) => Ok(Term::Mul(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Sub(left, right) => Ok(Term::Sub(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Pair(left, right) => Ok(Term::Pair(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Fst(term) => Ok(Term::Fst(Box::new(canonicalize_term(env, ctx, term)?))),
+        Term::Snd(term) => Ok(Term::Snd(Box::new(canonicalize_term(env, ctx, term)?))),
+        Term::EmptySet(ty) => Ok(Term::EmptySet(canonicalize_type(env, ctx, ty)?)),
+        Term::Universe(ty) => Ok(Term::Universe(canonicalize_type(env, ctx, ty)?)),
+        Term::Singleton(term) => Ok(Term::Singleton(Box::new(canonicalize_term(env, ctx, term)?))),
+        Term::Union(left, right) => Ok(Term::Union(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Inter(left, right) => Ok(Term::Inter(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Diff(left, right) => Ok(Term::Diff(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Complement(term) => {
+            Ok(Term::Complement(Box::new(canonicalize_term(env, ctx, term)?)))
+        }
+        Term::CartProd(left, right) => Ok(Term::CartProd(
+            Box::new(canonicalize_term(env, ctx, left)?),
+            Box::new(canonicalize_term(env, ctx, right)?),
+        )),
+        Term::Powerset(term) => Ok(Term::Powerset(Box::new(canonicalize_term(env, ctx, term)?))),
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            let var_type = canonicalize_type(env, ctx, var_type)?;
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            Ok(Term::SetBuilder {
+                var: var.clone(),
+                var_type,
+                body: Box::new(canonicalize_formula(env, &body_ctx, body)?),
+            })
+        }
+    }
+}
+
+fn canonicalize_formula(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+) -> Result<Formula, ValidationError> {
+    match formula {
+        Formula::True => Ok(Formula::True),
+        Formula::False => Ok(Formula::False),
+        Formula::Atom(name) => {
+            if ctx.has_prop_var(name)
+                || matches!(ctx.lookup_predicate_var(name), Some(sig) if sig.is_empty())
+            {
+                return Ok(formula.clone());
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.preds.contains_key(candidate))
+            {
+                return Ok(Formula::Atom(name));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.formula_def(candidate).is_some())
+            {
+                return Ok(Formula::Atom(name));
+            }
+            if let Some(matches) = env.ambiguous_predicate_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "proposition",
+                    name,
+                    &matches,
+                )));
+            }
+            Err(ValidationError::new(format!(
+                "unknown proposition variable `{name}`"
+            )))
+        }
+        Formula::PredApp(name, args) => {
+            if name == "le" {
+                let args = args
+                    .iter()
+                    .map(|arg| canonicalize_term(env, ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Formula::PredApp(name.clone(), args));
+            }
+            if ctx.lookup_predicate_var(name).is_some() {
+                let args = args
+                    .iter()
+                    .map(|arg| canonicalize_term(env, ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Formula::PredApp(name.clone(), args));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.preds.contains_key(candidate))
+            {
+                let args = args
+                    .iter()
+                    .map(|arg| canonicalize_term(env, ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Formula::PredApp(name, args));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.formula_def(candidate).is_some())
+            {
+                let def = env.formula_def(&name).expect("resolved formula def");
+                let args = canonicalize_formula_def_args(env, ctx, def, args)?;
+                return Ok(Formula::PredApp(name, args));
+            }
+            if let Some(matches) = env.ambiguous_predicate_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "predicate",
+                    name,
+                    &matches,
+                )));
+            }
+            Err(ValidationError::new(format!("unknown predicate `{name}`")))
+        }
+        Formula::Eq(left, right) => Ok(Formula::eq(
+            canonicalize_term(env, ctx, left)?,
+            canonicalize_term(env, ctx, right)?,
+        )),
+        Formula::In(elem, set) => Ok(Formula::membership(
+            canonicalize_term(env, ctx, elem)?,
+            canonicalize_term(env, ctx, set)?,
+        )),
+        Formula::Subset(left, right) => Ok(Formula::subset(
+            canonicalize_term(env, ctx, left)?,
+            canonicalize_term(env, ctx, right)?,
+        )),
+        Formula::And(left, right) => Ok(Formula::and(
+            canonicalize_formula(env, ctx, left)?,
+            canonicalize_formula(env, ctx, right)?,
+        )),
+        Formula::Or(left, right) => Ok(Formula::or(
+            canonicalize_formula(env, ctx, left)?,
+            canonicalize_formula(env, ctx, right)?,
+        )),
+        Formula::Implies(left, right) => Ok(Formula::implies(
+            canonicalize_formula(env, ctx, left)?,
+            canonicalize_formula(env, ctx, right)?,
+        )),
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        } => {
+            let var_type = canonicalize_type(env, ctx, var_type)?;
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            Ok(Formula::forall(
+                var.clone(),
+                var_type,
+                canonicalize_formula(env, &body_ctx, body)?,
+            ))
+        }
+        Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            let var_type = canonicalize_type(env, ctx, var_type)?;
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            Ok(Formula::exists(
+                var.clone(),
+                var_type,
+                canonicalize_formula(env, &body_ctx, body)?,
+            ))
+        }
+    }
+}
+
+fn canonicalize_predicate_arg(
+    env: &Env,
+    ctx: &Context,
+    arg: &PredicateArg,
+) -> Result<PredicateArg, ValidationError> {
+    match arg {
+        PredicateArg::Named(name) => {
+            if ctx.lookup_predicate_var(name).is_some() {
+                return Ok(arg.clone());
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.preds.contains_key(candidate))
+            {
+                return Ok(PredicateArg::Named(name));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.formula_def(candidate).is_some())
+            {
+                return Ok(PredicateArg::Named(name));
+            }
+            if let Some(matches) = env.ambiguous_predicate_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "predicate",
+                    name,
+                    &matches,
+                )));
+            }
+            Ok(arg.clone())
+        }
+        PredicateArg::Lambda { params, body } => {
+            let params = params
+                .iter()
+                .map(|param| {
+                    let ty = param
+                        .ty
+                        .as_ref()
+                        .map(|ty| canonicalize_type(env, ctx, ty))
+                        .transpose()?;
+                    Ok(LambdaParam {
+                        name: param.name.clone(),
+                        ty,
+                    })
+                })
+                .collect::<Result<Vec<_>, ValidationError>>()?;
+            if params.iter().any(|param| param.ty.is_none()) {
+                return Ok(PredicateArg::Lambda {
+                    params,
+                    body: body.clone(),
+                });
+            }
+            let mut body_ctx = ctx.clone();
+            for param in &params {
+                if let Some(ty) = &param.ty {
+                    body_ctx.add_term(param.name.clone(), ty.clone());
+                }
+            }
+            Ok(PredicateArg::Lambda {
+                params,
+                body: canonicalize_formula(env, &body_ctx, body)?,
+            })
+        }
+    }
+}
+
+fn canonicalize_formula_def_args(
+    env: &Env,
+    ctx: &Context,
+    def: &FormulaDef,
+    args: &[Term],
+) -> Result<Vec<Term>, ValidationError> {
+    let expected_args = def
+        .params
+        .iter()
+        .filter(|param| !matches!(param.kind, ParamKind::Type))
+        .count();
+    if expected_args != args.len() {
+        return Err(ValidationError::new(format!(
+            "definition `{}` expects {expected_args} argument(s), but got {}",
+            def.name,
+            args.len()
+        )));
+    }
+
+    let mut args_iter = args.iter();
+    let mut canonical = Vec::new();
+    for param in &def.params {
+        match &param.kind {
+            ParamKind::Type => {}
+            ParamKind::Prop => {
+                let arg = args_iter.next().expect("arity checked");
+                let formula = canonicalize_formula(env, ctx, &formula_def_prop_argument(arg)?)?;
+                let Formula::Atom(name) = formula else {
+                    return Err(ValidationError::new(format!(
+                        "proposition definition argument must be a proposition name, got `{arg}`"
+                    )));
+                };
+                canonical.push(Term::Var(name));
+            }
+            ParamKind::Predicate(_) => {
+                let arg = args_iter.next().expect("arity checked");
+                let pred_arg =
+                    canonicalize_predicate_arg(env, ctx, &formula_def_predicate_argument(arg)?)?;
+                canonical.push(predicate_arg_to_term(&pred_arg));
+            }
+            ParamKind::Term(_) => {
+                let arg = args_iter.next().expect("arity checked");
+                canonical.push(canonicalize_term(env, ctx, arg)?);
+            }
+        }
+    }
+    Ok(canonical)
+}
+
+fn canonicalize_term_def_args(
+    env: &Env,
+    ctx: &Context,
+    def: &TermDef,
+    args: &[Term],
+) -> Result<Vec<Term>, ValidationError> {
+    let expected_args = term_def_expected_args(def);
+    if expected_args != args.len() {
+        return Err(ValidationError::new(format!(
+            "definition `{}` expects {expected_args} argument(s), but got {}",
+            def.name,
+            args.len()
+        )));
+    }
+
+    let mut args_iter = args.iter();
+    let mut canonical = Vec::new();
+    for param in &def.params {
+        match &param.kind {
+            ParamKind::Type => {}
+            ParamKind::Prop => {
+                let arg = args_iter.next().expect("arity checked");
+                let formula = canonicalize_formula(env, ctx, &formula_def_prop_argument(arg)?)?;
+                let Formula::Atom(name) = formula else {
+                    return Err(ValidationError::new(format!(
+                        "proposition definition argument must be a proposition name, got `{arg}`"
+                    )));
+                };
+                canonical.push(Term::Var(name));
+            }
+            ParamKind::Predicate(_) => {
+                let arg = args_iter.next().expect("arity checked");
+                let pred_arg =
+                    canonicalize_predicate_arg(env, ctx, &formula_def_predicate_argument(arg)?)?;
+                canonical.push(predicate_arg_to_term(&pred_arg));
+            }
+            ParamKind::Term(_) => {
+                let arg = args_iter.next().expect("arity checked");
+                canonical.push(canonicalize_term(env, ctx, arg)?);
+            }
+        }
+    }
+    Ok(canonical)
+}
+
+fn predicate_arg_to_term(arg: &PredicateArg) -> Term {
+    match arg {
+        PredicateArg::Named(name) => Term::Var(name.clone()),
+        PredicateArg::Lambda { params, body } => Term::PredLambda {
+            params: params.clone(),
+            body: Box::new(body.clone()),
+        },
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8066,6 +8941,8 @@ impl ProofExpr {
                         Formula::Forall { .. } => {
                             let term = parse_term_str(arg)
                                 .map_err(|err| TacticError::new(err.message))?;
+                            let term = canonicalize_term(env, ctx, &term)
+                                .map_err(|err| TacticError::new(err.message))?;
                             Proof::ForallElim {
                                 proof_forall: Box::new(proof),
                                 arg: term,
@@ -8135,6 +9012,8 @@ impl ProofExpr {
                             body,
                         } => {
                             let term = parse_term_str(arg)
+                                .map_err(|err| TacticError::new(err.message))?;
+                            let term = canonicalize_term(env, ctx, &term)
                                 .map_err(|err| TacticError::new(err.message))?;
                             let actual =
                                 validate_term(env, ctx, &term).map_err(|err| TacticError::new(err.message))?;
@@ -8261,6 +9140,9 @@ fn consume_positional_schema_term_arg(
         unreachable!("filtered for term parameters")
     };
     let Ok(term) = parse_term_str(arg) else {
+        return Ok(false);
+    };
+    let Ok(term) = canonicalize_term(env, ctx, &term) else {
         return Ok(false);
     };
     let Ok(actual_ty) = validate_term(env, ctx, &term) else {
@@ -11097,7 +11979,13 @@ fn run_tactic_step(
             else {
                 return Err(TacticError::new("exists expects an existential goal"));
             };
-            match validate_term(env, &goal.context, witness) {
+            let witness = canonicalize_term(env, &goal.context, witness).map_err(|err| {
+                TacticError::new(format!(
+                    "exists witness `{witness}` is not valid here: {}",
+                    err.message
+                ))
+            })?;
+            match validate_term(env, &goal.context, &witness) {
                 Ok(actual) if &actual == var_type => {}
                 Ok(actual) => {
                     return Err(TacticError::new(format!(
@@ -11121,7 +12009,7 @@ fn run_tactic_step(
                 new_goals: vec![Goal {
                     id,
                     context: goal.context,
-                    target: subst_formula_term(body, var, witness),
+                    target: subst_formula_term(body, var, &witness),
                 }],
                 notes: Vec::new(),
             })
@@ -11602,6 +12490,8 @@ fn run_tactic_step(
         }
         Tactic::Contradiction => contradiction_step(env, goal),
         Tactic::ByCases { name, formula } => {
+            let formula = canonicalize_formula(env, &goal.context, formula)
+                .map_err(|err| TacticError::new(err.message))?;
             if matches!(allowed_mode, LogicMode::Constructive) {
                 return Err(TacticError::new(format!(
                     "by_cases uses excluded middle for `{formula}` and requires classical mode"
@@ -11691,16 +12581,27 @@ fn run_tactic_step(
                 TacticError::new(err.message.replace("`intro`", "`have`"))
             })?;
             if let Some(formula) = formula {
-                validate_formula(env, &goal.context, formula).map_err(|err| {
+                let canonical = canonicalize_formula(env, &goal.context, formula).map_err(|err| {
+                    TacticError::new(format!(
+                        "have formula `{formula}` is not valid here: {}",
+                        err.message
+                    ))
+                })?;
+                validate_formula(env, &goal.context, &canonical).map_err(|err| {
                     TacticError::new(format!(
                         "have formula `{formula}` is not valid here: {}",
                         err.message
                     ))
                 })?;
             }
+            let formula = formula
+                .as_ref()
+                .map(|formula| canonicalize_formula(env, &goal.context, formula))
+                .transpose()
+                .map_err(|err| TacticError::new(err.message))?;
             match expr {
                 Some(expr) => {
-                    let proof = if let Some(stated) = formula {
+                    let proof = if let Some(stated) = &formula {
                         proof_expr_for_expected(env, &goal.context, expr, stated, allowed_mode)?
                     } else {
                         proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?
@@ -11709,7 +12610,7 @@ fn run_tactic_step(
                         .map_err(|err| TacticError::new(err.message))?;
                     let hyp_formula = match formula {
                         Some(stated) => {
-                            if !formulas_def_eq(env, &goal.context, &checked.formula, stated)
+                            if !formulas_def_eq(env, &goal.context, &checked.formula, &stated)
                                 .unwrap_or(false)
                             {
                                 return Err(TacticError::new(format!(
@@ -11717,7 +12618,7 @@ fn run_tactic_step(
                                     checked.formula
                                 )));
                             }
-                            stated.clone()
+                            stated
                         }
                         None => checked.formula.clone(),
                     };
@@ -12411,12 +13312,16 @@ fn explicit_schema_subst(
             ParamKind::Type => {
                 let ty = parse_type_str(&arg.value)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                let ty = canonicalize_type(env, ctx, &ty)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 validate_type(env, ctx, &ty)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 subst.type_args.insert(arg.name.clone(), ty);
             }
             ParamKind::Prop => {
                 let formula = parse_formula_str(&arg.value)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                let formula = canonicalize_formula(env, ctx, &formula)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 validate_formula(env, ctx, &formula)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
@@ -12425,10 +13330,14 @@ fn explicit_schema_subst(
             ParamKind::Predicate(_) => {
                 let pred_arg = parse_predicate_arg(&arg.value)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                let pred_arg = canonicalize_predicate_arg(env, ctx, &pred_arg)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 subst.predicate_args.insert(arg.name.clone(), pred_arg);
             }
             ParamKind::Term(_) => {
                 let term = parse_term_str(&arg.value)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                let term = canonicalize_term(env, ctx, &term)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 validate_term(env, ctx, &term)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
@@ -15838,6 +16747,52 @@ theorem use_prefixed_theorem
   : q.Happy(q.alice) -> q.Happy(q.mother(q.alice)) := by
   intro h
   exact q.simp_rule h
+"#,
+        );
+    }
+
+    #[test]
+    fn namespace_blocks_scope_declaration_bodies_and_tactic_arguments() {
+        check_ok(
+            r#"
+mode constructive
+
+namespace q
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Happy(Person)
+
+def HappyMother (x : Person) : Prop := Happy(mother(x))
+
+axiom all_happy (x : Person) : Happy(x)
+
+theorem scoped_statement : Happy(alice) := by
+  exact all_happy alice
+
+theorem scoped_def : HappyMother(alice) := by
+  unfold HappyMother
+  exact all_happy mother(alice)
+
+data List
+| nil
+| cons(Person, List)
+
+defrec len (l : List) : Nat
+| nil => 0
+| cons h t rec => succ(rec)
+
+theorem len_nil : len(nil) = 0 := by
+  refl
+
+end q
+
+theorem outside_scoped_statement : q.Happy(q.alice) := by
+  exact q.all_happy q.alice
+
+theorem outside_len_nil : q.len(q.nil) = 0 := by
+  exact q.len_nil
 "#,
         );
     }
