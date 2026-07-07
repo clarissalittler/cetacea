@@ -909,8 +909,11 @@ impl Diagnostic {
         self
     }
 
-    fn with_tactic_error_suggestions(mut self, message: &str, target: &Formula) -> Self {
-        for suggestion in tactic_error_suggestions(message, target) {
+    fn with_tactic_error_suggestions(mut self, err: &TacticError, target: &Formula) -> Self {
+        for suggestion in &err.suggestions {
+            self.suggestions.push(suggestion.clone());
+        }
+        for suggestion in tactic_error_suggestions(&err.message, target) {
             self.suggestions.push(suggestion);
         }
         self
@@ -1017,6 +1020,20 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
             Some("apply theorem_name {A := Nat; P := fun x => ...}"),
         );
     }
+    if message.contains("cannot induct on") && message.contains("depends on it") {
+        let var = extract_backtick_after(message, "cannot induct on `").unwrap_or("n");
+        let hyp = extract_backtick_after(message, "while hypothesis `").unwrap_or("h");
+        push(
+            &mut suggestions,
+            "Induct before introducing dependent hypotheses",
+            format!(
+                "Hypothesis `{hyp}` mentions `{var}`, so it cannot be kept unchanged while `{var}` is split into cases. Leave the implication or forall in the goal, run induction first, then introduce `{hyp}` inside each arm."
+            ),
+            Some(&format!(
+                "induction {var} with\n| zero =>\n    intro {hyp}\n    ...\n| succ k ih =>\n    intro {hyp}\n    ..."
+            )),
+        );
+    }
     if message.contains("requires classical mode")
         || message.contains("uses classical")
         || message.contains("by_contra introduces")
@@ -1030,6 +1047,13 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
     }
 
     suggestions
+}
+
+fn extract_backtick_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let start = text.find(prefix)? + prefix.len();
+    let rest = &text[start..];
+    let end = rest.find('`')?;
+    Some(&rest[..end])
 }
 
 fn diagnostic_at(
@@ -2498,9 +2522,9 @@ impl FileChecker {
                                     countermodel_note(&model)
                                 ));
                             }
-                            self.result.diagnostics.push(
-                                diagnostic.with_tactic_error_suggestions(&err.message, target),
-                            );
+                            self.result
+                                .diagnostics
+                                .push(diagnostic.with_tactic_error_suggestions(&err, target));
                             continue;
                         }
                     };
@@ -2720,7 +2744,7 @@ fn goals_for_theorem_prefix(
                     format!("theorem `{}` failed: {}", decl.name, err.message),
                 )
                 .with_note(format!("target: {target}"))
-                .with_tactic_error_suggestions(&err.message, target)],
+                .with_tactic_error_suggestions(&err, target)],
             };
         }
     }
@@ -2873,7 +2897,7 @@ fn explain_theorem_at_index(
                     format!("theorem `{}` failed: {}", decl.name, err.message),
                 )
                 .with_note(format!("target: {target}"))
-                .with_tactic_error_suggestions(&err.message, target)],
+                .with_tactic_error_suggestions(&err, target)],
                 ..ExplanationResult::default()
             };
         }
@@ -8940,6 +8964,7 @@ struct TacticError {
     target: Option<Box<Formula>>,
     hyps: Vec<Formula>,
     line: Option<usize>,
+    suggestions: Vec<DiagnosticSuggestion>,
 }
 
 impl TacticError {
@@ -8949,6 +8974,7 @@ impl TacticError {
             target: None,
             hyps: Vec::new(),
             line: None,
+            suggestions: Vec::new(),
         }
     }
 
@@ -8970,6 +8996,11 @@ impl TacticError {
         if self.line.is_none() {
             self.line = Some(line);
         }
+        self
+    }
+
+    fn with_suggestion(mut self, suggestion: DiagnosticSuggestion) -> Self {
+        self.suggestions.push(suggestion);
         self
     }
 }
@@ -11140,9 +11171,16 @@ fn apply_plan_for_goal(
             let subject = theorem_name
                 .map(|name| format!("theorem `{name}`"))
                 .unwrap_or_else(|| "this proof".to_string());
-            TacticError::new(format!(
+            let err = TacticError::new(format!(
                 "cannot use {subject} here: its conclusion `{normalized_cursor}` does not match goal `{target}`"
-            ))
+            ));
+            if let Some(suggestion) =
+                predicate_parameter_apply_suggestion(theorem_name, schema_params)
+            {
+                err.with_suggestion(suggestion)
+            } else {
+                err
+            }
         })?;
     }
     infer_apply_args_from_context(
@@ -11304,6 +11342,46 @@ fn remaining_schema_params(params: &[Param], subst: &SchemaSubst) -> Vec<Param> 
             _ => None,
         })
         .collect()
+}
+
+fn predicate_parameter_apply_suggestion(
+    theorem_name: Option<&str>,
+    params: &[Param],
+) -> Option<DiagnosticSuggestion> {
+    let theorem_name = theorem_name?;
+    let (name, args) = params.iter().find_map(|param| match &param.kind {
+        ParamKind::Predicate(args) => Some((&param.name, args.as_slice())),
+        _ => None,
+    })?;
+    let example = predicate_lambda_placeholder(args)
+        .map(|lambda| format!("apply {theorem_name} {{{name} := {lambda}}}"));
+    Some(DiagnosticSuggestion {
+        title: "Provide the predicate parameter".to_string(),
+        detail: format!(
+            "Theorem `{theorem_name}` has predicate parameter `{name}`, and predicate parameters are not inferred from the goal. Spell `{name}` out with a lambda."
+        ),
+        example,
+    })
+}
+
+fn predicate_lambda_placeholder(args: &[Type]) -> Option<String> {
+    if args.is_empty() {
+        return None;
+    }
+
+    let names = ["m", "x", "y", "z", "w"];
+    if args.len() == 1 {
+        return Some(format!("fun {} : {} => ...", names[0], args[0]));
+    }
+    if args.windows(2).all(|pair| pair[0] == pair[1]) {
+        let binders = (0..args.len())
+            .map(|idx| names.get(idx).copied().unwrap_or("x"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        return Some(format!("fun {binders} : {} => ...", args[0]));
+    }
+
+    None
 }
 
 fn schema_subst_uses_predicate_lambda(subst: &SchemaSubst) -> bool {
@@ -12609,6 +12687,37 @@ theorem bad (P : Prop) : P -> P := by
             .suggestions
             .iter()
             .any(|suggestion| suggestion.title == "Use `split` only for conjunctions"));
+    }
+
+    #[test]
+    fn apply_predicate_parameter_failure_suggests_explicit_lambda() {
+        let import = import_line("std/nat.ctea");
+        let result = check_file(&format!(
+            r#"
+{import}
+mode constructive
+
+func bulb : Nat -> Nat
+axiom bulb_zero : bulb(0) = 0
+
+theorem bad (n : Nat) : bulb(n) = 0 := by
+  apply strong_induction
+  exact bulb_zero
+"#
+        ));
+        assert!(
+            !result.diagnostics.is_empty(),
+            "expected diagnostics, but file checked successfully"
+        );
+        let suggestion = result.diagnostics[0]
+            .suggestions
+            .iter()
+            .find(|suggestion| suggestion.title == "Provide the predicate parameter")
+            .expect("predicate-parameter suggestion");
+        assert_eq!(
+            suggestion.example.as_deref(),
+            Some("apply strong_induction {P := fun m : Nat => ...}")
+        );
     }
 
     #[test]
@@ -15085,7 +15194,7 @@ theorem induction_then_next_goal (n : Nat) : add(n, 0) = n /\ n = n := by
 
     #[test]
     fn induction_rejects_hypothesis_depending_on_variable() {
-        check_err_contains(
+        let result = check_file(
             r#"
 mode constructive
 
@@ -15099,8 +15208,25 @@ theorem bad (n : Nat) : P(n) -> P(n) := by
   | succ k ih =>
       exact h
 "#,
-            "cannot induct on `n` while hypothesis `h` depends on it",
         );
+        assert!(
+            !result.diagnostics.is_empty(),
+            "expected diagnostics, but file checked successfully"
+        );
+        let rendered = format!("{:#?}", result.diagnostics);
+        assert!(
+            rendered.contains("cannot induct on `n` while hypothesis `h` depends on it"),
+            "diagnostics did not contain induction refusal:\n{rendered}"
+        );
+        let suggestion = result.diagnostics[0]
+            .suggestions
+            .iter()
+            .find(|suggestion| suggestion.title == "Induct before introducing dependent hypotheses")
+            .expect("induction dependency suggestion");
+        assert!(suggestion
+            .example
+            .as_deref()
+            .is_some_and(|example| example.contains("intro h")));
     }
 
     #[test]

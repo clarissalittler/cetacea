@@ -235,6 +235,10 @@ feels like it should work — the goal is right there:
 ```text
 error: /home/left_adjoint/cetacea/docs/book/code/ch12-mistakes.ctea:31: theorem `which_predicate` failed: cannot use theorem `strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`
   note: target: bulb(n) = 0
+  help: Provide the predicate parameter
+    Theorem `strong_induction` has predicate parameter `P`, and predicate parameters are not inferred from the goal. Spell `P` out with a lambda.
+    try:
+      apply strong_induction {P := fun m : Nat => ...}
 ```
 
 The checker must match the conclusion `P(n)` against `bulb(n) = 0`,
