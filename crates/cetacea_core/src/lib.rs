@@ -801,20 +801,7 @@ impl Env {
     }
 
     fn ambiguous_theorem_names(&self, name: &str) -> Option<Vec<Name>> {
-        if name.contains('.') || is_builtin_name(name) {
-            return None;
-        }
-        let mut matches: Vec<_> = self
-            .theorems
-            .keys()
-            .filter(|candidate| qualified_name_leaf(candidate) == Some(name))
-            .cloned()
-            .collect();
-        if matches.len() < 2 {
-            return None;
-        }
-        matches.sort();
-        Some(matches)
+        ambiguous_leaf_names(self.theorems.keys(), name)
     }
 
     pub fn add_theorem(&mut self, theorem: Theorem) {
@@ -875,20 +862,7 @@ impl Env {
     }
 
     fn ambiguous_formula_def_names(&self, name: &str) -> Option<Vec<Name>> {
-        if name.contains('.') || is_builtin_name(name) {
-            return None;
-        }
-        let mut matches: Vec<_> = self
-            .defs
-            .keys()
-            .filter(|candidate| qualified_name_leaf(candidate) == Some(name))
-            .cloned()
-            .collect();
-        if matches.len() < 2 {
-            return None;
-        }
-        matches.sort();
-        Some(matches)
+        ambiguous_leaf_names(self.defs.keys(), name)
     }
 
     fn term_def(&self, name: &str) -> Option<&TermDef> {
@@ -899,16 +873,45 @@ impl Env {
         self.sorts.contains_key(name)
     }
 
+    fn ambiguous_sort_names(&self, name: &str) -> Option<Vec<Name>> {
+        ambiguous_leaf_names(self.sorts.keys(), name)
+    }
+
     fn has_const(&self, name: &str) -> bool {
         self.consts.contains_key(name)
+    }
+
+    fn ambiguous_term_names(&self, name: &str) -> Option<Vec<Name>> {
+        ambiguous_leaf_names(
+            self.consts
+                .keys()
+                .chain(self.term_defs.iter().filter_map(|(name, def)| {
+                    (term_def_expected_args(def) == 0).then_some(name)
+                })),
+            name,
+        )
     }
 
     fn has_func(&self, name: &str) -> bool {
         self.funcs.contains_key(name)
     }
 
+    fn ambiguous_function_names(&self, name: &str) -> Option<Vec<Name>> {
+        ambiguous_leaf_names(
+            self.funcs
+                .keys()
+                .chain(self.term_defs.keys())
+                .chain(self.data_rec_defs.keys()),
+            name,
+        )
+    }
+
     fn has_pred(&self, name: &str) -> bool {
         self.preds.contains_key(name)
+    }
+
+    fn ambiguous_predicate_names(&self, name: &str) -> Option<Vec<Name>> {
+        ambiguous_leaf_names(self.preds.keys().chain(self.defs.keys()), name)
     }
 
     fn has_theorem(&self, name: &str) -> bool {
@@ -950,6 +953,24 @@ fn declaration_namespace(name: &str) -> Option<Name> {
 fn qualified_name_leaf(name: &str) -> Option<&str> {
     name.rsplit_once('.')
         .and_then(|(_, leaf)| (!leaf.is_empty()).then_some(leaf))
+}
+
+fn ambiguous_leaf_names<'a>(
+    names: impl Iterator<Item = &'a Name>,
+    leaf: &str,
+) -> Option<Vec<Name>> {
+    if leaf.contains('.') || is_builtin_name(leaf) {
+        return None;
+    }
+    let mut matches: Vec<_> = names
+        .filter(|candidate| qualified_name_leaf(candidate) == Some(leaf))
+        .cloned()
+        .collect();
+    if matches.len() < 2 {
+        return None;
+    }
+    matches.sort();
+    Some(matches)
 }
 
 fn ambiguous_reference_message(kind: &str, name: &str, matches: &[Name]) -> String {
@@ -5477,7 +5498,14 @@ fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationEr
         }
         Type::Set(elem) => validate_type(env, ctx, elem),
         Type::Named(name) if env.has_sort(name) || ctx.has_type_var(name) => Ok(()),
-        Type::Named(name) => Err(ValidationError::new(format!("unknown type `{name}`"))),
+        Type::Named(name) => {
+            if let Some(matches) = env.ambiguous_sort_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "type", name, &matches,
+                )));
+            }
+            Err(ValidationError::new(format!("unknown type `{name}`")))
+        }
     }
 }
 
@@ -5500,6 +5528,11 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                 return Err(ValidationError::new(format!(
                     "recursive definition `{name}` expects {} argument(s), but got 0",
                     1 + def.extra_params.len()
+                )));
+            }
+            if let Some(matches) = env.ambiguous_term_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "term", name, &matches,
                 )));
             }
             Err(ValidationError::new(format!("unknown term `{name}`")))
@@ -5552,6 +5585,11 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                         }
                     }
                     return Ok(def.result_type.clone());
+                }
+                if let Some(matches) = env.ambiguous_function_names(name) {
+                    return Err(ValidationError::new(ambiguous_reference_message(
+                        "function", name, &matches,
+                    )));
                 }
                 return Err(ValidationError::new(format!("unknown function `{name}`")));
             };
@@ -5741,6 +5779,12 @@ fn validate_predicate_arg(
                         predicate_type_display(expected)
                     )))
                 }
+            } else if let Some(matches) = env.ambiguous_predicate_names(name) {
+                Err(ValidationError::new(ambiguous_reference_message(
+                    "predicate",
+                    name,
+                    &matches,
+                )))
             } else {
                 Err(ValidationError::new(format!("unknown predicate `{name}`")))
             }
@@ -5789,6 +5833,12 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
                 Ok(())
             } else if let Some(def) = env.formula_def(name) {
                 instantiate_formula_def(env, ctx, def, &[]).map(|_| ())
+            } else if let Some(matches) = env.ambiguous_predicate_names(name) {
+                Err(ValidationError::new(ambiguous_reference_message(
+                    "proposition",
+                    name,
+                    &matches,
+                )))
             } else {
                 Err(ValidationError::new(format!(
                     "unknown proposition variable `{name}`"
@@ -5853,6 +5903,12 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
                 Ok(())
             } else if let Some(def) = env.formula_def(name) {
                 instantiate_formula_def(env, ctx, def, args).map(|_| ())
+            } else if let Some(matches) = env.ambiguous_predicate_names(name) {
+                Err(ValidationError::new(ambiguous_reference_message(
+                    "predicate",
+                    name,
+                    &matches,
+                )))
             } else {
                 Err(ValidationError::new(format!("unknown predicate `{name}`")))
             }
@@ -15857,6 +15913,89 @@ theorem use_ambiguous_wrap (P : Prop) : q.Wrap(P) -> P := by
   exact h
 "#,
             "ambiguous definition `Wrap`; use `q.Wrap` or `r.Wrap`",
+        );
+    }
+
+    #[test]
+    fn ambiguous_qualified_type_leaf_reports_qualified_choices() {
+        check_err_contains(
+            r#"
+mode constructive
+
+namespace q
+sort Person
+end q
+
+namespace r
+sort Person
+end r
+
+const alice : Person
+"#,
+            "ambiguous type `Person`; use `q.Person` or `r.Person`",
+        );
+    }
+
+    #[test]
+    fn ambiguous_qualified_term_leaf_reports_qualified_choices() {
+        check_err_contains(
+            r#"
+mode constructive
+
+namespace q
+const c : Nat
+end q
+
+namespace r
+const c : Nat
+end r
+
+theorem ambiguous_const : c = c := by
+  refl
+"#,
+            "ambiguous term `c`; use `q.c` or `r.c`",
+        );
+    }
+
+    #[test]
+    fn ambiguous_qualified_function_leaf_reports_qualified_choices() {
+        check_err_contains(
+            r#"
+mode constructive
+
+namespace q
+func f : Nat -> Nat
+end q
+
+namespace r
+func f : Nat -> Nat
+end r
+
+theorem ambiguous_func : f(0) = 0 := by
+  refl
+"#,
+            "ambiguous function `f`; use `q.f` or `r.f`",
+        );
+    }
+
+    #[test]
+    fn ambiguous_qualified_predicate_leaf_reports_qualified_choices() {
+        check_err_contains(
+            r#"
+mode constructive
+
+namespace q
+pred Happy(Nat)
+end q
+
+namespace r
+pred Happy(Nat)
+end r
+
+theorem ambiguous_pred : Happy(0) := by
+  sorry
+"#,
+            "ambiguous predicate `Happy`; use `q.Happy` or `r.Happy`",
         );
     }
 
