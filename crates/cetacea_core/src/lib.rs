@@ -3,9 +3,9 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-mod kernel_api;
+mod kernel;
 
-pub use kernel_api::KernelSignature;
+pub use kernel::{check_proof, KernelSignature};
 
 pub type Name = String;
 
@@ -5139,17 +5139,6 @@ pub struct CheckedProof {
     pub mode_used: LogicMode,
 }
 
-pub fn check_proof(
-    signature: &KernelSignature<'_>,
-    ctx: &Context,
-    proof: &KernelProof,
-    expected: &Formula,
-    allowed_mode: LogicMode,
-) -> Result<LogicMode, KernelError> {
-    let env = signature.environment();
-    check_kernel_proof_node(env, ctx, &proof.0, expected, allowed_mode)
-}
-
 fn check_completed_draft(
     env: &Env,
     ctx: &Context,
@@ -5167,7 +5156,7 @@ fn check_completed_draft(
     )
 }
 
-fn check_kernel_proof_node(
+pub(crate) fn check_kernel_proof_node(
     env: &Env,
     ctx: &Context,
     proof: &DraftProof,

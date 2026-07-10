@@ -284,7 +284,8 @@ and Wasm APIs as a facade. New receipt fields may be added compatibly to JSON.
 Status: the deterministic semantic corpus oracle and initial artifact/timing
 report are in place. The public legacy kernel now accepts an opaque
 `KernelSignature` rather than the complete `Env`; shrinking its internal view
-and extracting modules remain H1 work.
+and extracting modules remain H1 work. CI rejects new parser, tactic, UI,
+filesystem, driver, or countermodel dependencies in the kernel module.
 
 - Tag the current FOL baseline and keep `main` releasable.
 - Record golden JSON for the standard library, examples, book, and CS250 corpus.

@@ -29,3 +29,6 @@ jobs:
 
       - name: Verify pre-HOL semantic baseline
         run: python3 scripts/hol_baseline.py check
+
+      - name: Check kernel dependency boundary
+        run: python3 scripts/check_kernel_boundary.py
