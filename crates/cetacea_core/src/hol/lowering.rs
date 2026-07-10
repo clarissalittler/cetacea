@@ -23,7 +23,7 @@ pub struct LoweringError {
 }
 
 impl LoweringError {
-    fn new(message: impl Into<String>) -> Self {
+    pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }
@@ -84,6 +84,7 @@ struct LocalBinding {
 /// The object borrows immutable kernel signatures. Declaration lowering will
 /// create a fresh scope after each transactional signature update, so no core
 /// IDs can become stale while an AST is being lowered.
+#[derive(Clone)]
 pub struct CompatibilityLowerer<'a> {
     types: &'a TypeSignature,
     constants: &'a TermSignature,
@@ -886,6 +887,19 @@ impl<'a> CompatibilityLowerer<'a> {
             .fold(TermContext::new(), |context, binding| {
                 context.with_bound(binding.ty.clone())
             })
+    }
+
+    pub(crate) fn core_context(&self) -> TermContext {
+        self.context()
+    }
+
+    pub(crate) fn infer_core(&self, term: &CoreTerm) -> Result<CoreType, LoweringError> {
+        self.infer(term)
+    }
+
+    pub(crate) fn resolve_local_term(&self, name: &str) -> Option<(u32, CoreType)> {
+        self.resolve_binding(name)
+            .map(|(index, binding)| (index, binding.ty.clone()))
     }
 
     fn infer(&self, term: &CoreTerm) -> Result<CoreType, LoweringError> {

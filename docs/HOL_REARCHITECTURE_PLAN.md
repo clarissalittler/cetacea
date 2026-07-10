@@ -464,15 +464,19 @@ and formula form, resolves local names to de Bruijn indices, and infers explicit
 rank-one type applications. The first transactional declaration slice now
 handles sorts, constants, functions, predicates, polymorphic transparent
 definitions, monomorphic direct-recursive datatypes, and legacy `defrec` with
-its exact branch binder layout. It is not connected to imports, theorem/axiom
-declarations, proofs, or the production driver. The legacy evaluator's overlapping
+its exact branch binder layout. Trusted, checked, and incomplete theorem
+templates now lower all schema parameter kinds and preserve their receipt
+boundaries. Every legacy proof-object form lowers to explicit HOL evidence,
+including capture-safe rewrite motives, quantifiers, theorem substitutions,
+classical rules, and Nat/data induction. This path is not connected to imports
+or the production driver. The legacy evaluator's overlapping
 other-argument arithmetic shortcuts are intentionally not kernel conversion:
 they are not substitution-stable and must become checked compatibility simp
 lemmas before proof lowering.
 
-- Lower theorem/axiom declarations and proof expressions into the new core;
-  `sort`, `const`, `func`, `pred`, `def`, `data`, `defrec`, formulas, and
-  predicate lambdas now have parser-independent lowering.
+- Done parser-independently: lower theorem/axiom declarations and every legacy
+  proof expression, along with `sort`, `const`, `func`, `pred`, `def`, `data`,
+  `defrec`, formulas, and predicate lambdas. Connect parsed commands next.
 - Preserve existing name resolution and import behavior through stable
   declaration identities.
 - Done: elaborate old monomorphic direct-recursive datatypes as zero-parameter

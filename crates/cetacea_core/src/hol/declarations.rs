@@ -1,22 +1,31 @@
 //! Transactional lowering of legacy declarations into the parallel HOL core.
 //!
-//! Imports, axioms, theorems, and proof evidence deliberately remain outside
-//! this first declaration slice. The supported forms are enough to build a
-//! resolved signature, user datatypes, transparent definitions, and checked
-//! structural recursion before any production-driver integration.
+//! Imports and production-driver integration deliberately remain outside this
+//! module. The parser-independent path now covers resolved signatures, user
+//! datatypes, transparent/structural definitions, theorem status boundaries,
+//! and every legacy proof-object variant.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use crate::{DataDef, DataRecDef, Formula, FormulaDef, Param, ParamKind, Term, TermDef, Type};
+use crate::{
+    ClassicalRule, DataDef, DataRecDef, DraftProof as LegacyDraftProof, Formula, FormulaDef, Param,
+    ParamKind, PredicateArg, SchemaSubst, Term, TermDef, Type,
+};
 
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
 use super::lowering::{CompatibilityLowerer, LoweringError};
 use super::prelude::CompatibilityPrelude;
+use super::proofs::HolDraftProof;
 use super::recursion::{StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
-use super::terms::{ConstantId, CoreTerm};
+use super::terms::{
+    definitionally_equal, instantiate_binder, instantiate_term_parameters_under_binders, normalize,
+    shift_under_new_binder, ConstantId, CoreTerm,
+};
+use super::theorems::TheoremId;
 use super::types::{CoreType, TypeConstructorId, TypeParameter};
+use super::DeclarationReceipt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompatibilityDeclarationError {
@@ -67,6 +76,15 @@ struct DataRegistration {
     constructors: Vec<ConstantId>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TheoremRegistration {
+    name: String,
+    theorem: TheoremId,
+    parameters: Vec<Param>,
+    type_parameters: Vec<TypeParameter>,
+    parameter_types: Vec<CoreType>,
+}
+
 /// Parser-independent declaration environment for the HOL compatibility path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompatibilityElaborator {
@@ -75,6 +93,7 @@ pub struct CompatibilityElaborator {
     names: HashSet<String>,
     symbols: Vec<SymbolRegistration>,
     data: HashMap<String, DataRegistration>,
+    theorems: Vec<TheoremRegistration>,
     next_type_parameter: u32,
 }
 
@@ -128,6 +147,7 @@ impl CompatibilityElaborator {
             names,
             symbols: Vec::new(),
             data,
+            theorems: Vec::new(),
             next_type_parameter: 0,
         })
     }
@@ -521,6 +541,177 @@ impl CompatibilityElaborator {
         Ok(constant)
     }
 
+    pub fn declare_trusted_axiom(
+        &mut self,
+        name: impl Into<String>,
+        parameters: &[Param],
+        statement: &Formula,
+    ) -> Result<(TheoremId, DeclarationReceipt), CompatibilityDeclarationError> {
+        let name = name.into();
+        self.ensure_name_free(&name)?;
+        let lowered = self
+            .lower_definition_parameters(parameters, |lowerer| lowerer.lower_formula(statement))?;
+        let mut staged = self.clone();
+        let (theorem, receipt) = staged.core.declare_trusted_axiom_with_parameters(
+            name.clone(),
+            lowered.type_parameters.clone(),
+            lowered.parameter_types.clone(),
+            lowered.body,
+        )?;
+        staged.next_type_parameter = lowered.next_type_parameter;
+        staged.finish_theorem(TheoremRegistration {
+            name,
+            theorem,
+            parameters: parameters.to_vec(),
+            type_parameters: lowered.type_parameters,
+            parameter_types: lowered.parameter_types,
+        });
+        *self = staged;
+        Ok((theorem, receipt))
+    }
+
+    /// Store a checked theorem template after lowering its legacy parameters
+    /// and statement. Proof-node lowering is intentionally a separate layer;
+    /// this entry point receives explicit HOL evidence in the same open term
+    /// parameter context as the lowered statement.
+    pub fn declare_checked_theorem(
+        &mut self,
+        name: impl Into<String>,
+        parameters: &[Param],
+        statement: &Formula,
+        proof: HolDraftProof,
+    ) -> Result<(TheoremId, DeclarationReceipt), CompatibilityDeclarationError> {
+        let name = name.into();
+        self.ensure_name_free(&name)?;
+        let lowered = self
+            .lower_definition_parameters(parameters, |lowerer| lowerer.lower_formula(statement))?;
+        let mut staged = self.clone();
+        let (theorem, receipt) = staged.core.declare_theorem_with_parameters(
+            name.clone(),
+            lowered.type_parameters.clone(),
+            lowered.parameter_types.clone(),
+            lowered.body,
+            proof,
+        )?;
+        staged.next_type_parameter = lowered.next_type_parameter;
+        staged.finish_theorem(TheoremRegistration {
+            name,
+            theorem,
+            parameters: parameters.to_vec(),
+            type_parameters: lowered.type_parameters,
+            parameter_types: lowered.parameter_types,
+        });
+        *self = staged;
+        Ok((theorem, receipt))
+    }
+
+    pub fn declare_incomplete_theorem(
+        &mut self,
+        name: impl Into<String>,
+        parameters: &[Param],
+        statement: &Formula,
+        proof: HolDraftProof,
+    ) -> Result<(TheoremId, DeclarationReceipt), CompatibilityDeclarationError> {
+        let name = name.into();
+        self.ensure_name_free(&name)?;
+        let lowered = self
+            .lower_definition_parameters(parameters, |lowerer| lowerer.lower_formula(statement))?;
+        let mut staged = self.clone();
+        let (theorem, receipt) = staged.core.declare_incomplete_theorem_with_parameters(
+            name.clone(),
+            lowered.type_parameters.clone(),
+            lowered.parameter_types.clone(),
+            lowered.body,
+            proof,
+        )?;
+        staged.next_type_parameter = lowered.next_type_parameter;
+        staged.finish_theorem(TheoremRegistration {
+            name,
+            theorem,
+            parameters: parameters.to_vec(),
+            type_parameters: lowered.type_parameters,
+            parameter_types: lowered.parameter_types,
+        });
+        *self = staged;
+        Ok((theorem, receipt))
+    }
+
+    /// Lower the constructive propositional/equality subset of a legacy proof
+    /// object and store the resulting checked theorem transactionally.
+    /// Quantifier, induction, existential, and rewrite evidence currently
+    /// returns a precise unsupported-node error.
+    pub fn declare_legacy_checked_theorem(
+        &mut self,
+        name: impl Into<String>,
+        parameters: &[Param],
+        statement: &Formula,
+        proof: &LegacyDraftProof,
+    ) -> Result<(TheoremId, DeclarationReceipt), CompatibilityDeclarationError> {
+        let name = name.into();
+        self.ensure_name_free(&name)?;
+        let lowered = self.lower_definition_parameters(parameters, |lowerer| {
+            let statement = lowerer.lower_formula(statement)?;
+            let proof = lower_legacy_proof(self, lowerer.clone(), proof, false)?;
+            ensure_same_proposition(self, lowerer, &proof.proposition, &statement)?;
+            Ok((statement, proof.proof))
+        })?;
+        let (statement, proof) = lowered.body;
+        let mut staged = self.clone();
+        let (theorem, receipt) = staged.core.declare_theorem_with_parameters(
+            name.clone(),
+            lowered.type_parameters.clone(),
+            lowered.parameter_types.clone(),
+            statement,
+            proof,
+        )?;
+        staged.next_type_parameter = lowered.next_type_parameter;
+        staged.finish_theorem(TheoremRegistration {
+            name,
+            theorem,
+            parameters: parameters.to_vec(),
+            type_parameters: lowered.type_parameters,
+            parameter_types: lowered.parameter_types,
+        });
+        *self = staged;
+        Ok((theorem, receipt))
+    }
+
+    pub fn declare_legacy_incomplete_theorem(
+        &mut self,
+        name: impl Into<String>,
+        parameters: &[Param],
+        statement: &Formula,
+        proof: &LegacyDraftProof,
+    ) -> Result<(TheoremId, DeclarationReceipt), CompatibilityDeclarationError> {
+        let name = name.into();
+        self.ensure_name_free(&name)?;
+        let lowered = self.lower_definition_parameters(parameters, |lowerer| {
+            let statement = lowerer.lower_formula(statement)?;
+            let proof = lower_legacy_proof(self, lowerer.clone(), proof, true)?;
+            ensure_same_proposition(self, lowerer, &proof.proposition, &statement)?;
+            Ok((statement, proof.proof))
+        })?;
+        let (statement, proof) = lowered.body;
+        let mut staged = self.clone();
+        let (theorem, receipt) = staged.core.declare_incomplete_theorem_with_parameters(
+            name.clone(),
+            lowered.type_parameters.clone(),
+            lowered.parameter_types.clone(),
+            statement,
+            proof,
+        )?;
+        staged.next_type_parameter = lowered.next_type_parameter;
+        staged.finish_theorem(TheoremRegistration {
+            name,
+            theorem,
+            parameters: parameters.to_vec(),
+            type_parameters: lowered.type_parameters,
+            parameter_types: lowered.parameter_types,
+        });
+        *self = staged;
+        Ok((theorem, receipt))
+    }
+
     fn lower_definition_parameters<T>(
         &self,
         parameters: &[Param],
@@ -607,6 +798,11 @@ impl CompatibilityElaborator {
         self.lowering_scope()?;
         Ok(())
     }
+
+    fn finish_theorem(&mut self, registration: TheoremRegistration) {
+        self.names.insert(registration.name.clone());
+        self.theorems.push(registration);
+    }
 }
 
 struct LoweredDefinition<T> {
@@ -667,10 +863,1082 @@ fn abstract_term(parameters: &[CoreType], body: CoreTerm) -> CoreTerm {
     })
 }
 
+struct LoweredLegacyProof {
+    proof: HolDraftProof,
+    proposition: CoreTerm,
+}
+
+#[derive(Clone)]
+struct LegacyProofLowerer<'a> {
+    environment: &'a CompatibilityElaborator,
+    lowerer: CompatibilityLowerer<'a>,
+    hypotheses: Vec<(String, CoreTerm)>,
+    allow_incomplete: bool,
+}
+
+fn lower_legacy_proof<'a>(
+    environment: &'a CompatibilityElaborator,
+    lowerer: CompatibilityLowerer<'a>,
+    proof: &LegacyDraftProof,
+    allow_incomplete: bool,
+) -> Result<LoweredLegacyProof, LoweringError> {
+    LegacyProofLowerer {
+        environment,
+        lowerer,
+        hypotheses: Vec::new(),
+        allow_incomplete,
+    }
+    .lower(proof)
+}
+
+impl LegacyProofLowerer<'_> {
+    fn lower(&mut self, proof: &LegacyDraftProof) -> Result<LoweredLegacyProof, LoweringError> {
+        match proof {
+            LegacyDraftProof::Hyp(name) => {
+                let (index, (_, proposition)) = self
+                    .hypotheses
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .find(|(_, (candidate, _))| candidate == name)
+                    .ok_or_else(|| {
+                        LoweringError::new(format!(
+                            "unknown legacy proof hypothesis `{name}` during HOL lowering"
+                        ))
+                    })?;
+                let index = u32::try_from(index)
+                    .map_err(|_| LoweringError::new("too many compatibility hypotheses"))?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::Hypothesis(index),
+                    proposition: proposition.clone(),
+                })
+            }
+            LegacyDraftProof::TrueIntro => Ok(LoweredLegacyProof {
+                proof: HolDraftProof::TruthIntro,
+                proposition: CoreTerm::Truth,
+            }),
+            LegacyDraftProof::FalseElim {
+                proof_false,
+                target,
+            } => {
+                let proof_false = self.lower(proof_false)?;
+                self.expect_normalized_shape(
+                    &proof_false.proposition,
+                    |term| matches!(term, CoreTerm::Falsity),
+                    "false elimination needs a proof of falsity",
+                )?;
+                let target = self.lowerer.lower_formula(target)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::FalseElim {
+                        proof_false: Box::new(proof_false.proof),
+                        target: target.clone(),
+                    },
+                    proposition: target,
+                })
+            }
+            LegacyDraftProof::AndIntro(left, right) => {
+                let left = self.lower(left)?;
+                let right = self.lower(right)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::AndIntro(Box::new(left.proof), Box::new(right.proof)),
+                    proposition: CoreTerm::and(left.proposition, right.proposition),
+                })
+            }
+            LegacyDraftProof::AndElimLeft(proof_and)
+            | LegacyDraftProof::AndElimRight(proof_and) => {
+                let proof_and = self.lower(proof_and)?;
+                let normalized = self.normalize(&proof_and.proposition)?;
+                let CoreTerm::And(left, right) = normalized else {
+                    return Err(LoweringError::new(
+                        "conjunction elimination needs a proof of a conjunction",
+                    ));
+                };
+                let (proof, proposition) = if matches!(proof, LegacyDraftProof::AndElimLeft(_)) {
+                    (HolDraftProof::AndElimLeft(Box::new(proof_and.proof)), *left)
+                } else {
+                    (
+                        HolDraftProof::AndElimRight(Box::new(proof_and.proof)),
+                        *right,
+                    )
+                };
+                Ok(LoweredLegacyProof { proof, proposition })
+            }
+            LegacyDraftProof::OrIntroLeft {
+                proof_left,
+                right_formula,
+            } => {
+                let left = self.lower(proof_left)?;
+                let right = self.lowerer.lower_formula(right_formula)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::OrIntroLeft {
+                        proof_left: Box::new(left.proof),
+                        right: right.clone(),
+                    },
+                    proposition: CoreTerm::or(left.proposition, right),
+                })
+            }
+            LegacyDraftProof::OrIntroRight {
+                left_formula,
+                proof_right,
+            } => {
+                let left = self.lowerer.lower_formula(left_formula)?;
+                let right = self.lower(proof_right)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::OrIntroRight {
+                        left: left.clone(),
+                        proof_right: Box::new(right.proof),
+                    },
+                    proposition: CoreTerm::or(left, right.proposition),
+                })
+            }
+            LegacyDraftProof::OrElim {
+                proof_or,
+                left_name,
+                left_case,
+                right_name,
+                right_case,
+                target,
+            } => {
+                let proof_or = self.lower(proof_or)?;
+                let normalized = self.normalize(&proof_or.proposition)?;
+                let CoreTerm::Or(left, right) = normalized else {
+                    return Err(LoweringError::new(
+                        "disjunction elimination needs a proof of a disjunction",
+                    ));
+                };
+                let target = self.lowerer.lower_formula(target)?;
+                let mut left_scope = self.clone();
+                left_scope
+                    .hypotheses
+                    .push((left_name.clone(), (*left).clone()));
+                let left_case = left_scope.lower(left_case)?;
+                ensure_same_proposition(
+                    self.environment,
+                    &self.lowerer,
+                    &left_case.proposition,
+                    &target,
+                )?;
+                let mut right_scope = self.clone();
+                right_scope
+                    .hypotheses
+                    .push((right_name.clone(), (*right).clone()));
+                let right_case = right_scope.lower(right_case)?;
+                ensure_same_proposition(
+                    self.environment,
+                    &self.lowerer,
+                    &right_case.proposition,
+                    &target,
+                )?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::OrElim {
+                        proof_or: Box::new(proof_or.proof),
+                        left_case: Box::new(left_case.proof),
+                        right_case: Box::new(right_case.proof),
+                        target: target.clone(),
+                    },
+                    proposition: target,
+                })
+            }
+            LegacyDraftProof::ImpIntro {
+                hyp_name,
+                hyp_formula,
+                body,
+            } => {
+                let premise = self.lowerer.lower_formula(hyp_formula)?;
+                let mut body_scope = self.clone();
+                body_scope
+                    .hypotheses
+                    .push((hyp_name.clone(), premise.clone()));
+                let body = body_scope.lower(body)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::ImpIntro {
+                        premise: premise.clone(),
+                        body: Box::new(body.proof),
+                    },
+                    proposition: CoreTerm::implies(premise, body.proposition),
+                })
+            }
+            LegacyDraftProof::ImpElim {
+                proof_imp,
+                proof_arg,
+            } => {
+                let implication = self.lower(proof_imp)?;
+                let normalized = self.normalize(&implication.proposition)?;
+                let CoreTerm::Implies(premise, conclusion) = normalized else {
+                    return Err(LoweringError::new(
+                        "implication elimination needs an implication proof",
+                    ));
+                };
+                let argument = self.lower(proof_arg)?;
+                ensure_same_proposition(
+                    self.environment,
+                    &self.lowerer,
+                    &argument.proposition,
+                    &premise,
+                )?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::ImpElim {
+                        proof_implication: Box::new(implication.proof),
+                        proof_argument: Box::new(argument.proof),
+                    },
+                    proposition: *conclusion,
+                })
+            }
+            LegacyDraftProof::EqRefl(term) => {
+                let term = self.lowerer.lower_term(term)?;
+                let ty = self.lowerer.infer_core(&term)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::EqualityRefl(term.clone()),
+                    proposition: CoreTerm::equality(ty, term.clone(), term),
+                })
+            }
+            LegacyDraftProof::EqSubst {
+                eq_proof,
+                proof_body,
+                target,
+            } => {
+                let equality = self.lower(eq_proof)?;
+                let normalized = self.normalize(&equality.proposition)?;
+                let CoreTerm::Equality { ty, left, right } = normalized else {
+                    return Err(LoweringError::new(
+                        "legacy equality substitution needs an equality proof",
+                    ));
+                };
+                let proof_body = self.lower(proof_body)?;
+                let target = self.lowerer.lower_formula(target)?;
+                if let Some(motive) =
+                    self.find_rewrite_motive(&proof_body.proposition, &left, &right, &ty, &target)?
+                {
+                    return Ok(LoweredLegacyProof {
+                        proof: HolDraftProof::EqualityElim {
+                            proof_equality: Box::new(equality.proof),
+                            motive,
+                            proof_left: Box::new(proof_body.proof),
+                        },
+                        proposition: target,
+                    });
+                }
+                if let Some(motive) =
+                    self.find_rewrite_motive(&proof_body.proposition, &right, &left, &ty, &target)?
+                {
+                    let shifted_left = shift_under_new_binder(&left)?;
+                    let symmetry_motive = CoreTerm::lambda(
+                        ty.clone(),
+                        CoreTerm::equality(ty.clone(), CoreTerm::Bound(0), shifted_left),
+                    );
+                    let symmetry = HolDraftProof::EqualityElim {
+                        proof_equality: Box::new(equality.proof),
+                        motive: symmetry_motive,
+                        proof_left: Box::new(HolDraftProof::EqualityRefl((*left).clone())),
+                    };
+                    return Ok(LoweredLegacyProof {
+                        proof: HolDraftProof::EqualityElim {
+                            proof_equality: Box::new(symmetry),
+                            motive,
+                            proof_left: Box::new(proof_body.proof),
+                        },
+                        proposition: target,
+                    });
+                }
+                Err(LoweringError::new(
+                    "cannot reconstruct the legacy equality rewrite as a single explicit HOL motive",
+                ))
+            }
+            LegacyDraftProof::Convert { proof_body, target } => {
+                let proof_body = self.lower(proof_body)?;
+                let target = self.lowerer.lower_formula(target)?;
+                ensure_same_proposition(
+                    self.environment,
+                    &self.lowerer,
+                    &proof_body.proposition,
+                    &target,
+                )?;
+                Ok(LoweredLegacyProof {
+                    proof: proof_body.proof,
+                    proposition: target,
+                })
+            }
+            LegacyDraftProof::ForallIntro {
+                var,
+                var_type,
+                body,
+            } => {
+                let domain = self.lowerer.lower_type(var_type)?;
+                let mut body_scope = self.under_term_binder(var, domain.clone())?;
+                let body = body_scope.lower(body)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::ForallIntro {
+                        domain: domain.clone(),
+                        body: Box::new(body.proof),
+                    },
+                    proposition: CoreTerm::forall(domain, body.proposition),
+                })
+            }
+            LegacyDraftProof::ForallElim { proof_forall, arg } => {
+                let proof_forall = self.lower(proof_forall)?;
+                let normalized = self.normalize(&proof_forall.proposition)?;
+                let CoreTerm::Forall { domain, body } = normalized else {
+                    return Err(LoweringError::new(
+                        "universal elimination needs a universal proof",
+                    ));
+                };
+                let argument = self.lowerer.lower_term_at_type(arg, &domain)?;
+                let proposition = instantiate_binder(
+                    self.environment.core.types(),
+                    self.environment.core.constants(),
+                    &self.lowerer.core_context(),
+                    &domain,
+                    &body,
+                    &argument,
+                )?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::ForallElim {
+                        proof_forall: Box::new(proof_forall.proof),
+                        argument,
+                    },
+                    proposition,
+                })
+            }
+            LegacyDraftProof::ExistsIntro {
+                witness,
+                proof_body,
+                exists_formula,
+            } => {
+                let existential = self.lowerer.lower_formula(exists_formula)?;
+                let normalized = self.normalize(&existential)?;
+                let CoreTerm::Exists { domain, body } = normalized else {
+                    return Err(LoweringError::new(
+                        "existential introduction target is not existential",
+                    ));
+                };
+                let witness = self.lowerer.lower_term_at_type(witness, &domain)?;
+                let expected_body = instantiate_binder(
+                    self.environment.core.types(),
+                    self.environment.core.constants(),
+                    &self.lowerer.core_context(),
+                    &domain,
+                    &body,
+                    &witness,
+                )?;
+                let proof_body = self.lower(proof_body)?;
+                ensure_same_proposition(
+                    self.environment,
+                    &self.lowerer,
+                    &proof_body.proposition,
+                    &expected_body,
+                )?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::ExistsIntro {
+                        domain,
+                        body: *body,
+                        witness,
+                        proof_body: Box::new(proof_body.proof),
+                    },
+                    proposition: existential,
+                })
+            }
+            LegacyDraftProof::ExistsElim {
+                proof_exists,
+                witness_name,
+                hyp_name,
+                body,
+                target,
+            } => {
+                let proof_exists = self.lower(proof_exists)?;
+                let normalized = self.normalize(&proof_exists.proposition)?;
+                let CoreTerm::Exists {
+                    domain,
+                    body: exists_body,
+                } = normalized
+                else {
+                    return Err(LoweringError::new(
+                        "existential elimination needs an existential proof",
+                    ));
+                };
+                let target = self.lowerer.lower_formula(target)?;
+                let shifted_target = shift_under_new_binder(&target)?;
+                let mut body_scope = self.under_term_binder(witness_name, domain)?;
+                body_scope
+                    .hypotheses
+                    .push((hyp_name.clone(), (*exists_body).clone()));
+                let body = body_scope.lower(body)?;
+                ensure_same_proposition(
+                    self.environment,
+                    &body_scope.lowerer,
+                    &body.proposition,
+                    &shifted_target,
+                )?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::ExistsElim {
+                        proof_exists: Box::new(proof_exists.proof),
+                        body: Box::new(body.proof),
+                        target: target.clone(),
+                    },
+                    proposition: target,
+                })
+            }
+            LegacyDraftProof::TheoremRef { name, subst } => {
+                self.lower_theorem_reference(name, subst)
+            }
+            LegacyDraftProof::Classical { rule, args, target } => {
+                self.lower_classical(rule.clone(), args, target)
+            }
+            LegacyDraftProof::Sorry { target } => {
+                if !self.allow_incomplete {
+                    return Err(LoweringError::new(
+                        "legacy `sorry` cannot be lowered as checked HOL evidence",
+                    ));
+                }
+                let target = self.lowerer.lower_formula(target)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::Sorry {
+                        target: target.clone(),
+                    },
+                    proposition: target,
+                })
+            }
+            LegacyDraftProof::NatInd {
+                var_name,
+                target,
+                base_case,
+                step_var,
+                ih_name,
+                step_case,
+            } => {
+                self.lower_nat_induction(var_name, target, base_case, step_var, ih_name, step_case)
+            }
+            LegacyDraftProof::DataInd {
+                var_name,
+                data_name,
+                target,
+                arms,
+            } => self.lower_data_induction(var_name, data_name, target, arms),
+        }
+    }
+
+    fn lower_nat_induction(
+        &mut self,
+        var_name: &str,
+        target: &Formula,
+        base_case: &LegacyDraftProof,
+        step_var: &str,
+        ih_name: &str,
+        step_case: &LegacyDraftProof,
+    ) -> Result<LoweredLegacyProof, LoweringError> {
+        let (scrutinee_index, scrutinee_type) =
+            self.lowerer.resolve_local_term(var_name).ok_or_else(|| {
+                LoweringError::new(format!(
+                    "unknown Nat induction variable `{var_name}` during HOL lowering"
+                ))
+            })?;
+        let nat = self.environment.prelude.nat_type();
+        if scrutinee_type != nat {
+            return Err(LoweringError::new(format!(
+                "legacy induction variable `{var_name}` has core type `{scrutinee_type:?}`, not Nat"
+            )));
+        }
+        let target = self.lowerer.lower_formula(target)?;
+        let motive_body = abstract_local_term(&self.lowerer, &target, scrutinee_index)?;
+        let motive = CoreTerm::lambda(nat.clone(), motive_body);
+        let scrutinee = CoreTerm::Bound(scrutinee_index);
+
+        let base_expected = self.normalize(&CoreTerm::apply(
+            motive.clone(),
+            CoreTerm::Constant(self.environment.prelude.zero()),
+        ))?;
+        let base_case = self.lower(base_case)?;
+        ensure_same_proposition(
+            self.environment,
+            &self.lowerer,
+            &base_case.proposition,
+            &base_expected,
+        )?;
+
+        let mut step_scope = self.under_term_binder(step_var, nat.clone())?;
+        let shifted_motive = shift_under_new_binder(&motive)?;
+        let induction_hypothesis =
+            step_scope.normalize(&CoreTerm::apply(shifted_motive.clone(), CoreTerm::Bound(0)))?;
+        step_scope
+            .hypotheses
+            .push((ih_name.to_string(), induction_hypothesis));
+        let step_expected = step_scope.normalize(&CoreTerm::apply(
+            shifted_motive,
+            CoreTerm::apply(
+                CoreTerm::Constant(self.environment.prelude.successor()),
+                CoreTerm::Bound(0),
+            ),
+        ))?;
+        let step_case = step_scope.lower(step_case)?;
+        ensure_same_proposition(
+            self.environment,
+            &step_scope.lowerer,
+            &step_case.proposition,
+            &step_expected,
+        )?;
+
+        Ok(LoweredLegacyProof {
+            proof: HolDraftProof::Induction {
+                datatype: self.environment.prelude.nat_constructor(),
+                type_arguments: Vec::new(),
+                motive,
+                scrutinee,
+                cases: vec![base_case.proof, step_case.proof],
+            },
+            proposition: target,
+        })
+    }
+
+    fn lower_data_induction(
+        &mut self,
+        var_name: &str,
+        data_name: &str,
+        target: &Formula,
+        arms: &[crate::DataIndArm],
+    ) -> Result<LoweredLegacyProof, LoweringError> {
+        let data = self.environment.data.get(data_name).ok_or_else(|| {
+            LoweringError::new(format!(
+                "unknown induction data type `{data_name}` during HOL lowering"
+            ))
+        })?;
+        if arms.len() != data.source.ctors.len() {
+            return Err(LoweringError::new(format!(
+                "legacy induction over `{data_name}` needs {} arm(s), but got {}",
+                data.source.ctors.len(),
+                arms.len()
+            )));
+        }
+        let (scrutinee_index, scrutinee_type) =
+            self.lowerer.resolve_local_term(var_name).ok_or_else(|| {
+                LoweringError::new(format!(
+                    "unknown data induction variable `{var_name}` during HOL lowering"
+                ))
+            })?;
+        let datatype_type = CoreType::constructor(data.datatype, Vec::new());
+        if scrutinee_type != datatype_type {
+            return Err(LoweringError::new(format!(
+                "legacy induction variable `{var_name}` has core type `{scrutinee_type:?}`, not `{datatype_type:?}`"
+            )));
+        }
+        let target = self.lowerer.lower_formula(target)?;
+        let motive_body = abstract_local_term(&self.lowerer, &target, scrutinee_index)?;
+        let motive = CoreTerm::lambda(datatype_type, motive_body);
+        let scrutinee = CoreTerm::Bound(scrutinee_index);
+        let mut cases = Vec::with_capacity(arms.len());
+
+        for (((arm, constructor), constructor_id), constructor_index) in arms
+            .iter()
+            .zip(&data.source.ctors)
+            .zip(&data.constructors)
+            .zip(0usize..)
+        {
+            if arm.ctor != constructor.name {
+                return Err(LoweringError::new(format!(
+                    "legacy induction arm `{}` is out of order; expected `{}`",
+                    arm.ctor, constructor.name
+                )));
+            }
+            let recursive_indices = constructor
+                .arg_types
+                .iter()
+                .enumerate()
+                .filter_map(|(index, ty)| is_direct_recursive_type(ty, data_name).then_some(index))
+                .collect::<Vec<_>>();
+            if arm.arg_names.len() != constructor.arg_types.len()
+                || arm.ih_names.len() != recursive_indices.len()
+            {
+                return Err(LoweringError::new(format!(
+                    "legacy induction arm `{}` has inconsistent binder metadata",
+                    arm.ctor
+                )));
+            }
+
+            let mut arm_scope = self.clone();
+            let mut shifted_motive = motive.clone();
+            for (name, ty) in arm.arg_names.iter().zip(&constructor.arg_types).rev() {
+                let ty = arm_scope.lowerer.lower_type(ty)?;
+                arm_scope = arm_scope.under_term_binder(name, ty)?;
+                shifted_motive = shift_under_new_binder(&shifted_motive)?;
+            }
+            let mut constructor_term = CoreTerm::Constant(*constructor_id);
+            for field_index in 0..constructor.arg_types.len() {
+                constructor_term =
+                    CoreTerm::apply(constructor_term, CoreTerm::Bound(field_index as u32));
+            }
+            let case_expected =
+                arm_scope.normalize(&CoreTerm::apply(shifted_motive.clone(), constructor_term))?;
+            for (ih_name, recursive_index) in arm.ih_names.iter().zip(&recursive_indices).rev() {
+                let induction_hypothesis = arm_scope.normalize(&CoreTerm::apply(
+                    shifted_motive.clone(),
+                    CoreTerm::Bound(*recursive_index as u32),
+                ))?;
+                arm_scope
+                    .hypotheses
+                    .push((ih_name.clone(), induction_hypothesis));
+            }
+            let case = arm_scope.lower(&arm.proof)?;
+            ensure_same_proposition(
+                self.environment,
+                &arm_scope.lowerer,
+                &case.proposition,
+                &case_expected,
+            )?;
+            cases.push(case.proof);
+
+            debug_assert_eq!(
+                self.environment
+                    .core
+                    .inductives()
+                    .declaration(data.datatype)
+                    .and_then(|declaration| declaration.constructors.get(constructor_index))
+                    .map(|metadata| metadata.constant),
+                Some(*constructor_id)
+            );
+        }
+
+        Ok(LoweredLegacyProof {
+            proof: HolDraftProof::Induction {
+                datatype: data.datatype,
+                type_arguments: Vec::new(),
+                motive,
+                scrutinee,
+                cases,
+            },
+            proposition: target,
+        })
+    }
+
+    fn lower_theorem_reference(
+        &mut self,
+        name: &str,
+        substitution: &SchemaSubst,
+    ) -> Result<LoweredLegacyProof, LoweringError> {
+        let registration = self
+            .environment
+            .theorems
+            .iter()
+            .find(|registration| registration.name == name)
+            .ok_or_else(|| {
+                LoweringError::new(format!(
+                    "unknown compatibility theorem `{name}` in legacy proof"
+                ))
+            })?;
+        let mut type_arguments = Vec::with_capacity(registration.type_parameters.len());
+        for parameter in &registration.parameters {
+            if matches!(parameter.kind, ParamKind::Type) {
+                let argument = substitution.type_args.get(&parameter.name).ok_or_else(|| {
+                    LoweringError::new(format!(
+                        "legacy theorem `{name}` is missing type argument `{}`",
+                        parameter.name
+                    ))
+                })?;
+                type_arguments.push(self.lowerer.lower_type(argument)?);
+            }
+        }
+        if type_arguments.len() != registration.type_parameters.len() {
+            return Err(LoweringError::new(format!(
+                "legacy theorem `{name}` has inconsistent type-parameter metadata"
+            )));
+        }
+
+        let mut term_arguments = Vec::with_capacity(registration.parameter_types.len());
+        let mut parameter_type_index = 0usize;
+        for parameter in &registration.parameters {
+            if matches!(parameter.kind, ParamKind::Type) {
+                continue;
+            }
+            let schematic_type = &registration.parameter_types[parameter_type_index];
+            parameter_type_index += 1;
+            let expected = self.environment.core.types().instantiate_scheme(
+                &registration.type_parameters,
+                schematic_type,
+                &type_arguments,
+            )?;
+            let argument = match &parameter.kind {
+                ParamKind::Prop => {
+                    let argument =
+                        substitution
+                            .formula_args
+                            .get(&parameter.name)
+                            .ok_or_else(|| {
+                                LoweringError::new(format!(
+                                    "legacy theorem `{name}` is missing proposition argument `{}`",
+                                    parameter.name
+                                ))
+                            })?;
+                    let argument = self.lowerer.lower_formula(argument)?;
+                    self.expect_type(&argument, &expected, &parameter.name)?;
+                    argument
+                }
+                ParamKind::Predicate(_) => {
+                    let argument = substitution
+                        .predicate_args
+                        .get(&parameter.name)
+                        .ok_or_else(|| {
+                            LoweringError::new(format!(
+                                "legacy theorem `{name}` is missing predicate argument `{}`",
+                                parameter.name
+                            ))
+                        })?;
+                    let term = match argument {
+                        PredicateArg::Named(name) => Term::Var(name.clone()),
+                        PredicateArg::Lambda { params, body } => Term::PredLambda {
+                            params: params.clone(),
+                            body: Box::new(body.clone()),
+                        },
+                    };
+                    self.lowerer.lower_term_at_type(&term, &expected)?
+                }
+                ParamKind::Term(_) => {
+                    let argument =
+                        substitution.term_args.get(&parameter.name).ok_or_else(|| {
+                            LoweringError::new(format!(
+                                "legacy theorem `{name}` is missing term argument `{}`",
+                                parameter.name
+                            ))
+                        })?;
+                    self.lowerer.lower_term_at_type(argument, &expected)?
+                }
+                ParamKind::Type => unreachable!("type parameters were skipped"),
+            };
+            term_arguments.push(argument);
+        }
+
+        let context = self.lowerer.core_context();
+        let statement = if self.allow_incomplete {
+            self.environment
+                .core
+                .theorems()
+                .instantiate_draft_statement(
+                    self.environment.core.types(),
+                    self.environment.core.constants(),
+                    &context,
+                    registration.theorem,
+                    &type_arguments,
+                    &term_arguments,
+                )
+        } else {
+            self.environment.core.theorems().instantiate_statement(
+                self.environment.core.types(),
+                self.environment.core.constants(),
+                &context,
+                registration.theorem,
+                &type_arguments,
+                &term_arguments,
+            )
+        }
+        .map_err(|error| LoweringError::new(error.message))?;
+        Ok(LoweredLegacyProof {
+            proof: HolDraftProof::TheoremRef {
+                theorem: registration.theorem,
+                type_arguments,
+                term_arguments,
+            },
+            proposition: statement,
+        })
+    }
+
+    fn find_rewrite_motive(
+        &self,
+        source: &CoreTerm,
+        from: &CoreTerm,
+        to: &CoreTerm,
+        ty: &CoreType,
+        target: &CoreTerm,
+    ) -> Result<Option<CoreTerm>, LoweringError> {
+        let shifted_source = shift_under_new_binder(source)?;
+        let shifted_from = shift_under_new_binder(from)?;
+        for body in replace_core_term_once(&shifted_source, &shifted_from, 0)? {
+            let motive = CoreTerm::lambda(ty.clone(), body);
+            let produced = CoreTerm::apply(motive.clone(), to.clone());
+            if definitionally_equal(
+                self.environment.core.types(),
+                self.environment.core.constants(),
+                &self.lowerer.core_context(),
+                &produced,
+                target,
+            )? {
+                return Ok(Some(motive));
+            }
+        }
+        Ok(None)
+    }
+
+    fn lower_classical(
+        &mut self,
+        rule: ClassicalRule,
+        args: &[LegacyDraftProof],
+        target: &Formula,
+    ) -> Result<LoweredLegacyProof, LoweringError> {
+        let target = self.lowerer.lower_formula(target)?;
+        match rule {
+            ClassicalRule::ExcludedMiddle => {
+                if !args.is_empty() {
+                    return Err(LoweringError::new(
+                        "legacy excluded middle unexpectedly has proof arguments",
+                    ));
+                }
+                let normalized = self.normalize(&target)?;
+                let CoreTerm::Or(left, right) = normalized else {
+                    return Err(LoweringError::new(
+                        "legacy excluded middle target is not a disjunction",
+                    ));
+                };
+                let CoreTerm::Implies(negated, falsehood) = *right else {
+                    return Err(LoweringError::new(
+                        "legacy excluded middle target has no negated right branch",
+                    ));
+                };
+                if !matches!(*falsehood, CoreTerm::Falsity) {
+                    return Err(LoweringError::new(
+                        "legacy excluded middle target has a malformed negation",
+                    ));
+                }
+                ensure_same_proposition(self.environment, &self.lowerer, &left, &negated)?;
+                Ok(LoweredLegacyProof {
+                    proof: HolDraftProof::ExcludedMiddle {
+                        proposition: (*left).clone(),
+                    },
+                    proposition: target,
+                })
+            }
+            ClassicalRule::DoubleNegationElim | ClassicalRule::ByContra => {
+                if args.len() != 1 {
+                    return Err(LoweringError::new(format!(
+                        "legacy `{rule}` expects one proof argument"
+                    )));
+                }
+                let proof_not_not = self.lower(&args[0])?;
+                Ok(LoweredLegacyProof {
+                    // The legacy by-contradiction node stores a complete proof
+                    // of `not not P`; DNE is the extensionally identical core
+                    // boundary and keeps the classical audit explicit.
+                    proof: HolDraftProof::DoubleNegationElim {
+                        proposition: target.clone(),
+                        proof_not_not: Box::new(proof_not_not.proof),
+                    },
+                    proposition: target,
+                })
+            }
+        }
+    }
+
+    fn normalize(&self, proposition: &CoreTerm) -> Result<CoreTerm, LoweringError> {
+        Ok(normalize(
+            self.environment.core.types(),
+            self.environment.core.constants(),
+            &self.lowerer.core_context(),
+            proposition,
+        )?)
+    }
+
+    fn expect_normalized_shape(
+        &self,
+        proposition: &CoreTerm,
+        predicate: impl FnOnce(&CoreTerm) -> bool,
+        message: &str,
+    ) -> Result<(), LoweringError> {
+        let normalized = self.normalize(proposition)?;
+        if predicate(&normalized) {
+            Ok(())
+        } else {
+            Err(LoweringError::new(message))
+        }
+    }
+
+    fn expect_type(
+        &self,
+        term: &CoreTerm,
+        expected: &CoreType,
+        parameter: &str,
+    ) -> Result<(), LoweringError> {
+        let actual = self.lowerer.infer_core(term)?;
+        if actual == *expected {
+            Ok(())
+        } else {
+            Err(LoweringError::new(format!(
+                "legacy theorem argument `{parameter}` has core type `{actual:?}`, but expected `{expected:?}`"
+            )))
+        }
+    }
+
+    fn under_term_binder(&self, name: &str, ty: CoreType) -> Result<Self, LoweringError> {
+        let mut scope = self.clone();
+        scope.lowerer.bind_term_parameter(name.to_string(), ty)?;
+        for (_, proposition) in &mut scope.hypotheses {
+            *proposition = shift_under_new_binder(proposition)?;
+        }
+        Ok(scope)
+    }
+}
+
+fn ensure_same_proposition(
+    environment: &CompatibilityElaborator,
+    lowerer: &CompatibilityLowerer<'_>,
+    actual: &CoreTerm,
+    expected: &CoreTerm,
+) -> Result<(), LoweringError> {
+    if definitionally_equal(
+        environment.core.types(),
+        environment.core.constants(),
+        &lowerer.core_context(),
+        actual,
+        expected,
+    )? {
+        Ok(())
+    } else {
+        Err(LoweringError::new(format!(
+            "lowered legacy proof has proposition `{actual:?}`, but expected `{expected:?}`"
+        )))
+    }
+}
+
+/// Abstract one resolved local de Bruijn variable while preserving every
+/// other surrounding binder. `instantiate_term_parameters_under_binders`
+/// performs the capture-safe traversal for us; the argument vector merely
+/// renames the selected old index to the new index zero and shifts its peers.
+fn abstract_local_term(
+    lowerer: &CompatibilityLowerer<'_>,
+    term: &CoreTerm,
+    selected: u32,
+) -> Result<CoreTerm, LoweringError> {
+    let depth = lowerer.core_context().depth();
+    let selected = usize::try_from(selected)
+        .map_err(|_| LoweringError::new("selected binder index does not fit in memory"))?;
+    if selected >= depth {
+        return Err(LoweringError::new(format!(
+            "cannot abstract binder `{selected}` from context depth `{depth}`"
+        )));
+    }
+    let arguments = (0..depth)
+        .rev()
+        .map(|old_index| {
+            if old_index == selected {
+                Ok(CoreTerm::Bound(0))
+            } else {
+                let shifted = old_index
+                    .checked_add(1)
+                    .ok_or_else(|| LoweringError::new("binder index overflow"))?;
+                Ok(CoreTerm::Bound(u32::try_from(shifted).map_err(|_| {
+                    LoweringError::new("binder index exceeds HOL core limits")
+                })?))
+            }
+        })
+        .collect::<Result<Vec<_>, LoweringError>>()?;
+    Ok(instantiate_term_parameters_under_binders(
+        term, &arguments, 0,
+    )?)
+}
+
+fn replace_core_term_once(
+    term: &CoreTerm,
+    needle: &CoreTerm,
+    binder_depth: u32,
+) -> Result<Vec<CoreTerm>, LoweringError> {
+    let mut replacements = Vec::new();
+    if term == needle {
+        replacements.push(CoreTerm::Bound(binder_depth));
+    }
+    let nested = |body: &CoreTerm,
+                  wrap: &dyn Fn(CoreTerm) -> CoreTerm|
+     -> Result<Vec<CoreTerm>, LoweringError> {
+        let nested_needle = shift_under_new_binder(needle)?;
+        let nested_depth = binder_depth
+            .checked_add(1)
+            .ok_or_else(|| LoweringError::new("rewrite binder depth overflow"))?;
+        Ok(replace_core_term_once(body, &nested_needle, nested_depth)?
+            .into_iter()
+            .map(wrap)
+            .collect())
+    };
+    let unary = |body: &CoreTerm,
+                 wrap: &dyn Fn(CoreTerm) -> CoreTerm|
+     -> Result<Vec<CoreTerm>, LoweringError> {
+        Ok(replace_core_term_once(body, needle, binder_depth)?
+            .into_iter()
+            .map(wrap)
+            .collect())
+    };
+    let binary = |left: &CoreTerm,
+                  right: &CoreTerm,
+                  wrap: &dyn Fn(CoreTerm, CoreTerm) -> CoreTerm|
+     -> Result<Vec<CoreTerm>, LoweringError> {
+        let mut results = replace_core_term_once(left, needle, binder_depth)?
+            .into_iter()
+            .map(|replacement| wrap(replacement, right.clone()))
+            .collect::<Vec<_>>();
+        results.extend(
+            replace_core_term_once(right, needle, binder_depth)?
+                .into_iter()
+                .map(|replacement| wrap(left.clone(), replacement)),
+        );
+        Ok(results)
+    };
+
+    let mut descendants = match term {
+        CoreTerm::Bound(_)
+        | CoreTerm::Constant(_)
+        | CoreTerm::TypeApplication { .. }
+        | CoreTerm::EmptySet { .. }
+        | CoreTerm::UniverseSet { .. }
+        | CoreTerm::Truth
+        | CoreTerm::Falsity => Vec::new(),
+        CoreTerm::Lambda {
+            parameter_type,
+            body,
+        } => nested(body, &|body| CoreTerm::lambda(parameter_type.clone(), body))?,
+        CoreTerm::Apply { function, argument } => binary(function, argument, &CoreTerm::apply)?,
+        CoreTerm::Pair(left, right) => binary(left, right, &CoreTerm::pair)?,
+        CoreTerm::First(pair) => unary(pair, &CoreTerm::first)?,
+        CoreTerm::Second(pair) => unary(pair, &CoreTerm::second)?,
+        CoreTerm::SingletonSet(element) => unary(element, &CoreTerm::singleton_set)?,
+        CoreTerm::SetUnion(left, right) => binary(left, right, &CoreTerm::set_union)?,
+        CoreTerm::SetIntersection(left, right) => binary(left, right, &CoreTerm::set_intersection)?,
+        CoreTerm::SetDifference(left, right) => binary(left, right, &CoreTerm::set_difference)?,
+        CoreTerm::SetComplement(set) => unary(set, &CoreTerm::set_complement)?,
+        CoreTerm::SetProduct(left, right) => binary(left, right, &CoreTerm::set_product)?,
+        CoreTerm::Powerset { element_type, set } => {
+            unary(set, &|set| CoreTerm::powerset(element_type.clone(), set))?
+        }
+        CoreTerm::SetBuilder { element_type, body } => nested(body, &|body| {
+            CoreTerm::set_builder(element_type.clone(), body)
+        })?,
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => binary(element, set, &|element, set| {
+            CoreTerm::membership(element_type.clone(), element, set)
+        })?,
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => binary(left, right, &|left, right| {
+            CoreTerm::subset(element_type.clone(), left, right)
+        })?,
+        CoreTerm::And(left, right) => binary(left, right, &CoreTerm::and)?,
+        CoreTerm::Or(left, right) => binary(left, right, &CoreTerm::or)?,
+        CoreTerm::Implies(left, right) => binary(left, right, &CoreTerm::implies)?,
+        CoreTerm::Equality { ty, left, right } => binary(left, right, &|left, right| {
+            CoreTerm::equality(ty.clone(), left, right)
+        })?,
+        CoreTerm::Forall { domain, body } => {
+            nested(body, &|body| CoreTerm::forall(domain.clone(), body))?
+        }
+        CoreTerm::Exists { domain, body } => {
+            nested(body, &|body| CoreTerm::exists(domain.clone(), body))?
+        }
+    };
+    replacements.append(&mut descendants);
+    Ok(replacements)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hol::fragments::{EvidenceStatus, StatementFragment};
     use crate::hol::terms::{definitionally_equal, infer_type, normalize, TermContext};
+    use crate::hol::theorems::HolTheoremStatus;
     use crate::{DataCtor, DataRecArm};
 
     fn var(name: &str) -> Term {
@@ -933,6 +2201,530 @@ mod tests {
                 alice,
             )
         );
+    }
+
+    #[test]
+    fn theorem_templates_lower_all_status_boundaries_transactionally() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let proposition_parameter = Param {
+            name: "P".to_string(),
+            kind: ParamKind::Prop,
+        };
+        let identity_statement = Formula::Implies(
+            Box::new(Formula::Atom("P".to_string())),
+            Box::new(Formula::Atom("P".to_string())),
+        );
+        let (identity, identity_receipt) = elaborator
+            .declare_checked_theorem(
+                "prop_identity",
+                std::slice::from_ref(&proposition_parameter),
+                &identity_statement,
+                HolDraftProof::ImpIntro {
+                    premise: CoreTerm::Bound(0),
+                    body: Box::new(HolDraftProof::Hypothesis(0)),
+                },
+            )
+            .expect("checked proposition template");
+        assert_eq!(identity_receipt.status(), EvidenceStatus::Checked);
+        assert_eq!(
+            identity_receipt.proof().required_fragment(),
+            StatementFragment::Prop
+        );
+        assert_eq!(
+            elaborator
+                .core()
+                .theorems()
+                .declaration(identity)
+                .map(|declaration| declaration.status),
+            Some(HolTheoremStatus::Checked)
+        );
+
+        let axiom_parameters = vec![
+            Param {
+                name: "A".to_string(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "x".to_string(),
+                kind: ParamKind::Term(Type::Named("A".to_string())),
+            },
+        ];
+        let (axiom, axiom_receipt) = elaborator
+            .declare_trusted_axiom(
+                "trusted_refl",
+                &axiom_parameters,
+                &Formula::Eq(var("x"), var("x")),
+            )
+            .expect("typed trusted axiom");
+        assert_eq!(axiom_receipt.status(), EvidenceStatus::TrustedAxiom);
+        assert_eq!(
+            axiom_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+        assert_eq!(
+            elaborator
+                .core()
+                .theorems()
+                .declaration(axiom)
+                .map(|declaration| declaration.status),
+            Some(HolTheoremStatus::TrustedAxiom)
+        );
+
+        let (incomplete, incomplete_receipt) = elaborator
+            .declare_incomplete_theorem(
+                "exercise",
+                std::slice::from_ref(&proposition_parameter),
+                &Formula::Atom("P".to_string()),
+                HolDraftProof::Sorry {
+                    target: CoreTerm::Bound(0),
+                },
+            )
+            .expect("typed incomplete theorem");
+        assert_eq!(incomplete_receipt.status(), EvidenceStatus::Incomplete);
+        let incomplete_declaration = elaborator
+            .core()
+            .theorems()
+            .declaration(incomplete)
+            .expect("stored incomplete declaration");
+        assert_eq!(incomplete_declaration.status, HolTheoremStatus::Incomplete);
+        assert!(incomplete_declaration.incomplete_draft.is_some());
+
+        let before = elaborator.clone();
+        let error = elaborator
+            .declare_checked_theorem(
+                "bad_theorem",
+                &[],
+                &Formula::False,
+                HolDraftProof::TruthIntro,
+            )
+            .expect_err("ill-typed evidence must reject transactionally");
+        assert!(error.message.contains("expected"));
+        assert_eq!(elaborator, before);
+        elaborator
+            .declare_trusted_axiom("bad_theorem", &[], &Formula::False)
+            .expect("failed proof did not reserve theorem name");
+    }
+
+    #[test]
+    fn lowers_legacy_propositional_proofs_references_classical_rules_and_holes() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let p = Param {
+            name: "P".to_string(),
+            kind: ParamKind::Prop,
+        };
+        let identity_statement = Formula::Implies(
+            Box::new(Formula::Atom("P".to_string())),
+            Box::new(Formula::Atom("P".to_string())),
+        );
+        let identity_proof = LegacyDraftProof::ImpIntro {
+            hyp_name: "h".to_string(),
+            hyp_formula: Formula::Atom("P".to_string()),
+            body: Box::new(LegacyDraftProof::Hyp("h".to_string())),
+        };
+        let (identity, identity_receipt) = elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_prop_identity",
+                std::slice::from_ref(&p),
+                &identity_statement,
+                &identity_proof,
+            )
+            .expect("legacy implication proof");
+        assert_eq!(identity_receipt.status(), EvidenceStatus::Checked);
+        assert_eq!(
+            elaborator
+                .core()
+                .theorems()
+                .declaration(identity)
+                .map(|declaration| declaration.status),
+            Some(HolTheoremStatus::Checked)
+        );
+
+        let q = Param {
+            name: "Q".to_string(),
+            kind: ParamKind::Prop,
+        };
+        let conjunction = Formula::And(
+            Box::new(Formula::Atom("P".to_string())),
+            Box::new(Formula::Atom("Q".to_string())),
+        );
+        let swapped = Formula::And(
+            Box::new(Formula::Atom("Q".to_string())),
+            Box::new(Formula::Atom("P".to_string())),
+        );
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_and_comm",
+                &[p.clone(), q],
+                &Formula::Implies(Box::new(conjunction.clone()), Box::new(swapped)),
+                &LegacyDraftProof::ImpIntro {
+                    hyp_name: "h".to_string(),
+                    hyp_formula: conjunction,
+                    body: Box::new(LegacyDraftProof::AndIntro(
+                        Box::new(LegacyDraftProof::AndElimRight(Box::new(
+                            LegacyDraftProof::Hyp("h".to_string()),
+                        ))),
+                        Box::new(LegacyDraftProof::AndElimLeft(Box::new(
+                            LegacyDraftProof::Hyp("h".to_string()),
+                        ))),
+                    )),
+                },
+            )
+            .expect("legacy conjunction proof");
+
+        let mut identity_substitution = SchemaSubst::default();
+        identity_substitution
+            .formula_args
+            .insert("P".to_string(), Formula::Atom("P".to_string()));
+        let (_, facade_receipt) = elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_identity_facade",
+                std::slice::from_ref(&p),
+                &identity_statement,
+                &LegacyDraftProof::TheoremRef {
+                    name: "legacy_prop_identity".to_string(),
+                    subst: identity_substitution,
+                },
+            )
+            .expect("legacy theorem reference");
+        assert_eq!(facade_receipt.status(), EvidenceStatus::Checked);
+        assert_eq!(facade_receipt.proof().direct_dependencies().len(), 1);
+
+        let generic_parameters = vec![
+            Param {
+                name: "A".to_string(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "R".to_string(),
+                kind: ParamKind::Predicate(vec![Type::Named("A".to_string())]),
+            },
+            Param {
+                name: "x".to_string(),
+                kind: ParamKind::Term(Type::Named("A".to_string())),
+            },
+        ];
+        let generic_atom = Formula::PredApp("R".to_string(), vec![var("x")]);
+        let generic_statement = Formula::Implies(
+            Box::new(generic_atom.clone()),
+            Box::new(generic_atom.clone()),
+        );
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_generic_predicate_identity",
+                &generic_parameters,
+                &generic_statement,
+                &LegacyDraftProof::ImpIntro {
+                    hyp_name: "h".to_string(),
+                    hyp_formula: generic_atom,
+                    body: Box::new(LegacyDraftProof::Hyp("h".to_string())),
+                },
+            )
+            .expect("generic legacy predicate theorem");
+        let nat_reflexive = Formula::Eq(Term::Zero, Term::Zero);
+        let concrete_statement = Formula::Implies(
+            Box::new(nat_reflexive.clone()),
+            Box::new(nat_reflexive.clone()),
+        );
+        let mut generic_substitution = SchemaSubst::default();
+        generic_substitution
+            .type_args
+            .insert("A".to_string(), Type::Nat);
+        generic_substitution.predicate_args.insert(
+            "R".to_string(),
+            PredicateArg::Lambda {
+                params: vec![crate::LambdaParam {
+                    name: "n".to_string(),
+                    ty: Some(Type::Nat),
+                }],
+                body: Formula::Eq(var("n"), var("n")),
+            },
+        );
+        generic_substitution
+            .term_args
+            .insert("x".to_string(), Term::Zero);
+        let (_, generic_instance_receipt) = elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_generic_nat_instance",
+                &[],
+                &concrete_statement,
+                &LegacyDraftProof::TheoremRef {
+                    name: "legacy_generic_predicate_identity".to_string(),
+                    subst: generic_substitution,
+                },
+            )
+            .expect("explicit type/predicate/term theorem substitution");
+        assert_eq!(
+            generic_instance_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrderInductive
+        );
+
+        elaborator
+            .declare_trusted_axiom("legacy_trusted_truth", &[], &Formula::True)
+            .expect("trusted truth fixture");
+        let (_, trusted_user_receipt) = elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_trusted_user",
+                &[],
+                &Formula::True,
+                &LegacyDraftProof::TheoremRef {
+                    name: "legacy_trusted_truth".to_string(),
+                    subst: SchemaSubst::default(),
+                },
+            )
+            .expect("trusted theorem reference");
+        assert_eq!(trusted_user_receipt.proof().axiom_dependencies().len(), 1);
+
+        let excluded_middle = Formula::Or(
+            Box::new(Formula::Atom("P".to_string())),
+            Box::new(Formula::Implies(
+                Box::new(Formula::Atom("P".to_string())),
+                Box::new(Formula::False),
+            )),
+        );
+        let (_, classical_receipt) = elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_em",
+                std::slice::from_ref(&p),
+                &excluded_middle,
+                &LegacyDraftProof::Classical {
+                    rule: ClassicalRule::ExcludedMiddle,
+                    args: Vec::new(),
+                    target: excluded_middle.clone(),
+                },
+            )
+            .expect("explicit legacy classical evidence");
+        assert!(classical_receipt
+            .proof()
+            .transitive_features()
+            .contains(&crate::hol::ProofFeature::Classical));
+
+        let (_, incomplete_receipt) = elaborator
+            .declare_legacy_incomplete_theorem(
+                "legacy_exercise",
+                std::slice::from_ref(&p),
+                &Formula::Atom("P".to_string()),
+                &LegacyDraftProof::Sorry {
+                    target: Formula::Atom("P".to_string()),
+                },
+            )
+            .expect("legacy draft hole");
+        assert_eq!(incomplete_receipt.status(), EvidenceStatus::Incomplete);
+        let mut incomplete_substitution = SchemaSubst::default();
+        incomplete_substitution
+            .formula_args
+            .insert("P".to_string(), Formula::Atom("P".to_string()));
+        let (_, incomplete_user_receipt) = elaborator
+            .declare_legacy_incomplete_theorem(
+                "legacy_exercise_user",
+                std::slice::from_ref(&p),
+                &Formula::Atom("P".to_string()),
+                &LegacyDraftProof::TheoremRef {
+                    name: "legacy_exercise".to_string(),
+                    subst: incomplete_substitution,
+                },
+            )
+            .expect("draft-to-draft theorem reference");
+        assert_eq!(
+            incomplete_user_receipt
+                .proof()
+                .incomplete_dependencies()
+                .len(),
+            1
+        );
+
+        let forall_refl = Formula::Forall {
+            var: "n".to_string(),
+            var_type: Type::Nat,
+            body: Box::new(Formula::Eq(var("n"), var("n"))),
+        };
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_forall_refl",
+                &[],
+                &forall_refl,
+                &LegacyDraftProof::ForallIntro {
+                    var: "n".to_string(),
+                    var_type: Type::Nat,
+                    body: Box::new(LegacyDraftProof::EqRefl(var("n"))),
+                },
+            )
+            .expect("legacy universal introduction");
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_zero_refl",
+                &[],
+                &Formula::Eq(Term::Zero, Term::Zero),
+                &LegacyDraftProof::ForallElim {
+                    proof_forall: Box::new(LegacyDraftProof::TheoremRef {
+                        name: "legacy_forall_refl".to_string(),
+                        subst: SchemaSubst::default(),
+                    }),
+                    arg: Term::Zero,
+                },
+            )
+            .expect("legacy universal elimination");
+
+        let exists_zero = Formula::Exists {
+            var: "n".to_string(),
+            var_type: Type::Nat,
+            body: Box::new(Formula::Eq(var("n"), Term::Zero)),
+        };
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_exists_zero",
+                &[],
+                &exists_zero,
+                &LegacyDraftProof::ExistsIntro {
+                    witness: Term::Zero,
+                    proof_body: Box::new(LegacyDraftProof::EqRefl(Term::Zero)),
+                    exists_formula: exists_zero.clone(),
+                },
+            )
+            .expect("legacy existential introduction");
+        let exists_truth = Formula::Exists {
+            var: "n".to_string(),
+            var_type: Type::Nat,
+            body: Box::new(Formula::True),
+        };
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_exists_elim",
+                &[],
+                &Formula::Implies(Box::new(exists_truth.clone()), Box::new(Formula::True)),
+                &LegacyDraftProof::ImpIntro {
+                    hyp_name: "h".to_string(),
+                    hyp_formula: exists_truth,
+                    body: Box::new(LegacyDraftProof::ExistsElim {
+                        proof_exists: Box::new(LegacyDraftProof::Hyp("h".to_string())),
+                        witness_name: "n".to_string(),
+                        hyp_name: "hn".to_string(),
+                        body: Box::new(LegacyDraftProof::TrueIntro),
+                        target: Formula::True,
+                    }),
+                },
+            )
+            .expect("legacy existential elimination");
+
+        let nat_parameter = Param {
+            name: "n".to_string(),
+            kind: ParamKind::Term(Type::Nat),
+        };
+        let nat_reflexivity = Formula::Eq(var("n"), var("n"));
+        let (_, nat_induction_receipt) = elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_nat_induction",
+                std::slice::from_ref(&nat_parameter),
+                &nat_reflexivity,
+                &LegacyDraftProof::NatInd {
+                    var_name: "n".to_string(),
+                    target: nat_reflexivity.clone(),
+                    base_case: Box::new(LegacyDraftProof::EqRefl(Term::Zero)),
+                    step_var: "k".to_string(),
+                    ih_name: "ih".to_string(),
+                    step_case: Box::new(LegacyDraftProof::EqRefl(Term::Succ(Box::new(var("k"))))),
+                },
+            )
+            .expect("legacy Nat induction");
+        assert!(nat_induction_receipt
+            .proof()
+            .direct_features()
+            .contains(&crate::hol::ProofFeature::Induction));
+
+        let equality_parameters = vec![
+            Param {
+                name: "x".to_string(),
+                kind: ParamKind::Term(Type::Nat),
+            },
+            Param {
+                name: "y".to_string(),
+                kind: ParamKind::Term(Type::Nat),
+            },
+        ];
+        let xy = Formula::Eq(var("x"), var("y"));
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_eq_symm_forward",
+                &equality_parameters,
+                &Formula::Implies(
+                    Box::new(xy.clone()),
+                    Box::new(Formula::Eq(var("y"), var("x"))),
+                ),
+                &LegacyDraftProof::ImpIntro {
+                    hyp_name: "h".to_string(),
+                    hyp_formula: xy.clone(),
+                    body: Box::new(LegacyDraftProof::EqSubst {
+                        eq_proof: Box::new(LegacyDraftProof::Hyp("h".to_string())),
+                        proof_body: Box::new(LegacyDraftProof::EqRefl(var("x"))),
+                        target: Formula::Eq(var("y"), var("x")),
+                    }),
+                },
+            )
+            .expect("forward equality motive reconstruction");
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_eq_reverse_rewrite",
+                &equality_parameters,
+                &Formula::Implies(Box::new(xy.clone()), Box::new(xy.clone())),
+                &LegacyDraftProof::ImpIntro {
+                    hyp_name: "h".to_string(),
+                    hyp_formula: xy.clone(),
+                    body: Box::new(LegacyDraftProof::EqSubst {
+                        eq_proof: Box::new(LegacyDraftProof::Hyp("h".to_string())),
+                        proof_body: Box::new(LegacyDraftProof::EqRefl(var("y"))),
+                        target: xy,
+                    }),
+                },
+            )
+            .expect("reverse equality motive reconstruction");
+
+        elaborator
+            .declare_data(&list_definition())
+            .expect("List for data induction");
+        let list_parameter = Param {
+            name: "l".to_string(),
+            kind: ParamKind::Term(Type::Named("List".to_string())),
+        };
+        let list_reflexivity = Formula::Eq(var("l"), var("l"));
+        elaborator
+            .declare_legacy_checked_theorem(
+                "legacy_list_induction",
+                std::slice::from_ref(&list_parameter),
+                &list_reflexivity,
+                &LegacyDraftProof::DataInd {
+                    var_name: "l".to_string(),
+                    data_name: "List".to_string(),
+                    target: list_reflexivity.clone(),
+                    arms: vec![
+                        crate::DataIndArm {
+                            ctor: "nil".to_string(),
+                            arg_names: Vec::new(),
+                            ih_names: Vec::new(),
+                            proof: LegacyDraftProof::EqRefl(var("nil")),
+                        },
+                        crate::DataIndArm {
+                            ctor: "cons".to_string(),
+                            arg_names: vec!["head".to_string(), "tail".to_string()],
+                            ih_names: vec!["ih".to_string()],
+                            proof: LegacyDraftProof::EqRefl(Term::App(
+                                "cons".to_string(),
+                                vec![var("head"), var("tail")],
+                            )),
+                        },
+                    ],
+                },
+            )
+            .expect("legacy data induction");
+
+        let before = elaborator.clone();
+        let unsupported = LegacyDraftProof::EqSubst {
+            eq_proof: Box::new(LegacyDraftProof::EqRefl(Term::Zero)),
+            proof_body: Box::new(LegacyDraftProof::TrueIntro),
+            target: Formula::True,
+        };
+        assert!(elaborator
+            .declare_legacy_checked_theorem("invalid_rewrite", &[], &Formula::True, &unsupported,)
+            .is_err());
+        assert_eq!(elaborator, before);
     }
 
     #[test]

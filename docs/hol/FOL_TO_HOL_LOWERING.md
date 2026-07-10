@@ -66,9 +66,9 @@ rejected.
 | Term `def d ... : A := t` | Check a polymorphic constant with a transparent body `lambda params. lower(t)`. | Parser-independent parameter/body lowering, checking, registration, and delta reduction are implemented. |
 | `data D | ...` | Transactionally declare a zero-parameter inductive type; a field exactly equal to `D` is `Recursive`, every other field is checked existing data. | Parser-independent lowering is implemented for the corpus's direct recursion; nested/mutual recursion remains rejected. |
 | `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | Parser-independent lowering uses legacy binder order and recursive index zero; focused `length` and `append` computations pass. |
-| `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | H4a core storage and receipt propagation are implemented; surface lowering remains. |
-| Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | H3 supports the monomorphic/type-schematic subset. |
-| Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | H4a core storage is implemented, including draft-to-draft references and transitive incomplete receipts; surface lowering remains. |
+| `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | Parser-independent parameter/statement lowering, storage, reference lowering, and transitive trust are implemented. |
+| Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | Every existing `DraftProof` variant now has parser-independent lowering to explicit HOL evidence. Production tactic/driver integration remains. |
+| Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | Parser-independent lowering retains holes outside the kernel and supports checked draft-to-draft references with transitive incomplete receipts. |
 
 Failed type, positivity, termination, or duplicate-name checks now leave both
 core signatures and the persistent compatibility name/arity/data catalogs
@@ -164,6 +164,17 @@ retain the rewrite occurrence chosen by the tactic (or deterministically
 reconstruct the unique motive). It may not turn rewrite into a trusted
 conversion.
 
+The parser-independent proof lowerer now implements every row above. Named
+hypotheses become checked indices; nested quantifier/existential contexts shift
+existing hypotheses; Nat and data induction abstract the resolved scrutinee
+into an explicit motive; theorem references lower type, proposition, predicate,
+and term substitutions; and equality substitution enumerates one rewritten
+occurrence to reconstruct a capture-safe motive, including reverse rewrites.
+`Convert` is accepted only when the HOL core itself proves definitional
+equality. Consequently, legacy arithmetic shortcuts that are not
+substitution-stable remain an explicit compatibility-lemma blocker rather than
+silently entering kernel conversion.
+
 H4a now has explicit proof nodes for excluded middle, proof by contradiction,
 and double-negation elimination. Each checks its proposition and subevidence,
 and the audit propagates `Classical` transitively. The compatibility tactic
@@ -231,10 +242,12 @@ These are compatibility prerequisites, not optional language expansion:
    Typed trusted axioms are kernel-visible and transitively reported. Typed
    drafts retain holes and may reference other incomplete declarations, but
    checked theorem lookup rejects them as evidence; incomplete receipts and
-   draft bodies remain available for teaching/editor workflows. Surface
-   declaration lowering is still required.
+   draft bodies remain available for teaching/editor workflows.
+   Parser-independent declaration and reference lowering is implemented;
+   import/driver integration remains.
 7. **Explicit classical evidence.** The three core rules and transitive
-   `Classical` feature are implemented; legacy tactic lowering remains.
+   `Classical` feature are implemented, and all three legacy proof forms now
+   lower to explicit audited evidence. Production tactic integration remains.
 8. **Instance-aware definition/theorem receipts.** Implemented in the H4a core.
    Every checked theorem reference records its instantiated statement and exact
    local term context. The dependency receipt reclassifies that statement while
@@ -266,7 +279,8 @@ proofs, and incomplete exercise files. None can be postponed until after the
    closed-numeral tests are implemented; checked secondary lemmas remain.
 4. Lower types, terms, formulas, declarations, and proof nodes in isolation;
    compare canonical statements and receipts with the legacy checker.
-   Type/term/formula lowering is implemented; declarations and proofs remain.
+   Parser-independent lowering is implemented for every listed form; the next
+   step is command/import integration and per-declaration comparison.
 5. Run both engines on all 74 files. Every one of the 588 recorded root
    declarations must match status, constructive/classical use, axiom/incomplete
    closure, and canonical surface statement; every one of the 38 negative
@@ -278,7 +292,10 @@ below the 1.5 MB review trigger. The exact legacy oracle still reports 74 files,
 588 root declarations, and 38 intended-negative theorems. After adding the
 first transactional declaration slice, the corresponding artifacts are
 2,760,416 and 1,349,967 bytes; Wasm growth is only 53 bytes because the new
-parser-independent path is not yet reachable from the production facade.
+parser-independent path is not yet reachable from the production facade. With
+all theorem statuses and legacy proof nodes lowered, they are 2,766,776 and
+1,349,297 bytes respectively. The small Wasm decrease is linker noise in still
+unreachable code, and the module remains comfortably below the review trigger.
 
 Only after that exact dual-check result should the driver route ordinary course
 files to the HOL kernel by default.
