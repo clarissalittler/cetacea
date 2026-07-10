@@ -129,7 +129,7 @@ A proof that uses the `sorry` tactic, or a theorem whose proof does, is
 accepted but flagged as incomplete:
 
 ```text
-accepted theorem homework_gap (constructive; incomplete: uses sorry)
+incomplete theorem homework_gap (constructive; uses sorry)
 ```
 
 This provisional acceptance keeps editor and homework-skeleton workflows
@@ -1165,8 +1165,8 @@ theorem stuck (P : Prop) : P := by
 ### `sorry`
 
 Use `sorry` (or its alias `admit`) to close any goal without proving it. The
-theorem is accepted so the rest of the file can be checked, but it is reported
-as incomplete:
+draft declaration is retained so the rest of the file can be checked, but it
+is not sent to the kernel and is reported as incomplete:
 
 ```text
 theorem homework_gap (P Q : Prop) : P /\ Q -> Q /\ P := by
@@ -1174,14 +1174,14 @@ theorem homework_gap (P Q : Prop) : P /\ Q -> Q /\ P := by
 ```
 
 ```text
-accepted theorem homework_gap (constructive; incomplete: uses sorry)
+incomplete theorem homework_gap (constructive; uses sorry)
 ```
 
 Incompleteness propagates: a theorem whose proof uses a sorry'd theorem is
-also reported as `incomplete: uses sorry`. This makes `sorry` safe to use for
+also reported as an `incomplete theorem`. This makes `sorry` safe to use for
 homework skeletons — an instructor can distribute a file of stated theorems
-with `sorry` bodies, and a submission is only fully proved when no accepted
-line carries the incomplete flag.
+with `sorry` bodies, and a submission is only fully proved when it has no
+`incomplete theorem` declarations.
 
 ### `have`
 
@@ -1730,7 +1730,7 @@ For everything else, when a proof fails:
    `apply`, `split`, and `cases`.
 8. Close a stubborn subgoal with `sorry` to keep checking the rest of the
    file, then come back to it. The theorem stays flagged as
-   `incomplete: uses sorry` until the `sorry` is removed.
+   `incomplete theorem ... (uses sorry)` until the `sorry` is removed.
 
 ## Style Conventions
 

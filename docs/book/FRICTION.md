@@ -102,7 +102,7 @@ stay meaningful.
     the worst surprises.
 
 16. **Resolved: axioms print as trusted.** Accepted axioms now display
-    `accepted axiom foo (trusted)`, keeping proof-mode labels for proved
+    `trusted axiom foo`, keeping proof-mode labels for proved
     theorems and using theorem dependency output for later axiom use.
 
 17. **Resolved: ambiguous one-occurrence rewrites report the selected

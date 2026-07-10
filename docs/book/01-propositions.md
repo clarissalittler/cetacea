@@ -454,12 +454,12 @@ a placeholder that closes any goal but brands the theorem as
 unfinished. The file already checks:
 
 ```text
-accepted theorem ex1_1 (constructive; incomplete: uses sorry)
+incomplete theorem ex1_1 (constructive; uses sorry)
 ...
 ```
 
 Replace each `sorry` with a real proof; you're done when every
-`incomplete: uses sorry` flag is gone. Only `intro`, `exact`, `split`,
+`incomplete theorem` marker is gone. Only `intro`, `exact`, `split`,
 `trivial`, `apply`, and the `.left`/`.right` projections are needed.
 
 - **Exercise 1.1** `Q -> Q` — the warm-up. One `intro`, one `exact`.

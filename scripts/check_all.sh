@@ -61,7 +61,7 @@ for file in "${files[@]}"; do
     else
       while IFS= read -r line; do
         book_receipt_lines+="$line"$'\n'
-      done < <(printf '%s\n' "$output" | sed -n '/^accepted \(theorem\|axiom\) /p')
+      done < <(printf '%s\n' "$output" | sed -n '/^\(accepted theorem\|incomplete theorem\|trusted axiom\) /p')
     fi
   fi
 
@@ -124,7 +124,7 @@ for file in "${files[@]}"; do
     continue
   fi
 
-  if [[ "$output" == *"incomplete: uses sorry"* ]] && ! allows_incomplete "$file"; then
+  if [[ "$output" == *"incomplete theorem"* ]] && ! allows_incomplete "$file"; then
     printf 'error: %s checked with unexpected incomplete theorem(s)\n' "$file" >&2
     printf '%s\n' "$output" >&2
     status=1
@@ -143,7 +143,7 @@ while IFS= read -r expected; do
     printf 'error: quoted book acceptance receipt is stale: %s\n' "$expected" >&2
     status=1
   fi
-done < <(sed -n '/^accepted \(theorem\|axiom\) /p' docs/book/*.md)
+done < <(sed -n '/^\(accepted theorem\|incomplete theorem\|trusted axiom\) /p' docs/book/*.md)
 
 if [[ $status -eq 0 ]]; then
   printf 'checked %s .ctea files\n' "${#files[@]}"

@@ -217,7 +217,7 @@ goal here.
 ## Try it
 
 The companion file ends with four exercises stated with `sorry`, so the
-file checks but flags them `incomplete: uses sorry`. Clear the flags:
+file checks but reports them as `incomplete theorem`. Complete the drafts:
 
 1. `exercise_divides_5_35` — find the witness.
 2. `exercise_modeq_23_3_mod_10` — 23 and 3 share a last digit; find

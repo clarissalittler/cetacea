@@ -214,8 +214,8 @@ Run the examples file and read the verdicts, Chapter 10 eyes on:
 accepted theorem sub_self_strong (constructive)
 accepted theorem le_n_succ_n (constructive)
 accepted theorem pred_le (constructive)
-accepted axiom bulb_zero (trusted)
-accepted axiom bulb_step (trusted)
+trusted axiom bulb_zero
+trusted axiom bulb_step
 accepted theorem all_bulbs_off (constructive; axioms: bulb_step, bulb_zero)
 ```
 

@@ -149,11 +149,11 @@ Two more things the checker does when you're stuck:
   rest of the file. The theorem is accepted but flagged:
 
   ```
-  accepted theorem hard_one (constructive; incomplete: uses sorry)
+  incomplete theorem hard_one (constructive; uses sorry)
   ```
 
   The flag propagates to anything that uses a sorry'd theorem, so a file
-  only counts as fully proved when no accepted line carries it. This is
+  only counts as fully proved when no `incomplete theorem` line remains. This is
   also how homework skeletons are distributed: your instructor states
   the theorems with `sorry` bodies, and your job is to make the flags
   disappear.

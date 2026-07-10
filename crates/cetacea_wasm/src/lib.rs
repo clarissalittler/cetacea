@@ -159,7 +159,10 @@ fn standard_imports() -> Vec<VirtualFile> {
         ("std/set.ctea", include_str!("../../../std/set.ctea")),
         ("std/list.ctea", include_str!("../../../std/list.ctea")),
         ("std/fun.ctea", include_str!("../../../std/fun.ctea")),
-        ("std/modular.ctea", include_str!("../../../std/modular.ctea")),
+        (
+            "std/modular.ctea",
+            include_str!("../../../std/modular.ctea"),
+        ),
     ]
     .into_iter()
     .map(|(path, source)| VirtualFile {
@@ -207,10 +210,11 @@ fn check_result_json(result: &CheckResult) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                r#"{{"name":{},"statement":{},"mode":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}]}}"#,
+                r#"{{"name":{},"statement":{},"mode":{},"status":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}]}}"#,
                 json_string(&theorem.name),
                 json_string(&theorem.statement),
                 json_string(&theorem.mode_used.to_string()),
+                json_string(&theorem.status.to_string()),
                 theorem.is_axiom,
                 theorem.is_imported,
                 theorem.uses_sorry,

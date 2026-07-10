@@ -7,8 +7,8 @@ use std::process::{self, Command, Stdio};
 use cetacea_core::{
     check_file_at_path, check_source_at_path, explain_theorem_at_path,
     explain_theorem_in_source_at_path, goals_at_path, goals_at_source_path, outline,
-    run_tactic_at_path, CheckResult, CheckedTheorem, Diagnostic, DiagnosticSeverity,
-    ExplanationResult, GoalSnapshot, GoalStepResult, Position, SourceOutline,
+    run_tactic_at_path, CheckResult, CheckedTheorem, DeclarationStatus, Diagnostic,
+    DiagnosticSeverity, ExplanationResult, GoalSnapshot, GoalStepResult, Position, SourceOutline,
 };
 
 fn main() {
@@ -2089,14 +2089,31 @@ fn print_accepted(result: &CheckResult) {
     {
         accepted = true;
         let kind = if theorem.is_axiom { "axiom" } else { "theorem" };
-        let mut notes = vec![theorem_display_label(theorem)];
+        let disposition = match theorem.status {
+            DeclarationStatus::Accepted => "accepted",
+            DeclarationStatus::Incomplete => "incomplete",
+            DeclarationStatus::TrustedAxiom => "trusted",
+        };
+        let mut notes = if theorem.is_axiom {
+            Vec::new()
+        } else {
+            vec![theorem_display_label(theorem)]
+        };
         if theorem.uses_sorry {
-            notes.push("incomplete: uses sorry".to_string());
+            notes.push("uses sorry".to_string());
         }
         if !theorem.is_axiom && !theorem.axiom_deps.is_empty() {
             notes.push(format!("axioms: {}", theorem.axiom_deps.join(", ")));
         }
-        println!("accepted {kind} {} ({})", theorem.name, notes.join("; "));
+        if notes.is_empty() {
+            println!("{disposition} {kind} {}", theorem.name);
+        } else {
+            println!(
+                "{disposition} {kind} {} ({})",
+                theorem.name,
+                notes.join("; ")
+            );
+        }
     }
     if !accepted && !diagnostics_have_errors(&result.diagnostics) {
         println!("accepted file");
@@ -2140,10 +2157,11 @@ fn checked_theorem_json(theorem: &CheckedTheorem) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"name":{},"statement":{},"mode":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}]}}"#,
+        r#"{{"name":{},"statement":{},"mode":{},"status":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}]}}"#,
         json_string(&theorem.name),
         json_string(&theorem.statement),
         json_string(&theorem.mode_used.to_string()),
+        json_string(&theorem.status.to_string()),
         theorem.is_axiom,
         theorem.is_imported,
         theorem.uses_sorry,
@@ -2410,6 +2428,7 @@ theorem excluded_middle (P : Prop) : P \/ not P := by
                 is_imported: true,
                 uses_sorry: false,
                 axiom_deps: vec!["set.set_ext".to_string()],
+                status: DeclarationStatus::TrustedAxiom,
             }],
             diagnostics: Vec::new(),
         };
@@ -2431,6 +2450,7 @@ theorem unfinished : True := by
         assert!(json.contains(r#""ok":false"#));
         assert!(json.contains(r#""kind":"sorry""#));
         assert!(json.contains(r#""declaration":"unfinished""#));
+        assert!(json.contains(r#""status":"incomplete""#));
         assert_eq!(json_string("a\"b\\c\n"), r#""a\"b\\c\n""#);
     }
 

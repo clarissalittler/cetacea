@@ -107,13 +107,14 @@ The browser UI is also deployed automatically to GitHub Pages by
 `.github/workflows/pages.yml`, which builds the WebAssembly checker and
 publishes the contents of `web/` on every push to `main`.
 
-The CLI prints each accepted theorem or axiom from the root file and the
-strongest mode used by its checked proof object. Accepted lines are printed
-for every passing theorem even when other theorems in the file fail. A proof
+The CLI prints each root declaration as `accepted theorem`, `incomplete
+theorem`, or `trusted axiom`, together with the strongest mode used by a proof.
+Status lines are printed for every retained declaration even when other
+theorems in the file fail. A proof
 that depends on axioms, directly or through other theorems, lists them, as in
 `accepted theorem length_append (constructive; axioms: append_cons,
 append_nil)`, and a proof that uses the `sorry` tactic (directly or through a
-sorry'd theorem) is reported as `(constructive; incomplete: uses sorry)`.
+sorry'd theorem) is reported as `incomplete theorem ... (constructive; uses sorry)`.
 Diagnostics for checked declarations and parse errors include the file and
 command or tactic line when the checker has path information. Parser
 diagnostics also carry line-local token spans where the parser can identify the
@@ -193,8 +194,8 @@ loaded once.
 - projections and parenthesized sub-expressions inside proof-expression
   arguments, as in `exact f h.left` and `rewrite -> hinj x y (h.left)`;
   projections bind tighter than application
-- `sorry` closes any goal; the theorem is accepted but reported as
-  `incomplete: uses sorry`, and incompleteness propagates to theorems that
+- `sorry` closes any goal; the declaration is reported as an
+  `incomplete theorem`, and incompleteness propagates to theorems that
   use a sorry'd theorem, so instructors can distribute homework skeletons
 - `cases h with | intro hp hq => ...` on conjunction hypotheses as well as
   existentials

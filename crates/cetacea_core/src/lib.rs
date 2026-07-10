@@ -422,79 +422,79 @@ impl fmt::Display for ClassicalRule {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Proof {
+pub enum DraftProof {
     Hyp(Name),
     TrueIntro,
     FalseElim {
-        proof_false: Box<Proof>,
+        proof_false: Box<DraftProof>,
         target: Formula,
     },
-    AndIntro(Box<Proof>, Box<Proof>),
-    AndElimLeft(Box<Proof>),
-    AndElimRight(Box<Proof>),
+    AndIntro(Box<DraftProof>, Box<DraftProof>),
+    AndElimLeft(Box<DraftProof>),
+    AndElimRight(Box<DraftProof>),
     OrIntroLeft {
-        proof_left: Box<Proof>,
+        proof_left: Box<DraftProof>,
         right_formula: Formula,
     },
     OrIntroRight {
         left_formula: Formula,
-        proof_right: Box<Proof>,
+        proof_right: Box<DraftProof>,
     },
     OrElim {
-        proof_or: Box<Proof>,
+        proof_or: Box<DraftProof>,
         left_name: Name,
-        left_case: Box<Proof>,
+        left_case: Box<DraftProof>,
         right_name: Name,
-        right_case: Box<Proof>,
+        right_case: Box<DraftProof>,
         target: Formula,
     },
     ImpIntro {
         hyp_name: Name,
         hyp_formula: Formula,
-        body: Box<Proof>,
+        body: Box<DraftProof>,
     },
     ImpElim {
-        proof_imp: Box<Proof>,
-        proof_arg: Box<Proof>,
+        proof_imp: Box<DraftProof>,
+        proof_arg: Box<DraftProof>,
     },
     EqRefl(Term),
     EqSubst {
-        eq_proof: Box<Proof>,
-        proof_body: Box<Proof>,
+        eq_proof: Box<DraftProof>,
+        proof_body: Box<DraftProof>,
         target: Formula,
     },
     Convert {
-        proof_body: Box<Proof>,
+        proof_body: Box<DraftProof>,
         target: Formula,
     },
     ForallIntro {
         var: Name,
         var_type: Type,
-        body: Box<Proof>,
+        body: Box<DraftProof>,
     },
     ForallElim {
-        proof_forall: Box<Proof>,
+        proof_forall: Box<DraftProof>,
         arg: Term,
     },
     ExistsIntro {
         witness: Term,
-        proof_body: Box<Proof>,
+        proof_body: Box<DraftProof>,
         exists_formula: Formula,
     },
     ExistsElim {
-        proof_exists: Box<Proof>,
+        proof_exists: Box<DraftProof>,
         witness_name: Name,
         hyp_name: Name,
-        body: Box<Proof>,
+        body: Box<DraftProof>,
         target: Formula,
     },
     NatInd {
         var_name: Name,
         target: Formula,
-        base_case: Box<Proof>,
+        base_case: Box<DraftProof>,
         step_var: Name,
         ih_name: Name,
-        step_case: Box<Proof>,
+        step_case: Box<DraftProof>,
     },
     DataInd {
         var_name: Name,
@@ -508,7 +508,7 @@ pub enum Proof {
     },
     Classical {
         rule: ClassicalRule,
-        args: Vec<Proof>,
+        args: Vec<DraftProof>,
         target: Formula,
     },
     Sorry {
@@ -516,12 +516,40 @@ pub enum Proof {
     },
 }
 
+/// A hole-free proof object that is eligible for kernel checking.
+///
+/// The inner representation is private: the only conversion from an editor
+/// `DraftProof` rejects `sorry` holes before the kernel can inspect the proof.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KernelProof(DraftProof);
+
+impl TryFrom<DraftProof> for KernelProof {
+    type Error = KernelError;
+
+    fn try_from(proof: DraftProof) -> Result<Self, Self::Error> {
+        if draft_proof_has_holes(&proof) {
+            Err(KernelError::new(
+                "draft proof contains `sorry`; incomplete drafts are not kernel proofs",
+            ))
+        } else {
+            Ok(Self(proof))
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TheoremEvidence {
+    Kernel(KernelProof),
+    Incomplete(DraftProof),
+    TrustedAxiom,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataIndArm {
     pub ctor: Name,
     pub arg_names: Vec<Name>,
     pub ih_names: Vec<Name>,
-    pub proof: Proof,
+    pub proof: DraftProof,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -636,7 +664,7 @@ pub struct Context {
     pred_vars: HashMap<Name, Vec<Type>>,
     term_vars: Vec<TermBinding>,
     proof_vars: Vec<ProofBinding>,
-    proof_terms: Vec<Proof>,
+    proof_terms: Vec<DraftProof>,
     proof_kernel_formulas: Vec<Formula>,
 }
 
@@ -651,11 +679,11 @@ impl Context {
     }
 
     pub fn add_proof(&mut self, name: Name, formula: Formula) {
-        let proof = Proof::Hyp(name.clone());
+        let proof = DraftProof::Hyp(name.clone());
         self.add_proof_with_witness(name, formula, proof);
     }
 
-    fn add_proof_with_witness(&mut self, name: Name, formula: Formula, proof: Proof) {
+    fn add_proof_with_witness(&mut self, name: Name, formula: Formula, proof: DraftProof) {
         self.add_proof_with_kernel(name, formula.clone(), proof, formula);
     }
 
@@ -663,7 +691,7 @@ impl Context {
         &mut self,
         name: Name,
         formula: Formula,
-        proof: Proof,
+        proof: DraftProof,
         kernel_formula: Formula,
     ) {
         self.proof_vars.push(ProofBinding { name, formula });
@@ -715,7 +743,7 @@ impl Context {
             .map(|binding| &binding.formula)
     }
 
-    fn lookup_proof(&self, name: &str) -> Option<&Proof> {
+    fn lookup_proof(&self, name: &str) -> Option<&DraftProof> {
         self.proof_vars
             .iter()
             .enumerate()
@@ -737,11 +765,13 @@ impl Context {
         &self.proof_vars
     }
 
-    fn proof_bindings(&self) -> impl DoubleEndedIterator<Item = (&ProofBinding, &Proof)> {
+    fn proof_bindings(&self) -> impl DoubleEndedIterator<Item = (&ProofBinding, &DraftProof)> {
         self.proof_vars.iter().zip(self.proof_terms.iter())
     }
 
-    fn proof_entries(&self) -> impl DoubleEndedIterator<Item = (&ProofBinding, &Proof, &Formula)> {
+    fn proof_entries(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (&ProofBinding, &DraftProof, &Formula)> {
         self.proof_vars
             .iter()
             .zip(self.proof_terms.iter())
@@ -762,7 +792,7 @@ pub struct Theorem {
     pub name: Name,
     pub params: Vec<Param>,
     pub statement: Formula,
-    pub proof: Option<Proof>,
+    pub evidence: TheoremEvidence,
     pub mode_used: LogicMode,
     pub is_axiom: bool,
     pub uses_sorry: bool,
@@ -1286,6 +1316,23 @@ fn tactic_note_diagnostic(
     warning_at(source_path, note.line, message).with_note(note.message)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeclarationStatus {
+    Accepted,
+    Incomplete,
+    TrustedAxiom,
+}
+
+impl fmt::Display for DeclarationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Accepted => write!(f, "accepted"),
+            Self::Incomplete => write!(f, "incomplete"),
+            Self::TrustedAxiom => write!(f, "trusted_axiom"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckedTheorem {
     pub name: Name,
@@ -1295,6 +1342,7 @@ pub struct CheckedTheorem {
     pub is_imported: bool,
     pub uses_sorry: bool,
     pub axiom_deps: Vec<Name>,
+    pub status: DeclarationStatus,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -2229,9 +2277,7 @@ impl FileChecker {
                                 continue;
                             }
                         };
-                    let alias = decl
-                        .alias
-                        .or_else(|| inherited_alias.map(str::to_string));
+                    let alias = decl.alias.or_else(|| inherited_alias.map(str::to_string));
                     self.check_resolved_import(resolved_path, true, alias);
                 }
                 Command::Mode(next_mode) => mode = next_mode,
@@ -2990,7 +3036,7 @@ impl FileChecker {
                         name: decl.name.clone(),
                         params,
                         statement: statement.clone(),
-                        proof: None,
+                        evidence: TheoremEvidence::TrustedAxiom,
                         mode_used: mode,
                         is_axiom: true,
                         uses_sorry: false,
@@ -3004,6 +3050,7 @@ impl FileChecker {
                         is_imported,
                         uses_sorry: false,
                         axiom_deps: vec![decl.name],
+                        status: DeclarationStatus::TrustedAxiom,
                     });
                 }
                 Command::Theorem(decl) => {
@@ -3131,8 +3178,16 @@ impl FileChecker {
                     };
                     let proof = proved.proof;
 
-                    let mode_used =
-                        match check_proof(&self.env, &theorem_ctx, &proof, &statement, mode) {
+                    let mode_used = if draft_proof_has_holes(&proof) {
+                        draft_proof_mode(&self.env, &proof)
+                    } else {
+                        match check_completed_draft(
+                            &self.env,
+                            &theorem_ctx,
+                            &proof,
+                            &statement,
+                            mode,
+                        ) {
                             Ok(mode_used) => mode_used,
                             Err(err) => {
                                 self.result.diagnostics.push(
@@ -3148,7 +3203,8 @@ impl FileChecker {
                                 );
                                 continue;
                             }
-                        };
+                        }
+                    };
 
                     if matches!(mode, LogicMode::Constructive)
                         && matches!(mode_used, LogicMode::Classical)
@@ -3177,11 +3233,19 @@ impl FileChecker {
 
                     let uses_sorry = proof_uses_sorry(&self.env, &proof);
                     let axiom_deps = proof_axiom_deps(&self.env, &proof);
+                    let evidence = if uses_sorry {
+                        TheoremEvidence::Incomplete(proof)
+                    } else {
+                        TheoremEvidence::Kernel(
+                            KernelProof::try_from(proof)
+                                .expect("a kernel-checked proof must be hole-free"),
+                        )
+                    };
                     self.env.add_theorem(Theorem {
                         name: decl.name.clone(),
                         params,
                         statement: statement.clone(),
-                        proof: Some(proof),
+                        evidence,
                         mode_used,
                         is_axiom: false,
                         uses_sorry,
@@ -3195,6 +3259,11 @@ impl FileChecker {
                         is_imported,
                         uses_sorry,
                         axiom_deps,
+                        status: if uses_sorry {
+                            DeclarationStatus::Incomplete
+                        } else {
+                            DeclarationStatus::Accepted
+                        },
                     });
                 }
             }
@@ -3393,19 +3462,22 @@ fn goals_for_theorem_prefix(
     if session.goals.is_empty() && tactic_count == decl.tactics.len() {
         match session.root.clone().complete() {
             Ok(proof) => {
-                if let Err(err) = check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
-                {
-                    diagnostics.push(
-                        diagnostic_at(
-                            source_path,
-                            located.line,
-                            format!(
-                                "theorem `{}` was rejected by the kernel: {}",
-                                decl.name, err.message
-                            ),
-                        )
-                        .with_note(format!("target: {}", statement)),
-                    );
+                if !draft_proof_has_holes(&proof) {
+                    if let Err(err) =
+                        check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
+                    {
+                        diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                located.line,
+                                format!(
+                                    "theorem `{}` was rejected by the kernel: {}",
+                                    decl.name, err.message
+                                ),
+                            )
+                            .with_note(format!("target: {}", statement)),
+                        );
+                    }
                 }
             }
             Err(err) => {
@@ -3592,19 +3664,22 @@ fn explain_theorem_at_index(
     if completed {
         match session.root.clone().complete() {
             Ok(proof) => {
-                if let Err(err) = check_proof(&checker.env, &theorem_ctx, &proof, &statement, mode)
-                {
-                    diagnostics.push(
-                        diagnostic_at(
-                            source_path,
-                            located.line,
-                            format!(
-                                "theorem `{}` was rejected by the kernel: {}",
-                                decl.name, err.message
-                            ),
-                        )
-                        .with_note(format!("target: {}", statement)),
-                    );
+                if !draft_proof_has_holes(&proof) {
+                    if let Err(err) =
+                        check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
+                    {
+                        diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                located.line,
+                                format!(
+                                    "theorem `{}` was rejected by the kernel: {}",
+                                    decl.name, err.message
+                                ),
+                            )
+                            .with_note(format!("target: {}", statement)),
+                        );
+                    }
                 }
             }
             Err(err) => diagnostics.push(
@@ -5020,12 +5095,33 @@ pub struct CheckedProof {
 pub fn check_proof(
     env: &Env,
     ctx: &Context,
-    proof: &Proof,
+    proof: &KernelProof,
+    expected: &Formula,
+    allowed_mode: LogicMode,
+) -> Result<LogicMode, KernelError> {
+    check_kernel_proof_node(env, ctx, &proof.0, expected, allowed_mode)
+}
+
+fn check_completed_draft(
+    env: &Env,
+    ctx: &Context,
+    proof: &DraftProof,
+    expected: &Formula,
+    allowed_mode: LogicMode,
+) -> Result<LogicMode, KernelError> {
+    let kernel_proof = KernelProof::try_from(proof.clone())?;
+    check_proof(env, ctx, &kernel_proof, expected, allowed_mode)
+}
+
+fn check_kernel_proof_node(
+    env: &Env,
+    ctx: &Context,
+    proof: &DraftProof,
     expected: &Formula,
     allowed_mode: LogicMode,
 ) -> Result<LogicMode, KernelError> {
     validate_formula(env, ctx, expected)?;
-    let checked = infer_proof(env, ctx, proof, allowed_mode)?;
+    let checked = infer_kernel_proof_node(env, ctx, proof, allowed_mode)?;
     validate_formula(env, ctx, &checked.formula)?;
     if formulas_def_eq(env, ctx, &checked.formula, expected)? {
         Ok(checked.mode_used)
@@ -5820,23 +5916,25 @@ fn ensure_kernel_binder_unused(ctx: &Context, name: &str) -> Result<(), KernelEr
     Ok(())
 }
 
-fn visit_proof_nodes(proof: &Proof, visit: &mut impl FnMut(&Proof)) {
+fn visit_proof_nodes(proof: &DraftProof, visit: &mut impl FnMut(&DraftProof)) {
     visit(proof);
     match proof {
-        Proof::Hyp(_)
-        | Proof::TrueIntro
-        | Proof::EqRefl(_)
-        | Proof::TheoremRef { .. }
-        | Proof::Sorry { .. } => {}
-        Proof::FalseElim { proof_false, .. } => visit_proof_nodes(proof_false, visit),
-        Proof::AndIntro(left, right) => {
+        DraftProof::Hyp(_)
+        | DraftProof::TrueIntro
+        | DraftProof::EqRefl(_)
+        | DraftProof::TheoremRef { .. }
+        | DraftProof::Sorry { .. } => {}
+        DraftProof::FalseElim { proof_false, .. } => visit_proof_nodes(proof_false, visit),
+        DraftProof::AndIntro(left, right) => {
             visit_proof_nodes(left, visit);
             visit_proof_nodes(right, visit);
         }
-        Proof::AndElimLeft(inner) | Proof::AndElimRight(inner) => visit_proof_nodes(inner, visit),
-        Proof::OrIntroLeft { proof_left, .. } => visit_proof_nodes(proof_left, visit),
-        Proof::OrIntroRight { proof_right, .. } => visit_proof_nodes(proof_right, visit),
-        Proof::OrElim {
+        DraftProof::AndElimLeft(inner) | DraftProof::AndElimRight(inner) => {
+            visit_proof_nodes(inner, visit)
+        }
+        DraftProof::OrIntroLeft { proof_left, .. } => visit_proof_nodes(proof_left, visit),
+        DraftProof::OrIntroRight { proof_right, .. } => visit_proof_nodes(proof_right, visit),
+        DraftProof::OrElim {
             proof_or,
             left_case,
             right_case,
@@ -5846,15 +5944,15 @@ fn visit_proof_nodes(proof: &Proof, visit: &mut impl FnMut(&Proof)) {
             visit_proof_nodes(left_case, visit);
             visit_proof_nodes(right_case, visit);
         }
-        Proof::ImpIntro { body, .. } => visit_proof_nodes(body, visit),
-        Proof::ImpElim {
+        DraftProof::ImpIntro { body, .. } => visit_proof_nodes(body, visit),
+        DraftProof::ImpElim {
             proof_imp,
             proof_arg,
         } => {
             visit_proof_nodes(proof_imp, visit);
             visit_proof_nodes(proof_arg, visit);
         }
-        Proof::EqSubst {
+        DraftProof::EqSubst {
             eq_proof,
             proof_body,
             ..
@@ -5862,17 +5960,17 @@ fn visit_proof_nodes(proof: &Proof, visit: &mut impl FnMut(&Proof)) {
             visit_proof_nodes(eq_proof, visit);
             visit_proof_nodes(proof_body, visit);
         }
-        Proof::Convert { proof_body, .. } => visit_proof_nodes(proof_body, visit),
-        Proof::ForallIntro { body, .. } => visit_proof_nodes(body, visit),
-        Proof::ForallElim { proof_forall, .. } => visit_proof_nodes(proof_forall, visit),
-        Proof::ExistsIntro { proof_body, .. } => visit_proof_nodes(proof_body, visit),
-        Proof::ExistsElim {
+        DraftProof::Convert { proof_body, .. } => visit_proof_nodes(proof_body, visit),
+        DraftProof::ForallIntro { body, .. } => visit_proof_nodes(body, visit),
+        DraftProof::ForallElim { proof_forall, .. } => visit_proof_nodes(proof_forall, visit),
+        DraftProof::ExistsIntro { proof_body, .. } => visit_proof_nodes(proof_body, visit),
+        DraftProof::ExistsElim {
             proof_exists, body, ..
         } => {
             visit_proof_nodes(proof_exists, visit);
             visit_proof_nodes(body, visit);
         }
-        Proof::NatInd {
+        DraftProof::NatInd {
             base_case,
             step_case,
             ..
@@ -5880,12 +5978,12 @@ fn visit_proof_nodes(proof: &Proof, visit: &mut impl FnMut(&Proof)) {
             visit_proof_nodes(base_case, visit);
             visit_proof_nodes(step_case, visit);
         }
-        Proof::DataInd { arms, .. } => {
+        DraftProof::DataInd { arms, .. } => {
             for arm in arms {
                 visit_proof_nodes(&arm.proof, visit);
             }
         }
-        Proof::Classical { args, .. } => {
+        DraftProof::Classical { args, .. } => {
             for arg in args {
                 visit_proof_nodes(arg, visit);
             }
@@ -5893,13 +5991,37 @@ fn visit_proof_nodes(proof: &Proof, visit: &mut impl FnMut(&Proof)) {
     }
 }
 
+fn draft_proof_has_holes(proof: &DraftProof) -> bool {
+    let mut found = false;
+    visit_proof_nodes(proof, &mut |node| {
+        if matches!(node, DraftProof::Sorry { .. }) {
+            found = true;
+        }
+    });
+    found
+}
+
+fn draft_proof_mode(env: &Env, proof: &DraftProof) -> LogicMode {
+    let mut mode = LogicMode::Constructive;
+    visit_proof_nodes(proof, &mut |node| match node {
+        DraftProof::Classical { .. } => mode = LogicMode::Classical,
+        DraftProof::TheoremRef { name, .. } => {
+            if let Some(theorem) = env.theorem(name) {
+                mode = mode.combine(theorem.mode_used);
+            }
+        }
+        _ => {}
+    });
+    mode
+}
+
 /// Whether the proof contains a `sorry`, directly or through a referenced
 /// theorem that was itself admitted with `sorry`.
-pub fn proof_uses_sorry(env: &Env, proof: &Proof) -> bool {
+pub fn proof_uses_sorry(env: &Env, proof: &DraftProof) -> bool {
     let mut found = false;
     visit_proof_nodes(proof, &mut |node| match node {
-        Proof::Sorry { .. } => found = true,
-        Proof::TheoremRef { name, .. } => {
+        DraftProof::Sorry { .. } => found = true,
+        DraftProof::TheoremRef { name, .. } => {
             if env.theorem(name).is_some_and(|theorem| theorem.uses_sorry) {
                 found = true;
             }
@@ -5911,10 +6033,10 @@ pub fn proof_uses_sorry(env: &Env, proof: &Proof) -> bool {
 
 /// Names of the axioms this proof depends on, directly or through referenced
 /// theorems. Sorted and deduplicated.
-pub fn proof_axiom_deps(env: &Env, proof: &Proof) -> Vec<Name> {
+pub fn proof_axiom_deps(env: &Env, proof: &DraftProof) -> Vec<Name> {
     let mut deps = HashSet::new();
     visit_proof_nodes(proof, &mut |node| {
-        if let Proof::TheoremRef { name, .. } = node {
+        if let DraftProof::TheoremRef { name, .. } = node {
             if let Some(theorem) = env.theorem(name) {
                 if theorem.is_axiom {
                     deps.insert(theorem.name.clone());
@@ -5929,14 +6051,14 @@ pub fn proof_axiom_deps(env: &Env, proof: &Proof) -> Vec<Name> {
     deps
 }
 
-pub fn infer_proof(
+fn infer_kernel_proof_node(
     env: &Env,
     ctx: &Context,
-    proof: &Proof,
+    proof: &DraftProof,
     allowed_mode: LogicMode,
 ) -> Result<CheckedProof, KernelError> {
     match proof {
-        Proof::Hyp(name) => {
+        DraftProof::Hyp(name) => {
             let Some(formula) = ctx.lookup_kernel_formula(name) else {
                 return Err(KernelError::new(format!("unknown hypothesis `{name}`")));
             };
@@ -5945,38 +6067,35 @@ pub fn infer_proof(
                 mode_used: LogicMode::Constructive,
             })
         }
-        Proof::TrueIntro => Ok(CheckedProof {
+        DraftProof::TrueIntro => Ok(CheckedProof {
             formula: Formula::True,
             mode_used: LogicMode::Constructive,
         }),
-        Proof::Sorry { target } => {
-            validate_formula(env, ctx, target)?;
-            Ok(CheckedProof {
-                formula: target.clone(),
-                mode_used: LogicMode::Constructive,
-            })
-        }
-        Proof::FalseElim {
+        DraftProof::Sorry { .. } => Err(KernelError::new(
+            "kernel proof unexpectedly contains a `sorry` hole",
+        )),
+        DraftProof::FalseElim {
             proof_false,
             target,
         } => {
             validate_formula(env, ctx, target)?;
-            let mode_used = check_proof(env, ctx, proof_false, &Formula::False, allowed_mode)?;
+            let mode_used =
+                check_kernel_proof_node(env, ctx, proof_false, &Formula::False, allowed_mode)?;
             Ok(CheckedProof {
                 formula: target.clone(),
                 mode_used,
             })
         }
-        Proof::AndIntro(left, right) => {
-            let left = infer_proof(env, ctx, left, allowed_mode)?;
-            let right = infer_proof(env, ctx, right, allowed_mode)?;
+        DraftProof::AndIntro(left, right) => {
+            let left = infer_kernel_proof_node(env, ctx, left, allowed_mode)?;
+            let right = infer_kernel_proof_node(env, ctx, right, allowed_mode)?;
             Ok(CheckedProof {
                 formula: Formula::and(left.formula, right.formula),
                 mode_used: left.mode_used.combine(right.mode_used),
             })
         }
-        Proof::AndElimLeft(proof) => {
-            let checked = infer_proof(env, ctx, proof, allowed_mode)?;
+        DraftProof::AndElimLeft(proof) => {
+            let checked = infer_kernel_proof_node(env, ctx, proof, allowed_mode)?;
             let formula = normalize_formula_for_kernel(env, ctx, &checked.formula)?;
             let Formula::And(left, _) = formula else {
                 return Err(KernelError::new(
@@ -5988,8 +6107,8 @@ pub fn infer_proof(
                 mode_used: checked.mode_used,
             })
         }
-        Proof::AndElimRight(proof) => {
-            let checked = infer_proof(env, ctx, proof, allowed_mode)?;
+        DraftProof::AndElimRight(proof) => {
+            let checked = infer_kernel_proof_node(env, ctx, proof, allowed_mode)?;
             let formula = normalize_formula_for_kernel(env, ctx, &checked.formula)?;
             let Formula::And(_, right) = formula else {
                 return Err(KernelError::new(
@@ -6001,29 +6120,29 @@ pub fn infer_proof(
                 mode_used: checked.mode_used,
             })
         }
-        Proof::OrIntroLeft {
+        DraftProof::OrIntroLeft {
             proof_left,
             right_formula,
         } => {
             validate_formula(env, ctx, right_formula)?;
-            let checked = infer_proof(env, ctx, proof_left, allowed_mode)?;
+            let checked = infer_kernel_proof_node(env, ctx, proof_left, allowed_mode)?;
             Ok(CheckedProof {
                 formula: Formula::or(checked.formula, right_formula.clone()),
                 mode_used: checked.mode_used,
             })
         }
-        Proof::OrIntroRight {
+        DraftProof::OrIntroRight {
             left_formula,
             proof_right,
         } => {
             validate_formula(env, ctx, left_formula)?;
-            let checked = infer_proof(env, ctx, proof_right, allowed_mode)?;
+            let checked = infer_kernel_proof_node(env, ctx, proof_right, allowed_mode)?;
             Ok(CheckedProof {
                 formula: Formula::or(left_formula.clone(), checked.formula),
                 mode_used: checked.mode_used,
             })
         }
-        Proof::OrElim {
+        DraftProof::OrElim {
             proof_or,
             left_name,
             left_case,
@@ -6031,7 +6150,7 @@ pub fn infer_proof(
             right_case,
             target,
         } => {
-            let checked_or = infer_proof(env, ctx, proof_or, allowed_mode)?;
+            let checked_or = infer_kernel_proof_node(env, ctx, proof_or, allowed_mode)?;
             let formula = normalize_formula_defs(env, ctx, &checked_or.formula)?;
             let Formula::Or(left_formula, right_formula) = formula else {
                 return Err(KernelError::new("cases can only eliminate a disjunction"));
@@ -6039,18 +6158,20 @@ pub fn infer_proof(
 
             let mut left_ctx = ctx.clone();
             left_ctx.add_proof(left_name.clone(), *left_formula);
-            let left_mode = check_proof(env, &left_ctx, left_case, target, allowed_mode)?;
+            let left_mode =
+                check_kernel_proof_node(env, &left_ctx, left_case, target, allowed_mode)?;
 
             let mut right_ctx = ctx.clone();
             right_ctx.add_proof(right_name.clone(), *right_formula);
-            let right_mode = check_proof(env, &right_ctx, right_case, target, allowed_mode)?;
+            let right_mode =
+                check_kernel_proof_node(env, &right_ctx, right_case, target, allowed_mode)?;
 
             Ok(CheckedProof {
                 formula: target.clone(),
                 mode_used: checked_or.mode_used.combine(left_mode).combine(right_mode),
             })
         }
-        Proof::ImpIntro {
+        DraftProof::ImpIntro {
             hyp_name,
             hyp_formula,
             body,
@@ -6058,46 +6179,46 @@ pub fn infer_proof(
             validate_formula(env, ctx, hyp_formula)?;
             let mut body_ctx = ctx.clone();
             body_ctx.add_proof(hyp_name.clone(), hyp_formula.clone());
-            let body = infer_proof(env, &body_ctx, body, allowed_mode)?;
+            let body = infer_kernel_proof_node(env, &body_ctx, body, allowed_mode)?;
             Ok(CheckedProof {
                 formula: Formula::implies(hyp_formula.clone(), body.formula),
                 mode_used: body.mode_used,
             })
         }
-        Proof::ImpElim {
+        DraftProof::ImpElim {
             proof_imp,
             proof_arg,
         } => {
-            let checked_imp = infer_proof(env, ctx, proof_imp, allowed_mode)?;
+            let checked_imp = infer_kernel_proof_node(env, ctx, proof_imp, allowed_mode)?;
             let formula = normalize_formula_defs(env, ctx, &checked_imp.formula)?;
             let Formula::Implies(premise, conclusion) = formula else {
                 return Err(KernelError::new("apply expected an implication"));
             };
-            let arg_mode = check_proof(env, ctx, proof_arg, &premise, allowed_mode)?;
+            let arg_mode = check_kernel_proof_node(env, ctx, proof_arg, &premise, allowed_mode)?;
             Ok(CheckedProof {
                 formula: *conclusion,
                 mode_used: checked_imp.mode_used.combine(arg_mode),
             })
         }
-        Proof::EqRefl(term) => {
+        DraftProof::EqRefl(term) => {
             term_type(env, ctx, term)?;
             Ok(CheckedProof {
                 formula: Formula::eq(term.clone(), term.clone()),
                 mode_used: LogicMode::Constructive,
             })
         }
-        Proof::EqSubst {
+        DraftProof::EqSubst {
             eq_proof,
             proof_body,
             target,
         } => {
             validate_formula(env, ctx, target)?;
-            let checked_eq = infer_proof(env, ctx, eq_proof, allowed_mode)?;
+            let checked_eq = infer_kernel_proof_node(env, ctx, eq_proof, allowed_mode)?;
             let formula = normalize_formula_defs(env, ctx, &checked_eq.formula)?;
             let Formula::Eq(left, right) = formula else {
                 return Err(KernelError::new("rewrite expected an equality proof"));
             };
-            let checked_body = infer_proof(env, ctx, proof_body, allowed_mode)?;
+            let checked_body = infer_kernel_proof_node(env, ctx, proof_body, allowed_mode)?;
             if !formula_rewrite_matches(&checked_body.formula, target, &left, &right)
                 && !formula_rewrite_matches(&checked_body.formula, target, &right, &left)
             {
@@ -6111,9 +6232,9 @@ pub fn infer_proof(
                 mode_used: checked_eq.mode_used.combine(checked_body.mode_used),
             })
         }
-        Proof::Convert { proof_body, target } => {
+        DraftProof::Convert { proof_body, target } => {
             validate_formula(env, ctx, target)?;
-            let checked_body = infer_proof(env, ctx, proof_body, allowed_mode)?;
+            let checked_body = infer_kernel_proof_node(env, ctx, proof_body, allowed_mode)?;
             if !formulas_def_eq(env, ctx, &checked_body.formula, target)? {
                 return Err(KernelError::new(format!(
                     "cannot convert proof of `{}` to `{target}` by unfolding definitions",
@@ -6125,7 +6246,7 @@ pub fn infer_proof(
                 mode_used: checked_body.mode_used,
             })
         }
-        Proof::ForallIntro {
+        DraftProof::ForallIntro {
             var,
             var_type,
             body,
@@ -6133,14 +6254,14 @@ pub fn infer_proof(
             validate_type(env, ctx, var_type)?;
             let mut body_ctx = ctx.clone();
             body_ctx.add_term(var.clone(), var_type.clone());
-            let body = infer_proof(env, &body_ctx, body, allowed_mode)?;
+            let body = infer_kernel_proof_node(env, &body_ctx, body, allowed_mode)?;
             Ok(CheckedProof {
                 formula: Formula::forall(var.clone(), var_type.clone(), body.formula),
                 mode_used: body.mode_used,
             })
         }
-        Proof::ForallElim { proof_forall, arg } => {
-            let checked = infer_proof(env, ctx, proof_forall, allowed_mode)?;
+        DraftProof::ForallElim { proof_forall, arg } => {
+            let checked = infer_kernel_proof_node(env, ctx, proof_forall, allowed_mode)?;
             let formula = normalize_formula_defs(env, ctx, &checked.formula)?;
             let Formula::Forall {
                 var,
@@ -6163,7 +6284,7 @@ pub fn infer_proof(
                 mode_used: checked.mode_used,
             })
         }
-        Proof::ExistsIntro {
+        DraftProof::ExistsIntro {
             witness,
             proof_body,
             exists_formula,
@@ -6186,13 +6307,14 @@ pub fn infer_proof(
                 )));
             }
             let expected_body = subst_formula_term(body, var, witness);
-            let mode_used = check_proof(env, ctx, proof_body, &expected_body, allowed_mode)?;
+            let mode_used =
+                check_kernel_proof_node(env, ctx, proof_body, &expected_body, allowed_mode)?;
             Ok(CheckedProof {
                 formula: exists_formula.clone(),
                 mode_used,
             })
         }
-        Proof::ExistsElim {
+        DraftProof::ExistsElim {
             proof_exists,
             witness_name,
             hyp_name,
@@ -6200,7 +6322,7 @@ pub fn infer_proof(
             target,
         } => {
             validate_formula(env, ctx, target)?;
-            let checked_exists = infer_proof(env, ctx, proof_exists, allowed_mode)?;
+            let checked_exists = infer_kernel_proof_node(env, ctx, proof_exists, allowed_mode)?;
             let formula = normalize_formula_defs(env, ctx, &checked_exists.formula)?;
             let Formula::Exists {
                 var,
@@ -6222,13 +6344,13 @@ pub fn infer_proof(
             let mut body_ctx = ctx.clone();
             body_ctx.add_term(witness_name.clone(), var_type);
             body_ctx.add_proof(hyp_name.clone(), hyp_formula);
-            let body_mode = check_proof(env, &body_ctx, body, target, allowed_mode)?;
+            let body_mode = check_kernel_proof_node(env, &body_ctx, body, target, allowed_mode)?;
             Ok(CheckedProof {
                 formula: target.clone(),
                 mode_used: checked_exists.mode_used.combine(body_mode),
             })
         }
-        Proof::NatInd {
+        DraftProof::NatInd {
             var_name,
             target,
             base_case,
@@ -6260,7 +6382,8 @@ pub fn infer_proof(
             ensure_kernel_binder_unused(ctx, ih_name)?;
 
             let base_target = subst_formula_term(target, var_name, &Term::Zero);
-            let base_mode = check_proof(env, ctx, base_case, &base_target, allowed_mode)?;
+            let base_mode =
+                check_kernel_proof_node(env, ctx, base_case, &base_target, allowed_mode)?;
 
             let mut step_ctx = ctx.clone();
             step_ctx.add_term(step_var.clone(), Type::Nat);
@@ -6269,14 +6392,15 @@ pub fn infer_proof(
             step_ctx.add_proof(ih_name.clone(), ih_formula);
             let step_target =
                 subst_formula_term(target, var_name, &Term::Succ(Box::new(step_var_term)));
-            let step_mode = check_proof(env, &step_ctx, step_case, &step_target, allowed_mode)?;
+            let step_mode =
+                check_kernel_proof_node(env, &step_ctx, step_case, &step_target, allowed_mode)?;
 
             Ok(CheckedProof {
                 formula: target.clone(),
                 mode_used: base_mode.combine(step_mode),
             })
         }
-        Proof::DataInd {
+        DraftProof::DataInd {
             var_name,
             data_name,
             target,
@@ -6359,7 +6483,8 @@ pub fn infer_proof(
                 }
                 let ctor_term = data_ctor_term(&ctor.name, &arm.arg_names);
                 let arm_target = subst_formula_term(target, var_name, &ctor_term);
-                let arm_mode = check_proof(env, &arm_ctx, &arm.proof, &arm_target, allowed_mode)?;
+                let arm_mode =
+                    check_kernel_proof_node(env, &arm_ctx, &arm.proof, &arm_target, allowed_mode)?;
                 mode_used = mode_used.combine(arm_mode);
             }
 
@@ -6368,7 +6493,7 @@ pub fn infer_proof(
                 mode_used,
             })
         }
-        Proof::TheoremRef { name, subst } => {
+        DraftProof::TheoremRef { name, subst } => {
             let Some(theorem) = env.theorem(name) else {
                 return Err(KernelError::new(format!("unknown theorem `{name}`")));
             };
@@ -6379,7 +6504,7 @@ pub fn infer_proof(
                 mode_used: theorem.mode_used,
             })
         }
-        Proof::Classical { rule, args, target } => {
+        DraftProof::Classical { rule, args, target } => {
             if matches!(allowed_mode, LogicMode::Constructive) {
                 return Err(KernelError::new(format!(
                     "`{rule}` requires classical mode"
@@ -6412,7 +6537,8 @@ pub fn infer_proof(
                     }
                     let expected =
                         Formula::implies(Formula::negate(target.clone()), Formula::False);
-                    let arg_mode = check_proof(env, ctx, &args[0], &expected, allowed_mode)?;
+                    let arg_mode =
+                        check_kernel_proof_node(env, ctx, &args[0], &expected, allowed_mode)?;
                     Ok(CheckedProof {
                         formula: target.clone(),
                         mode_used: LogicMode::Classical.combine(arg_mode),
@@ -6425,7 +6551,8 @@ pub fn infer_proof(
                         ));
                     }
                     let expected = Formula::negate(Formula::negate(target.clone()));
-                    let arg_mode = check_proof(env, ctx, &args[0], &expected, allowed_mode)?;
+                    let arg_mode =
+                        check_kernel_proof_node(env, ctx, &args[0], &expected, allowed_mode)?;
                     Ok(CheckedProof {
                         formula: target.clone(),
                         mode_used: LogicMode::Classical.combine(arg_mode),
@@ -9107,7 +9234,7 @@ enum ProofStep {
 
 enum PendingProofStep {
     ForallArg(Term),
-    ImpArg(Proof),
+    ImpArg(DraftProof),
     Projection(Projection),
 }
 
@@ -9161,9 +9288,9 @@ impl ProofExpr {
         }
     }
 
-    fn base_proof(&self, env: &Env, ctx: &Context) -> Result<Proof, TacticError> {
+    fn base_proof(&self, env: &Env, ctx: &Context) -> Result<DraftProof, TacticError> {
         if self.is_true_intro() {
-            return Ok(Proof::TrueIntro);
+            return Ok(DraftProof::TrueIntro);
         }
         if let Some(proof) = ctx.lookup_proof(&self.base) {
             if self.has_explicit_args() {
@@ -9180,7 +9307,7 @@ impl ProofExpr {
             } else {
                 SchemaSubst::default()
             };
-            Ok(Proof::TheoremRef {
+            Ok(DraftProof::TheoremRef {
                 name: theorem.name.clone(),
                 subst,
             })
@@ -9197,7 +9324,7 @@ impl ProofExpr {
                     )));
                 }
             }
-            Ok(Proof::Hyp(self.base.clone()))
+            Ok(DraftProof::Hyp(self.base.clone()))
         }
     }
 
@@ -9206,7 +9333,7 @@ impl ProofExpr {
         env: &Env,
         ctx: &Context,
         allowed_mode: LogicMode,
-    ) -> Result<Proof, TacticError> {
+    ) -> Result<DraftProof, TacticError> {
         let resolved = self.resolve_dotted_projection_base(env, ctx);
         if &resolved != self {
             return resolved.to_proof(env, ctx, allowed_mode);
@@ -9225,12 +9352,13 @@ impl ProofExpr {
         for step in &self.steps {
             proof = match step {
                 ProofStep::Arg(arg) => {
-                    let checked = infer_proof(env, ctx, &proof, allowed_mode).map_err(|err| {
-                        TacticError::new(format!(
-                            "cannot use proof `{}` with an argument: {}",
-                            self.base, err.message
-                        ))
-                    })?;
+                    let checked =
+                        infer_kernel_proof_node(env, ctx, &proof, allowed_mode).map_err(|err| {
+                            TacticError::new(format!(
+                                "cannot use proof `{}` with an argument: {}",
+                                self.base, err.message
+                            ))
+                        })?;
                     let formula = normalize_formula_defs(env, ctx, &checked.formula)
                         .map_err(|err| TacticError::new(err.message))?;
                     match formula {
@@ -9239,7 +9367,7 @@ impl ProofExpr {
                                 .map_err(|err| TacticError::new(err.message))?;
                             let term = canonicalize_term(env, ctx, &term)
                                 .map_err(|err| TacticError::new(err.message))?;
-                            Proof::ForallElim {
+                            DraftProof::ForallElim {
                                 proof_forall: Box::new(proof),
                                 arg: term,
                             }
@@ -9249,7 +9377,7 @@ impl ProofExpr {
                                 .map_err(|err| TacticError::new(err.message))?;
                             let proof_arg =
                                 proof_expr_for_inferred(env, ctx, &arg_expr, allowed_mode)?;
-                            Proof::ImpElim {
+                            DraftProof::ImpElim {
                                 proof_imp: Box::new(proof),
                                 proof_arg: Box::new(proof_arg),
                             }
@@ -9261,8 +9389,10 @@ impl ProofExpr {
                         }
                     }
                 }
-                ProofStep::Projection(Projection::Left) => Proof::AndElimLeft(Box::new(proof)),
-                ProofStep::Projection(Projection::Right) => Proof::AndElimRight(Box::new(proof)),
+                ProofStep::Projection(Projection::Left) => DraftProof::AndElimLeft(Box::new(proof)),
+                ProofStep::Projection(Projection::Right) => {
+                    DraftProof::AndElimRight(Box::new(proof))
+                }
             };
         }
 
@@ -9275,7 +9405,7 @@ impl ProofExpr {
         ctx: &Context,
         theorem: &Theorem,
         allowed_mode: LogicMode,
-    ) -> Result<Proof, TacticError> {
+    ) -> Result<DraftProof, TacticError> {
         let mut schema_subst = explicit_schema_subst(env, ctx, theorem, &self.explicit_args)?;
         let mut term_subst = HashMap::new();
         let mut cursor = theorem.statement.clone();
@@ -9341,7 +9471,7 @@ impl ProofExpr {
                             let proof_arg =
                                 proof_expr_for_inferred(env, ctx, &arg_expr, allowed_mode)?;
                             let checked_arg =
-                                infer_proof(env, ctx, &proof_arg, allowed_mode).map_err(|err| {
+                                infer_kernel_proof_node(env, ctx, &proof_arg, allowed_mode).map_err(|err| {
                                     TacticError::new(format!(
                                         "cannot apply theorem `{}`: {}",
                                         theorem.name, err.message
@@ -9390,25 +9520,25 @@ impl ProofExpr {
         }
 
         ensure_schema_subst_complete(&theorem.params, &schema_subst, Some(theorem.name.as_str()))?;
-        let mut proof = Proof::TheoremRef {
+        let mut proof = DraftProof::TheoremRef {
             name: theorem.name.clone(),
             subst: schema_subst,
         };
         for step in pending {
             proof = match step {
-                PendingProofStep::ForallArg(arg) => Proof::ForallElim {
+                PendingProofStep::ForallArg(arg) => DraftProof::ForallElim {
                     proof_forall: Box::new(proof),
                     arg,
                 },
-                PendingProofStep::ImpArg(proof_arg) => Proof::ImpElim {
+                PendingProofStep::ImpArg(proof_arg) => DraftProof::ImpElim {
                     proof_imp: Box::new(proof),
                     proof_arg: Box::new(proof_arg),
                 },
                 PendingProofStep::Projection(Projection::Left) => {
-                    Proof::AndElimLeft(Box::new(proof))
+                    DraftProof::AndElimLeft(Box::new(proof))
                 }
                 PendingProofStep::Projection(Projection::Right) => {
-                    Proof::AndElimRight(Box::new(proof))
+                    DraftProof::AndElimRight(Box::new(proof))
                 }
             };
         }
@@ -10930,8 +11060,8 @@ fn parse_tactic_lines(
                     )
                     .with_line(line_no));
                 }
-                let formula = parse_formula_str(formula_str.trim())
-                    .map_err(|err| err.with_line(line_no))?;
+                let formula =
+                    parse_formula_str(formula_str.trim()).map_err(|err| err.with_line(line_no))?;
                 i += 1;
                 let body_end = case_body_end(lines, i, have_indent);
                 let block = parse_tactic_lines(&lines[i..body_end], namespace_stack)?;
@@ -11691,7 +11821,7 @@ impl ProofSession {
         Ok(())
     }
 
-    fn complete(self) -> Result<Proof, TacticError> {
+    fn complete(self) -> Result<DraftProof, TacticError> {
         if let Some(goal) = self.goals.first() {
             return Err(TacticError::new(format!("unsolved goal `{}`", goal.target))
                 .with_target(goal.target.clone())
@@ -11712,7 +11842,7 @@ impl ProofSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PartialProof {
     Hole(usize),
-    Done(Proof),
+    Done(DraftProof),
     FalseElim {
         proof_false: Box<PartialProof>,
         target: Formula,
@@ -11827,32 +11957,32 @@ impl PartialProof {
         }
     }
 
-    fn complete(self) -> Result<Proof, TacticError> {
+    fn complete(self) -> Result<DraftProof, TacticError> {
         match self {
             PartialProof::Hole(_) => Err(TacticError::new("proof has an unsolved goal")),
             PartialProof::Done(proof) => Ok(proof),
             PartialProof::FalseElim {
                 proof_false,
                 target,
-            } => Ok(Proof::FalseElim {
+            } => Ok(DraftProof::FalseElim {
                 proof_false: Box::new(proof_false.complete()?),
                 target,
             }),
-            PartialProof::AndIntro(left, right) => Ok(Proof::AndIntro(
+            PartialProof::AndIntro(left, right) => Ok(DraftProof::AndIntro(
                 Box::new(left.complete()?),
                 Box::new(right.complete()?),
             )),
             PartialProof::OrIntroLeft {
                 proof_left,
                 right_formula,
-            } => Ok(Proof::OrIntroLeft {
+            } => Ok(DraftProof::OrIntroLeft {
                 proof_left: Box::new(proof_left.complete()?),
                 right_formula,
             }),
             PartialProof::OrIntroRight {
                 left_formula,
                 proof_right,
-            } => Ok(Proof::OrIntroRight {
+            } => Ok(DraftProof::OrIntroRight {
                 left_formula,
                 proof_right: Box::new(proof_right.complete()?),
             }),
@@ -11863,7 +11993,7 @@ impl PartialProof {
                 right_name,
                 right_case,
                 target,
-            } => Ok(Proof::OrElim {
+            } => Ok(DraftProof::OrElim {
                 proof_or: Box::new(proof_or.complete()?),
                 left_name,
                 left_case: Box::new(left_case.complete()?),
@@ -11875,7 +12005,7 @@ impl PartialProof {
                 hyp_name,
                 hyp_formula,
                 body,
-            } => Ok(Proof::ImpIntro {
+            } => Ok(DraftProof::ImpIntro {
                 hyp_name,
                 hyp_formula,
                 body: Box::new(body.complete()?),
@@ -11883,7 +12013,7 @@ impl PartialProof {
             PartialProof::ImpElim {
                 proof_imp,
                 proof_arg,
-            } => Ok(Proof::ImpElim {
+            } => Ok(DraftProof::ImpElim {
                 proof_imp: Box::new(proof_imp.complete()?),
                 proof_arg: Box::new(proof_arg.complete()?),
             }),
@@ -11891,12 +12021,12 @@ impl PartialProof {
                 eq_proof,
                 proof_body,
                 target,
-            } => Ok(Proof::EqSubst {
+            } => Ok(DraftProof::EqSubst {
                 eq_proof: Box::new(eq_proof.complete()?),
                 proof_body: Box::new(proof_body.complete()?),
                 target,
             }),
-            PartialProof::Convert { proof_body, target } => Ok(Proof::Convert {
+            PartialProof::Convert { proof_body, target } => Ok(DraftProof::Convert {
                 proof_body: Box::new(proof_body.complete()?),
                 target,
             }),
@@ -11904,12 +12034,12 @@ impl PartialProof {
                 var,
                 var_type,
                 body,
-            } => Ok(Proof::ForallIntro {
+            } => Ok(DraftProof::ForallIntro {
                 var,
                 var_type,
                 body: Box::new(body.complete()?),
             }),
-            PartialProof::ForallElim { proof_forall, arg } => Ok(Proof::ForallElim {
+            PartialProof::ForallElim { proof_forall, arg } => Ok(DraftProof::ForallElim {
                 proof_forall: Box::new(proof_forall.complete()?),
                 arg,
             }),
@@ -11917,7 +12047,7 @@ impl PartialProof {
                 witness,
                 proof_body,
                 exists_formula,
-            } => Ok(Proof::ExistsIntro {
+            } => Ok(DraftProof::ExistsIntro {
                 witness,
                 proof_body: Box::new(proof_body.complete()?),
                 exists_formula,
@@ -11927,7 +12057,7 @@ impl PartialProof {
                 for arg in args {
                     completed_args.push(arg.complete()?);
                 }
-                Ok(Proof::Classical {
+                Ok(DraftProof::Classical {
                     rule,
                     args: completed_args,
                     target,
@@ -11956,7 +12086,7 @@ fn prove(
 }
 
 struct ProofResult {
-    proof: Proof,
+    proof: DraftProof,
     notes: Vec<TacticNote>,
 }
 
@@ -12047,7 +12177,10 @@ fn unfold_head_formula_defs(
             Formula::Atom(name) | Formula::PredApp(name, _) => name.clone(),
             _ => break,
         };
-        let Some(def_name) = env.formula_def_scoped(ctx, &head).map(|def| def.name.clone()) else {
+        let Some(def_name) = env
+            .formula_def_scoped(ctx, &head)
+            .map(|def| def.name.clone())
+        else {
             break;
         };
         let (next, did_change) = unfold_named_formula_def(env, ctx, &current, &def_name)?;
@@ -12162,12 +12295,14 @@ fn run_tactic_step_inner(
         Tactic::Exact(expr) => {
             let proof =
                 proof_expr_for_expected(env, &goal.context, expr, &goal.target, allowed_mode)?;
-            check_proof(env, &goal.context, &proof, &goal.target, allowed_mode).map_err(|err| {
-                TacticError::new(format!(
-                    "exact proof does not solve the goal: {}",
-                    err.message
-                ))
-            })?;
+            check_completed_draft(env, &goal.context, &proof, &goal.target, allowed_mode).map_err(
+                |err| {
+                    TacticError::new(format!(
+                        "exact proof does not solve the goal: {}",
+                        err.message
+                    ))
+                },
+            )?;
             Ok(StepResult {
                 replacement: PartialProof::Done(proof),
                 new_goals: Vec::new(),
@@ -12184,7 +12319,7 @@ fn run_tactic_step_inner(
                 )));
             }
             Ok(StepResult {
-                replacement: PartialProof::Done(Proof::TrueIntro),
+                replacement: PartialProof::Done(DraftProof::TrueIntro),
                 new_goals: Vec::new(),
                 notes: Vec::new(),
             })
@@ -12310,7 +12445,7 @@ fn run_tactic_step_inner(
             right_tactics,
         } => {
             let proof_or = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
-            let checked = infer_proof(env, &goal.context, &proof_or, allowed_mode)
+            let checked = infer_kernel_proof_node(env, &goal.context, &proof_or, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot case split: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
                 .map_err(|err| TacticError::new(err.message))?;
@@ -12341,7 +12476,7 @@ fn run_tactic_step_inner(
             notes.extend(right_case.notes);
 
             Ok(StepResult {
-                replacement: PartialProof::Done(Proof::OrElim {
+                replacement: PartialProof::Done(DraftProof::OrElim {
                     proof_or: Box::new(proof_or),
                     left_name: left_name.clone(),
                     left_case: Box::new(left_case.proof),
@@ -12360,7 +12495,7 @@ fn run_tactic_step_inner(
             body_tactics,
         } => {
             let proof_exists = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
-            let checked = infer_proof(env, &goal.context, &proof_exists, allowed_mode)
+            let checked = infer_kernel_proof_node(env, &goal.context, &proof_exists, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot case split: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
                 .map_err(|err| TacticError::new(err.message))?;
@@ -12385,7 +12520,7 @@ fn run_tactic_step_inner(
                     )?;
 
                     Ok(StepResult {
-                        replacement: PartialProof::Done(Proof::ExistsElim {
+                        replacement: PartialProof::Done(DraftProof::ExistsElim {
                             proof_exists: Box::new(proof_exists),
                             witness_name: witness_name.clone(),
                             hyp_name: hyp_name.clone(),
@@ -12416,21 +12551,23 @@ fn run_tactic_step_inner(
                     )?;
 
                     // (fun hl => fun hr => body) (h.left) (h.right)
-                    let lambda = Proof::ImpIntro {
+                    let lambda = DraftProof::ImpIntro {
                         hyp_name: witness_name.clone(),
                         hyp_formula: (*left).clone(),
-                        body: Box::new(Proof::ImpIntro {
+                        body: Box::new(DraftProof::ImpIntro {
                             hyp_name: hyp_name.clone(),
                             hyp_formula: (*right).clone(),
                             body: Box::new(body_proof.proof),
                         }),
                     };
-                    let applied = Proof::ImpElim {
-                        proof_imp: Box::new(Proof::ImpElim {
+                    let applied = DraftProof::ImpElim {
+                        proof_imp: Box::new(DraftProof::ImpElim {
                             proof_imp: Box::new(lambda),
-                            proof_arg: Box::new(Proof::AndElimLeft(Box::new(proof_exists.clone()))),
+                            proof_arg: Box::new(DraftProof::AndElimLeft(Box::new(
+                                proof_exists.clone(),
+                            ))),
                         }),
-                        proof_arg: Box::new(Proof::AndElimRight(Box::new(proof_exists))),
+                        proof_arg: Box::new(DraftProof::AndElimRight(Box::new(proof_exists))),
                     };
                     Ok(StepResult {
                         replacement: PartialProof::Done(applied),
@@ -12500,8 +12637,8 @@ fn run_tactic_step_inner(
                     .map_err(|err| TacticError::new(err.message))?;
                 if norm_left == norm_right {
                     return Ok(StepResult {
-                        replacement: PartialProof::Done(Proof::Convert {
-                            proof_body: Box::new(Proof::EqRefl(norm_left)),
+                        replacement: PartialProof::Done(DraftProof::Convert {
+                            proof_body: Box::new(DraftProof::EqRefl(norm_left)),
                             target: goal.target.clone(),
                         }),
                         new_goals: Vec::new(),
@@ -12526,7 +12663,7 @@ fn run_tactic_step_inner(
                 )));
             }
             Ok(StepResult {
-                replacement: PartialProof::Done(Proof::EqRefl(left.clone())),
+                replacement: PartialProof::Done(DraftProof::EqRefl(left.clone())),
                 new_goals: Vec::new(),
                 notes: Vec::new(),
             })
@@ -12537,7 +12674,7 @@ fn run_tactic_step_inner(
             all,
         } => {
             let eq_proof = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
-            let checked = infer_proof(env, &goal.context, &eq_proof, allowed_mode)
+            let checked = infer_kernel_proof_node(env, &goal.context, &eq_proof, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot rewrite: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
                 .map_err(|err| TacticError::new(err.message))?;
@@ -12872,7 +13009,7 @@ fn run_tactic_step_inner(
                     notes.extend(step_case.notes);
 
                     Ok(StepResult {
-                        replacement: PartialProof::Done(Proof::NatInd {
+                        replacement: PartialProof::Done(DraftProof::NatInd {
                             var_name: var_name.clone(),
                             target: goal.target,
                             base_case: Box::new(base_case.proof),
@@ -12945,7 +13082,7 @@ fn run_tactic_step_inner(
                     }
 
                     Ok(StepResult {
-                        replacement: PartialProof::Done(Proof::DataInd {
+                        replacement: PartialProof::Done(DraftProof::DataInd {
                             var_name: var_name.clone(),
                             data_name: data_name.clone(),
                             target: goal.target,
@@ -12996,7 +13133,7 @@ fn run_tactic_step_inner(
 
             Ok(StepResult {
                 replacement: PartialProof::OrElim {
-                    proof_or: Box::new(PartialProof::Done(Proof::Classical {
+                    proof_or: Box::new(PartialProof::Done(DraftProof::Classical {
                         rule: ClassicalRule::ExcludedMiddle,
                         args: Vec::new(),
                         target: Formula::or(formula.clone(), not_formula),
@@ -13053,7 +13190,7 @@ fn run_tactic_step_inner(
             })
         }
         Tactic::Sorry => Ok(StepResult {
-            replacement: PartialProof::Done(Proof::Sorry {
+            replacement: PartialProof::Done(DraftProof::Sorry {
                 target: goal.target,
             }),
             new_goals: Vec::new(),
@@ -13088,9 +13225,8 @@ fn run_tactic_step_inner(
                 .transpose()
                 .map_err(|err| TacticError::new(err.message))?;
             if !block.is_empty() {
-                let stated = formula.ok_or_else(|| {
-                    TacticError::new("`have ... := by` needs a stated formula")
-                })?;
+                let stated = formula
+                    .ok_or_else(|| TacticError::new("`have ... := by` needs a stated formula"))?;
                 let claim = prove(
                     env,
                     goal.context.clone(),
@@ -13125,7 +13261,7 @@ fn run_tactic_step_inner(
                     } else {
                         proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?
                     };
-                    let checked = infer_proof(env, &goal.context, &proof, allowed_mode)
+                    let checked = infer_kernel_proof_node(env, &goal.context, &proof, allowed_mode)
                         .map_err(|err| TacticError::new(err.message))?;
                     let hyp_formula = match formula {
                         Some(stated) => {
@@ -13256,14 +13392,14 @@ struct SimpRule {
 #[derive(Clone)]
 enum SimpRuleProof {
     Theorem,
-    Local(Box<Proof>),
+    Local(Box<DraftProof>),
 }
 
 #[derive(Clone)]
 struct SimpRewrite {
     before: Formula,
     after: Formula,
-    eq_proof: Proof,
+    eq_proof: DraftProof,
 }
 
 fn collect_simp_rules(
@@ -13310,7 +13446,7 @@ fn collect_simp_rules(
         let proof = ctx
             .lookup_proof(name)
             .cloned()
-            .unwrap_or_else(|| Proof::Hyp(name.clone()));
+            .unwrap_or_else(|| DraftProof::Hyp(name.clone()));
         rules.push(SimpRule {
             name: name.clone(),
             proof: SimpRuleProof::Local(Box::new(proof)),
@@ -13347,20 +13483,20 @@ fn build_simp_replacement(
 }
 
 fn build_simp_hypothesis_proof(
-    original_proof: Proof,
+    original_proof: DraftProof,
     builtin_target: &Formula,
     builtin_changed: bool,
     rewrites: &[SimpRewrite],
-) -> Proof {
+) -> DraftProof {
     let mut proof = original_proof;
     if builtin_changed {
-        proof = Proof::Convert {
+        proof = DraftProof::Convert {
             proof_body: Box::new(proof),
             target: builtin_target.clone(),
         };
     }
     for rewrite in rewrites {
-        proof = Proof::EqSubst {
+        proof = DraftProof::EqSubst {
             eq_proof: Box::new(rewrite.eq_proof.clone()),
             proof_body: Box::new(proof),
             target: rewrite.after.clone(),
@@ -13393,7 +13529,7 @@ fn simplify_named_hypothesis_with_rules(
     let proof = ctx
         .lookup_proof(name)
         .cloned()
-        .unwrap_or_else(|| Proof::Hyp(name.to_string()));
+        .unwrap_or_else(|| DraftProof::Hyp(name.to_string()));
     let kernel_formula = ctx
         .lookup_kernel_formula(name)
         .cloned()
@@ -13440,7 +13576,7 @@ fn rewrite_formula_with_simp_rules_once(
     ctx: &Context,
     formula: &Formula,
     rules: &[SimpRule],
-) -> Result<Option<(Formula, Proof)>, TacticError> {
+) -> Result<Option<(Formula, DraftProof)>, TacticError> {
     match formula {
         Formula::True | Formula::False | Formula::Atom(_) => Ok(None),
         Formula::Eq(left, right) => {
@@ -13515,7 +13651,7 @@ fn rewrite_binary_formula_with_simp_rules(
     right: &Formula,
     rules: &[SimpRule],
     rebuild: fn(Formula, Formula) -> Formula,
-) -> Result<Option<(Formula, Proof)>, TacticError> {
+) -> Result<Option<(Formula, DraftProof)>, TacticError> {
     if let Some((new_left, proof)) = rewrite_formula_with_simp_rules_once(env, ctx, left, rules)? {
         return Ok(Some((rebuild(new_left, right.clone()), proof)));
     }
@@ -13533,7 +13669,7 @@ fn rewrite_binary_term_with_simp_rules(
     right: &Term,
     rules: &[SimpRule],
     rebuild: fn(Term, Term) -> Formula,
-) -> Result<Option<(Formula, Proof)>, TacticError> {
+) -> Result<Option<(Formula, DraftProof)>, TacticError> {
     if let Some((new_left, proof)) = rewrite_term_with_simp_rules_once(env, ctx, left, rules)? {
         return Ok(Some((rebuild(new_left, right.clone()), proof)));
     }
@@ -13548,7 +13684,7 @@ fn rewrite_term_with_simp_rules_once(
     ctx: &Context,
     term: &Term,
     rules: &[SimpRule],
-) -> Result<Option<(Term, Proof)>, TacticError> {
+) -> Result<Option<(Term, DraftProof)>, TacticError> {
     for rule in rules {
         if let Some((term, proof)) = apply_simp_rule_to_term(env, ctx, term, rule)? {
             return Ok(Some((term, proof)));
@@ -13676,7 +13812,7 @@ fn apply_simp_rule_to_term(
     ctx: &Context,
     term: &Term,
     rule: &SimpRule,
-) -> Result<Option<(Term, Proof)>, TacticError> {
+) -> Result<Option<(Term, DraftProof)>, TacticError> {
     let mut term_subst = HashMap::new();
     let mut schema_subst = SchemaSubst::default();
     {
@@ -13700,7 +13836,7 @@ fn apply_simp_rule_to_term(
         return Ok(None);
     }
     let eq_proof = match &rule.proof {
-        SimpRuleProof::Theorem => Proof::TheoremRef {
+        SimpRuleProof::Theorem => DraftProof::TheoremRef {
             name: rule.name.clone(),
             subst: schema_subst,
         },
@@ -13715,7 +13851,7 @@ fn rewrite_unary_term_with_simp_rules(
     inner: &Term,
     rules: &[SimpRule],
     rebuild: fn(Term) -> Term,
-) -> Result<Option<(Term, Proof)>, TacticError> {
+) -> Result<Option<(Term, DraftProof)>, TacticError> {
     if let Some((inner, proof)) = rewrite_term_with_simp_rules_once(env, ctx, inner, rules)? {
         Ok(Some((rebuild(inner), proof)))
     } else {
@@ -13730,7 +13866,7 @@ fn rewrite_binary_term_node_with_simp_rules(
     right: &Term,
     rules: &[SimpRule],
     rebuild: fn(Term, Term) -> Term,
-) -> Result<Option<(Term, Proof)>, TacticError> {
+) -> Result<Option<(Term, DraftProof)>, TacticError> {
     if let Some((left, proof)) = rewrite_term_with_simp_rules_once(env, ctx, left, rules)? {
         return Ok(Some((rebuild(left, right.clone()), proof)));
     }
@@ -13779,9 +13915,9 @@ fn proof_expr_for_inferred(
     ctx: &Context,
     expr: &ProofExpr,
     allowed_mode: LogicMode,
-) -> Result<Proof, TacticError> {
+) -> Result<DraftProof, TacticError> {
     if expr.is_true_intro() {
-        return Ok(Proof::TrueIntro);
+        return Ok(DraftProof::TrueIntro);
     }
 
     if expr.is_bare_theorem_ref(env, ctx) {
@@ -13790,7 +13926,7 @@ fn proof_expr_for_inferred(
             .ok_or_else(|| TacticError::new(format!("unknown theorem `{}`", expr.base)))?;
         let subst = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
         ensure_schema_subst_complete(&theorem.params, &subst, Some(theorem.name.as_str()))?;
-        return Ok(Proof::TheoremRef {
+        return Ok(DraftProof::TheoremRef {
             name: theorem.name.clone(),
             subst,
         });
@@ -13973,9 +14109,9 @@ fn proof_expr_for_expected(
     expr: &ProofExpr,
     expected: &Formula,
     allowed_mode: LogicMode,
-) -> Result<Proof, TacticError> {
+) -> Result<DraftProof, TacticError> {
     if expr.is_true_intro() {
-        return Ok(Proof::TrueIntro);
+        return Ok(DraftProof::TrueIntro);
     }
 
     if expr.is_bare_theorem_ref(env, ctx) {
@@ -13992,7 +14128,7 @@ fn proof_expr_for_expected(
             explicit,
             Some(theorem.name.as_str()),
         )?;
-        return Ok(Proof::TheoremRef {
+        return Ok(DraftProof::TheoremRef {
             name: theorem.name.clone(),
             subst,
         });
@@ -14007,7 +14143,7 @@ fn proof_expr_for_apply(
     expr: &ProofExpr,
     target: &Formula,
     allowed_mode: LogicMode,
-) -> Result<(Proof, Vec<Term>, Vec<Formula>), TacticError> {
+) -> Result<(DraftProof, Vec<Term>, Vec<Formula>), TacticError> {
     if expr.is_bare_theorem_ref(env, ctx) {
         let theorem = env
             .theorem_scoped(ctx, &expr.base)
@@ -14023,7 +14159,7 @@ fn proof_expr_for_apply(
             Some(theorem.name.as_str()),
         )?;
         return Ok((
-            Proof::TheoremRef {
+            DraftProof::TheoremRef {
                 name: theorem.name.clone(),
                 subst: plan.schema_subst,
             },
@@ -14033,7 +14169,7 @@ fn proof_expr_for_apply(
     }
 
     let proof = expr.to_proof(env, ctx, allowed_mode)?;
-    let checked = infer_proof(env, ctx, &proof, allowed_mode).map_err(|err| {
+    let checked = infer_kernel_proof_node(env, ctx, &proof, allowed_mode).map_err(|err| {
         TacticError::new(format!("cannot use proof with `apply`: {}", err.message))
     })?;
     let plan = apply_plan_for_goal(
@@ -15257,7 +15393,7 @@ fn contradiction_step(env: &Env, goal: Goal) -> Result<StepResult, TacticError> 
         if let Some(pos_proof) = pos {
             return Ok(StepResult {
                 replacement: PartialProof::FalseElim {
-                    proof_false: Box::new(PartialProof::Done(Proof::ImpElim {
+                    proof_false: Box::new(PartialProof::Done(DraftProof::ImpElim {
                         proof_imp: Box::new(neg_proof.clone()),
                         proof_arg: Box::new(pos_proof.clone()),
                     })),
@@ -16425,6 +16561,7 @@ theorem honest (P : Prop) : P -> P := by
         assert!(result.diagnostics.is_empty());
         let hole = result.theorems.iter().find(|t| t.name == "hole").unwrap();
         assert!(hole.uses_sorry);
+        assert_eq!(hole.status, DeclarationStatus::Incomplete);
         let uses_hole = result
             .theorems
             .iter()
@@ -16434,8 +16571,32 @@ theorem honest (P : Prop) : P -> P := by
             uses_hole.uses_sorry,
             "sorry should taint dependent theorems"
         );
+        assert_eq!(uses_hole.status, DeclarationStatus::Incomplete);
         let honest = result.theorems.iter().find(|t| t.name == "honest").unwrap();
         assert!(!honest.uses_sorry);
+        assert_eq!(honest.status, DeclarationStatus::Accepted);
+    }
+
+    #[test]
+    fn kernel_proofs_cannot_contain_draft_holes() {
+        let hole = DraftProof::Sorry {
+            target: Formula::True,
+        };
+        let err = KernelProof::try_from(hole).expect_err("sorry must remain a draft hole");
+        assert!(err.message.contains("not kernel proofs"));
+
+        let proof = KernelProof::try_from(DraftProof::TrueIntro)
+            .expect("a complete proof should cross the kernel boundary");
+        assert_eq!(
+            check_proof(
+                &Env::new(),
+                &Context::new(),
+                &proof,
+                &Formula::True,
+                LogicMode::Constructive,
+            ),
+            Ok(LogicMode::Constructive)
+        );
     }
 
     #[test]

@@ -354,7 +354,7 @@ are now implemented:
 - `show_goal` reports the current goal.
 - `intro` rejects shadowing instead of silently replacing a local name.
 - The `sorry` tactic (alias `admit`) closes any goal; the theorem is
-  accepted but reported as `incomplete: uses sorry`, and the flag
+  reported as an `incomplete theorem`, and the status
   propagates to theorems that use a sorry'd theorem. This is the missing
   piece for distributing homework skeleton files.
 - The CLI prints `accepted` lines for every passing theorem even when
@@ -452,8 +452,8 @@ freshness rule above is the user-visible face of the shadowing fix.
   local equational rewriting. Computation-only equalities close with a
   bare `refl`.
 - **Homework skeletons** are practical now: state the theorems, fill the
-  bodies with `sorry`, and hand the file out. Per-theorem `accepted`
-  lines, the `incomplete: uses sorry` flag, and axiom-dependency
+  bodies with `sorry`, and hand the file out. Per-declaration status
+  lines, the `incomplete theorem` status, and axiom-dependency
   reporting make grading output honest, and countermodel notes stop
   students from grinding on unprovable goals.
 - **The standard library** is small enough for students to read while

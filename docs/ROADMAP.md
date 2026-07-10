@@ -82,7 +82,7 @@ theorem with `forall`, `intro` inside the arms). Acceptance: both
 messages carry `try:` blocks; book ch12/ch9 mistakes quotes updated and
 re-verified.
 
-**1.3 Axiom label (item 16).** Print `accepted axiom foo (trusted)`
+**1.3 Axiom label (item 16).** Print `trusted axiom foo`
 instead of `(constructive)`. Grep book/tutorials for quoted axiom
 lines and update them (Phase 0's tripwire confirms).
 

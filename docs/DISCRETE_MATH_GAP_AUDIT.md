@@ -54,8 +54,8 @@ that had silently started checking. It also verifies every quoted error headline
 and acceptance receipt against live CLI output. Diagnostic paths are now relative
 to the working directory in both text and JSON, so those excerpts are portable.
 
-Still outstanding in Phase 0 are separating `Sorry` from kernel-valid proofs,
-and further isolation of the trusted kernel boundary.
+The principal remaining Phase 0 work is further isolation of the trusted kernel
+into a smaller module with a narrower environment interface.
 
 ## Evidence reviewed
 
@@ -143,15 +143,20 @@ which constructor facts are derivable.
 
 ### Draft holes versus kernel proofs
 
-`Sorry` is currently a kernel `Proof` constructor, and kernel inference returns
-its target as proved. The propagated `incomplete` label is honest, but this
-contradicts the central "proof object with no holes" invariant.
-
-The intended separation should be:
+This separation is now implemented:
 
 - `DraftProof`, which may contain holes and supports editing;
-- `KernelProof`, which cannot contain holes;
-- distinct `Accepted`, `Incomplete`, and `TrustedAxiom` result states.
+- `KernelProof`, whose private representation can only be constructed after a
+  recursive hole check and is the only proof type accepted by `check_proof`;
+- distinct `Accepted`, `Incomplete`, and `TrustedAxiom` result states in the
+  checker API, CLI, JSON, and Wasm JSON.
+- matching `Kernel`, `Incomplete`, and `TrustedAxiom` evidence variants in the
+  theorem environment, so a hole-bearing draft cannot occupy a kernel-proof
+  field.
+
+Incomplete declarations remain available to later drafts and taint dependents,
+but they are never labeled accepted and their hole-bearing proof is never sent
+through the kernel boundary.
 
 ### Generalized induction
 

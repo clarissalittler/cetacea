@@ -111,16 +111,10 @@ pub fn explain_theorem_with_imports(
 pub fn check_proof(
     env: &Env,
     ctx: &Context,
-    proof: &Proof,
+    proof: &KernelProof,
     expected: &Formula,
     allowed_mode: LogicMode,
 ) -> Result<LogicMode, KernelError>
-pub fn infer_proof(
-    env: &Env,
-    ctx: &Context,
-    proof: &Proof,
-    allowed_mode: LogicMode,
-) -> Result<CheckedProof, KernelError>
 ```
 
 Use `check_file` for in-memory source strings. It can parse import declarations,
@@ -312,16 +306,17 @@ with surrounding theorem variables.
 
 ## Proof Objects
 
-`Proof` is the kernel-level proof language:
+Tactics build a `DraftProof`. It has the natural-deduction constructors plus a
+`Sorry` hole used by editor and homework-skeleton workflows:
 
 ```rust
-pub enum Proof {
+pub enum DraftProof {
     Hyp(Name),
     TrueIntro,
-    FalseElim { proof_false: Box<Proof>, target: Formula },
-    AndIntro(Box<Proof>, Box<Proof>),
-    AndElimLeft(Box<Proof>),
-    AndElimRight(Box<Proof>),
+    FalseElim { proof_false: Box<DraftProof>, target: Formula },
+    AndIntro(Box<DraftProof>, Box<DraftProof>),
+    AndElimLeft(Box<DraftProof>),
+    AndElimRight(Box<DraftProof>),
     OrIntroLeft { ... },
     OrIntroRight { ... },
     OrElim { ... },
@@ -337,14 +332,27 @@ pub enum Proof {
     TheoremRef { ... },
     Classical(ClassicalRule, Formula),
     Convert { ... },
+    Sorry { target: Formula },
+}
+
+pub struct KernelProof(DraftProof); // private field
+
+pub enum TheoremEvidence {
+    Kernel(KernelProof),
+    Incomplete(DraftProof),
+    TrustedAxiom,
 }
 ```
 
 Design notes:
 
 - Proof objects are natural-deduction-style.
-- Tactics do not directly prove theorems. They build these proof objects.
-- The kernel checks the proof object afterward.
+- Tactics do not directly prove theorems. They build draft proof objects.
+- The only conversion to `KernelProof` recursively rejects `Sorry`; its inner
+  field is private, and `check_proof` accepts only this hole-free type.
+- Results distinguish accepted proofs, incomplete drafts, and trusted axioms.
+- The environment stores the matching `TheoremEvidence` variant rather than an
+  optional, potentially hole-bearing proof.
 - `Convert` exists for transparent formula definitions and definitional
   equality.
 - Classical rules are explicit proof nodes, so the checker can track whether a
@@ -898,7 +906,7 @@ This is enough for the current Nat library:
 Classical proof use is explicit in proof objects:
 
 ```rust
-Proof::Classical(ClassicalRule, Formula)
+DraftProof::Classical(ClassicalRule, Formula)
 ```
 
 The current classical rules are:

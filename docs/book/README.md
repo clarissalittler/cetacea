@@ -48,7 +48,7 @@ Each chapter comes with three (sometimes four) companion files in
 | File | What it is |
 |---|---|
 | `chNN-examples.ctea` | Every worked proof from the chapter, runnable. It checks clean. |
-| `chNN-exercises.ctea` | The chapter's exercises with `sorry` placeholder proofs. It checks as-is, but every theorem is flagged `incomplete: uses sorry`. Your job is to clear the flags. |
+| `chNN-exercises.ctea` | The chapter's exercises with `sorry` placeholder proofs. It checks as-is, but every theorem is reported as an `incomplete theorem`. Your job is to complete them. |
 | `chNN-solutions.ctea` | Full solutions. Genuinely try the exercises first. |
 | `chNN-mistakes.ctea` / `ch02-fallacies.ctea` | **Intended to fail.** Deliberately wrong proofs whose error messages the chapter dissects. Run them; read the errors. |
 
@@ -62,7 +62,7 @@ The rhythm for each chapter:
 2. Run the examples file and watch every theorem get accepted.
 3. Run the mistakes file and read what rejection looks like.
 4. Open the exercises file and replace each `sorry` with a proof,
-   re-running the checker as you go. The `incomplete: uses sorry` flags
+   re-running the checker as you go. The `incomplete theorem` markers
    are your to-do list; the chapter is done when they are all gone.
 
 A small notational convention used throughout: when we narrate the
