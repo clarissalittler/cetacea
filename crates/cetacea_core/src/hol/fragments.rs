@@ -125,13 +125,11 @@ fn classify_proposition(
 ) -> Result<StatementFragment, FragmentError> {
     match proposition {
         CoreTerm::Truth | CoreTerm::Falsity | CoreTerm::Bound(_) => Ok(StatementFragment::Prop),
-        CoreTerm::Constant(id) => {
-            if metadata.structurally_recursive_constants.contains(id) {
-                Ok(StatementFragment::FirstOrderInductive)
-            } else {
-                Ok(StatementFragment::Prop)
-            }
-        }
+        CoreTerm::Constant(id) => classify_nullary_proposition(types, metadata, *id, &[]),
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } => classify_nullary_proposition(types, metadata, *constant, arguments),
         CoreTerm::And(left, right) | CoreTerm::Or(left, right) | CoreTerm::Implies(left, right) => {
             Ok(
                 classify_proposition(types, constants, context, metadata, left)?.combine(
@@ -197,6 +195,18 @@ fn classify_first_order_term(
             };
             Ok(declaration_fragment.combine(type_fragment))
         }
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } => Ok(classify_type_arguments(types, metadata, arguments)?
+            .combine(
+                if metadata.structurally_recursive_constants.contains(constant) {
+                    StatementFragment::FirstOrderInductive
+                } else {
+                    StatementFragment::FirstOrder
+                },
+            )
+            .combine(type_fragment)),
         CoreTerm::Apply { .. } => classify_declared_application(
             types,
             constants,
@@ -233,18 +243,19 @@ fn classify_declared_application(
 ) -> Result<StatementFragment, FragmentError> {
     let mut arguments = Vec::new();
     let head = application_spine(application, &mut arguments);
-    let CoreTerm::Constant(id) = head else {
+    let Some((id, type_arguments)) = declared_head(head) else {
         // Applying a bound function, predicate variable, or retained lambda is
         // precisely the higher-order case that saturation rules must expose.
         return Ok(StatementFragment::HigherOrder);
     };
 
     let mut current_type = infer_type(types, constants, context, head)?;
-    let mut fragment = if metadata.structurally_recursive_constants.contains(id) {
+    let mut fragment = classify_type_arguments(types, metadata, type_arguments)?;
+    fragment = fragment.combine(if metadata.structurally_recursive_constants.contains(&id) {
         StatementFragment::FirstOrderInductive
     } else {
         StatementFragment::FirstOrder
-    };
+    });
 
     for argument in arguments {
         let CoreType::Arrow(domain, codomain) = current_type else {
@@ -285,6 +296,48 @@ fn classify_declared_application(
             }
         }
     }
+}
+
+fn declared_head(term: &CoreTerm) -> Option<(ConstantId, &[CoreType])> {
+    match term {
+        CoreTerm::Constant(id) => Some((*id, &[])),
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } => Some((*constant, arguments)),
+        _ => None,
+    }
+}
+
+fn classify_nullary_proposition(
+    types: &TypeSignature,
+    metadata: &FragmentMetadata,
+    id: ConstantId,
+    type_arguments: &[CoreType],
+) -> Result<StatementFragment, FragmentError> {
+    let declaration_fragment = if metadata.structurally_recursive_constants.contains(&id) {
+        StatementFragment::FirstOrderInductive
+    } else if type_arguments.is_empty() {
+        StatementFragment::Prop
+    } else {
+        StatementFragment::FirstOrder
+    };
+    Ok(declaration_fragment.combine(classify_type_arguments(types, metadata, type_arguments)?))
+}
+
+fn classify_type_arguments(
+    types: &TypeSignature,
+    metadata: &FragmentMetadata,
+    arguments: &[CoreType],
+) -> Result<StatementFragment, FragmentError> {
+    arguments.iter().try_fold(
+        if arguments.is_empty() {
+            StatementFragment::Prop
+        } else {
+            StatementFragment::FirstOrder
+        },
+        |fragment, argument| Ok(fragment.combine(classify_data_type(types, metadata, argument)?)),
+    )
 }
 
 fn application_spine<'a>(term: &'a CoreTerm, arguments: &mut Vec<&'a CoreTerm>) -> &'a CoreTerm {
@@ -943,6 +996,40 @@ mod tests {
         );
         assert_eq!(
             classify(&fixture, &TermContext::new(), &statement),
+            StatementFragment::HigherOrder
+        );
+    }
+
+    #[test]
+    fn explicit_polymorphic_instances_are_classified_from_their_type_arguments() {
+        let mut fixture = fixture();
+        let parameter = TypeParameter::any(50);
+        let generic_predicate = fixture
+            .constants
+            .declare_polymorphic(
+                &fixture.types,
+                "generic_predicate",
+                vec![parameter],
+                CoreType::arrow(CoreType::Parameter(parameter), CoreType::Prop),
+            )
+            .expect("generic predicate");
+
+        let nat_instance = CoreTerm::apply(
+            CoreTerm::instantiate_constant(generic_predicate, vec![fixture.nat.clone()]),
+            CoreTerm::Constant(fixture.a),
+        );
+        assert_eq!(
+            classify(&fixture, &TermContext::new(), &nat_instance),
+            StatementFragment::FirstOrder
+        );
+
+        let predicate_type = CoreType::arrow(fixture.nat.clone(), CoreType::Prop);
+        let predicate_instance = CoreTerm::apply(
+            CoreTerm::instantiate_constant(generic_predicate, vec![predicate_type]),
+            CoreTerm::Constant(fixture.predicate),
+        );
+        assert_eq!(
+            classify(&fixture, &TermContext::new(), &predicate_instance),
             StatementFragment::HigherOrder
         );
     }

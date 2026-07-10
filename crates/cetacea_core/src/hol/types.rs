@@ -175,6 +175,61 @@ impl TypeSignature {
         }
     }
 
+    /// Validate a rank-1 type scheme.
+    ///
+    /// Every type parameter occurring in the body must be declared by the
+    /// scheme, with the same class. Unused parameters are permitted so the
+    /// inductive layer can represent phantom parameters without special cases.
+    pub fn validate_scheme(
+        &self,
+        parameters: &[TypeParameter],
+        body: &CoreType,
+    ) -> Result<(), TypeError> {
+        self.validate(body)?;
+        let mut declared = HashMap::new();
+        for parameter in parameters {
+            if declared.insert(parameter.id, parameter.class).is_some() {
+                return Err(TypeError::new(format!(
+                    "type scheme repeats parameter id `{}`",
+                    parameter.id.0
+                )));
+            }
+        }
+        validate_scheme_parameters(body, &declared)
+    }
+
+    /// Instantiate a checked rank-1 type scheme with explicit type arguments.
+    pub fn instantiate_scheme(
+        &self,
+        parameters: &[TypeParameter],
+        body: &CoreType,
+        arguments: &[CoreType],
+    ) -> Result<CoreType, TypeError> {
+        self.validate_scheme(parameters, body)?;
+        if parameters.len() != arguments.len() {
+            return Err(TypeError::new(format!(
+                "type scheme expects {} type argument(s), but got {}",
+                parameters.len(),
+                arguments.len()
+            )));
+        }
+
+        let mut substitution = HashMap::new();
+        for (parameter, argument) in parameters.iter().zip(arguments) {
+            self.validate(argument)?;
+            if parameter.class == TypeParameterClass::FirstOrder
+                && self.first_order_status(argument)? != FirstOrderStatus::FirstOrder
+            {
+                return Err(TypeError::new(format!(
+                    "type argument `{argument:?}` for parameter `{}` must be first-order",
+                    parameter.id.0
+                )));
+            }
+            substitution.insert(parameter.id, argument.clone());
+        }
+        Ok(substitute_type_parameters(body, &substitution))
+    }
+
     /// Classify whether a type may be used as a first-order quantifier domain.
     ///
     /// `Prop`, arrow types, and unconstrained type parameters are higher-order.
@@ -213,6 +268,64 @@ impl TypeSignature {
         self.constructors
             .get(id.0 as usize)
             .ok_or_else(|| TypeError::new(format!("unknown type constructor id `{}`", id.0)))
+    }
+}
+
+fn validate_scheme_parameters(
+    ty: &CoreType,
+    declared: &HashMap<TypeParameterId, TypeParameterClass>,
+) -> Result<(), TypeError> {
+    match ty {
+        CoreType::Prop => Ok(()),
+        CoreType::Parameter(parameter) => match declared.get(&parameter.id) {
+            Some(class) if *class == parameter.class => Ok(()),
+            Some(class) => Err(TypeError::new(format!(
+                "type parameter `{}` is used with class `{:?}`, but declared with class `{class:?}`",
+                parameter.id.0, parameter.class
+            ))),
+            None => Err(TypeError::new(format!(
+                "type parameter `{}` is not declared by this type scheme",
+                parameter.id.0
+            ))),
+        },
+        CoreType::Constructor { arguments, .. } => {
+            for argument in arguments {
+                validate_scheme_parameters(argument, declared)?;
+            }
+            Ok(())
+        }
+        CoreType::Arrow(domain, codomain) | CoreType::Product(domain, codomain) => {
+            validate_scheme_parameters(domain, declared)?;
+            validate_scheme_parameters(codomain, declared)
+        }
+    }
+}
+
+fn substitute_type_parameters(
+    ty: &CoreType,
+    substitution: &HashMap<TypeParameterId, CoreType>,
+) -> CoreType {
+    match ty {
+        CoreType::Prop => CoreType::Prop,
+        CoreType::Parameter(parameter) => substitution
+            .get(&parameter.id)
+            .cloned()
+            .unwrap_or_else(|| CoreType::Parameter(*parameter)),
+        CoreType::Constructor { id, arguments } => CoreType::constructor(
+            *id,
+            arguments
+                .iter()
+                .map(|argument| substitute_type_parameters(argument, substitution))
+                .collect(),
+        ),
+        CoreType::Arrow(domain, codomain) => CoreType::arrow(
+            substitute_type_parameters(domain, substitution),
+            substitute_type_parameters(codomain, substitution),
+        ),
+        CoreType::Product(left, right) => CoreType::product(
+            substitute_type_parameters(left, substitution),
+            substitute_type_parameters(right, substitution),
+        ),
     }
 }
 
@@ -327,5 +440,63 @@ mod tests {
             .validate(&CoreType::constructor(TypeConstructorId(99), Vec::new()))
             .expect_err("unknown constructor must fail");
         assert_eq!(error.message, "unknown type constructor id `99`");
+    }
+
+    #[test]
+    fn rank_one_schemes_substitute_through_nested_types() {
+        let (signature, nat, list) = signature();
+        let parameter = TypeParameter::any(7);
+        let body = CoreType::arrow(
+            CoreType::Parameter(parameter),
+            CoreType::constructor(list, vec![CoreType::Parameter(parameter)]),
+        );
+        let nat = CoreType::constructor(nat, Vec::new());
+        assert_eq!(
+            signature.instantiate_scheme(&[parameter], &body, std::slice::from_ref(&nat)),
+            Ok(CoreType::arrow(
+                nat.clone(),
+                CoreType::constructor(list, vec![nat])
+            ))
+        );
+    }
+
+    #[test]
+    fn rank_one_schemes_reject_free_and_duplicate_parameters() {
+        let (signature, _, _) = signature();
+        let parameter = TypeParameter::any(3);
+        let free_error = signature
+            .validate_scheme(&[], &CoreType::Parameter(parameter))
+            .expect_err("free parameter must fail");
+        assert!(free_error.message.contains("is not declared"));
+
+        let duplicate_error = signature
+            .validate_scheme(&[parameter, parameter], &CoreType::Prop)
+            .expect_err("duplicate parameter must fail");
+        assert!(duplicate_error.message.contains("repeats parameter id"));
+    }
+
+    #[test]
+    fn first_order_scheme_parameters_reject_higher_order_arguments() {
+        let (signature, nat, _) = signature();
+        let parameter = TypeParameter::first_order(0);
+        let body = CoreType::Parameter(parameter);
+        let predicate = CoreType::arrow(CoreType::constructor(nat, Vec::new()), CoreType::Prop);
+        let error = signature
+            .instantiate_scheme(&[parameter], &body, &[predicate])
+            .expect_err("first-order parameter cannot receive a predicate type");
+        assert!(error.message.contains("must be first-order"));
+    }
+
+    #[test]
+    fn scheme_instantiation_checks_type_argument_arity() {
+        let (signature, _, _) = signature();
+        let parameter = TypeParameter::any(0);
+        let error = signature
+            .instantiate_scheme(&[parameter], &CoreType::Parameter(parameter), &[])
+            .expect_err("missing type argument must fail");
+        assert_eq!(
+            error.message,
+            "type scheme expects 1 type argument(s), but got 0"
+        );
     }
 }

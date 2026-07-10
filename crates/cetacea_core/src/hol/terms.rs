@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use super::types::{CoreType, TypeError, TypeSignature};
+use super::types::{CoreType, TypeError, TypeParameter, TypeSignature};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ConstantId(pub u32);
@@ -11,6 +11,11 @@ pub enum CoreTerm {
     /// A de Bruijn index: zero is the nearest enclosing binder.
     Bound(u32),
     Constant(ConstantId),
+    /// Explicit rank-1 instantiation of a polymorphic declared constant.
+    TypeApplication {
+        constant: ConstantId,
+        arguments: Vec<CoreType>,
+    },
     Lambda {
         parameter_type: CoreType,
         body: Box<CoreTerm>,
@@ -40,6 +45,13 @@ pub enum CoreTerm {
 }
 
 impl CoreTerm {
+    pub fn instantiate_constant(constant: ConstantId, arguments: Vec<CoreType>) -> Self {
+        Self::TypeApplication {
+            constant,
+            arguments,
+        }
+    }
+
     pub fn lambda(parameter_type: CoreType, body: Self) -> Self {
         Self::Lambda {
             parameter_type,
@@ -119,6 +131,7 @@ impl From<TypeError> for TermError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Constant {
     name: String,
+    type_parameters: Vec<TypeParameter>,
     ty: CoreType,
 }
 
@@ -139,7 +152,17 @@ impl TermSignature {
         name: impl Into<String>,
         ty: CoreType,
     ) -> Result<ConstantId, TermError> {
-        types.validate(&ty)?;
+        self.declare_polymorphic(types, name, Vec::new(), ty)
+    }
+
+    pub fn declare_polymorphic(
+        &mut self,
+        types: &TypeSignature,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        ty: CoreType,
+    ) -> Result<ConstantId, TermError> {
+        types.validate_scheme(&type_parameters, &ty)?;
         let name = name.into();
         if self.names.contains_key(&name) {
             return Err(TermError::new(format!(
@@ -151,6 +174,7 @@ impl TermSignature {
         let id = ConstantId(raw_id);
         self.constants.push(Constant {
             name: name.clone(),
+            type_parameters,
             ty,
         });
         self.names.insert(name, id);
@@ -165,6 +189,31 @@ impl TermSignature {
         self.constants
             .get(id.0 as usize)
             .ok_or_else(|| TermError::new(format!("unknown constant id `{}`", id.0)))
+    }
+
+    fn monomorphic_constant_type(&self, id: ConstantId) -> Result<CoreType, TermError> {
+        let constant = self.constant(id)?;
+        if constant.type_parameters.is_empty() {
+            Ok(constant.ty.clone())
+        } else {
+            Err(TermError::new(format!(
+                "polymorphic constant `{}` expects {} explicit type argument(s)",
+                constant.name,
+                constant.type_parameters.len()
+            )))
+        }
+    }
+
+    fn instantiate_constant_type(
+        &self,
+        types: &TypeSignature,
+        id: ConstantId,
+        arguments: &[CoreType],
+    ) -> Result<CoreType, TermError> {
+        let constant = self.constant(id)?;
+        types
+            .instantiate_scheme(&constant.type_parameters, &constant.ty, arguments)
+            .map_err(Into::into)
     }
 }
 
@@ -202,7 +251,11 @@ pub fn infer_type(
 ) -> Result<CoreType, TermError> {
     match term {
         CoreTerm::Bound(index) => Ok(context.lookup(*index)?.clone()),
-        CoreTerm::Constant(id) => Ok(constants.constant(*id)?.ty.clone()),
+        CoreTerm::Constant(id) => constants.monomorphic_constant_type(*id),
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } => constants.instantiate_constant_type(types, *constant, arguments),
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -329,9 +382,11 @@ pub fn instantiate_binder(
 
 fn normalize_typed(term: &CoreTerm) -> Result<CoreTerm, TermError> {
     match term {
-        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
-            Ok(term.clone())
-        }
+        CoreTerm::Bound(_)
+        | CoreTerm::Constant(_)
+        | CoreTerm::TypeApplication { .. }
+        | CoreTerm::Truth
+        | CoreTerm::Falsity => Ok(term.clone()),
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -383,9 +438,11 @@ fn substitute_top(argument: &CoreTerm, body: &CoreTerm) -> Result<CoreTerm, Term
 fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<CoreTerm, TermError> {
     match term {
         CoreTerm::Bound(index) if *index == target => Ok(replacement.clone()),
-        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
-            Ok(term.clone())
-        }
+        CoreTerm::Bound(_)
+        | CoreTerm::Constant(_)
+        | CoreTerm::TypeApplication { .. }
+        | CoreTerm::Truth
+        | CoreTerm::Falsity => Ok(term.clone()),
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -434,9 +491,11 @@ fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermErro
             }
             Ok(CoreTerm::Bound(shifted as u32))
         }
-        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
-            Ok(term.clone())
-        }
+        CoreTerm::Bound(_)
+        | CoreTerm::Constant(_)
+        | CoreTerm::TypeApplication { .. }
+        | CoreTerm::Truth
+        | CoreTerm::Falsity => Ok(term.clone()),
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -483,7 +542,7 @@ pub(super) fn shift_under_new_binder(term: &CoreTerm) -> Result<CoreTerm, TermEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hol::types::TypeConstructorId;
+    use crate::hol::types::{TypeConstructorId, TypeParameter};
 
     fn signatures() -> (TypeSignature, TermSignature, CoreType, ConstantId) {
         let mut types = TypeSignature::new();
@@ -617,6 +676,82 @@ mod tests {
             )
             .expect_err("unknown type constructor must fail");
         assert_eq!(error.message, "unknown type constructor id `44`");
+    }
+
+    #[test]
+    fn polymorphic_constants_require_explicit_type_instantiation() {
+        let (types, mut terms, nat, zero) = signatures();
+        let parameter = TypeParameter::any(0);
+        let identity = terms
+            .declare_polymorphic(
+                &types,
+                "identity",
+                vec![parameter],
+                CoreType::arrow(
+                    CoreType::Parameter(parameter),
+                    CoreType::Parameter(parameter),
+                ),
+            )
+            .expect("generic identity");
+
+        let bare_error = infer_type(
+            &types,
+            &terms,
+            &TermContext::new(),
+            &CoreTerm::Constant(identity),
+        )
+        .expect_err("bare polymorphic constant must fail");
+        assert!(bare_error.message.contains("explicit type argument"));
+
+        let instantiated = CoreTerm::instantiate_constant(identity, vec![nat.clone()]);
+        let application = CoreTerm::apply(instantiated, CoreTerm::Constant(zero));
+        assert_eq!(
+            infer_type(&types, &terms, &TermContext::new(), &application),
+            Ok(nat)
+        );
+    }
+
+    #[test]
+    fn polymorphic_constant_instantiation_checks_arity_and_parameter_class() {
+        let (types, mut terms, nat, _) = signatures();
+        let parameter = TypeParameter::first_order(0);
+        let generic = terms
+            .declare_polymorphic(
+                &types,
+                "generic",
+                vec![parameter],
+                CoreType::Parameter(parameter),
+            )
+            .expect("generic constant");
+
+        let arity_error = infer_type(
+            &types,
+            &terms,
+            &TermContext::new(),
+            &CoreTerm::instantiate_constant(generic, Vec::new()),
+        )
+        .expect_err("missing type argument must fail");
+        assert!(arity_error.message.contains("expects 1 type argument"));
+
+        let predicate = CoreType::arrow(nat, CoreType::Prop);
+        let class_error = infer_type(
+            &types,
+            &terms,
+            &TermContext::new(),
+            &CoreTerm::instantiate_constant(generic, vec![predicate]),
+        )
+        .expect_err("predicate is not first-order data");
+        assert!(class_error.message.contains("must be first-order"));
+    }
+
+    #[test]
+    fn monomorphic_declarations_reject_unbound_type_parameters() {
+        let types = TypeSignature::new();
+        let mut terms = TermSignature::new();
+        let error = terms
+            .declare(&types, "bad", CoreType::Parameter(TypeParameter::any(99)))
+            .expect_err("monomorphic declaration has no type parameter binder");
+        assert!(error.message.contains("is not declared"));
     }
 
     #[test]

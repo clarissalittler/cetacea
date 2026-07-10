@@ -315,9 +315,12 @@ Status: `hol::types` now defines resolved simple types, stable constructor and
 parameter IDs, constructor-arity validation, and conservative first-order
 domain classification. `hol::terms` adds resolved constants, de Bruijn binders,
 typed lambdas/application, capture-avoiding beta substitution, and checked
-normalization. Primitive proposition terms and a hole-free constructive proof
-checker now cover connectives, quantifiers over arbitrary simple types, typed
-equality, and equality elimination through explicit predicate motives. The
+normalization. Rank-1 constant schemes now require explicit core type
+applications, validate scheme binders, substitute through nested types, and
+enforce first-order parameter constraints. Primitive proposition terms and a
+hole-free constructive proof checker cover connectives, quantifiers over
+arbitrary simple types, typed equality, and equality elimination through
+explicit predicate motives. The
 new `hol::fragments` layer beta-normalizes and classifies checked statements,
 then derives deterministic transitive receipts and enforces constructive
 Prop/FOL/FOL+induction/HOL policies. Its adversarial tests reject higher-order
