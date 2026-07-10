@@ -348,8 +348,11 @@ nested recursion pending a later design. Structurally recursive definitions now
 receive only constructor fields and precomputed results for declared recursive
 subdata; constructor reduction is definitional, works for `Prop` results, and
 cannot name the function being defined. Type-constructor parameter classes are
-also enforced at every core type occurrence. Induction proof evidence, the
-small surface elaborator, and the three end-to-end examples remain to be built.
+also enforced at every core type occurrence. The proof checker now has an
+explicit structural-induction rule whose exhaustive cases receive constructor
+fields and induction hypotheses only for recorded recursive fields; a
+hand-built constructive `List` induction principle passes. The small surface
+elaborator and the three end-to-end examples remain to be built.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:

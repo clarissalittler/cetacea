@@ -1,10 +1,11 @@
 use std::fmt;
 
+use super::inductive::{InductiveError, InductiveSignature};
 use super::terms::{
     definitionally_equal, infer_type, instantiate_binder, normalize, shift_under_new_binder,
     CoreTerm, TermContext, TermError, TermSignature,
 };
-use super::types::{CoreType, TypeError, TypeSignature};
+use super::types::{CoreType, TypeConstructorId, TypeError, TypeSignature};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HolDraftProof {
@@ -64,6 +65,14 @@ pub enum HolDraftProof {
         body: Box<HolDraftProof>,
         target: CoreTerm,
     },
+    Induction {
+        datatype: TypeConstructorId,
+        type_arguments: Vec<CoreType>,
+        motive: CoreTerm,
+        scrutinee: CoreTerm,
+        /// One case per constructor, in declaration order.
+        cases: Vec<HolDraftProof>,
+    },
     Sorry {
         target: CoreTerm,
     },
@@ -119,6 +128,12 @@ impl From<TypeError> for ProofError {
     }
 }
 
+impl From<InductiveError> for ProofError {
+    fn from(error: InductiveError) -> Self {
+        Self::new(error.message)
+    }
+}
+
 /// Propositions available as proof hypotheses, nearest binder first.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HolProofContext {
@@ -170,8 +185,55 @@ pub fn check_hol_proof(
     proof: &HolKernelProof,
     expected: &CoreTerm,
 ) -> Result<(), ProofError> {
+    check_hol_proof_internal(
+        types,
+        constants,
+        None,
+        term_context,
+        proof_context,
+        proof,
+        expected,
+    )
+}
+
+pub fn check_hol_proof_with_inductives(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    inductives: &InductiveSignature,
+    term_context: &TermContext,
+    proof_context: &HolProofContext,
+    proof: &HolKernelProof,
+    expected: &CoreTerm,
+) -> Result<(), ProofError> {
+    check_hol_proof_internal(
+        types,
+        constants,
+        Some(inductives),
+        term_context,
+        proof_context,
+        proof,
+        expected,
+    )
+}
+
+fn check_hol_proof_internal(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    inductives: Option<&InductiveSignature>,
+    term_context: &TermContext,
+    proof_context: &HolProofContext,
+    proof: &HolKernelProof,
+    expected: &CoreTerm,
+) -> Result<(), ProofError> {
     expect_proposition(types, constants, term_context, expected, "proof target")?;
-    let actual = infer_proof(types, constants, term_context, proof_context, &proof.0)?;
+    let actual = infer_proof(
+        types,
+        constants,
+        inductives,
+        term_context,
+        proof_context,
+        &proof.0,
+    )?;
     if proposition_equal(types, constants, term_context, &actual, expected)? {
         Ok(())
     } else {
@@ -184,6 +246,7 @@ pub fn check_hol_proof(
 fn infer_proof(
     types: &TypeSignature,
     constants: &TermSignature,
+    inductives: Option<&InductiveSignature>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -198,6 +261,7 @@ fn infer_proof(
             check_draft(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_false,
@@ -213,12 +277,32 @@ fn infer_proof(
             Ok(target.clone())
         }
         HolDraftProof::AndIntro(left, right) => Ok(CoreTerm::and(
-            infer_proof(types, constants, term_context, proof_context, left)?,
-            infer_proof(types, constants, term_context, proof_context, right)?,
+            infer_proof(
+                types,
+                constants,
+                inductives,
+                term_context,
+                proof_context,
+                left,
+            )?,
+            infer_proof(
+                types,
+                constants,
+                inductives,
+                term_context,
+                proof_context,
+                right,
+            )?,
         )),
         HolDraftProof::AndElimLeft(proof_and) => {
-            let proposition =
-                normalized_proof_formula(types, constants, term_context, proof_context, proof_and)?;
+            let proposition = normalized_proof_formula(
+                types,
+                constants,
+                inductives,
+                term_context,
+                proof_context,
+                proof_and,
+            )?;
             let CoreTerm::And(left, _) = proposition else {
                 return Err(ProofError::new(
                     "and-left elimination expects a conjunction",
@@ -227,8 +311,14 @@ fn infer_proof(
             Ok(*left)
         }
         HolDraftProof::AndElimRight(proof_and) => {
-            let proposition =
-                normalized_proof_formula(types, constants, term_context, proof_context, proof_and)?;
+            let proposition = normalized_proof_formula(
+                types,
+                constants,
+                inductives,
+                term_context,
+                proof_context,
+                proof_and,
+            )?;
             let CoreTerm::And(_, right) = proposition else {
                 return Err(ProofError::new(
                     "and-right elimination expects a conjunction",
@@ -239,7 +329,14 @@ fn infer_proof(
         HolDraftProof::OrIntroLeft { proof_left, right } => {
             expect_proposition(types, constants, term_context, right, "right disjunct")?;
             Ok(CoreTerm::or(
-                infer_proof(types, constants, term_context, proof_context, proof_left)?,
+                infer_proof(
+                    types,
+                    constants,
+                    inductives,
+                    term_context,
+                    proof_context,
+                    proof_left,
+                )?,
                 right.clone(),
             ))
         }
@@ -247,7 +344,14 @@ fn infer_proof(
             expect_proposition(types, constants, term_context, left, "left disjunct")?;
             Ok(CoreTerm::or(
                 left.clone(),
-                infer_proof(types, constants, term_context, proof_context, proof_right)?,
+                infer_proof(
+                    types,
+                    constants,
+                    inductives,
+                    term_context,
+                    proof_context,
+                    proof_right,
+                )?,
             ))
         }
         HolDraftProof::OrElim {
@@ -263,8 +367,14 @@ fn infer_proof(
                 target,
                 "or-elimination target",
             )?;
-            let proposition =
-                normalized_proof_formula(types, constants, term_context, proof_context, proof_or)?;
+            let proposition = normalized_proof_formula(
+                types,
+                constants,
+                inductives,
+                term_context,
+                proof_context,
+                proof_or,
+            )?;
             let CoreTerm::Or(left, right) = proposition else {
                 return Err(ProofError::new("or elimination expects a disjunction"));
             };
@@ -279,6 +389,7 @@ fn infer_proof(
             check_draft(
                 types,
                 constants,
+                inductives,
                 term_context,
                 &left_context,
                 left_case,
@@ -287,6 +398,7 @@ fn infer_proof(
             check_draft(
                 types,
                 constants,
+                inductives,
                 term_context,
                 &right_context,
                 right_case,
@@ -301,7 +413,14 @@ fn infer_proof(
                 term_context,
                 premise.clone(),
             )?;
-            let conclusion = infer_proof(types, constants, term_context, &body_context, body)?;
+            let conclusion = infer_proof(
+                types,
+                constants,
+                inductives,
+                term_context,
+                &body_context,
+                body,
+            )?;
             Ok(CoreTerm::implies(premise.clone(), conclusion))
         }
         HolDraftProof::ImpElim {
@@ -311,6 +430,7 @@ fn infer_proof(
             let proposition = normalized_proof_formula(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_implication,
@@ -323,6 +443,7 @@ fn infer_proof(
             check_draft(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_argument,
@@ -342,6 +463,7 @@ fn infer_proof(
             let equality = normalized_proof_formula(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -367,6 +489,7 @@ fn infer_proof(
             check_draft(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_left,
@@ -386,6 +509,7 @@ fn infer_proof(
             let proposition = infer_proof(
                 types,
                 constants,
+                inductives,
                 &body_term_context,
                 &body_proof_context,
                 body,
@@ -399,6 +523,7 @@ fn infer_proof(
             let proposition = normalized_proof_formula(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_forall,
@@ -436,6 +561,7 @@ fn infer_proof(
             check_draft(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_body,
@@ -458,6 +584,7 @@ fn infer_proof(
             let proposition = normalized_proof_formula(
                 types,
                 constants,
+                inductives,
                 term_context,
                 proof_context,
                 proof_exists,
@@ -482,12 +609,121 @@ fn infer_proof(
             check_draft(
                 types,
                 constants,
+                inductives,
                 &body_term_context,
                 &body_proof_context,
                 body,
                 &shifted_target,
             )?;
             Ok(target.clone())
+        }
+        HolDraftProof::Induction {
+            datatype,
+            type_arguments,
+            motive,
+            scrutinee,
+            cases,
+        } => {
+            let inductive_signature = inductives.ok_or_else(|| {
+                ProofError::new(
+                    "induction proof requires a checked inductive signature at the kernel boundary",
+                )
+            })?;
+            let declaration = inductive_signature.declaration(*datatype).ok_or_else(|| {
+                ProofError::new(format!(
+                    "type constructor `{}` is not a checked inductive datatype",
+                    datatype.0
+                ))
+            })?;
+            let datatype_type = CoreType::constructor(*datatype, type_arguments.clone());
+            types.validate(&datatype_type)?;
+            let actual_scrutinee = infer_type(types, constants, term_context, scrutinee)?;
+            if actual_scrutinee != datatype_type {
+                return Err(ProofError::new(format!(
+                    "induction scrutinee has type `{actual_scrutinee:?}`, but expected `{datatype_type:?}`"
+                )));
+            }
+            let actual_motive = infer_type(types, constants, term_context, motive)?;
+            let expected_motive = CoreType::arrow(datatype_type, CoreType::Prop);
+            if actual_motive != expected_motive {
+                return Err(ProofError::new(format!(
+                    "induction motive has type `{actual_motive:?}`, but expected `{expected_motive:?}`"
+                )));
+            }
+            if cases.len() != declaration.constructors.len() {
+                return Err(ProofError::new(format!(
+                    "induction over `{}` needs {} case(s), but got {}",
+                    declaration.name,
+                    declaration.constructors.len(),
+                    cases.len()
+                )));
+            }
+
+            for (case, constructor) in cases.iter().zip(&declaration.constructors) {
+                let instantiated = inductive_signature.instantiate_constructor(
+                    types,
+                    constructor.constant,
+                    type_arguments,
+                )?;
+                let mut case_term_context = term_context.clone();
+                for field_type in instantiated.field_types.iter().rev() {
+                    case_term_context = case_term_context.with_bound(field_type.clone());
+                }
+
+                let mut case_proof_context = proof_context.clone();
+                let mut shifted_motive = motive.clone();
+                for _ in &instantiated.field_types {
+                    case_proof_context = case_proof_context.under_term_binder()?;
+                    shifted_motive = shift_under_new_binder(&shifted_motive)?;
+                }
+
+                let mut constructor_term =
+                    CoreTerm::instantiate_constant(constructor.constant, type_arguments.clone());
+                for field_index in 0..instantiated.field_types.len() {
+                    constructor_term =
+                        CoreTerm::apply(constructor_term, CoreTerm::Bound(field_index as u32));
+                }
+                let case_target = normalize(
+                    types,
+                    constants,
+                    &case_term_context,
+                    &CoreTerm::apply(shifted_motive.clone(), constructor_term),
+                )?;
+
+                for recursive_field in instantiated.recursive_fields.iter().rev() {
+                    let induction_hypothesis = normalize(
+                        types,
+                        constants,
+                        &case_term_context,
+                        &CoreTerm::apply(
+                            shifted_motive.clone(),
+                            CoreTerm::Bound(*recursive_field as u32),
+                        ),
+                    )?;
+                    case_proof_context = case_proof_context.with_assumption(
+                        types,
+                        constants,
+                        &case_term_context,
+                        induction_hypothesis,
+                    )?;
+                }
+                check_draft(
+                    types,
+                    constants,
+                    inductives,
+                    &case_term_context,
+                    &case_proof_context,
+                    case,
+                    &case_target,
+                )?;
+            }
+
+            Ok(normalize(
+                types,
+                constants,
+                term_context,
+                &CoreTerm::apply(motive.clone(), scrutinee.clone()),
+            )?)
         }
         HolDraftProof::Sorry { .. } => Err(ProofError::new(
             "kernel proof unexpectedly contains a `sorry` hole",
@@ -498,12 +734,20 @@ fn infer_proof(
 fn check_draft(
     types: &TypeSignature,
     constants: &TermSignature,
+    inductives: Option<&InductiveSignature>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
     expected: &CoreTerm,
 ) -> Result<(), ProofError> {
-    let actual = infer_proof(types, constants, term_context, proof_context, proof)?;
+    let actual = infer_proof(
+        types,
+        constants,
+        inductives,
+        term_context,
+        proof_context,
+        proof,
+    )?;
     if proposition_equal(types, constants, term_context, &actual, expected)? {
         Ok(())
     } else {
@@ -516,11 +760,19 @@ fn check_draft(
 fn normalized_proof_formula(
     types: &TypeSignature,
     constants: &TermSignature,
+    inductives: Option<&InductiveSignature>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
 ) -> Result<CoreTerm, ProofError> {
-    let proposition = infer_proof(types, constants, term_context, proof_context, proof)?;
+    let proposition = infer_proof(
+        types,
+        constants,
+        inductives,
+        term_context,
+        proof_context,
+        proof,
+    )?;
     Ok(normalize(types, constants, term_context, &proposition)?)
 }
 
@@ -596,13 +848,16 @@ fn proof_has_hole(proof: &HolDraftProof) -> bool {
         HolDraftProof::ExistsElim {
             proof_exists, body, ..
         } => proof_has_hole(proof_exists) || proof_has_hole(body),
+        HolDraftProof::Induction { cases, .. } => cases.iter().any(proof_has_hole),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hol::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
     use crate::hol::terms::ConstantId;
+    use crate::hol::types::TypeParameter;
 
     struct Fixture {
         types: TypeSignature,
@@ -679,6 +934,41 @@ mod tests {
                 expected,
             )
         }
+    }
+
+    fn declare_list(
+        fixture: &mut Fixture,
+    ) -> (
+        InductiveSignature,
+        TypeConstructorId,
+        ConstantId,
+        ConstantId,
+    ) {
+        let parameter = TypeParameter::any(90);
+        let mut inductives = InductiveSignature::new();
+        let list = inductives
+            .declare(
+                &mut fixture.types,
+                &mut fixture.terms,
+                InductiveSpec::new(
+                    "List",
+                    vec![parameter],
+                    vec![
+                        InductiveConstructorSpec::new("nil", Vec::new()),
+                        InductiveConstructorSpec::new(
+                            "cons",
+                            vec![
+                                InductiveFieldType::existing(CoreType::Parameter(parameter)),
+                                InductiveFieldType::Recursive,
+                            ],
+                        ),
+                    ],
+                ),
+            )
+            .expect("List");
+        let nil = fixture.terms.resolve("nil").expect("nil");
+        let cons = fixture.terms.resolve("cons").expect("cons");
+        (inductives, list, nil, cons)
     }
 
     #[test]
@@ -979,5 +1269,145 @@ mod tests {
             )
             .expect_err("empty proof context has no hypothesis zero");
         assert!(error.message.contains("unknown proof hypothesis index `0`"));
+    }
+
+    #[test]
+    fn list_induction_checks_the_constructive_induction_principle() {
+        let mut fixture = Fixture::new();
+        let (inductives, list, nil, cons) = declare_list(&mut fixture);
+        let list_nat = CoreType::constructor(list, vec![fixture.nat.clone()]);
+        let property = fixture
+            .terms
+            .declare(
+                &fixture.types,
+                "ListProperty",
+                CoreType::arrow(list_nat.clone(), CoreType::Prop),
+            )
+            .expect("list property");
+        let property_of = |term| CoreTerm::apply(CoreTerm::Constant(property), term);
+        let nil_nat = CoreTerm::instantiate_constant(nil, vec![fixture.nat.clone()]);
+
+        // forall head, forall tail, P(tail) -> P(cons head tail)
+        let cons_in_step = CoreTerm::apply(
+            CoreTerm::apply(
+                CoreTerm::instantiate_constant(cons, vec![fixture.nat.clone()]),
+                CoreTerm::Bound(1),
+            ),
+            CoreTerm::Bound(0),
+        );
+        let step = CoreTerm::forall(
+            fixture.nat.clone(),
+            CoreTerm::forall(
+                list_nat.clone(),
+                CoreTerm::implies(property_of(CoreTerm::Bound(0)), property_of(cons_in_step)),
+            ),
+        );
+        let expected = CoreTerm::implies(
+            property_of(nil_nat.clone()),
+            CoreTerm::implies(
+                step.clone(),
+                CoreTerm::forall(list_nat.clone(), property_of(CoreTerm::Bound(0))),
+            ),
+        );
+
+        let cons_case = HolDraftProof::ImpElim {
+            proof_implication: Box::new(HolDraftProof::ForallElim {
+                proof_forall: Box::new(HolDraftProof::ForallElim {
+                    // In the cons case: IH is hypothesis 0, the shifted step
+                    // hypothesis is 1, head is term 0, and tail is term 1.
+                    proof_forall: Box::new(HolDraftProof::Hypothesis(1)),
+                    argument: CoreTerm::Bound(0),
+                }),
+                argument: CoreTerm::Bound(1),
+            }),
+            proof_argument: Box::new(HolDraftProof::Hypothesis(0)),
+        };
+        let proof = HolDraftProof::ImpIntro {
+            premise: property_of(nil_nat),
+            body: Box::new(HolDraftProof::ImpIntro {
+                premise: step,
+                body: Box::new(HolDraftProof::ForallIntro {
+                    domain: list_nat,
+                    body: Box::new(HolDraftProof::Induction {
+                        datatype: list,
+                        type_arguments: vec![fixture.nat.clone()],
+                        motive: CoreTerm::Constant(property),
+                        scrutinee: CoreTerm::Bound(0),
+                        cases: vec![HolDraftProof::Hypothesis(1), cons_case],
+                    }),
+                }),
+            }),
+        };
+        let kernel = fixture.kernel(proof);
+        check_hol_proof_with_inductives(
+            &fixture.types,
+            &fixture.terms,
+            &inductives,
+            &TermContext::new(),
+            &HolProofContext::new(),
+            &kernel,
+            &expected,
+        )
+        .expect("constructive list induction principle");
+    }
+
+    #[test]
+    fn induction_requires_all_cases_and_the_inductive_kernel_signature() {
+        let mut fixture = Fixture::new();
+        let (inductives, list, nil, _) = declare_list(&mut fixture);
+        let list_nat = CoreType::constructor(list, vec![fixture.nat.clone()]);
+        let nil_nat = CoreTerm::instantiate_constant(nil, vec![fixture.nat.clone()]);
+        let complete = HolDraftProof::Induction {
+            datatype: list,
+            type_arguments: vec![fixture.nat.clone()],
+            motive: CoreTerm::lambda(list_nat.clone(), CoreTerm::Truth),
+            scrutinee: nil_nat.clone(),
+            cases: vec![HolDraftProof::TruthIntro, HolDraftProof::TruthIntro],
+        };
+        let kernel = fixture.kernel(complete);
+        let missing_signature = check_hol_proof(
+            &fixture.types,
+            &fixture.terms,
+            &TermContext::new(),
+            &HolProofContext::new(),
+            &kernel,
+            &CoreTerm::Truth,
+        )
+        .expect_err("induction metadata is part of the kernel signature");
+        assert!(missing_signature.message.contains("inductive signature"));
+
+        let missing_case = fixture.kernel(HolDraftProof::Induction {
+            datatype: list,
+            type_arguments: vec![fixture.nat.clone()],
+            motive: CoreTerm::lambda(list_nat, CoreTerm::Truth),
+            scrutinee: nil_nat,
+            cases: vec![HolDraftProof::TruthIntro],
+        });
+        let error = check_hol_proof_with_inductives(
+            &fixture.types,
+            &fixture.terms,
+            &inductives,
+            &TermContext::new(),
+            &HolProofContext::new(),
+            &missing_case,
+            &CoreTerm::Truth,
+        )
+        .expect_err("one case cannot cover List");
+        assert!(error.message.contains("needs 2 case"));
+    }
+
+    #[test]
+    fn holes_inside_induction_cases_never_become_kernel_evidence() {
+        let draft = HolDraftProof::Induction {
+            datatype: TypeConstructorId(0),
+            type_arguments: Vec::new(),
+            motive: CoreTerm::lambda(CoreType::Prop, CoreTerm::Truth),
+            scrutinee: CoreTerm::Truth,
+            cases: vec![HolDraftProof::Sorry {
+                target: CoreTerm::Truth,
+            }],
+        };
+        let error = HolKernelProof::try_from(draft).expect_err("induction hole must fail");
+        assert!(error.message.contains("not kernel proofs"));
     }
 }

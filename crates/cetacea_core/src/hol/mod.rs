@@ -20,7 +20,10 @@ pub use inductive::{
     InductiveConstructor, InductiveConstructorSpec, InductiveDeclaration, InductiveError,
     InductiveFieldType, InductiveSignature, InductiveSpec, InstantiatedConstructor,
 };
-pub use proofs::{check_hol_proof, HolDraftProof, HolKernelProof, HolProofContext, ProofError};
+pub use proofs::{
+    check_hol_proof, check_hol_proof_with_inductives, HolDraftProof, HolKernelProof,
+    HolProofContext, ProofError,
+};
 pub use recursion::{
     RecursionError, RecursionSignature, StructuralArmLayout, StructuralArmSpec,
     StructuralDefinition, StructuralDefinitionSpec,
