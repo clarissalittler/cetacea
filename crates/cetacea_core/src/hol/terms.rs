@@ -19,6 +19,24 @@ pub enum CoreTerm {
         function: Box<CoreTerm>,
         argument: Box<CoreTerm>,
     },
+    Truth,
+    Falsity,
+    And(Box<CoreTerm>, Box<CoreTerm>),
+    Or(Box<CoreTerm>, Box<CoreTerm>),
+    Implies(Box<CoreTerm>, Box<CoreTerm>),
+    Equality {
+        ty: CoreType,
+        left: Box<CoreTerm>,
+        right: Box<CoreTerm>,
+    },
+    Forall {
+        domain: CoreType,
+        body: Box<CoreTerm>,
+    },
+    Exists {
+        domain: CoreType,
+        body: Box<CoreTerm>,
+    },
 }
 
 impl CoreTerm {
@@ -33,6 +51,40 @@ impl CoreTerm {
         Self::Apply {
             function: Box::new(function),
             argument: Box::new(argument),
+        }
+    }
+
+    pub fn and(left: Self, right: Self) -> Self {
+        Self::And(Box::new(left), Box::new(right))
+    }
+
+    pub fn or(left: Self, right: Self) -> Self {
+        Self::Or(Box::new(left), Box::new(right))
+    }
+
+    pub fn implies(premise: Self, conclusion: Self) -> Self {
+        Self::Implies(Box::new(premise), Box::new(conclusion))
+    }
+
+    pub fn equality(ty: CoreType, left: Self, right: Self) -> Self {
+        Self::Equality {
+            ty,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    pub fn forall(domain: CoreType, body: Self) -> Self {
+        Self::Forall {
+            domain,
+            body: Box::new(body),
+        }
+    }
+
+    pub fn exists(domain: CoreType, body: Self) -> Self {
+        Self::Exists {
+            domain,
+            body: Box::new(body),
         }
     }
 }
@@ -175,6 +227,46 @@ pub fn infer_type(
             }
             Ok(*codomain)
         }
+        CoreTerm::Truth | CoreTerm::Falsity => Ok(CoreType::Prop),
+        CoreTerm::And(left, right) | CoreTerm::Or(left, right) | CoreTerm::Implies(left, right) => {
+            expect_prop(types, constants, context, left, "left operand")?;
+            expect_prop(types, constants, context, right, "right operand")?;
+            Ok(CoreType::Prop)
+        }
+        CoreTerm::Equality { ty, left, right } => {
+            types.validate(ty)?;
+            let left_type = infer_type(types, constants, context, left)?;
+            let right_type = infer_type(types, constants, context, right)?;
+            if left_type != *ty || right_type != *ty {
+                return Err(TermError::new(format!(
+                    "equality at type `{ty:?}` has operand types `{left_type:?}` and `{right_type:?}`"
+                )));
+            }
+            Ok(CoreType::Prop)
+        }
+        CoreTerm::Forall { domain, body } | CoreTerm::Exists { domain, body } => {
+            types.validate(domain)?;
+            let body_context = context.clone().with_bound(domain.clone());
+            expect_prop(types, constants, &body_context, body, "quantifier body")?;
+            Ok(CoreType::Prop)
+        }
+    }
+}
+
+fn expect_prop(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    context: &TermContext,
+    term: &CoreTerm,
+    role: &str,
+) -> Result<(), TermError> {
+    let actual = infer_type(types, constants, context, term)?;
+    if actual == CoreType::Prop {
+        Ok(())
+    } else {
+        Err(TermError::new(format!(
+            "{role} must have type `Prop`, but has type `{actual:?}`"
+        )))
     }
 }
 
@@ -207,9 +299,39 @@ pub fn definitionally_equal(
     Ok(normalize_typed(left)? == normalize_typed(right)?)
 }
 
+pub fn instantiate_binder(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    context: &TermContext,
+    domain: &CoreType,
+    body: &CoreTerm,
+    argument: &CoreTerm,
+) -> Result<CoreTerm, TermError> {
+    types.validate(domain)?;
+    let argument_type = infer_type(types, constants, context, argument)?;
+    if argument_type != *domain {
+        return Err(TermError::new(format!(
+            "binder argument has type `{argument_type:?}`, but expected `{domain:?}`"
+        )));
+    }
+    let body_context = context.clone().with_bound(domain.clone());
+    expect_prop(types, constants, &body_context, body, "binder body")?;
+    let instantiated = substitute_top(argument, body)?;
+    expect_prop(
+        types,
+        constants,
+        context,
+        &instantiated,
+        "instantiated body",
+    )?;
+    Ok(instantiated)
+}
+
 fn normalize_typed(term: &CoreTerm) -> Result<CoreTerm, TermError> {
     match term {
-        CoreTerm::Bound(_) | CoreTerm::Constant(_) => Ok(term.clone()),
+        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
+            Ok(term.clone())
+        }
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -226,6 +348,29 @@ fn normalize_typed(term: &CoreTerm) -> Result<CoreTerm, TermError> {
                 Ok(CoreTerm::apply(function, argument))
             }
         }
+        CoreTerm::And(left, right) => Ok(CoreTerm::and(
+            normalize_typed(left)?,
+            normalize_typed(right)?,
+        )),
+        CoreTerm::Or(left, right) => Ok(CoreTerm::or(
+            normalize_typed(left)?,
+            normalize_typed(right)?,
+        )),
+        CoreTerm::Implies(premise, conclusion) => Ok(CoreTerm::implies(
+            normalize_typed(premise)?,
+            normalize_typed(conclusion)?,
+        )),
+        CoreTerm::Equality { ty, left, right } => Ok(CoreTerm::equality(
+            ty.clone(),
+            normalize_typed(left)?,
+            normalize_typed(right)?,
+        )),
+        CoreTerm::Forall { domain, body } => {
+            Ok(CoreTerm::forall(domain.clone(), normalize_typed(body)?))
+        }
+        CoreTerm::Exists { domain, body } => {
+            Ok(CoreTerm::exists(domain.clone(), normalize_typed(body)?))
+        }
     }
 }
 
@@ -238,7 +383,9 @@ fn substitute_top(argument: &CoreTerm, body: &CoreTerm) -> Result<CoreTerm, Term
 fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<CoreTerm, TermError> {
     match term {
         CoreTerm::Bound(index) if *index == target => Ok(replacement.clone()),
-        CoreTerm::Bound(_) | CoreTerm::Constant(_) => Ok(term.clone()),
+        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
+            Ok(term.clone())
+        }
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -249,6 +396,31 @@ fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<Co
         CoreTerm::Apply { function, argument } => Ok(CoreTerm::apply(
             substitute(function, target, replacement)?,
             substitute(argument, target, replacement)?,
+        )),
+        CoreTerm::And(left, right) => Ok(CoreTerm::and(
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::Or(left, right) => Ok(CoreTerm::or(
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::Implies(premise, conclusion) => Ok(CoreTerm::implies(
+            substitute(premise, target, replacement)?,
+            substitute(conclusion, target, replacement)?,
+        )),
+        CoreTerm::Equality { ty, left, right } => Ok(CoreTerm::equality(
+            ty.clone(),
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::Forall { domain, body } => Ok(CoreTerm::forall(
+            domain.clone(),
+            substitute(body, target + 1, &shift(replacement, 1, 0)?)?,
+        )),
+        CoreTerm::Exists { domain, body } => Ok(CoreTerm::exists(
+            domain.clone(),
+            substitute(body, target + 1, &shift(replacement, 1, 0)?)?,
         )),
     }
 }
@@ -262,7 +434,9 @@ fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermErro
             }
             Ok(CoreTerm::Bound(shifted as u32))
         }
-        CoreTerm::Bound(_) | CoreTerm::Constant(_) => Ok(term.clone()),
+        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
+            Ok(term.clone())
+        }
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -274,7 +448,36 @@ fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermErro
             shift(function, amount, cutoff)?,
             shift(argument, amount, cutoff)?,
         )),
+        CoreTerm::And(left, right) => Ok(CoreTerm::and(
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::Or(left, right) => Ok(CoreTerm::or(
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::Implies(premise, conclusion) => Ok(CoreTerm::implies(
+            shift(premise, amount, cutoff)?,
+            shift(conclusion, amount, cutoff)?,
+        )),
+        CoreTerm::Equality { ty, left, right } => Ok(CoreTerm::equality(
+            ty.clone(),
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::Forall { domain, body } => Ok(CoreTerm::forall(
+            domain.clone(),
+            shift(body, amount, cutoff + 1)?,
+        )),
+        CoreTerm::Exists { domain, body } => Ok(CoreTerm::exists(
+            domain.clone(),
+            shift(body, amount, cutoff + 1)?,
+        )),
     }
+}
+
+pub(super) fn shift_under_new_binder(term: &CoreTerm) -> Result<CoreTerm, TermError> {
+    shift(term, 1, 0)
 }
 
 #[cfg(test)]
@@ -426,5 +629,94 @@ mod tests {
         let once = normalize(&types, &terms, &TermContext::new(), &nested).expect("normalize once");
         let twice = normalize(&types, &terms, &TermContext::new(), &once).expect("normalize twice");
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn logical_forms_have_type_prop() {
+        let (types, terms, nat, zero) = signatures();
+        let equality = CoreTerm::equality(
+            nat.clone(),
+            CoreTerm::Constant(zero),
+            CoreTerm::Constant(zero),
+        );
+        let proposition = CoreTerm::forall(
+            nat,
+            CoreTerm::implies(equality.clone(), CoreTerm::or(equality, CoreTerm::Falsity)),
+        );
+        assert_eq!(
+            infer_type(&types, &terms, &TermContext::new(), &proposition),
+            Ok(CoreType::Prop)
+        );
+    }
+
+    #[test]
+    fn logical_connectives_reject_data_operands() {
+        let (types, terms, _, zero) = signatures();
+        let malformed = CoreTerm::and(CoreTerm::Truth, CoreTerm::Constant(zero));
+        let error = infer_type(&types, &terms, &TermContext::new(), &malformed)
+            .expect_err("and needs propositions");
+        assert!(error
+            .message
+            .contains("right operand must have type `Prop`"));
+    }
+
+    #[test]
+    fn typed_equality_rejects_mismatched_operands() {
+        let (types, terms, nat, zero) = signatures();
+        let malformed = CoreTerm::equality(
+            nat,
+            CoreTerm::Constant(zero),
+            CoreTerm::lambda(CoreType::Prop, CoreTerm::Bound(0)),
+        );
+        let error = infer_type(&types, &terms, &TermContext::new(), &malformed)
+            .expect_err("equality operands must match its type");
+        assert!(error.message.contains("equality at type"));
+    }
+
+    #[test]
+    fn quantifiers_reject_non_propositional_bodies() {
+        let (types, terms, nat, _) = signatures();
+        let malformed = CoreTerm::forall(nat, CoreTerm::Bound(0));
+        let error = infer_type(&types, &terms, &TermContext::new(), &malformed)
+            .expect_err("forall body must be a proposition");
+        assert!(error
+            .message
+            .contains("quantifier body must have type `Prop`"));
+    }
+
+    #[test]
+    fn binder_instantiation_substitutes_without_capture() {
+        let (types, terms, nat, _) = signatures();
+        // forall x, forall y, x = y; instantiate x with an outer variable z.
+        let context = TermContext::new().with_bound(nat.clone());
+        let body = CoreTerm::forall(
+            nat.clone(),
+            CoreTerm::equality(nat.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0)),
+        );
+        let instantiated =
+            instantiate_binder(&types, &terms, &context, &nat, &body, &CoreTerm::Bound(0))
+                .expect("instantiate outer forall");
+        assert_eq!(
+            instantiated,
+            CoreTerm::forall(
+                nat.clone(),
+                CoreTerm::equality(nat, CoreTerm::Bound(1), CoreTerm::Bound(0))
+            )
+        );
+    }
+
+    #[test]
+    fn binder_instantiation_checks_argument_type() {
+        let (types, terms, nat, _) = signatures();
+        let error = instantiate_binder(
+            &types,
+            &terms,
+            &TermContext::new(),
+            &nat,
+            &CoreTerm::Truth,
+            &CoreTerm::Truth,
+        )
+        .expect_err("Prop is not a Nat witness");
+        assert!(error.message.contains("binder argument has type"));
     }
 }

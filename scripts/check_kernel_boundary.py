@@ -10,7 +10,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CORE_SRC = ROOT / "crates" / "cetacea_core" / "src"
-KERNEL_PATHS = (CORE_SRC / "kernel.rs", CORE_SRC / "kernel")
+KERNEL_PATHS = (
+    CORE_SRC / "kernel.rs",
+    CORE_SRC / "kernel",
+    CORE_SRC / "hol" / "types.rs",
+    CORE_SRC / "hol" / "terms.rs",
+    CORE_SRC / "hol" / "proofs.rs",
+)
 
 # These names belong outside the trusted logical core. Patterns are purposely
 # narrow enough that comments explaining the boundary do not trigger them.
@@ -65,4 +71,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

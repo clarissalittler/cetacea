@@ -315,7 +315,11 @@ Status: `hol::types` now defines resolved simple types, stable constructor and
 parameter IDs, constructor-arity validation, and conservative first-order
 domain classification. `hol::terms` adds resolved constants, de Bruijn binders,
 typed lambdas/application, capture-avoiding beta substitution, and checked
-normalization. Logical constants and proof checking have not begun.
+normalization. Primitive proposition terms and a hole-free constructive proof
+checker now cover connectives, quantifiers over arbitrary simple types, typed
+equality, and equality elimination through explicit predicate motives. The
+checker is still hand-constructed: theorem declarations and surface elaboration
+have not begun.
 
 - Add `CoreType` and typed `CoreTerm` without deleting the old AST.
 - Implement capture-avoiding substitution, alpha-equivalence, beta reduction,
