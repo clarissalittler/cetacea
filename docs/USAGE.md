@@ -24,6 +24,25 @@ Check a file with the CLI:
 cargo run -p cetacea_cli -- examples/imports.ctea
 ```
 
+For assignment or CI checking, `--strict` rejects root-file axioms and any root
+theorem that uses `sorry`, directly or through another theorem. Imported axioms
+remain available, so a course may explicitly choose trusted library principles
+such as set extensionality:
+
+```sh
+cargo run -p cetacea_cli -- --strict homework.ctea
+```
+
+The component policies are also available separately as `--deny-sorry` and
+`--deny-axioms`. Add `--deny-classical` for an assignment that requires
+constructive proofs. `--json` emits declarations, diagnostics, policy settings,
+and policy violations as one machine-readable object; the process exits with
+status 1 for either a checker error or a policy violation:
+
+```sh
+cargo run -p cetacea_cli -- --strict --deny-classical --json homework.ctea
+```
+
 Start the full-screen terminal TUI with:
 
 ```sh
@@ -112,6 +131,10 @@ accepted but flagged as incomplete:
 ```text
 accepted theorem homework_gap (constructive; incomplete: uses sorry)
 ```
+
+This provisional acceptance keeps editor and homework-skeleton workflows
+moving. Use `--deny-sorry` or `--strict` when incompleteness must make the
+command fail.
 
 If a file has only imports, the CLI prints:
 

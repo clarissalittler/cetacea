@@ -58,6 +58,16 @@ cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
 
+Use strict, machine-readable checking for assignments and automation with:
+
+```sh
+cargo run -p cetacea_cli -- --strict --json path/to/submission.ctea
+```
+
+`--strict` rejects root axioms and incomplete root theorems. The granular
+`--deny-sorry`, `--deny-axioms`, and `--deny-classical` policies can be composed
+when a course needs a different trust or logic boundary.
+
 Run the full-screen terminal TUI with:
 
 ```sh
@@ -201,6 +211,8 @@ loaded once.
 - browser UI localStorage autosave, a load-example menu, inline error markers,
   and live re-checking
 - command and tactic-line reporting for checker diagnostics
+- strict course checking with composable `--deny-sorry`, `--deny-axioms`, and
+  `--deny-classical` policies, plus `--json` output for autograders and CI
 
 ## Next Milestones
 

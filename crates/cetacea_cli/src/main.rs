@@ -23,7 +23,9 @@ fn main() {
     };
 
     match config.mode {
-        RunMode::Check => process::exit(run_check(&config.path)),
+        RunMode::Check => {
+            process::exit(run_check(&config.path, config.policy, config.output_format))
+        }
         RunMode::LineInteractive => {
             if let Err(err) = run_interactive(config.path) {
                 eprintln!("error: {err}");
@@ -49,37 +51,171 @@ enum RunMode {
 struct CliConfig {
     mode: RunMode,
     path: PathBuf,
+    policy: CheckPolicy,
+    output_format: OutputFormat,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CheckPolicy {
+    deny_sorry: bool,
+    deny_root_axioms: bool,
+    deny_classical: bool,
+}
+
+impl CheckPolicy {
+    fn strict() -> Self {
+        Self {
+            deny_sorry: true,
+            deny_root_axioms: true,
+            deny_classical: false,
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        !self.deny_sorry && !self.deny_root_axioms && !self.deny_classical
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OutputFormat {
+    #[default]
+    Text,
+    Json,
 }
 
 fn parse_args(args: &[String]) -> Option<CliConfig> {
     let mut mode = RunMode::Check;
     let mut path = None;
+    let mut policy = CheckPolicy::default();
+    let mut output_format = OutputFormat::Text;
     for arg in args {
         match arg.as_str() {
             "-i" | "--interactive" | "--tui" => mode = RunMode::Tui,
             "--line" | "--repl" => mode = RunMode::LineInteractive,
+            "--strict" => {
+                let strict = CheckPolicy::strict();
+                policy.deny_sorry |= strict.deny_sorry;
+                policy.deny_root_axioms |= strict.deny_root_axioms;
+            }
+            "--deny-sorry" => policy.deny_sorry = true,
+            "--deny-axioms" => policy.deny_root_axioms = true,
+            "--deny-classical" => policy.deny_classical = true,
+            "--json" => output_format = OutputFormat::Json,
+            _ if arg.starts_with('-') => return None,
             _ if path.is_none() => path = Some(PathBuf::from(arg)),
             _ => return None,
         }
     }
 
-    Some(CliConfig { mode, path: path? })
+    if mode != RunMode::Check && (!policy.is_empty() || output_format != OutputFormat::Text) {
+        return None;
+    }
+
+    Some(CliConfig {
+        mode,
+        path: path?,
+        policy,
+        output_format,
+    })
 }
 
 fn print_usage() {
-    eprintln!("usage: cetacea [--tui|--interactive|-i|--line] <file.ctea>");
+    eprintln!(
+        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] <file.ctea>"
+    );
 }
 
-fn run_check(path: &Path) -> i32 {
+fn run_check(path: &Path, policy: CheckPolicy, output_format: OutputFormat) -> i32 {
     let result = check_file_at_path(path);
-    print_accepted(&result);
-    if !result.diagnostics.is_empty() {
-        print_diagnostics(&result.diagnostics);
+    let violations = check_policy_violations(&result, policy);
+    match output_format {
+        OutputFormat::Text => {
+            print_accepted(&result);
+            if !result.diagnostics.is_empty() {
+                print_diagnostics(&result.diagnostics);
+            }
+            print_policy_violations(&violations);
+        }
+        OutputFormat::Json => println!("{}", check_result_json(&result, policy, &violations)),
     }
-    if diagnostics_have_errors(&result.diagnostics) {
+    if diagnostics_have_errors(&result.diagnostics) || !violations.is_empty() {
         1
     } else {
         0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PolicyViolationKind {
+    Sorry,
+    RootAxiom,
+    Classical,
+}
+
+impl PolicyViolationKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Sorry => "sorry",
+            Self::RootAxiom => "root_axiom",
+            Self::Classical => "classical",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PolicyViolation {
+    kind: PolicyViolationKind,
+    declaration: String,
+    message: String,
+}
+
+fn check_policy_violations(result: &CheckResult, policy: CheckPolicy) -> Vec<PolicyViolation> {
+    let mut violations = Vec::new();
+    for theorem in result
+        .theorems
+        .iter()
+        .filter(|theorem| !theorem.is_imported)
+    {
+        if policy.deny_sorry && theorem.uses_sorry {
+            violations.push(PolicyViolation {
+                kind: PolicyViolationKind::Sorry,
+                declaration: theorem.name.clone(),
+                message: format!(
+                    "theorem `{}` is incomplete because it uses `sorry` directly or transitively",
+                    theorem.name
+                ),
+            });
+        }
+        if policy.deny_root_axioms && theorem.is_axiom {
+            violations.push(PolicyViolation {
+                kind: PolicyViolationKind::RootAxiom,
+                declaration: theorem.name.clone(),
+                message: format!(
+                    "root axiom `{}` is not allowed by the checking policy",
+                    theorem.name
+                ),
+            });
+        }
+        if policy.deny_classical
+            && !theorem.is_axiom
+            && theorem.mode_used == cetacea_core::LogicMode::Classical
+        {
+            violations.push(PolicyViolation {
+                kind: PolicyViolationKind::Classical,
+                declaration: theorem.name.clone(),
+                message: format!(
+                    "theorem `{}` uses classical reasoning, which is not allowed by the checking policy",
+                    theorem.name
+                ),
+            });
+        }
+    }
+    violations
+}
+
+fn print_policy_violations(violations: &[PolicyViolation]) {
+    for violation in violations {
+        eprintln!("error: policy: {}", violation.message);
     }
 }
 
@@ -1967,6 +2103,132 @@ fn print_accepted(result: &CheckResult) {
     }
 }
 
+fn check_result_json(
+    result: &CheckResult,
+    policy: CheckPolicy,
+    violations: &[PolicyViolation],
+) -> String {
+    let theorems = result
+        .theorems
+        .iter()
+        .map(checked_theorem_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let diagnostics = result
+        .diagnostics
+        .iter()
+        .map(diagnostic_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let violations = violations
+        .iter()
+        .map(policy_violation_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let ok = !diagnostics_have_errors(&result.diagnostics) && violations.is_empty();
+    format!(
+        r#"{{"ok":{ok},"policy":{{"deny_sorry":{},"deny_root_axioms":{},"deny_classical":{}}},"theorems":[{theorems}],"diagnostics":[{diagnostics}],"policy_violations":[{violations}]}}"#,
+        policy.deny_sorry, policy.deny_root_axioms, policy.deny_classical
+    )
+}
+
+fn checked_theorem_json(theorem: &CheckedTheorem) -> String {
+    let axiom_deps = theorem
+        .axiom_deps
+        .iter()
+        .map(|name| json_string(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"name":{},"statement":{},"mode":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}]}}"#,
+        json_string(&theorem.name),
+        json_string(&theorem.statement),
+        json_string(&theorem.mode_used.to_string()),
+        theorem.is_axiom,
+        theorem.is_imported,
+        theorem.uses_sorry,
+        axiom_deps,
+    )
+}
+
+fn diagnostic_json(diagnostic: &Diagnostic) -> String {
+    let location = diagnostic
+        .location
+        .as_ref()
+        .map(|location| {
+            format!(
+                r#"{{"path":{},"line":{}}}"#,
+                optional_json_string(location.path.as_deref()),
+                location.line
+            )
+        })
+        .unwrap_or_else(|| "null".to_string());
+    let span = diagnostic
+        .span
+        .as_ref()
+        .map(|span| format!(r#"{{"start":{},"end":{}}}"#, span.start, span.end))
+        .unwrap_or_else(|| "null".to_string());
+    let notes = diagnostic
+        .notes
+        .iter()
+        .map(|note| json_string(note))
+        .collect::<Vec<_>>()
+        .join(",");
+    let suggestions = diagnostic
+        .suggestions
+        .iter()
+        .map(|suggestion| {
+            format!(
+                r#"{{"title":{},"detail":{},"example":{}}}"#,
+                json_string(&suggestion.title),
+                json_string(&suggestion.detail),
+                optional_json_string(suggestion.example.as_deref()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"severity":{},"message":{},"location":{},"span":{},"notes":[{}],"suggestions":[{}]}}"#,
+        json_string(diagnostic_label(diagnostic)),
+        json_string(&diagnostic.message),
+        location,
+        span,
+        notes,
+        suggestions,
+    )
+}
+
+fn policy_violation_json(violation: &PolicyViolation) -> String {
+    format!(
+        r#"{{"kind":{},"declaration":{},"message":{}}}"#,
+        json_string(violation.kind.label()),
+        json_string(&violation.declaration),
+        json_string(&violation.message),
+    )
+}
+
+fn optional_json_string(value: Option<&str>) -> String {
+    value.map(json_string).unwrap_or_else(|| "null".to_string())
+}
+
+fn json_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch.is_control() => out.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn theorem_display_label(theorem: &CheckedTheorem) -> String {
     if theorem.is_axiom {
         "trusted".to_string()
@@ -2018,4 +2280,140 @@ fn indent_block(text: &str, prefix: &str) -> String {
         .map(|line| format!("{prefix}{line}"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_args_accepts_strict_json_policy_flags() {
+        let config = parse_args(&args(&[
+            "--strict",
+            "--deny-classical",
+            "--json",
+            "submission.ctea",
+        ]))
+        .expect("arguments should parse");
+        assert_eq!(config.mode, RunMode::Check);
+        assert_eq!(config.path, PathBuf::from("submission.ctea"));
+        assert_eq!(config.output_format, OutputFormat::Json);
+        assert_eq!(
+            config.policy,
+            CheckPolicy {
+                deny_sorry: true,
+                deny_root_axioms: true,
+                deny_classical: true,
+            }
+        );
+        let reversed = parse_args(&args(&["--deny-classical", "--strict", "submission.ctea"]))
+            .expect("policy flags should compose in any order");
+        assert_eq!(reversed.policy, config.policy);
+    }
+
+    #[test]
+    fn parse_args_rejects_check_policy_in_interactive_modes() {
+        assert!(parse_args(&args(&["--tui", "--strict", "submission.ctea"])).is_none());
+        assert!(parse_args(&args(&["--line", "--json", "submission.ctea"])).is_none());
+    }
+
+    #[test]
+    fn strict_policy_rejects_root_axioms_and_transitive_sorry() {
+        let result = cetacea_core::check_file(
+            r#"
+mode constructive
+
+axiom trusted : True
+
+theorem incomplete : True := by
+  sorry
+
+theorem depends_on_incomplete : True := by
+  exact incomplete
+"#,
+        );
+        assert!(!diagnostics_have_errors(&result.diagnostics));
+        let violations = check_policy_violations(&result, CheckPolicy::strict());
+        assert_eq!(violations.len(), 3);
+        assert_eq!(
+            violations
+                .iter()
+                .filter(|violation| violation.kind == PolicyViolationKind::Sorry)
+                .count(),
+            2
+        );
+        assert!(violations
+            .iter()
+            .any(|violation| violation.kind == PolicyViolationKind::RootAxiom));
+    }
+
+    #[test]
+    fn deny_classical_rejects_only_classical_root_theorems() {
+        let result = cetacea_core::check_file(
+            r#"
+mode classical
+
+theorem constructive_id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem excluded_middle (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+"#,
+        );
+        assert!(!diagnostics_have_errors(&result.diagnostics));
+        let violations = check_policy_violations(
+            &result,
+            CheckPolicy {
+                deny_classical: true,
+                ..CheckPolicy::default()
+            },
+        );
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].declaration, "excluded_middle");
+        assert_eq!(violations[0].kind, PolicyViolationKind::Classical);
+    }
+
+    #[test]
+    fn strict_policy_ignores_unused_imported_axioms() {
+        let result = CheckResult {
+            theorems: vec![CheckedTheorem {
+                name: "set.set_ext".to_string(),
+                statement: "True".to_string(),
+                mode_used: cetacea_core::LogicMode::Constructive,
+                is_axiom: true,
+                is_imported: true,
+                uses_sorry: false,
+                axiom_deps: vec!["set.set_ext".to_string()],
+            }],
+            diagnostics: Vec::new(),
+        };
+        assert!(check_policy_violations(&result, CheckPolicy::strict()).is_empty());
+    }
+
+    #[test]
+    fn json_output_includes_policy_violations_and_escapes_strings() {
+        let result = cetacea_core::check_file(
+            r#"
+mode constructive
+theorem unfinished : True := by
+  sorry
+"#,
+        );
+        let policy = CheckPolicy::strict();
+        let violations = check_policy_violations(&result, policy);
+        let json = check_result_json(&result, policy, &violations);
+        assert!(json.contains(r#""ok":false"#));
+        assert!(json.contains(r#""kind":"sorry""#));
+        assert!(json.contains(r#""declaration":"unfinished""#));
+        assert_eq!(json_string("a\"b\\c\n"), r#""a\"b\\c\n""#);
+    }
 }

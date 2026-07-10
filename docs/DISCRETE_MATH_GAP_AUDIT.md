@@ -43,9 +43,14 @@ constraints. Regression tests cover disjointness without a discriminator,
 multi-argument injectivity, binder shadowing, and suppression of the old
 one-element constructor countermodel.
 
+Strict and machine-readable course checking is also implemented: `--strict`
+rejects root axioms and direct or transitive `sorry`, the component policies
+may be selected separately, `--deny-classical` enforces constructive work, and
+`--json` reports declarations, diagnostics, policy settings, and violations.
+
 Still outstanding in Phase 0 are separating `Sorry` from kernel-valid proofs,
-strict and machine-readable course checking, executable documentation excerpts,
-and further isolation of the trusted kernel boundary.
+executable documentation excerpts, and further isolation of the trusted kernel
+boundary.
 
 ## Evidence reviewed
 
