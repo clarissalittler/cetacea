@@ -758,6 +758,7 @@ fn theorem_ref(theorem: TheoremId, arguments: &[CoreType]) -> HolDraftProof {
     HolDraftProof::TheoremRef {
         theorem,
         type_arguments: arguments.to_vec(),
+        term_arguments: Vec::new(),
     }
 }
 

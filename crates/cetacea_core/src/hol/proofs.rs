@@ -16,6 +16,7 @@ pub enum HolDraftProof {
     TheoremRef {
         theorem: TheoremId,
         type_arguments: Vec<CoreType>,
+        term_arguments: Vec<CoreTerm>,
     },
     TruthIntro,
     FalseElim {
@@ -367,13 +368,21 @@ fn infer_proof(
         HolDraftProof::TheoremRef {
             theorem,
             type_arguments,
+            term_arguments,
         } => {
             let theorem_signature = theorems.ok_or_else(|| {
                 ProofError::new(
                     "theorem reference requires a checked theorem signature at the kernel boundary",
                 )
             })?;
-            Ok(theorem_signature.instantiate_statement(types, *theorem, type_arguments)?)
+            Ok(theorem_signature.instantiate_statement(
+                types,
+                constants,
+                term_context,
+                *theorem,
+                type_arguments,
+                term_arguments,
+            )?)
         }
         HolDraftProof::TruthIntro => Ok(CoreTerm::Truth),
         HolDraftProof::FalseElim {
@@ -1313,9 +1322,12 @@ fn collect_proof_constant_dependencies(
         dependencies.extend(term_constant_dependencies(term));
     };
     match proof {
-        HolDraftProof::Hypothesis(_)
-        | HolDraftProof::TheoremRef { .. }
-        | HolDraftProof::TruthIntro => {}
+        HolDraftProof::Hypothesis(_) | HolDraftProof::TruthIntro => {}
+        HolDraftProof::TheoremRef { term_arguments, .. } => {
+            for argument in term_arguments {
+                add_term(argument);
+            }
+        }
         HolDraftProof::FalseElim {
             proof_false,
             target,
@@ -1435,9 +1447,16 @@ fn validate_draft_proof_type_scheme(
     };
     match proof {
         HolDraftProof::Hypothesis(_) | HolDraftProof::TruthIntro => Ok(()),
-        HolDraftProof::TheoremRef { type_arguments, .. } => {
+        HolDraftProof::TheoremRef {
+            type_arguments,
+            term_arguments,
+            ..
+        } => {
             for argument in type_arguments {
                 types.validate_scheme(parameters, argument)?;
+            }
+            for argument in term_arguments {
+                validate_term(argument)?;
             }
             Ok(())
         }

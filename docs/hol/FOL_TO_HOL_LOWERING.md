@@ -38,14 +38,16 @@ Source names and spans remain in the elaborator for diagnostics.
 | Term schema `(x : A)` | Rank-one term parameter of type `A` | Stored in the theorem template context and explicitly instantiated at references. |
 | Predicate schema `(R : A1 -> ... -> Prop)` | Rank-one saturated symbol parameter | Counts as FOL when used only fully applied to first-order arguments; passing, returning, partially applying, or quantifying over it is HOL. |
 
-The H3 theorem signature currently supports only type parameters. H4 therefore
-requires a checked term/symbol-parameter context for theorem templates. A
-template statement and proof are checked with those parameters in scope, and a
-`TheoremRef` carries explicit type and term/symbol arguments. Instantiation must
-substitute capture-avoidantly and recompute the instance statement fragment.
-Encoding legacy proposition and predicate schemas as object-level quantifiers
-would incorrectly make almost the entire propositional and FOL standard library
-HOL, so that shortcut is rejected.
+The first H4a checkpoint now adds the checked term/symbol-parameter context for
+theorem templates. A template statement and proof are checked with those
+parameters in scope, and a `TheoremRef` carries explicit type and term/symbol
+arguments. Instantiation is simultaneous and capture-avoiding, including under
+ambient binders. Saturated predicate-symbol templates retain an FOL receipt;
+partial or value-level uses remain HOL. Surface parameter inference and lowering
+from the legacy `ParamKind` forms still remain. Encoding legacy proposition and
+predicate schemas as object-level quantifiers would incorrectly make almost the
+entire propositional and FOL standard library HOL, so that shortcut remains
+rejected.
 
 ## Declaration lowering
 
@@ -177,9 +179,10 @@ checking.
 
 These are compatibility prerequisites, not optional language expansion:
 
-1. **Rank-one term/symbol theorem schemes.** Required by pervasive `(P : Prop)`,
-   `(x : A)`, and `(R : A -> ... -> Prop)` parameters without falsely
-   classifying the standard Prop/FOL libraries as HOL.
+1. **Rank-one term/symbol theorem schemes.** The checked core template and
+   explicit-reference substrate is implemented. Surface inference/lowering is
+   still required for pervasive `(P : Prop)`, `(x : A)`, and
+   `(R : A -> ... -> Prop)` parameters.
 2. **Checked transparent definitions and delta reduction.** Required by formula
    definitions, term definitions, `unfold`, `simp`, and definitional `Convert`.
 3. **Legacy first-order sets.** Add the `Set A` wrapper and audited computation

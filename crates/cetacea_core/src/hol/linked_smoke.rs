@@ -86,26 +86,22 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         HolDraftProof::TheoremRef {
             theorem: induction_source,
             type_arguments: Vec::new(),
+            term_arguments: Vec::new(),
         },
     )?;
 
     let theorem_parameter = TypeParameter::any(501);
     let identity = elaborator
-        .declare_theorem(
+        .declare_theorem_with_parameters(
             "identity",
             vec![theorem_parameter],
-            CoreTerm::forall(
+            vec![CoreType::Parameter(theorem_parameter)],
+            CoreTerm::equality(
                 CoreType::Parameter(theorem_parameter),
-                CoreTerm::equality(
-                    CoreType::Parameter(theorem_parameter),
-                    CoreTerm::Bound(0),
-                    CoreTerm::Bound(0),
-                ),
+                CoreTerm::Bound(0),
+                CoreTerm::Bound(0),
             ),
-            HolDraftProof::ForallIntro {
-                domain: CoreType::Parameter(theorem_parameter),
-                body: Box::new(HolDraftProof::EqualityRefl(CoreTerm::Bound(0))),
-            },
+            HolDraftProof::EqualityRefl(CoreTerm::Bound(0)),
         )?
         .0;
     let (_, polymorphic) = elaborator.declare_theorem(
@@ -116,12 +112,10 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
             CoreTerm::Constant(zero),
             CoreTerm::Constant(zero),
         ),
-        HolDraftProof::ForallElim {
-            proof_forall: Box::new(HolDraftProof::TheoremRef {
-                theorem: identity,
-                type_arguments: vec![nat],
-            }),
-            argument: CoreTerm::Constant(zero),
+        HolDraftProof::TheoremRef {
+            theorem: identity,
+            type_arguments: vec![nat],
+            term_arguments: vec![CoreTerm::Constant(zero)],
         },
     )?;
 

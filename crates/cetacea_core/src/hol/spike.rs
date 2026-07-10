@@ -263,14 +263,29 @@ impl SpikeElaborator {
         statement: CoreTerm,
         draft: HolDraftProof,
     ) -> Result<(TheoremId, DeclarationReceipt), SpikeError> {
+        self.declare_theorem_with_parameters(name, type_parameters, Vec::new(), statement, draft)
+    }
+
+    /// Check, store, and receipt a theorem template with explicit rank-one
+    /// term/symbol parameters. Parameters are in declaration order; the last
+    /// parameter is de Bruijn index zero in the open statement and evidence.
+    pub fn declare_theorem_with_parameters(
+        &mut self,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        term_parameters: Vec<CoreType>,
+        statement: CoreTerm,
+        draft: HolDraftProof,
+    ) -> Result<(TheoremId, DeclarationReceipt), SpikeError> {
         let proof = HolKernelProof::try_from(draft)?;
         let mut staged_theorems = self.theorems.clone();
-        let theorem = staged_theorems.check_and_declare(
+        let theorem = staged_theorems.check_and_declare_with_parameters(
             &self.types,
             &self.constants,
             &self.inductives,
             name,
             type_parameters,
+            term_parameters.clone(),
             statement.clone(),
             proof,
         )?;
@@ -298,7 +313,16 @@ impl SpikeElaborator {
                 .iter()
                 .filter_map(|constant| self.definition_receipts.get(constant).cloned()),
         );
-        let fragment = self.classify(&statement)?;
+        let term_context = term_parameters
+            .into_iter()
+            .fold(TermContext::new(), TermContext::with_bound);
+        let fragment = classify_statement(
+            &self.types,
+            &self.constants,
+            &term_context,
+            &self.fragments,
+            &statement,
+        )?;
         let receipt_id = DeclarationId(self.next_receipt_id);
         let next_receipt_id = self
             .next_receipt_id
@@ -470,6 +494,7 @@ mod tests {
                 HolDraftProof::TheoremRef {
                     theorem: inductive_source,
                     type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
                 },
             )
             .expect("stored facade theorem");
@@ -573,6 +598,7 @@ mod tests {
                 HolDraftProof::TheoremRef {
                     theorem: base,
                     type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
                 },
             )
             .expect("middle theorem");
@@ -584,6 +610,7 @@ mod tests {
                 HolDraftProof::TheoremRef {
                     theorem: middle,
                     type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
                 },
             )
             .expect("leaf theorem");
@@ -599,6 +626,62 @@ mod tests {
         assert_eq!(
             leaf_receipt.proof().transitive_dependencies(),
             &std::collections::BTreeSet::from([base_receipt.id(), middle_receipt.id()])
+        );
+    }
+
+    #[test]
+    fn saturated_rank_one_symbol_templates_remain_first_order() {
+        let mut elaborator = SpikeElaborator::new();
+        let nat_id = elaborator.declare_base_type("Nat", true).expect("Nat");
+        let nat = CoreType::constructor(nat_id, Vec::new());
+        let zero = elaborator
+            .declare_constant("zero", nat.clone())
+            .expect("zero");
+        let predicate_type = CoreType::arrow(nat.clone(), CoreType::Prop);
+        let predicate = elaborator
+            .declare_constant("Even", predicate_type.clone())
+            .expect("Even");
+
+        // Parameters are [P, x], hence x is Bound(0) and P is Bound(1).
+        let atom = CoreTerm::apply(CoreTerm::Bound(1), CoreTerm::Bound(0));
+        let (template, template_receipt) = elaborator
+            .declare_theorem_with_parameters(
+                "predicate_identity",
+                Vec::new(),
+                vec![predicate_type, nat.clone()],
+                CoreTerm::implies(atom.clone(), atom.clone()),
+                HolDraftProof::ImpIntro {
+                    premise: atom,
+                    body: Box::new(HolDraftProof::Hypothesis(0)),
+                },
+            )
+            .expect("checked predicate-symbol template");
+        assert_eq!(
+            template_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+
+        let concrete_atom =
+            CoreTerm::apply(CoreTerm::Constant(predicate), CoreTerm::Constant(zero));
+        let (_, instance_receipt) = elaborator
+            .declare_theorem(
+                "even_zero_identity",
+                Vec::new(),
+                CoreTerm::implies(concrete_atom.clone(), concrete_atom),
+                HolDraftProof::TheoremRef {
+                    theorem: template,
+                    type_arguments: Vec::new(),
+                    term_arguments: vec![CoreTerm::Constant(predicate), CoreTerm::Constant(zero)],
+                },
+            )
+            .expect("first-order template instance");
+        assert_eq!(
+            instance_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+        assert_eq!(
+            instance_receipt.proof().direct_dependencies(),
+            &std::collections::BTreeSet::from([template_receipt.id()])
         );
     }
 }

@@ -9,8 +9,9 @@ use super::proofs::{
     HolProofAudit, HolProofContext, ProofError,
 };
 use super::terms::{
-    instantiate_term_type_scheme, term_constant_dependencies, validate_term_type_scheme,
-    ConstantId, CoreTerm, TermContext, TermError, TermSignature,
+    infer_type, instantiate_term_parameters, instantiate_term_type_scheme,
+    term_constant_dependencies, validate_term_type_scheme, ConstantId, CoreTerm, TermContext,
+    TermError, TermSignature,
 };
 use super::types::{CoreType, TypeError, TypeParameter, TypeSignature};
 
@@ -21,6 +22,7 @@ pub struct TheoremId(pub u32);
 pub struct HolTheoremDeclaration {
     pub name: String,
     pub type_parameters: Vec<TypeParameter>,
+    pub term_parameters: Vec<CoreType>,
     pub statement: CoreTerm,
     pub direct_dependencies: BTreeSet<TheoremId>,
     pub direct_constant_dependencies: BTreeSet<ConstantId>,
@@ -88,18 +90,52 @@ impl HolTheoremSignature {
     pub fn instantiate_statement(
         &self,
         types: &TypeSignature,
+        constants: &TermSignature,
+        context: &TermContext,
         id: TheoremId,
         type_arguments: &[CoreType],
+        term_arguments: &[CoreTerm],
     ) -> Result<CoreTerm, TheoremError> {
         let declaration = self
             .declaration(id)
             .ok_or_else(|| TheoremError::new(format!("unknown checked theorem id `{}`", id.0)))?;
-        Ok(instantiate_term_type_scheme(
+        if term_arguments.len() != declaration.term_parameters.len() {
+            return Err(TheoremError::new(format!(
+                "checked theorem `{}` expects {} explicit term argument(s), but got {}",
+                declaration.name,
+                declaration.term_parameters.len(),
+                term_arguments.len()
+            )));
+        }
+        let statement = instantiate_term_type_scheme(
             types,
             &declaration.type_parameters,
             &declaration.statement,
             type_arguments,
-        )?)
+        )?;
+        for (parameter, argument) in declaration.term_parameters.iter().zip(term_arguments) {
+            let parameter = types.instantiate_scheme(
+                &declaration.type_parameters,
+                parameter,
+                type_arguments,
+            )?;
+            let actual = infer_type(types, constants, context, argument)?;
+            if actual != parameter {
+                return Err(TheoremError::new(format!(
+                    "checked theorem `{}` term argument has type `{actual:?}`, but expected `{parameter:?}`",
+                    declaration.name
+                )));
+            }
+        }
+        let statement = instantiate_term_parameters(&statement, term_arguments)?;
+        let actual = infer_type(types, constants, context, &statement)?;
+        if actual != CoreType::Prop {
+            return Err(TheoremError::new(format!(
+                "instantiated checked theorem `{}` has type `{actual:?}`, not `Prop`",
+                declaration.name
+            )));
+        }
+        Ok(statement)
     }
 
     pub fn check_and_declare(
@@ -112,17 +148,48 @@ impl HolTheoremSignature {
         statement: CoreTerm,
         proof: HolKernelProof,
     ) -> Result<TheoremId, TheoremError> {
+        self.check_and_declare_with_parameters(
+            types,
+            constants,
+            inductives,
+            name,
+            type_parameters,
+            Vec::new(),
+            statement,
+            proof,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_and_declare_with_parameters(
+        &mut self,
+        types: &TypeSignature,
+        constants: &TermSignature,
+        inductives: &InductiveSignature,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        term_parameters: Vec<CoreType>,
+        statement: CoreTerm,
+        proof: HolKernelProof,
+    ) -> Result<TheoremId, TheoremError> {
         let name = name.into();
         let id = self.reserve_id(&name)?;
         types.validate_scheme(&type_parameters, &CoreType::Prop)?;
+        for parameter in &term_parameters {
+            types.validate_scheme(&type_parameters, parameter)?;
+        }
         validate_term_type_scheme(types, &type_parameters, &statement)?;
         validate_kernel_proof_type_scheme(types, &type_parameters, &proof)?;
+        let term_context = term_parameters
+            .iter()
+            .cloned()
+            .fold(TermContext::new(), TermContext::with_bound);
         let audit = check_hol_proof_with_signatures_audit(
             types,
             constants,
             inductives,
             self,
-            &TermContext::new(),
+            &term_context,
             &HolProofContext::new(),
             &proof,
             &statement,
@@ -135,6 +202,7 @@ impl HolTheoremSignature {
             HolTheoremDeclaration {
                 name,
                 type_parameters,
+                term_parameters,
                 statement,
                 direct_dependencies,
                 direct_constant_dependencies,
@@ -253,6 +321,7 @@ mod tests {
                     proof_forall: Box::new(HolDraftProof::TheoremRef {
                         theorem: identity,
                         type_arguments: vec![fixture.nat.clone()],
+                        term_arguments: Vec::new(),
                     }),
                     argument: CoreTerm::Constant(fixture.zero),
                 }),
@@ -301,6 +370,92 @@ mod tests {
     }
 
     #[test]
+    fn checked_term_templates_instantiate_simultaneously_under_ambient_binders() {
+        let fixture = fixture();
+        let mut theorems = HolTheoremSignature::new();
+        // Declaration order is x, ignored; the nearest template binder is the
+        // last parameter, so x is Bound(1).
+        let first_identity = theorems
+            .check_and_declare_with_parameters(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "first_identity",
+                Vec::new(),
+                vec![fixture.nat.clone(), fixture.nat.clone()],
+                CoreTerm::equality(fixture.nat.clone(), CoreTerm::Bound(1), CoreTerm::Bound(1)),
+                kernel(HolDraftProof::EqualityRefl(CoreTerm::Bound(1))),
+            )
+            .expect("two-parameter theorem template");
+
+        let ambient_statement = CoreTerm::forall(
+            fixture.nat.clone(),
+            CoreTerm::equality(fixture.nat.clone(), CoreTerm::Bound(0), CoreTerm::Bound(0)),
+        );
+        let ambient = theorems
+            .check_and_declare(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "ambient_identity",
+                Vec::new(),
+                ambient_statement,
+                kernel(HolDraftProof::ForallIntro {
+                    domain: fixture.nat.clone(),
+                    body: Box::new(HolDraftProof::TheoremRef {
+                        theorem: first_identity,
+                        type_arguments: Vec::new(),
+                        term_arguments: vec![CoreTerm::Bound(0), CoreTerm::Constant(fixture.zero)],
+                    }),
+                }),
+            )
+            .expect("ambient variable survives simultaneous instantiation");
+        assert_eq!(
+            theorems
+                .declaration(ambient)
+                .expect("stored ambient theorem")
+                .direct_dependencies,
+            BTreeSet::from([first_identity])
+        );
+
+        let missing = theorems
+            .check_and_declare(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "missing_term_argument",
+                Vec::new(),
+                CoreTerm::Truth,
+                kernel(HolDraftProof::TheoremRef {
+                    theorem: first_identity,
+                    type_arguments: Vec::new(),
+                    term_arguments: vec![CoreTerm::Constant(fixture.zero)],
+                }),
+            )
+            .expect_err("term-template arity is explicit");
+        assert!(missing.message.contains("expects 2 explicit term argument"));
+        assert_eq!(theorems.resolve("missing_term_argument"), None);
+
+        let wrong_type = theorems
+            .check_and_declare(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "wrong_term_argument",
+                Vec::new(),
+                CoreTerm::Truth,
+                kernel(HolDraftProof::TheoremRef {
+                    theorem: first_identity,
+                    type_arguments: Vec::new(),
+                    term_arguments: vec![CoreTerm::Truth, CoreTerm::Constant(fixture.zero)],
+                }),
+            )
+            .expect_err("term-template argument types are checked");
+        assert!(wrong_type.message.contains("term argument has type"));
+        assert_eq!(theorems.resolve("wrong_term_argument"), None);
+    }
+
+    #[test]
     fn theorem_declarations_reject_unknown_refs_duplicates_and_free_type_parameters() {
         let fixture = fixture();
         let mut theorems = HolTheoremSignature::new();
@@ -315,6 +470,7 @@ mod tests {
                 kernel(HolDraftProof::TheoremRef {
                     theorem: TheoremId(99),
                     type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
                 }),
             )
             .expect_err("unknown theorem reference must fail");

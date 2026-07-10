@@ -414,7 +414,11 @@ fragment-receipt ideas.
 Status: **bounded H4a substrate authorized.** Implement the prerequisites and
 ordering in the H3.5 exit decision before routing any normal course file to the
 HOL engine. The legacy checker remains authoritative until the exact dual-check
-exit gate passes.
+exit gate passes. The first substrate checkpoint now supports checked rank-one
+term/proposition/predicate-symbol theorem templates, simultaneous
+capture-avoiding reference instantiation, and FOL classification of saturated
+symbol parameters. Missing and ill-typed arguments are rejected
+transactionally; legacy surface parameter inference remains to be connected.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

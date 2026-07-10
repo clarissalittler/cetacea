@@ -1090,6 +1090,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let mut transported_bit_has_card_proof = HolDraftProof::TheoremRef {
         theorem: transport.theorem,
         type_arguments: vec![color_type.clone(), bit_type.clone()],
+        term_arguments: Vec::new(),
     };
     for argument in [CoreTerm::Constant(encode), CoreTerm::Constant(decode)] {
         transported_bit_has_card_proof = HolDraftProof::ForallElim {

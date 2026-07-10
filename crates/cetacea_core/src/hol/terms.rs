@@ -740,6 +740,84 @@ pub(crate) fn instantiate_term_type_scheme(
     Ok(substitute_term_types(term, &substitution))
 }
 
+/// Instantiate the free term-parameter prefix of an open theorem template.
+///
+/// `arguments` are in declaration order, while the last declared parameter is
+/// de Bruijn index zero. Substitution is simultaneous so ambient variables in
+/// one argument cannot be mistaken for a still-uninstantiated template
+/// parameter on a later pass.
+pub(crate) fn instantiate_term_parameters(
+    term: &CoreTerm,
+    arguments: &[CoreTerm],
+) -> Result<CoreTerm, TermError> {
+    instantiate_term_parameters_at_depth(term, arguments, 0)
+}
+
+fn instantiate_term_parameters_at_depth(
+    term: &CoreTerm,
+    arguments: &[CoreTerm],
+    depth: u32,
+) -> Result<CoreTerm, TermError> {
+    match term {
+        CoreTerm::Bound(index) if *index < depth => Ok(CoreTerm::Bound(*index)),
+        CoreTerm::Bound(index) => {
+            let free_index = index.checked_sub(depth).expect("guarded by index >= depth");
+            let free_index = usize::try_from(free_index)
+                .map_err(|_| TermError::new("term parameter index does not fit in memory"))?;
+            let declaration_index =
+                arguments.len().checked_sub(free_index + 1).ok_or_else(|| {
+                    TermError::new(format!(
+                        "open theorem term references undeclared parameter index `{free_index}`"
+                    ))
+                })?;
+            shift(&arguments[declaration_index], depth as i32, 0)
+        }
+        CoreTerm::Constant(id) => Ok(CoreTerm::Constant(*id)),
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } => Ok(CoreTerm::instantiate_constant(*constant, arguments.clone())),
+        CoreTerm::Lambda {
+            parameter_type,
+            body,
+        } => Ok(CoreTerm::lambda(
+            parameter_type.clone(),
+            instantiate_term_parameters_at_depth(body, arguments, depth + 1)?,
+        )),
+        CoreTerm::Apply { function, argument } => Ok(CoreTerm::apply(
+            instantiate_term_parameters_at_depth(function, arguments, depth)?,
+            instantiate_term_parameters_at_depth(argument, arguments, depth)?,
+        )),
+        CoreTerm::Truth => Ok(CoreTerm::Truth),
+        CoreTerm::Falsity => Ok(CoreTerm::Falsity),
+        CoreTerm::And(left, right) => Ok(CoreTerm::and(
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::Or(left, right) => Ok(CoreTerm::or(
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::Implies(premise, conclusion) => Ok(CoreTerm::implies(
+            instantiate_term_parameters_at_depth(premise, arguments, depth)?,
+            instantiate_term_parameters_at_depth(conclusion, arguments, depth)?,
+        )),
+        CoreTerm::Equality { ty, left, right } => Ok(CoreTerm::equality(
+            ty.clone(),
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::Forall { domain, body } => Ok(CoreTerm::forall(
+            domain.clone(),
+            instantiate_term_parameters_at_depth(body, arguments, depth + 1)?,
+        )),
+        CoreTerm::Exists { domain, body } => Ok(CoreTerm::exists(
+            domain.clone(),
+            instantiate_term_parameters_at_depth(body, arguments, depth + 1)?,
+        )),
+    }
+}
+
 pub(crate) fn term_constant_dependencies(term: &CoreTerm) -> BTreeSet<ConstantId> {
     let mut dependencies = BTreeSet::new();
     collect_term_constant_dependencies(term, &mut dependencies);

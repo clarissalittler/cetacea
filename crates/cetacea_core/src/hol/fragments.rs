@@ -244,19 +244,28 @@ fn classify_declared_application(
 ) -> Result<StatementFragment, FragmentError> {
     let mut arguments = Vec::new();
     let head = application_spine(application, &mut arguments);
-    let Some((id, type_arguments)) = declared_head(head) else {
-        // Applying a bound function, predicate variable, or retained lambda is
-        // precisely the higher-order case that saturation rules must expose.
+    let (mut current_type, mut fragment) = if let Some((id, type_arguments)) = declared_head(head) {
+        let fragment = classify_type_arguments(types, metadata, type_arguments)?.combine(
+            if metadata.structurally_recursive_constants.contains(&id) {
+                StatementFragment::FirstOrderInductive
+            } else {
+                StatementFragment::FirstOrder
+            },
+        );
+        (infer_type(types, constants, context, head)?, fragment)
+    } else if matches!(head, CoreTerm::Bound(_)) {
+        // Rank-one theorem symbol parameters behave like declared symbols when
+        // saturated. An enclosing object-level quantifier over an arrow type
+        // still raises the enclosing formula to HOL, and partial application
+        // is detected by the result-type check below.
+        (
+            infer_type(types, constants, context, head)?,
+            StatementFragment::FirstOrder,
+        )
+    } else {
+        // Retained lambdas and other computed function values are higher-order.
         return Ok(StatementFragment::HigherOrder);
     };
-
-    let mut current_type = infer_type(types, constants, context, head)?;
-    let mut fragment = classify_type_arguments(types, metadata, type_arguments)?;
-    fragment = fragment.combine(if metadata.structurally_recursive_constants.contains(&id) {
-        StatementFragment::FirstOrderInductive
-    } else {
-        StatementFragment::FirstOrder
-    });
 
     for argument in arguments {
         let CoreType::Arrow(domain, codomain) = current_type else {
