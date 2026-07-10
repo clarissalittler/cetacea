@@ -109,13 +109,18 @@ pub fn explain_theorem_with_imports(
     imports: &[VirtualFile],
 ) -> ExplanationResult
 pub fn check_proof(
-    env: &Env,
+    signature: &KernelSignature<'_>,
     ctx: &Context,
     proof: &KernelProof,
     expected: &Formula,
     allowed_mode: LogicMode,
 ) -> Result<LogicMode, KernelError>
 ```
+
+`Env::kernel_signature()` creates the opaque, read-only signature view. The
+legacy implementation still adapts that view to the existing environment
+internally, but callers no longer make the full checker environment part of the
+kernel API.
 
 Use `check_file` for in-memory source strings. It can parse import declarations,
 but relative imports are resolved relative to the current working directory
@@ -643,7 +648,12 @@ Example: `rewrite`
 The public kernel boundary is:
 
 ```rust
-pub fn check_proof(..., proof: &KernelProof, ...)
+pub fn check_proof(
+    signature: &KernelSignature<'_>,
+    ...,
+    proof: &KernelProof,
+    ...,
+)
 ```
 
 Node inference is private and only runs after conversion to `KernelProof` has

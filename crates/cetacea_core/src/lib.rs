@@ -3,6 +3,10 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod kernel_api;
+
+pub use kernel_api::KernelSignature;
+
 pub type Name = String;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -5136,12 +5140,13 @@ pub struct CheckedProof {
 }
 
 pub fn check_proof(
-    env: &Env,
+    signature: &KernelSignature<'_>,
     ctx: &Context,
     proof: &KernelProof,
     expected: &Formula,
     allowed_mode: LogicMode,
 ) -> Result<LogicMode, KernelError> {
+    let env = signature.environment();
     check_kernel_proof_node(env, ctx, &proof.0, expected, allowed_mode)
 }
 
@@ -5153,7 +5158,13 @@ fn check_completed_draft(
     allowed_mode: LogicMode,
 ) -> Result<LogicMode, KernelError> {
     let kernel_proof = KernelProof::try_from(proof.clone())?;
-    check_proof(env, ctx, &kernel_proof, expected, allowed_mode)
+    check_proof(
+        &env.kernel_signature(),
+        ctx,
+        &kernel_proof,
+        expected,
+        allowed_mode,
+    )
 }
 
 fn check_kernel_proof_node(
@@ -16749,9 +16760,10 @@ theorem honest (P : Prop) : P -> P := by
 
         let proof = KernelProof::try_from(DraftProof::TrueIntro)
             .expect("a complete proof should cross the kernel boundary");
+        let env = Env::new();
         assert_eq!(
             check_proof(
-                &Env::new(),
+                &env.kernel_signature(),
                 &Context::new(),
                 &proof,
                 &Formula::True,
