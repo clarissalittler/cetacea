@@ -224,6 +224,11 @@ loaded once.
 
 ## Next Milestones
 
+The `hol` branch evaluates whether these milestones should be built over a
+constructive simply typed higher-order core while retaining enforceable Prop and
+FOL teaching fragments. See
+[`docs/HOL_REARCHITECTURE_PLAN.md`](docs/HOL_REARCHITECTURE_PLAN.md).
+
 1. Parameterized (polymorphic) data types, so `List` and `Tree` can be
    declared once for any element type. Deliberately deferred: it requires
    polymorphic function signatures and a type-application form threaded
