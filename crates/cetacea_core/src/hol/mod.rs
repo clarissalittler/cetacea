@@ -8,6 +8,7 @@ pub mod fragments;
 mod h35_cardinality;
 pub mod h3_examples;
 pub mod inductive;
+mod linked_smoke;
 pub mod proofs;
 pub mod recursion;
 pub mod spike;
@@ -28,6 +29,7 @@ pub use inductive::{
     InductiveConstructor, InductiveConstructorSpec, InductiveDeclaration, InductiveError,
     InductiveFieldType, InductiveSignature, InductiveSpec, InstantiatedConstructor,
 };
+pub use linked_smoke::{run_linked_hol_smoke, LinkedHolSmokeReport};
 pub use proofs::{
     check_hol_proof, check_hol_proof_audit, check_hol_proof_with_inductives,
     check_hol_proof_with_inductives_audit, check_hol_proof_with_signatures_audit, HolDraftProof,

@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
+use cetacea_core::hol::run_linked_hol_smoke;
 use cetacea_core::{
     check_file_at_path, check_source_at_path, explain_theorem_at_path,
     explain_theorem_in_source_at_path, goals_at_path, goals_at_source_path, outline,
@@ -13,6 +14,23 @@ use cetacea_core::{
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args == ["--hol-smoke"] {
+        match run_linked_hol_smoke() {
+            Ok(report) => println!(
+                "structural={} facade={} polymorphic={} axioms={} incomplete={}",
+                report.structural_required,
+                report.facade_required,
+                report.polymorphic_required,
+                report.axiom_dependencies,
+                report.incomplete_dependencies,
+            ),
+            Err(error) => {
+                eprintln!("error: HOL smoke failed: {error}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
         print_usage();
         return;
@@ -121,7 +139,7 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
 
 fn print_usage() {
     eprintln!(
-        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] <file.ctea>"
+        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] <file.ctea>\n       cetacea --hol-smoke"
     );
 }
 

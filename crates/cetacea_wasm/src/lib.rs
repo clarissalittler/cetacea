@@ -1,3 +1,4 @@
+use cetacea_core::hol::run_linked_hol_smoke;
 use cetacea_core::{
     check_file_with_imports, explain_theorem_with_imports, goals_at_with_imports, outline,
     run_tactic_with_imports, CheckResult, Diagnostic, DiagnosticSeverity, ExplanationResult,
@@ -28,6 +29,26 @@ pub unsafe extern "C" fn cetacea_free(ptr: *mut u8, len: usize) {
 #[no_mangle]
 pub extern "C" fn cetacea_version() -> *mut u8 {
     response_json(r#"{"version":"0.1.0"}"#.to_string())
+}
+
+/// Runs the bounded constructive-HOL spike through its real kernel path.
+///
+/// This export is intentionally small at the ABI boundary but keeps the HOL
+/// engine reachable in release Wasm artifacts, so H3.5 size and latency
+/// measurements cannot be artifacts of linker dead-code elimination.
+#[no_mangle]
+pub extern "C" fn cetacea_hol_spike_smoke() -> *mut u8 {
+    match run_linked_hol_smoke() {
+        Ok(report) => response_json(format!(
+            r#"{{"ok":true,"structural_required":{},"facade_required":{},"polymorphic_required":{},"axioms":{},"incomplete":{}}}"#,
+            json_string(&report.structural_required.to_string()),
+            json_string(&report.facade_required.to_string()),
+            json_string(&report.polymorphic_required.to_string()),
+            report.axiom_dependencies,
+            report.incomplete_dependencies,
+        )),
+        Err(error) => response_json(error_json(&error.message)),
+    }
 }
 
 /// Checks a Cetacea source string and returns a length-prefixed JSON response.
@@ -443,4 +464,41 @@ fn json_string(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linked_hol_smoke_exercises_kernel_features_without_trust() {
+        let ptr = cetacea_hol_spike_smoke();
+        assert!(!ptr.is_null());
+        let (json, allocation_len) = unsafe {
+            let prefix = std::slice::from_raw_parts(ptr, 4);
+            let payload_len =
+                u32::from_le_bytes(prefix.try_into().expect("four-byte length")) as usize;
+            let payload = std::slice::from_raw_parts(ptr.add(4), payload_len);
+            (
+                std::str::from_utf8(payload)
+                    .expect("smoke JSON is UTF-8")
+                    .to_string(),
+                payload_len + 4,
+            )
+        };
+        unsafe { cetacea_free(ptr, allocation_len) };
+
+        assert!(json.contains(r#""ok":true"#), "{json}");
+        assert!(
+            json.contains(r#""structural_required":"fol+induction""#),
+            "{json}"
+        );
+        assert!(
+            json.contains(r#""facade_required":"fol+induction""#),
+            "{json}"
+        );
+        assert!(json.contains(r#""polymorphic_required":"hol""#), "{json}");
+        assert!(json.contains(r#""axioms":0"#), "{json}");
+        assert!(json.contains(r#""incomplete":0"#), "{json}");
+    }
 }
