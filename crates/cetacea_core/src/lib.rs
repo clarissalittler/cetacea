@@ -3,6 +3,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod hol;
 mod kernel;
 
 pub use kernel::{check_proof, KernelSignature};

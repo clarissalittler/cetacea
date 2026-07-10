@@ -311,6 +311,10 @@ can run per module.
 
 ### Phase H2 — parallel HOL core
 
+Status: `hol::types` now defines resolved simple types, stable constructor and
+parameter IDs, constructor-arity validation, and conservative first-order
+domain classification. Core terms and proof checking have not begun.
+
 - Add `CoreType` and typed `CoreTerm` without deleting the old AST.
 - Implement capture-avoiding substitution, alpha-equivalence, beta reduction,
   type checking, and a fuel-independent normalization strategy for the accepted
