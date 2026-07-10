@@ -7,6 +7,7 @@
 pub mod fragments;
 pub mod inductive;
 pub mod proofs;
+pub mod recursion;
 pub mod terms;
 pub mod types;
 
@@ -20,6 +21,10 @@ pub use inductive::{
     InductiveFieldType, InductiveSignature, InductiveSpec, InstantiatedConstructor,
 };
 pub use proofs::{check_hol_proof, HolDraftProof, HolKernelProof, HolProofContext, ProofError};
+pub use recursion::{
+    RecursionError, RecursionSignature, StructuralArmLayout, StructuralArmSpec,
+    StructuralDefinition, StructuralDefinitionSpec,
+};
 pub use terms::{
     definitionally_equal, infer_type, instantiate_binder, normalize, ConstantId, CoreTerm,
     TermContext, TermError, TermSignature,

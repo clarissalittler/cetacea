@@ -103,7 +103,7 @@ impl std::error::Error for TypeError {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TypeConstructor {
     name: String,
-    arity: usize,
+    parameter_classes: Vec<TypeParameterClass>,
     preserves_first_order: bool,
 }
 
@@ -128,6 +128,19 @@ impl TypeSignature {
         arity: usize,
         preserves_first_order: bool,
     ) -> Result<TypeConstructorId, TypeError> {
+        self.declare_parameterized(
+            name,
+            vec![TypeParameterClass::Any; arity],
+            preserves_first_order,
+        )
+    }
+
+    pub fn declare_parameterized(
+        &mut self,
+        name: impl Into<String>,
+        parameter_classes: Vec<TypeParameterClass>,
+        preserves_first_order: bool,
+    ) -> Result<TypeConstructorId, TypeError> {
         let name = name.into();
         if self.names.contains_key(&name) {
             return Err(TypeError::new(format!(
@@ -139,7 +152,7 @@ impl TypeSignature {
         let id = TypeConstructorId(raw_id);
         self.constructors.push(TypeConstructor {
             name: name.clone(),
-            arity,
+            parameter_classes,
             preserves_first_order,
         });
         self.names.insert(name, id);
@@ -155,16 +168,32 @@ impl TypeSignature {
             CoreType::Prop | CoreType::Parameter(_) => Ok(()),
             CoreType::Constructor { id, arguments } => {
                 let constructor = self.constructor(*id)?;
-                if arguments.len() != constructor.arity {
+                if arguments.len() != constructor.parameter_classes.len() {
                     return Err(TypeError::new(format!(
                         "type constructor `{}` expects {} argument(s), but got {}",
                         constructor.name,
-                        constructor.arity,
+                        constructor.parameter_classes.len(),
                         arguments.len()
                     )));
                 }
                 for argument in arguments {
                     self.validate(argument)?;
+                }
+                for (index, (class, argument)) in constructor
+                    .parameter_classes
+                    .iter()
+                    .zip(arguments)
+                    .enumerate()
+                {
+                    if *class == TypeParameterClass::FirstOrder
+                        && self.first_order_status_validated(argument)?
+                            != FirstOrderStatus::FirstOrder
+                    {
+                        return Err(TypeError::new(format!(
+                            "type argument {index} of constructor `{}` must be first-order, but got `{argument:?}`",
+                            constructor.name
+                        )));
+                    }
                 }
                 Ok(())
             }
@@ -498,5 +527,24 @@ mod tests {
             error.message,
             "type scheme expects 1 type argument(s), but got 0"
         );
+    }
+
+    #[test]
+    fn type_constructor_parameter_classes_are_enforced_at_every_use() {
+        let mut signature = TypeSignature::new();
+        let nat = signature.declare("Nat", 0, true).expect("Nat");
+        let finite = signature
+            .declare_parameterized("Finite", vec![TypeParameterClass::FirstOrder], true)
+            .expect("Finite");
+        let nat = CoreType::constructor(nat, Vec::new());
+        let predicate = CoreType::arrow(nat.clone(), CoreType::Prop);
+        assert_eq!(
+            signature.validate(&CoreType::constructor(finite, vec![nat])),
+            Ok(())
+        );
+        let error = signature
+            .validate(&CoreType::constructor(finite, vec![predicate]))
+            .expect_err("first-order constructor parameter cannot be bypassed");
+        assert!(error.message.contains("must be first-order"));
     }
 }

@@ -196,9 +196,12 @@ impl InductiveSignature {
 
         let mut staged_types = types.clone();
         let mut staged_constants = constants.clone();
-        let type_constructor = staged_types.declare(
+        let type_constructor = staged_types.declare_parameterized(
             spec.name.clone(),
-            spec.type_parameters.len(),
+            spec.type_parameters
+                .iter()
+                .map(|parameter| parameter.class)
+                .collect(),
             preserves_first_order,
         )?;
         if self.by_type.contains_key(&type_constructor) {

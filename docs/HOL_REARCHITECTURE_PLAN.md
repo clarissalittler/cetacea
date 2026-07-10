@@ -344,9 +344,12 @@ Status: the checked declaration substrate now supports transactional,
 parameterized inductive types and explicit polymorphic constructor schemes.
 It derives first-order preservation from constructor fields, records direct
 recursive fields, rejects negative occurrences, and deliberately rejects
-nested recursion pending a later design. Structural recursion, induction proof
-evidence, the small surface elaborator, and the three end-to-end examples remain
-to be built.
+nested recursion pending a later design. Structurally recursive definitions now
+receive only constructor fields and precomputed results for declared recursive
+subdata; constructor reduction is definitional, works for `Prop` results, and
+cannot name the function being defined. Type-constructor parameter classes are
+also enforced at every core type occurrence. Induction proof evidence, the
+small surface elaborator, and the three end-to-end examples remain to be built.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:

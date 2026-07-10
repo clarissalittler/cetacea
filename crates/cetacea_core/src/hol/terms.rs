@@ -135,10 +135,30 @@ struct Constant {
     ty: CoreType,
 }
 
+/// Kernel reduction data installed only after the recursion checker has
+/// validated a definition. These fields are crate-private so surface code
+/// cannot manufacture computation rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StructuralReductionArm {
+    pub constructor: ConstantId,
+    pub field_count: usize,
+    pub recursive_fields: Vec<usize>,
+    /// Binder types nearest-first: fields, recursive results, fixed arguments.
+    pub binder_types: Vec<CoreType>,
+    pub body: CoreTerm,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StructuralReduction {
+    pub fixed_parameter_count: usize,
+    pub arms: Vec<StructuralReductionArm>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TermSignature {
     constants: Vec<Constant>,
     names: HashMap<String, ConstantId>,
+    structural_reductions: HashMap<ConstantId, StructuralReduction>,
 }
 
 impl TermSignature {
@@ -183,6 +203,28 @@ impl TermSignature {
 
     pub fn resolve(&self, name: &str) -> Option<ConstantId> {
         self.names.get(name).copied()
+    }
+
+    pub(crate) fn next_constant_id(&self) -> Result<ConstantId, TermError> {
+        u32::try_from(self.constants.len())
+            .map(ConstantId)
+            .map_err(|_| TermError::new("too many constants"))
+    }
+
+    pub(crate) fn register_structural_reduction(
+        &mut self,
+        id: ConstantId,
+        reduction: StructuralReduction,
+    ) -> Result<(), TermError> {
+        self.constant(id)?;
+        if self.structural_reductions.contains_key(&id) {
+            return Err(TermError::new(format!(
+                "constant `{}` already has a structural reduction",
+                id.0
+            )));
+        }
+        self.structural_reductions.insert(id, reduction);
+        Ok(())
     }
 
     fn constant(&self, id: ConstantId) -> Result<&Constant, TermError> {
@@ -334,7 +376,7 @@ pub fn normalize(
     term: &CoreTerm,
 ) -> Result<CoreTerm, TermError> {
     infer_type(types, constants, context, term)?;
-    normalize_typed(term)
+    normalize_typed(constants, term)
 }
 
 pub fn definitionally_equal(
@@ -349,7 +391,7 @@ pub fn definitionally_equal(
     if left_type != right_type {
         return Ok(false);
     }
-    Ok(normalize_typed(left)? == normalize_typed(right)?)
+    Ok(normalize_typed(constants, left)? == normalize_typed(constants, right)?)
 }
 
 pub fn instantiate_binder(
@@ -380,7 +422,7 @@ pub fn instantiate_binder(
     Ok(instantiated)
 }
 
-fn normalize_typed(term: &CoreTerm) -> Result<CoreTerm, TermError> {
+fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTerm, TermError> {
     match term {
         CoreTerm::Bound(_)
         | CoreTerm::Constant(_)
@@ -392,40 +434,135 @@ fn normalize_typed(term: &CoreTerm) -> Result<CoreTerm, TermError> {
             body,
         } => Ok(CoreTerm::lambda(
             parameter_type.clone(),
-            normalize_typed(body)?,
+            normalize_typed(constants, body)?,
         )),
         CoreTerm::Apply { function, argument } => {
-            let function = normalize_typed(function)?;
-            let argument = normalize_typed(argument)?;
+            let function = normalize_typed(constants, function)?;
+            let argument = normalize_typed(constants, argument)?;
             if let CoreTerm::Lambda { body, .. } = function {
-                normalize_typed(&substitute_top(&argument, &body)?)
+                normalize_typed(constants, &substitute_top(&argument, &body)?)
             } else {
-                Ok(CoreTerm::apply(function, argument))
+                let application = CoreTerm::apply(function, argument);
+                if let Some(reduced) = reduce_structural_application(constants, &application)? {
+                    normalize_typed(constants, &reduced)
+                } else {
+                    Ok(application)
+                }
             }
         }
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
-            normalize_typed(left)?,
-            normalize_typed(right)?,
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
         )),
         CoreTerm::Or(left, right) => Ok(CoreTerm::or(
-            normalize_typed(left)?,
-            normalize_typed(right)?,
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
         )),
         CoreTerm::Implies(premise, conclusion) => Ok(CoreTerm::implies(
-            normalize_typed(premise)?,
-            normalize_typed(conclusion)?,
+            normalize_typed(constants, premise)?,
+            normalize_typed(constants, conclusion)?,
         )),
         CoreTerm::Equality { ty, left, right } => Ok(CoreTerm::equality(
             ty.clone(),
-            normalize_typed(left)?,
-            normalize_typed(right)?,
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
         )),
-        CoreTerm::Forall { domain, body } => {
-            Ok(CoreTerm::forall(domain.clone(), normalize_typed(body)?))
+        CoreTerm::Forall { domain, body } => Ok(CoreTerm::forall(
+            domain.clone(),
+            normalize_typed(constants, body)?,
+        )),
+        CoreTerm::Exists { domain, body } => Ok(CoreTerm::exists(
+            domain.clone(),
+            normalize_typed(constants, body)?,
+        )),
+    }
+}
+
+fn reduce_structural_application(
+    constants: &TermSignature,
+    application: &CoreTerm,
+) -> Result<Option<CoreTerm>, TermError> {
+    let mut arguments = Vec::new();
+    let head = term_application_spine(application, &mut arguments);
+    let Some(definition_id) = declared_constant_id(head) else {
+        return Ok(None);
+    };
+    let Some(definition) = constants.structural_reductions.get(&definition_id) else {
+        return Ok(None);
+    };
+    if arguments.len() != definition.fixed_parameter_count + 1 {
+        return Ok(None);
+    }
+
+    let fixed_arguments = &arguments[..definition.fixed_parameter_count];
+    let scrutinee = arguments[definition.fixed_parameter_count];
+    let mut constructor_arguments = Vec::new();
+    let constructor_head = term_application_spine(scrutinee, &mut constructor_arguments);
+    let Some(constructor_id) = declared_constant_id(constructor_head) else {
+        return Ok(None);
+    };
+    let Some(arm) = definition
+        .arms
+        .iter()
+        .find(|arm| arm.constructor == constructor_id)
+    else {
+        return Ok(None);
+    };
+    if constructor_arguments.len() != arm.field_count {
+        return Ok(None);
+    }
+
+    let mut values = constructor_arguments
+        .iter()
+        .map(|argument| (*argument).clone())
+        .collect::<Vec<_>>();
+    for recursive_field in &arm.recursive_fields {
+        let recursive_argument = constructor_arguments.get(*recursive_field).ok_or_else(|| {
+            TermError::new("checked structural reduction has an invalid recursive field index")
+        })?;
+        let mut recursive_call = head.clone();
+        for fixed_argument in fixed_arguments {
+            recursive_call = CoreTerm::apply(recursive_call, (*fixed_argument).clone());
         }
-        CoreTerm::Exists { domain, body } => {
-            Ok(CoreTerm::exists(domain.clone(), normalize_typed(body)?))
+        recursive_call = CoreTerm::apply(recursive_call, (*recursive_argument).clone());
+        values.push(recursive_call);
+    }
+    values.extend(fixed_arguments.iter().map(|argument| (*argument).clone()));
+
+    if values.len() != arm.binder_types.len() {
+        return Err(TermError::new(
+            "checked structural reduction has inconsistent binder metadata",
+        ));
+    }
+    let mut instantiated = arm.body.clone();
+    for binder_type in &arm.binder_types {
+        instantiated = CoreTerm::lambda(binder_type.clone(), instantiated);
+    }
+    for value in values.iter().rev() {
+        instantiated = CoreTerm::apply(instantiated, value.clone());
+    }
+    Ok(Some(instantiated))
+}
+
+fn term_application_spine<'a>(
+    term: &'a CoreTerm,
+    arguments: &mut Vec<&'a CoreTerm>,
+) -> &'a CoreTerm {
+    match term {
+        CoreTerm::Apply { function, argument } => {
+            let head = term_application_spine(function, arguments);
+            arguments.push(argument);
+            head
         }
+        _ => term,
+    }
+}
+
+fn declared_constant_id(term: &CoreTerm) -> Option<ConstantId> {
+    match term {
+        CoreTerm::Constant(id) => Some(*id),
+        CoreTerm::TypeApplication { constant, .. } => Some(*constant),
+        _ => None,
     }
 }
 
