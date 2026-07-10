@@ -16,7 +16,8 @@ use cetacea_core::{
     explain_theorem_at_path, explain_theorem_in_source_at_path, goals_at_path,
     goals_at_source_path, outline, run_tactic_at_path, CheckResult, CheckedTheorem,
     DeclarationStatus, Diagnostic, DiagnosticSeverity, ExplanationResult, GoalSnapshot,
-    GoalStepResult, HolShadowMismatch, HolShadowReport, HolShadowTheorem, Position, SourceOutline,
+    GoalStepResult, HolShadowMismatch, HolShadowReport, HolShadowStatementClassification,
+    HolShadowTheorem, Position, SourceOutline,
 };
 
 use assignment::{parse_manifest, AssignmentManifest};
@@ -2721,6 +2722,12 @@ fn hol_policy_violation_json(violation: &HolPolicyViolation) -> String {
 }
 
 fn hol_shadow_json(report: &HolShadowReport) -> String {
+    let statement_classifications = report
+        .statement_classifications
+        .iter()
+        .map(hol_shadow_statement_classification_json)
+        .collect::<Vec<_>>()
+        .join(",");
     let theorems = report
         .theorems
         .iter()
@@ -2749,14 +2756,33 @@ fn hol_shadow_json(report: &HolShadowReport) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"matches":{},"attempted_declarations":{},"checked_declarations":{},"imported_files":[{}],"imported_virtual_files":[{}],"theorems":[{}],"mismatches":[{}]}}"#,
+        r#"{{"matches":{},"attempted_declarations":{},"checked_declarations":{},"imported_files":[{}],"imported_virtual_files":[{}],"statement_classifications":[{}],"theorems":[{}],"mismatches":[{}]}}"#,
         report.is_match(),
         report.attempted_declarations,
         report.checked_declarations.len(),
         imported_files,
         imported_virtual_files,
+        statement_classifications,
         theorems,
         mismatches,
+    )
+}
+
+fn hol_shadow_statement_classification_json(
+    classification: &HolShadowStatementClassification,
+) -> String {
+    let source_path = classification.source_path.as_ref().map(|path| {
+        let path = display_diagnostic_path(&path.to_string_lossy());
+        json_string(&path)
+    });
+    format!(
+        r#"{{"name":{},"signature":{},"fragment":{},"line":{},"source_path":{},"is_imported":{}}}"#,
+        json_string(&classification.name),
+        json_string(&classification.signature),
+        json_string(&classification.fragment.to_string()),
+        classification.line,
+        source_path.unwrap_or_else(|| "null".to_string()),
+        classification.is_imported,
     )
 }
 
@@ -3506,6 +3532,7 @@ theorem identity (P : Prop) : P -> P := by
             None,
         );
         assert!(json.contains(r#""hol_shadow":{"matches":true"#));
+        assert!(json.contains(r#""statement_classifications":[{"name":"identity""#));
         assert!(json.contains(r#""required_fragment":"prop""#));
         assert!(json.contains(r#""name":"identity""#));
     }

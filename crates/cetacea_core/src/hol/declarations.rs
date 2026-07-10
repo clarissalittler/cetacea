@@ -28,7 +28,7 @@ use super::terms::{
 };
 use super::theorems::TheoremId;
 use super::types::{CoreType, TypeConstructorId, TypeParameter};
-use super::DeclarationReceipt;
+use super::{DeclarationReceipt, StatementFragment};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompatibilityDeclarationError {
@@ -571,6 +571,21 @@ impl CompatibilityElaborator {
         });
         *self = staged;
         Ok((theorem, receipt))
+    }
+
+    /// Lower and classify a canonical legacy theorem signature without
+    /// declaring it or requiring proof evidence. This is the pre-receipt seam
+    /// used to certify model-search eligibility for failed proofs.
+    pub fn classify_legacy_statement(
+        &self,
+        parameters: &[Param],
+        statement: &Formula,
+    ) -> Result<StatementFragment, CompatibilityDeclarationError> {
+        let lowered = self
+            .lower_definition_parameters(parameters, |lowerer| lowerer.lower_formula(statement))?;
+        Ok(self
+            .core
+            .classify_with_parameters(&lowered.parameter_types, &lowered.body)?)
     }
 
     /// Store a checked theorem template after lowering its legacy parameters

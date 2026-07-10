@@ -1462,6 +1462,20 @@ pub struct HolShadowDeclaration {
     pub is_imported: bool,
 }
 
+/// Least-fragment classification available after statement elaboration but
+/// before proof checking. Unlike a theorem receipt, this also exists for a
+/// theorem whose proof is rejected.
+#[cfg(feature = "hol-shadow")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HolShadowStatementClassification {
+    pub name: Name,
+    pub signature: String,
+    pub fragment: hol::StatementFragment,
+    pub line: usize,
+    pub source_path: Option<PathBuf>,
+    pub is_imported: bool,
+}
+
 /// Receipt comparison for a theorem accepted by both engines.
 #[cfg(feature = "hol-shadow")]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1504,6 +1518,7 @@ pub struct HolShadowReport {
     pub legacy: CheckResult,
     pub attempted_declarations: usize,
     pub checked_declarations: Vec<HolShadowDeclaration>,
+    pub statement_classifications: Vec<HolShadowStatementClassification>,
     pub theorems: Vec<HolShadowTheorem>,
     pub mismatches: Vec<HolShadowMismatch>,
     pub receipt_names: BTreeMap<hol::DeclarationId, Name>,
@@ -1697,6 +1712,7 @@ pub fn check_source_at_path_with_hol_shadow(
                 },
                 attempted_declarations: 0,
                 checked_declarations: Vec::new(),
+                statement_classifications: Vec::new(),
                 theorems: Vec::new(),
                 mismatches: Vec::new(),
                 receipt_names: BTreeMap::new(),
@@ -1746,6 +1762,7 @@ fn unavailable_hol_shadow(
         legacy,
         attempted_declarations: 0,
         checked_declarations: Vec::new(),
+        statement_classifications: Vec::new(),
         theorems: Vec::new(),
         mismatches: vec![HolShadowMismatch {
             declaration: "<compatibility-prelude>".to_string(),
@@ -2248,6 +2265,7 @@ struct HolShadowState {
     elaborator: hol::CompatibilityElaborator,
     attempted_declarations: usize,
     checked_declarations: Vec<HolShadowDeclaration>,
+    statement_classifications: Vec<HolShadowStatementClassification>,
     theorems: Vec<HolShadowTheorem>,
     mismatches: Vec<HolShadowMismatch>,
     receipt_names: HashMap<hol::DeclarationId, Name>,
@@ -2262,6 +2280,7 @@ impl HolShadowState {
             elaborator: hol::CompatibilityElaborator::new()?,
             attempted_declarations: 0,
             checked_declarations: Vec::new(),
+            statement_classifications: Vec::new(),
             theorems: Vec::new(),
             mismatches: Vec::new(),
             receipt_names: HashMap::new(),
@@ -2463,6 +2482,7 @@ impl FileChecker {
             legacy: self.result,
             attempted_declarations: shadow.attempted_declarations,
             checked_declarations: shadow.checked_declarations,
+            statement_classifications: shadow.statement_classifications,
             theorems: shadow.theorems,
             mismatches: shadow.mismatches,
             receipt_names: shadow.receipt_names.into_iter().collect(),
@@ -2611,6 +2631,55 @@ impl FileChecker {
             is_imported: checked.is_imported,
             receipt,
         });
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn countermodel_eligibility(
+        &mut self,
+        name: &str,
+        parameters: &[Param],
+        statement: &Formula,
+        line: usize,
+        source_path: Option<&Path>,
+        is_imported: bool,
+    ) -> CountermodelEligibility {
+        let Some(shadow) = &mut self.hol_shadow else {
+            return CountermodelEligibility::Heuristic;
+        };
+        match shadow
+            .elaborator
+            .classify_legacy_statement(parameters, statement)
+        {
+            Ok(fragment) => {
+                shadow
+                    .statement_classifications
+                    .push(HolShadowStatementClassification {
+                        name: name.to_string(),
+                        signature: canonical_theorem_signature(parameters, statement),
+                        fragment,
+                        line,
+                        source_path: source_path.map(Path::to_path_buf),
+                        is_imported,
+                    });
+                CountermodelEligibility::Certified(fragment)
+            }
+            Err(error) => {
+                let declaration = HolShadowState::location(
+                    name,
+                    HolShadowDeclarationKind::Theorem,
+                    line,
+                    source_path,
+                    is_imported,
+                );
+                shadow.mismatch(
+                    &declaration,
+                    format!(
+                        "could not classify theorem statement for countermodel eligibility: {error}"
+                    ),
+                );
+                CountermodelEligibility::Disabled
+            }
+        }
     }
 
     fn check_source(&mut self, source: &str, base_dir: Option<&Path>) {
@@ -3750,6 +3819,17 @@ impl FileChecker {
                         );
                         continue;
                     }
+                    #[cfg(feature = "hol-shadow")]
+                    let countermodel_eligibility = self.countermodel_eligibility(
+                        &decl.name,
+                        &params,
+                        &statement,
+                        line,
+                        source_path,
+                        is_imported,
+                    );
+                    #[cfg(not(feature = "hol-shadow"))]
+                    let countermodel_eligibility = CountermodelEligibility::Heuristic;
                     let proof_ctx = theorem_ctx
                         .clone()
                         .with_namespace(declaration_namespace(&decl.name));
@@ -3769,48 +3849,45 @@ impl FileChecker {
                                 format!("theorem `{}` failed: {}", decl.name, err.message),
                             )
                             .with_note(format!("target: {target}"));
-                            if let Some(model) = propositional_countermodel(&[], &statement) {
-                                diagnostic = diagnostic.with_note(format!(
-                                    "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
-                                    countermodel_note(&model)
-                                ));
-                            } else if let Some(model) =
-                                arithmetic_countermodel(&[], &statement, &theorem_ctx.term_vars)
-                            {
-                                diagnostic = diagnostic.with_note(format!(
-                                    "the arithmetic statement is false when {}. No proof can close it; check the statement itself.",
-                                    arithmetic_countermodel_note(&model)
-                                ));
-                            } else if let Some(model) =
-                                first_order_countermodel(&self.env, &theorem_ctx, &[], &statement)
-                            {
-                                diagnostic = diagnostic.with_note(format!(
-                                    "the first-order statement is false in {}. No proof can close it; check the statement itself.",
-                                    first_order_countermodel_note(&model)
-                                ));
-                            } else if let Some(model) =
-                                propositional_countermodel(&err.hyps, target)
+                            if let Some(note) = statement_countermodel_note(
+                                &self.env,
+                                &theorem_ctx,
+                                &statement,
+                                countermodel_eligibility,
+                            ) {
+                                diagnostic = diagnostic.with_note(note);
+                            } else if let Some(model) = countermodel_eligibility
+                                .allows_propositional()
+                                .then(|| propositional_countermodel(&err.hyps, target))
+                                .flatten()
                             {
                                 diagnostic = diagnostic.with_note(format!(
                                     "the open goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
                                     countermodel_note(&model)
                                 ));
-                            } else if let Some(model) =
-                                arithmetic_countermodel(&err.hyps, target, &err.terms)
+                            } else if let Some(model) = countermodel_eligibility
+                                .allows_arithmetic()
+                                .then(|| arithmetic_countermodel(&err.hyps, target, &err.terms))
+                                .flatten()
                             {
                                 diagnostic = diagnostic.with_note(format!(
                                     "the open arithmetic goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
                                     arithmetic_countermodel_note(&model)
                                 ));
-                            } else if let Some(err_ctx) = err.context.as_ref() {
-                                if let Some(model) =
-                                    first_order_countermodel(&self.env, err_ctx, &err.hyps, target)
-                                {
-                                    diagnostic = diagnostic.with_note(format!(
-                                        "the open first-order goal does not follow from the current hypotheses: it is false in {}. Reconsider the earlier proof steps.",
-                                        first_order_countermodel_note(&model)
-                                    ));
-                                }
+                            } else if let Some(model) = err.context.as_ref().and_then(|err_ctx| {
+                                countermodel_eligibility
+                                    .allows_first_order()
+                                    .then(|| {
+                                        first_order_countermodel(
+                                            &self.env, err_ctx, &err.hyps, target,
+                                        )
+                                    })
+                                    .flatten()
+                            }) {
+                                diagnostic = diagnostic.with_note(format!(
+                                    "the open first-order goal does not follow from the current hypotheses: it is false in {}. Reconsider the earlier proof steps.",
+                                    first_order_countermodel_note(&model)
+                                ));
                             }
                             self.result
                                 .diagnostics
@@ -5801,6 +5878,97 @@ pub(crate) fn check_kernel_proof_node(
             checked.formula, expected
         )))
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CountermodelEligibility {
+    /// Production behavior during migration: each bounded engine validates its
+    /// own syntax before searching.
+    Heuristic,
+    /// The HOL compatibility classifier has certified the least fragment.
+    #[cfg(feature = "hol-shadow")]
+    Certified(hol::StatementFragment),
+    /// Classification failed; shadow mismatch reporting is authoritative and
+    /// model search must not guess.
+    #[cfg(feature = "hol-shadow")]
+    Disabled,
+}
+
+impl CountermodelEligibility {
+    fn allows_propositional(self) -> bool {
+        #[cfg(feature = "hol-shadow")]
+        {
+            matches!(
+                self,
+                Self::Heuristic | Self::Certified(hol::StatementFragment::Prop)
+            )
+        }
+        #[cfg(not(feature = "hol-shadow"))]
+        {
+            matches!(self, Self::Heuristic)
+        }
+    }
+
+    fn allows_arithmetic(self) -> bool {
+        #[cfg(feature = "hol-shadow")]
+        {
+            matches!(
+                self,
+                Self::Heuristic | Self::Certified(hol::StatementFragment::FirstOrderInductive)
+            )
+        }
+        #[cfg(not(feature = "hol-shadow"))]
+        {
+            matches!(self, Self::Heuristic)
+        }
+    }
+
+    fn allows_first_order(self) -> bool {
+        #[cfg(feature = "hol-shadow")]
+        {
+            matches!(
+                self,
+                Self::Heuristic | Self::Certified(hol::StatementFragment::FirstOrder)
+            )
+        }
+        #[cfg(not(feature = "hol-shadow"))]
+        {
+            matches!(self, Self::Heuristic)
+        }
+    }
+}
+
+fn statement_countermodel_note(
+    env: &Env,
+    ctx: &Context,
+    statement: &Formula,
+    eligibility: CountermodelEligibility,
+) -> Option<String> {
+    if eligibility.allows_propositional() {
+        if let Some(model) = propositional_countermodel(&[], statement) {
+            return Some(format!(
+                "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
+                countermodel_note(&model)
+            ));
+        }
+    }
+    if eligibility.allows_arithmetic() {
+        if let Some(model) = arithmetic_countermodel(&[], statement, &ctx.term_vars) {
+            return Some(format!(
+                "the arithmetic statement is false when {}. No proof can close it; check the statement itself.",
+                arithmetic_countermodel_note(&model)
+            ));
+        }
+    }
+    if eligibility.allows_first_order() {
+        if let Some(model) = first_order_countermodel(env, ctx, &[], statement) {
+            return Some(format!(
+                "the first-order statement is false in {}. No proof can close it; check the statement itself.",
+                first_order_countermodel_note(&model)
+            ));
+        }
+    }
+    None
 }
 
 /// Collects the propositional atoms of a formula. Returns `false` if the
@@ -17773,6 +17941,115 @@ theorem wrong_relation_branch
                 && notes.contains("2-element domain with x = a, y = b, where Knows = {(a,b)}"),
             "expected open first-order countermodel note, got: {notes}"
         );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_routes_countermodels_from_certified_statement_fragments() {
+        let report = check_file_with_hol_shadow(
+            r#"
+mode constructive
+
+theorem bad_prop (P Q : Prop) : P -> Q := by
+  intro hp
+  exact hp
+
+theorem bad_nat (n : Nat) : succ(n) = n := by
+  refl
+
+sort Person
+pred Knows(Person, Person)
+
+theorem bad_fol
+  : forall x y : Person, Knows(x, y) -> Knows(y, x) := by
+  intro x
+  intro y
+  intro h
+  exact h
+"#,
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert_eq!(report.statement_classifications.len(), 3);
+        let fragment_for = |name: &str| {
+            report
+                .statement_classifications
+                .iter()
+                .find(|classification| classification.name == name)
+                .expect("statement classification")
+                .fragment
+        };
+        assert_eq!(fragment_for("bad_prop"), hol::StatementFragment::Prop);
+        assert_eq!(
+            fragment_for("bad_nat"),
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert_eq!(fragment_for("bad_fol"), hol::StatementFragment::FirstOrder);
+        let notes_for = |name: &str| {
+            report
+                .legacy
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.message.contains(name))
+                .expect("failed theorem diagnostic")
+                .notes
+                .join("\n")
+        };
+        assert!(notes_for("bad_prop").contains("not a tautology"));
+        assert!(notes_for("bad_nat").contains("arithmetic statement"));
+        assert!(notes_for("bad_fol").contains("first-order statement"));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_certifies_saturated_predicate_schema_as_first_order() {
+        let source = r#"
+mode constructive
+sort Person
+
+theorem predicate_wish
+  (P : Person -> Prop)
+  (x : Person)
+  : P(x) := by
+  assumption
+"#;
+        let report = check_file_with_hol_shadow(source);
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert_eq!(
+            report.statement_classifications[0].fragment,
+            hol::StatementFragment::FirstOrder
+        );
+        let certified_notes = report.legacy.diagnostics[0].notes.join("\n");
+        assert!(
+            certified_notes.contains("first-order statement")
+                || certified_notes.contains("open first-order goal"),
+            "a saturated rank-one predicate schema is certified FOL: {certified_notes}"
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn certified_hol_fragment_disables_first_order_model_search() {
+        let person = Type::Named("Person".to_string());
+        let mut env = Env::new();
+        env.sorts.insert("Person".to_string(), person.clone());
+        let mut ctx = Context::new();
+        ctx.add_predicate_var("P".to_string(), vec![person.clone()]);
+        ctx.add_term("x".to_string(), person);
+        let statement = Formula::PredApp("P".to_string(), vec![Term::Var("x".to_string())]);
+        assert!(statement_countermodel_note(
+            &env,
+            &ctx,
+            &statement,
+            CountermodelEligibility::Certified(hol::StatementFragment::FirstOrder),
+        )
+        .is_some());
+        assert!(statement_countermodel_note(
+            &env,
+            &ctx,
+            &statement,
+            CountermodelEligibility::Certified(hol::StatementFragment::HigherOrder),
+        )
+        .is_none());
     }
 
     #[test]

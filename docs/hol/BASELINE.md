@@ -78,6 +78,9 @@ The current checkpoint reports:
 | Matching corpus files | 74 / 74 |
 | Matching root theorem/axiom receipts | 588 / 588 |
 | Matching accepted declaration occurrences, including imports | 9,389 / 9,389 |
+| Classified elaborated root theorem statements | 600 / 600 |
+| Classified proof-negative theorem statements | 36 |
+| Ill-typed negative signatures rejected before classification | 2 |
 | Unique mismatches | 0 |
 | `prop` required fragment | 108 |
 | `fol` required fragment | 234 |
@@ -89,6 +92,15 @@ shadow mismatch makes that opt-in CLI invocation fail for use in migration CI;
 ordinary CLI and editor checking remain legacy-authoritative. The browser crate
 does not expose this migration tool and disables the `hol-shadow` Cargo feature,
 so command integration does not pull the sidecar into the Wasm artifact.
+
+The same opt-in path now classifies a failed theorem signature before any proof
+receipt can exist. Countermodel diagnostics are dispatched from that certified
+least fragment: propositional truth tables for `prop`, finite structures for
+`fol`, bounded Nat evaluation for `fol+induction`, and no weaker-fragment
+claim for `hol` or a classification failure. Ordinary checking and editor goal
+hints retain their legacy routing until those surfaces own persistent HOL state.
+`--json` exposes the successful pre-receipt records, including rejected
+theorem signatures, as `hol_shadow.statement_classifications`.
 
 ## Implementation and artifacts
 

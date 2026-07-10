@@ -518,28 +518,42 @@ incompleteness, and unused imports. A versioned, fail-closed
 filesystem import, individually permitted imported axioms, and exact root
 theorem signatures including their canonical parameter telescopes. A local
 student axiom cannot impersonate an allowed imported axiom. Ordinary checking
-remains unchanged. H5 still owns Wasm/TUI/browser surfaces, structural signature
-fingerprints after the syntax stabilizes, and certified countermodel
-eligibility. The first policy checkpoint's native CLI release was 3,396,656
-bytes; the feature-isolated Wasm module was unchanged at 1,351,837 bytes. The
+remains unchanged. Failed theorems in native shadow mode are now classified
+before a receipt exists; truth-table, bounded first-order, and bounded Nat model
+search are selected only by that certified least fragment, while HOL or failed
+classification produces no weaker-fragment countermodel claim. The pre-receipt
+classifications, including rejected theorem names, full
+signatures, fragments, locations, and import provenance, are exposed in shadow
+JSON for audit. The exact corpus gate now checks 600/600 elaborated root theorem
+statements, including 36 proof-level intended rejections; two deliberately
+ill-typed negative signatures are rejected before classification. H5 still owns
+Wasm/TUI/browser policy surfaces, certified editor goal hints, and structural
+signature fingerprints after the syntax stabilizes.
+The first policy checkpoint's native CLI release was 3,396,656 bytes; the
+feature-isolated Wasm module was unchanged at 1,351,837 bytes. The
 manifest checkpoint is 3,482,976 bytes natively and 1,351,852 bytes in Wasm;
 the browser artifact grew by only 15 bytes and remains below the 1.5 MB review
-line.
+line. At the auditable pre-receipt/countermodel checkpoint they are 3,495,424
+and 1,351,920 bytes respectively; the no-shadow browser path grows by 68 bytes
+and remains below the review line.
 
 - Implement least-fragment classification and transitive feature receipts.
 - Native CLI text/JSON and versioned manifests are implemented; extend Wasm
   JSON, TUI, and browser results after the policy format settles.
 - Native allowed-import, named imported-axiom, and frozen full-signature
   policies are implemented.
-- Ensure model search consumes the certified fragment, not an ad hoc syntax
-  guess.
+- Native shadow file diagnostics consume the certified fragment; route editor
+  goal hints through the same pre-receipt classifier when that surface adopts
+  HOL state.
 
 Exit gate: adversarial tests demonstrate that a syntactically FOL theorem proved
 through HOL, choice, extensionality, classical reasoning, or an unallowed import
 is rejected by the corresponding course policy. The native manifest portion now
 has executable tests for fragment boundaries, independent classical/trust/draft
 permissions, transitive used axioms, exact resolved imports, named imported
-axioms, missing or changed full signatures, and local-axiom impersonation.
+axioms, missing or changed full signatures, local-axiom impersonation, and
+certified Prop/FOL/inductive/HOL countermodel dispatch. The pre-receipt gate is
+600/600 for all elaborated root theorem statements.
 
 ### Phase H6 — library and curriculum migration
 

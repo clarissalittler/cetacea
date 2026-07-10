@@ -321,3 +321,15 @@ At the versioned assignment-manifest checkpoint, the native CLI is 3,482,976
 bytes and the feature-isolated Wasm module is 1,351,852 bytes. Recording
 resolved-import provenance and full canonical signatures changes the browser
 artifact by only 15 bytes; manifest enforcement itself remains native-only.
+
+The H5 pre-receipt classifier reuses the same parameter lowering and least-
+fragment calculation before proof checking, without declaring a theorem.
+Native shadow diagnostics dispatch propositional, first-order, or bounded Nat
+countermodels only from that result; HOL and classification failures suppress
+weaker-fragment claims. Shadow JSON exposes the audit record even when the proof
+is rejected. The corpus gate classifies 600/600 elaborated root theorem
+statements, including 36 proof-negative exercises; two intentionally ill-typed
+negative signatures are rejected earlier by legacy statement validation.
+The corresponding release artifacts are 3,495,424 bytes for the native CLI and
+1,351,920 bytes for Wasm. The feature-disabled browser path retains only the
+refactored legacy fallback dispatch, a 68-byte increase.

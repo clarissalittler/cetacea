@@ -2,9 +2,12 @@
 """Run the legacy/HOL shadow comparison over the exact teaching corpus.
 
 `report` prints the current migration frontier without treating HOL mismatches
-as a script failure. `check` is the H4 exit gate: legacy positive/negative
-behavior must remain intact and every accepted declaration must replay through
-HOL with matching theorem receipts.
+as a script failure. `check` is the H4/H5 exit gate: legacy positive/negative
+behavior must remain intact, every accepted declaration must replay through HOL
+with matching theorem receipts, and every elaborated root theorem statement
+(including a proof-level intended rejection) must receive a pre-receipt fragment
+classification. Intentionally ill-typed signatures are rejected before this
+seam and counted separately.
 """
 
 from __future__ import annotations
@@ -63,10 +66,13 @@ def run_one(checker: Path, path: Path) -> dict[str, Any]:
     root_theorems = [
         theorem for theorem in result["theorems"] if not theorem["is_imported"]
     ]
+    declared_negative: list[str] = []
     if negative:
-        declared = hol_baseline.THEOREM_DECL.findall(path.read_text(encoding="utf-8"))
+        declared_negative = hol_baseline.THEOREM_DECL.findall(
+            path.read_text(encoding="utf-8")
+        )
         accepted = {theorem["name"] for theorem in root_theorems}
-        accidentally_accepted = sorted(accepted.intersection(declared))
+        accidentally_accepted = sorted(accepted.intersection(declared_negative))
         if accidentally_accepted:
             raise ShadowError(
                 f"negative fixture {hol_baseline.relative(path)} accepted theorem(s): "
@@ -76,10 +82,46 @@ def run_one(checker: Path, path: Path) -> dict[str, Any]:
     shadow = result.get("hol_shadow")
     if shadow is None:
         raise ShadowError(f"{hol_baseline.relative(path)} returned no HOL shadow report")
+    root_classifications = [
+        classification
+        for classification in shadow.get("statement_classifications", [])
+        if not classification["is_imported"]
+    ]
+    classifiable_negative = [
+        name
+        for name in declared_negative
+        if any(
+            diagnostic["severity"] == "error"
+            and diagnostic["message"].startswith(f"theorem `{name}` failed:")
+            for diagnostic in result["diagnostics"]
+        )
+    ]
+    expected_classifications = [
+        theorem["name"] for theorem in root_theorems if not theorem["is_axiom"]
+    ]
+    expected_classifications.extend(classifiable_negative)
+    classified_names = [
+        classification["name"] for classification in root_classifications
+    ]
+    missing_classifications = sorted(
+        (Counter(expected_classifications) - Counter(classified_names)).elements()
+    )
+    if missing_classifications:
+        raise ShadowError(
+            f"{hol_baseline.relative(path)} did not classify root theorem statement(s): "
+            + ", ".join(missing_classifications)
+        )
     return {
         "path": hol_baseline.relative(path),
         "negative": negative,
         "root_theorems": root_theorems,
+        "root_classifications": root_classifications,
+        "expected_classifications": len(expected_classifications),
+        "negative_classifications": sum(
+            (Counter(classifiable_negative) & Counter(classified_names)).values()
+        ),
+        "negative_before_classification": len(declared_negative)
+        - len(classifiable_negative),
         "shadow": shadow,
     }
 
@@ -103,6 +145,11 @@ def capture(checker: Path) -> dict[str, Any]:
         for file_result in files
         for theorem in file_result["shadow"]["theorems"]
         if not theorem["is_imported"]
+    ]
+    root_classifications = [
+        classification
+        for file_result in files
+        for classification in file_result["root_classifications"]
     ]
     mismatch_occurrences = [
         mismatch
@@ -138,6 +185,16 @@ def capture(checker: Path) -> dict[str, Any]:
             "files_matching": files_matching,
             "root_legacy_theorems": len(root_theorems),
             "root_hol_theorems": len(root_hol_theorems),
+            "root_statement_classifications": len(root_classifications),
+            "expected_root_statement_classifications": sum(
+                file_result["expected_classifications"] for file_result in files
+            ),
+            "negative_statement_classifications": sum(
+                file_result["negative_classifications"] for file_result in files
+            ),
+            "negative_statements_before_classification": sum(
+                file_result["negative_before_classification"] for file_result in files
+            ),
             "attempted_declaration_occurrences": sum(
                 file_result["shadow"]["attempted_declarations"]
                 for file_result in files
@@ -177,6 +234,13 @@ def print_report(receipt: dict[str, Any]) -> None:
         "declaration occurrences: "
         f"{summary['checked_declaration_occurrences']}/"
         f"{summary['attempted_declaration_occurrences']} checked"
+    )
+    print(
+        "pre-receipt statement classifications: "
+        f"{summary['root_statement_classifications']}/"
+        f"{summary['expected_root_statement_classifications']} root theorem statements; "
+        f"{summary['negative_statement_classifications']} proof-negative; "
+        f"{summary['negative_statements_before_classification']} rejected before classification"
     )
     print(f"required fragments: {summary['required_fragments']}")
     print(f"statuses: {summary['statuses']}")

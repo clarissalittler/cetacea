@@ -410,10 +410,24 @@ impl SpikeElaborator {
     }
 
     pub fn classify(&self, statement: &CoreTerm) -> Result<StatementFragment, SpikeError> {
+        self.classify_with_parameters(&[], statement)
+    }
+
+    /// Classify an open proposition in the same term-parameter context used by
+    /// parameterized theorem declarations, without storing a declaration.
+    pub fn classify_with_parameters(
+        &self,
+        parameter_types: &[CoreType],
+        statement: &CoreTerm,
+    ) -> Result<StatementFragment, SpikeError> {
+        let context = parameter_types
+            .iter()
+            .cloned()
+            .fold(TermContext::new(), TermContext::with_bound);
         Ok(classify_statement(
             &self.types,
             &self.constants,
-            &TermContext::new(),
+            &context,
             &self.fragments,
             statement,
         )?)
