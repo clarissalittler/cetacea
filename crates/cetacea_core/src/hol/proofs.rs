@@ -111,6 +111,7 @@ pub struct HolKernelProof(HolDraftProof);
 pub struct HolProofAudit {
     uses_induction: bool,
     uses_classical: bool,
+    has_holes: bool,
     theorem_dependencies: BTreeSet<TheoremId>,
     constant_dependencies: BTreeSet<ConstantId>,
 }
@@ -124,6 +125,10 @@ impl HolProofAudit {
         self.uses_classical
     }
 
+    pub fn has_holes(&self) -> bool {
+        self.has_holes
+    }
+
     pub fn theorem_dependencies(&self) -> &BTreeSet<TheoremId> {
         &self.theorem_dependencies
     }
@@ -131,6 +136,12 @@ impl HolProofAudit {
     pub fn constant_dependencies(&self) -> &BTreeSet<ConstantId> {
         &self.constant_dependencies
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EvidenceBoundary {
+    Kernel,
+    Draft,
 }
 
 impl TryFrom<HolDraftProof> for HolKernelProof {
@@ -341,6 +352,37 @@ pub fn check_hol_proof_with_signatures_audit(
     Ok(audit_proof(&proof.0))
 }
 
+pub(crate) fn check_hol_draft_with_signatures_audit(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    inductives: &InductiveSignature,
+    theorems: &HolTheoremSignature,
+    term_context: &TermContext,
+    proof_context: &HolProofContext,
+    proof: &HolDraftProof,
+    expected: &CoreTerm,
+) -> Result<HolProofAudit, ProofError> {
+    expect_proposition(
+        types,
+        constants,
+        term_context,
+        expected,
+        "draft proof target",
+    )?;
+    check_draft(
+        types,
+        constants,
+        Some(inductives),
+        Some(theorems),
+        EvidenceBoundary::Draft,
+        term_context,
+        proof_context,
+        proof,
+        expected,
+    )?;
+    Ok(audit_proof(proof))
+}
+
 fn check_hol_proof_internal(
     types: &TypeSignature,
     constants: &TermSignature,
@@ -357,6 +399,7 @@ fn check_hol_proof_internal(
         constants,
         inductives,
         theorems,
+        EvidenceBoundary::Kernel,
         term_context,
         proof_context,
         &proof.0,
@@ -375,6 +418,7 @@ fn infer_proof(
     constants: &TermSignature,
     inductives: Option<&InductiveSignature>,
     theorems: Option<&HolTheoremSignature>,
+    boundary: EvidenceBoundary,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -391,14 +435,25 @@ fn infer_proof(
                     "theorem reference requires a checked theorem signature at the kernel boundary",
                 )
             })?;
-            Ok(theorem_signature.instantiate_statement(
-                types,
-                constants,
-                term_context,
-                *theorem,
-                type_arguments,
-                term_arguments,
-            )?)
+            let statement = match boundary {
+                EvidenceBoundary::Kernel => theorem_signature.instantiate_statement(
+                    types,
+                    constants,
+                    term_context,
+                    *theorem,
+                    type_arguments,
+                    term_arguments,
+                ),
+                EvidenceBoundary::Draft => theorem_signature.instantiate_draft_statement(
+                    types,
+                    constants,
+                    term_context,
+                    *theorem,
+                    type_arguments,
+                    term_arguments,
+                ),
+            }?;
+            Ok(statement)
         }
         HolDraftProof::TruthIntro => Ok(CoreTerm::Truth),
         HolDraftProof::FalseElim {
@@ -410,6 +465,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_false,
@@ -430,6 +486,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 left,
@@ -439,6 +496,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 right,
@@ -450,6 +508,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_and,
@@ -467,6 +526,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_and,
@@ -486,6 +546,7 @@ fn infer_proof(
                     constants,
                     inductives,
                     theorems,
+                    boundary,
                     term_context,
                     proof_context,
                     proof_left,
@@ -502,6 +563,7 @@ fn infer_proof(
                     constants,
                     inductives,
                     theorems,
+                    boundary,
                     term_context,
                     proof_context,
                     proof_right,
@@ -526,6 +588,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_or,
@@ -546,6 +609,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 &left_context,
                 left_case,
@@ -556,6 +620,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 &right_context,
                 right_case,
@@ -575,6 +640,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 &body_context,
                 body,
@@ -590,6 +656,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_implication,
@@ -604,6 +671,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_argument,
@@ -625,6 +693,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -652,6 +721,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_left,
@@ -675,6 +745,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -712,6 +783,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -758,6 +830,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 &body_term_context,
                 &body_proof_context,
                 body,
@@ -773,6 +846,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_forall,
@@ -812,6 +886,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_body,
@@ -836,6 +911,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_exists,
@@ -862,6 +938,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 &body_term_context,
                 &body_proof_context,
                 body,
@@ -964,6 +1041,7 @@ fn infer_proof(
                     constants,
                     inductives,
                     theorems,
+                    boundary,
                     &case_term_context,
                     &case_proof_context,
                     case,
@@ -1008,6 +1086,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 proof_context,
                 proof_not_not,
@@ -1034,6 +1113,7 @@ fn infer_proof(
                 constants,
                 inductives,
                 theorems,
+                boundary,
                 term_context,
                 &body_context,
                 body,
@@ -1041,9 +1121,15 @@ fn infer_proof(
             )?;
             Ok(proposition.clone())
         }
-        HolDraftProof::Sorry { .. } => Err(ProofError::new(
-            "kernel proof unexpectedly contains a `sorry` hole",
-        )),
+        HolDraftProof::Sorry { target } => match boundary {
+            EvidenceBoundary::Kernel => Err(ProofError::new(
+                "kernel proof unexpectedly contains a `sorry` hole",
+            )),
+            EvidenceBoundary::Draft => {
+                expect_proposition(types, constants, term_context, target, "draft proof hole")?;
+                Ok(target.clone())
+            }
+        },
     }
 }
 
@@ -1111,6 +1197,7 @@ fn check_draft(
     constants: &TermSignature,
     inductives: Option<&InductiveSignature>,
     theorems: Option<&HolTheoremSignature>,
+    boundary: EvidenceBoundary,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -1121,6 +1208,7 @@ fn check_draft(
         constants,
         inductives,
         theorems,
+        boundary,
         term_context,
         proof_context,
         proof,
@@ -1139,6 +1227,7 @@ fn normalized_proof_formula(
     constants: &TermSignature,
     inductives: Option<&InductiveSignature>,
     theorems: Option<&HolTheoremSignature>,
+    boundary: EvidenceBoundary,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -1148,6 +1237,7 @@ fn normalized_proof_formula(
         constants,
         inductives,
         theorems,
+        boundary,
         term_context,
         proof_context,
         proof,
@@ -1252,6 +1342,7 @@ fn audit_proof(proof: &HolDraftProof) -> HolProofAudit {
     HolProofAudit {
         uses_induction: proof_uses_induction(proof),
         uses_classical: proof_uses_classical(proof),
+        has_holes: proof_has_hole(proof),
         theorem_dependencies,
         constant_dependencies,
     }
@@ -1619,7 +1710,7 @@ pub(crate) fn validate_kernel_proof_type_scheme(
     validate_draft_proof_type_scheme(types, parameters, &proof.0)
 }
 
-fn validate_draft_proof_type_scheme(
+pub(crate) fn validate_draft_proof_type_scheme(
     types: &TypeSignature,
     parameters: &[super::types::TypeParameter],
     proof: &HolDraftProof,
@@ -2251,6 +2342,19 @@ mod tests {
                 target: fixture.atom_a(),
             }),
         };
+        let audit = check_hol_draft_with_signatures_audit(
+            &fixture.types,
+            &fixture.terms,
+            &InductiveSignature::new(),
+            &HolTheoremSignature::new(),
+            &TermContext::new(),
+            &HolProofContext::new(),
+            &draft,
+            &CoreTerm::implies(fixture.atom_a(), fixture.atom_a()),
+        )
+        .expect("typed draft holes remain inspectable outside the kernel");
+        assert!(audit.has_holes());
+
         let error = HolKernelProof::try_from(draft).expect_err("nested sorry must fail");
         assert!(error.message.contains("not kernel proofs"));
     }

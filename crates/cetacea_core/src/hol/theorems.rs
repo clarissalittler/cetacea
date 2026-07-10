@@ -5,8 +5,9 @@ use std::fmt;
 
 use super::inductive::InductiveSignature;
 use super::proofs::{
-    check_hol_proof_with_signatures_audit, validate_kernel_proof_type_scheme, HolKernelProof,
-    HolProofAudit, HolProofContext, ProofError,
+    check_hol_draft_with_signatures_audit, check_hol_proof_with_signatures_audit,
+    validate_draft_proof_type_scheme, validate_kernel_proof_type_scheme, HolDraftProof,
+    HolKernelProof, HolProofAudit, HolProofContext, ProofError,
 };
 use super::terms::{
     infer_type, instantiate_term_parameters, instantiate_term_type_scheme,
@@ -21,6 +22,7 @@ pub struct TheoremId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HolTheoremStatus {
     Checked,
+    Incomplete,
     TrustedAxiom,
 }
 
@@ -34,6 +36,9 @@ pub struct HolTheoremDeclaration {
     pub direct_dependencies: BTreeSet<TheoremId>,
     pub direct_constant_dependencies: BTreeSet<ConstantId>,
     pub audit: HolProofAudit,
+    /// Retained only for incomplete declarations. Checked evidence has already
+    /// crossed the kernel boundary; trusted axioms deliberately have none.
+    pub incomplete_draft: Option<HolDraftProof>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,9 +108,57 @@ impl HolTheoremSignature {
         type_arguments: &[CoreType],
         term_arguments: &[CoreTerm],
     ) -> Result<CoreTerm, TheoremError> {
+        self.instantiate_statement_internal(
+            types,
+            constants,
+            context,
+            id,
+            type_arguments,
+            term_arguments,
+            false,
+        )
+    }
+
+    pub(crate) fn instantiate_draft_statement(
+        &self,
+        types: &TypeSignature,
+        constants: &TermSignature,
+        context: &TermContext,
+        id: TheoremId,
+        type_arguments: &[CoreType],
+        term_arguments: &[CoreTerm],
+    ) -> Result<CoreTerm, TheoremError> {
+        self.instantiate_statement_internal(
+            types,
+            constants,
+            context,
+            id,
+            type_arguments,
+            term_arguments,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn instantiate_statement_internal(
+        &self,
+        types: &TypeSignature,
+        constants: &TermSignature,
+        context: &TermContext,
+        id: TheoremId,
+        type_arguments: &[CoreType],
+        term_arguments: &[CoreTerm],
+        allow_incomplete: bool,
+    ) -> Result<CoreTerm, TheoremError> {
         let declaration = self
             .declaration(id)
             .ok_or_else(|| TheoremError::new(format!("unknown checked theorem id `{}`", id.0)))?;
+        if declaration.status == HolTheoremStatus::Incomplete && !allow_incomplete {
+            return Err(TheoremError::new(format!(
+                "incomplete theorem `{}` is not kernel evidence",
+                declaration.name
+            )));
+        }
         if term_arguments.len() != declaration.term_parameters.len() {
             return Err(TheoremError::new(format!(
                 "checked theorem `{}` expects {} explicit term argument(s), but got {}",
@@ -215,6 +268,95 @@ impl HolTheoremSignature {
                 direct_dependencies,
                 direct_constant_dependencies,
                 audit,
+                incomplete_draft: None,
+            },
+        )?;
+        Ok(id)
+    }
+
+    pub fn check_and_declare_incomplete(
+        &mut self,
+        types: &TypeSignature,
+        constants: &TermSignature,
+        inductives: &InductiveSignature,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        statement: CoreTerm,
+        draft: HolDraftProof,
+    ) -> Result<TheoremId, TheoremError> {
+        self.check_and_declare_incomplete_with_parameters(
+            types,
+            constants,
+            inductives,
+            name,
+            type_parameters,
+            Vec::new(),
+            statement,
+            draft,
+        )
+    }
+
+    /// Type-check and retain a theorem draft without admitting it as kernel
+    /// evidence. A draft is incomplete when it contains a typed `sorry` hole
+    /// or depends directly on another incomplete theorem.
+    #[allow(clippy::too_many_arguments)]
+    pub fn check_and_declare_incomplete_with_parameters(
+        &mut self,
+        types: &TypeSignature,
+        constants: &TermSignature,
+        inductives: &InductiveSignature,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        term_parameters: Vec<CoreType>,
+        statement: CoreTerm,
+        draft: HolDraftProof,
+    ) -> Result<TheoremId, TheoremError> {
+        let name = name.into();
+        let id = self.reserve_id(&name)?;
+        types.validate_scheme(&type_parameters, &CoreType::Prop)?;
+        for parameter in &term_parameters {
+            types.validate_scheme(&type_parameters, parameter)?;
+        }
+        validate_term_type_scheme(types, &type_parameters, &statement)?;
+        validate_draft_proof_type_scheme(types, &type_parameters, &draft)?;
+        let term_context = term_parameters
+            .iter()
+            .cloned()
+            .fold(TermContext::new(), TermContext::with_bound);
+        let audit = check_hol_draft_with_signatures_audit(
+            types,
+            constants,
+            inductives,
+            self,
+            &term_context,
+            &HolProofContext::new(),
+            &draft,
+            &statement,
+        )?;
+        let direct_dependencies = audit.theorem_dependencies().clone();
+        let depends_on_incomplete = direct_dependencies.iter().any(|dependency| {
+            self.declaration(*dependency)
+                .is_some_and(|declaration| declaration.status == HolTheoremStatus::Incomplete)
+        });
+        if !audit.has_holes() && !depends_on_incomplete {
+            return Err(TheoremError::new(format!(
+                "theorem draft `{name}` is complete; declare it as checked evidence"
+            )));
+        }
+        let mut direct_constant_dependencies = term_constant_dependencies(&statement);
+        direct_constant_dependencies.extend(audit.constant_dependencies().iter().copied());
+        self.insert_checked(
+            id,
+            HolTheoremDeclaration {
+                name,
+                status: HolTheoremStatus::Incomplete,
+                type_parameters,
+                term_parameters,
+                statement,
+                direct_dependencies,
+                direct_constant_dependencies,
+                audit,
+                incomplete_draft: Some(draft),
             },
         )?;
         Ok(id)
@@ -276,6 +418,7 @@ impl HolTheoremSignature {
                 direct_dependencies: BTreeSet::new(),
                 direct_constant_dependencies,
                 audit: HolProofAudit::default(),
+                incomplete_draft: None,
             },
         )?;
         Ok(id)
@@ -642,5 +785,83 @@ mod tests {
             .expect_err("axioms must still be propositions");
         assert!(non_prop.message.contains("not `Prop`"));
         assert_eq!(theorems.resolve("bad_axiom"), None);
+    }
+
+    #[test]
+    fn incomplete_drafts_are_stored_but_never_become_kernel_evidence() {
+        let fixture = fixture();
+        let mut theorems = HolTheoremSignature::new();
+        let hole = theorems
+            .check_and_declare_incomplete(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "unfinished_truth",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::Sorry {
+                    target: CoreTerm::Truth,
+                },
+            )
+            .expect("typed incomplete theorem");
+        let hole_declaration = theorems.declaration(hole).expect("stored draft");
+        assert_eq!(hole_declaration.status, HolTheoremStatus::Incomplete);
+        assert!(hole_declaration.audit.has_holes());
+        assert!(hole_declaration.incomplete_draft.is_some());
+
+        let rejected_kernel_user = theorems
+            .check_and_declare(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "laundered_truth",
+                Vec::new(),
+                CoreTerm::Truth,
+                kernel(HolDraftProof::TheoremRef {
+                    theorem: hole,
+                    type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
+                }),
+            )
+            .expect_err("an incomplete theorem is not kernel evidence");
+        assert!(rejected_kernel_user.message.contains("not kernel evidence"));
+        assert_eq!(theorems.resolve("laundered_truth"), None);
+
+        let dependent = theorems
+            .check_and_declare_incomplete(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "unfinished_facade",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::TheoremRef {
+                    theorem: hole,
+                    type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
+                },
+            )
+            .expect("incompleteness propagates through draft references");
+        let dependent = theorems
+            .declaration(dependent)
+            .expect("stored facade draft");
+        assert_eq!(dependent.status, HolTheoremStatus::Incomplete);
+        assert!(!dependent.audit.has_holes());
+        assert_eq!(dependent.direct_dependencies, BTreeSet::from([hole]));
+        assert!(dependent.incomplete_draft.is_some());
+
+        let complete = theorems
+            .check_and_declare_incomplete(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "actually_complete",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::TruthIntro,
+            )
+            .expect_err("complete evidence belongs in a checked declaration");
+        assert!(complete.message.contains("is complete"));
+        assert_eq!(theorems.resolve("actually_complete"), None);
     }
 }

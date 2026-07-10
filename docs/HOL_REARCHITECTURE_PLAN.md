@@ -423,8 +423,11 @@ H4a also now stores typed trusted axiom templates and propagates their IDs
 through checked theorem receipts. Explicit excluded-middle,
 double-negation-elimination, and contradiction evidence is kernel-checked and
 adds a transitive `Classical` feature; constructive policies reject it unless
-explicitly allowed. Surface axiom/classical lowering and incomplete draft
-storage remain.
+explicitly allowed. Typed incomplete theorem drafts are now checked and retained
+outside the kernel, can depend on other incomplete drafts, and produce
+transitive incomplete receipts. The checked theorem-reference path rejects
+incomplete declarations, preventing dependency laundering. Surface
+axiom/classical/incomplete lowering remains.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

@@ -21,6 +21,7 @@ pub struct LinkedHolSmokeReport {
     pub axiom_dependencies: usize,
     pub incomplete_dependencies: usize,
     pub trusted_user_axiom_dependencies: usize,
+    pub incomplete_user_dependencies: usize,
     pub classical_user_features: usize,
 }
 
@@ -134,6 +135,25 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         },
     )?;
 
+    let (unfinished, _) = elaborator.declare_incomplete_theorem(
+        "unfinished_truth",
+        Vec::new(),
+        CoreTerm::Truth,
+        HolDraftProof::Sorry {
+            target: CoreTerm::Truth,
+        },
+    )?;
+    let (_, incomplete_user) = elaborator.declare_incomplete_theorem(
+        "unfinished_facade",
+        Vec::new(),
+        CoreTerm::Truth,
+        HolDraftProof::TheoremRef {
+            theorem: unfinished,
+            type_arguments: Vec::new(),
+            term_arguments: Vec::new(),
+        },
+    )?;
+
     let atom = elaborator.declare_constant("P", CoreType::Prop)?;
     let proposition = CoreTerm::Constant(atom);
     let classical_statement = CoreTerm::or(
@@ -171,6 +191,7 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
             .map(|receipt| receipt.proof().incomplete_dependencies().len())
             .sum(),
         trusted_user_axiom_dependencies: trusted_user.proof().axiom_dependencies().len(),
+        incomplete_user_dependencies: incomplete_user.proof().incomplete_dependencies().len(),
         classical_user_features: classical_user.proof().transitive_features().len(),
     })
 }
@@ -194,6 +215,7 @@ mod tests {
         assert_eq!(report.axiom_dependencies, 0);
         assert_eq!(report.incomplete_dependencies, 0);
         assert_eq!(report.trusted_user_axiom_dependencies, 1);
+        assert_eq!(report.incomplete_user_dependencies, 1);
         assert_eq!(report.classical_user_features, 1);
     }
 }

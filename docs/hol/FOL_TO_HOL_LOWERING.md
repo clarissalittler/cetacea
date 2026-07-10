@@ -21,8 +21,10 @@ The compatibility elaborator must preserve:
 - every positive and negative result in the 74-file semantic oracle.
 
 Names are resolved before lowering. The core receives stable IDs, explicit type
-arguments, typed de Bruijn term variables, and hole-free proof evidence only.
-Source names and spans remain in the elaborator for diagnostics.
+arguments, and typed de Bruijn term variables. Checked declarations receive
+hole-free kernel evidence; incomplete declarations retain separately checked
+draft evidence that the kernel lookup path cannot consume. Source names and
+spans remain in the elaborator for diagnostics.
 
 ## Type and parameter lowering
 
@@ -66,7 +68,7 @@ rejected.
 | `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | Core currently puts the recursive argument last, while legacy syntax puts it first. H4 must add a checked recursive-argument position (preferred) or a transparent eta wrapper. |
 | `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | H4a core storage and receipt propagation are implemented; surface lowering remains. |
 | Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | H3 supports the monomorphic/type-schematic subset. |
-| Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | Incomplete declaration/reference storage is not implemented in H3. |
+| Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | H4a core storage is implemented, including draft-to-draft references and transitive incomplete receipts; surface lowering remains. |
 
 Failed type, positivity, termination, duplicate-name, or proof checks must leave
 all signatures and import tables unchanged, matching the transactional H3 APIs.
@@ -192,9 +194,12 @@ These are compatibility prerequisites, not optional language expansion:
    projection reduction for the existing product type.
 5. **Structural recursion argument position.** Preserve the legacy recursive
    first argument for definitions such as `append`, `replicate`, and `addl`.
-6. **Trusted and incomplete declaration storage.** Typed trusted axioms and
-   transitive trust receipts are implemented. Holes and incomplete dependencies
-   still need draft-only storage outside the kernel.
+6. **Trusted and incomplete declaration storage.** Implemented in the H4a core.
+   Typed trusted axioms are kernel-visible and transitively reported. Typed
+   drafts retain holes and may reference other incomplete declarations, but
+   checked theorem lookup rejects them as evidence; incomplete receipts and
+   draft bodies remain available for teaching/editor workflows. Surface
+   declaration lowering is still required.
 7. **Explicit classical evidence.** The three core rules and transitive
    `Classical` feature are implemented; legacy tactic lowering remains.
 8. **Instance-aware definition/theorem receipts.** Schematic declarations must

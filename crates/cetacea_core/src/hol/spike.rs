@@ -340,6 +340,95 @@ impl SpikeElaborator {
         Ok((theorem, receipt))
     }
 
+    pub fn declare_incomplete_theorem(
+        &mut self,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        statement: CoreTerm,
+        draft: HolDraftProof,
+    ) -> Result<(TheoremId, DeclarationReceipt), SpikeError> {
+        self.declare_incomplete_theorem_with_parameters(
+            name,
+            type_parameters,
+            Vec::new(),
+            statement,
+            draft,
+        )
+    }
+
+    /// Type-check and retain a theorem draft while keeping it outside the
+    /// kernel evidence boundary. Hole and dependency status is derived from
+    /// the draft rather than supplied by the caller.
+    pub fn declare_incomplete_theorem_with_parameters(
+        &mut self,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        term_parameters: Vec<CoreType>,
+        statement: CoreTerm,
+        draft: HolDraftProof,
+    ) -> Result<(TheoremId, DeclarationReceipt), SpikeError> {
+        let mut staged_theorems = self.theorems.clone();
+        let theorem = staged_theorems.check_and_declare_incomplete_with_parameters(
+            &self.types,
+            &self.constants,
+            &self.inductives,
+            name,
+            type_parameters,
+            term_parameters.clone(),
+            statement.clone(),
+            draft,
+        )?;
+        let declaration = staged_theorems
+            .declaration(theorem)
+            .expect("a newly checked incomplete theorem is stored");
+        let mut dependency_receipts = declaration
+            .direct_dependencies
+            .iter()
+            .map(|dependency| {
+                self.theorem_receipts
+                    .get(dependency)
+                    .cloned()
+                    .ok_or_else(|| {
+                        SpikeError::new(format!(
+                            "incomplete theorem dependency `{}` has no receipt",
+                            dependency.0
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        dependency_receipts.extend(
+            declaration
+                .direct_constant_dependencies
+                .iter()
+                .filter_map(|constant| self.definition_receipts.get(constant).cloned()),
+        );
+        let term_context = term_parameters
+            .into_iter()
+            .fold(TermContext::new(), TermContext::with_bound);
+        let fragment = classify_statement(
+            &self.types,
+            &self.constants,
+            &term_context,
+            &self.fragments,
+            &statement,
+        )?;
+        let receipt_id = DeclarationId(self.next_receipt_id);
+        let next_receipt_id = self
+            .next_receipt_id
+            .checked_add(1)
+            .ok_or_else(|| SpikeError::new("too many spike declaration receipts"))?;
+        let receipt = DeclarationReceipt::incomplete_with_dependencies(
+            receipt_id,
+            fragment,
+            proof_features_from_audit(declaration.audit.clone()),
+            dependency_receipts.iter(),
+        );
+        self.theorems = staged_theorems;
+        self.theorem_receipts.insert(theorem, receipt.clone());
+        self.next_receipt_id = next_receipt_id;
+        Ok((theorem, receipt))
+    }
+
     pub fn declare_trusted_axiom(
         &mut self,
         name: impl Into<String>,
@@ -837,5 +926,88 @@ mod tests {
         let mut classical_policy = ReceiptPolicy::new(TeachingProfile::Prop);
         classical_policy.allow_classical();
         assert!(classical_policy.check(&facade_receipt).is_empty());
+    }
+
+    #[test]
+    fn incomplete_drafts_are_policy_visible_and_cannot_be_laundered() {
+        let mut elaborator = SpikeElaborator::new();
+        let (unfinished, unfinished_receipt) = elaborator
+            .declare_incomplete_theorem(
+                "unfinished_truth",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::Sorry {
+                    target: CoreTerm::Truth,
+                },
+            )
+            .expect("typed incomplete theorem");
+        assert_eq!(
+            unfinished_receipt.status(),
+            crate::hol::fragments::EvidenceStatus::Incomplete
+        );
+        let default_policy = ReceiptPolicy::new(TeachingProfile::Prop);
+        assert!(default_policy.check(&unfinished_receipt).contains(
+            &crate::hol::fragments::PolicyViolation::IncompleteNotAllowed(unfinished_receipt.id())
+        ));
+        let mut draft_policy = ReceiptPolicy::new(TeachingProfile::Prop);
+        draft_policy.allow_incomplete();
+        assert!(draft_policy.check(&unfinished_receipt).is_empty());
+
+        let (_, facade_receipt) = elaborator
+            .declare_incomplete_theorem(
+                "unfinished_facade",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::TheoremRef {
+                    theorem: unfinished,
+                    type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
+                },
+            )
+            .expect("incomplete dependency remains a draft");
+        assert_eq!(
+            facade_receipt.proof().incomplete_dependencies(),
+            &std::collections::BTreeSet::from([unfinished_receipt.id()])
+        );
+        assert!(draft_policy.check(&facade_receipt).is_empty());
+
+        let laundering = elaborator
+            .declare_theorem(
+                "laundered_truth",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::TheoremRef {
+                    theorem: unfinished,
+                    type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
+                },
+            )
+            .expect_err("checked evidence cannot reference an incomplete theorem");
+        assert!(laundering.message.contains("not kernel evidence"));
+        assert!(elaborator.theorems().resolve("laundered_truth").is_none());
+
+        let atom = elaborator.declare_constant("P", CoreType::Prop).expect("P");
+        let proposition = CoreTerm::Constant(atom);
+        let excluded_middle = CoreTerm::or(
+            proposition.clone(),
+            CoreTerm::implies(proposition.clone(), CoreTerm::Falsity),
+        );
+        let (_, classical_draft) = elaborator
+            .declare_incomplete_theorem(
+                "unfinished_classical",
+                Vec::new(),
+                CoreTerm::and(excluded_middle, CoreTerm::Truth),
+                HolDraftProof::AndIntro(
+                    Box::new(HolDraftProof::ExcludedMiddle { proposition }),
+                    Box::new(HolDraftProof::Sorry {
+                        target: CoreTerm::Truth,
+                    }),
+                ),
+            )
+            .expect("classical features survive draft storage");
+        assert_eq!(
+            classical_draft.proof().direct_features(),
+            &std::collections::BTreeSet::from([ProofFeature::Classical])
+        );
     }
 }

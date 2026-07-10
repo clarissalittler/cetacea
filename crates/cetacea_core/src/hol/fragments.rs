@@ -582,8 +582,7 @@ impl DeclarationReceipt {
         }
     }
 
-    #[cfg(test)]
-    fn incomplete<'a>(
+    pub(super) fn incomplete_with_dependencies<'a>(
         id: DeclarationId,
         statement_fragment: StatementFragment,
         direct_features: impl IntoIterator<Item = ProofFeature>,
@@ -594,6 +593,16 @@ impl DeclarationReceipt {
             status: EvidenceStatus::Incomplete,
             receipt: ProofReceipt::derive(statement_fragment, direct_features, dependencies),
         }
+    }
+
+    #[cfg(test)]
+    fn incomplete<'a>(
+        id: DeclarationId,
+        statement_fragment: StatementFragment,
+        direct_features: impl IntoIterator<Item = ProofFeature>,
+        dependencies: impl IntoIterator<Item = &'a Self>,
+    ) -> Self {
+        Self::incomplete_with_dependencies(id, statement_fragment, direct_features, dependencies)
     }
 
     pub(super) fn trusted_axiom_with_dependencies<'a>(
