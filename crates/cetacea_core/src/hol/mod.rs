@@ -5,6 +5,7 @@
 //! passed its stop/go gate.
 
 pub mod fragments;
+pub mod inductive;
 pub mod proofs;
 pub mod terms;
 pub mod types;
@@ -13,6 +14,10 @@ pub use fragments::{
     classify_statement, DeclarationId, DeclarationReceipt, EvidenceStatus, FragmentError,
     FragmentMetadata, PolicyViolation, ProofFeature, ProofReceipt, ReceiptPolicy,
     StatementFragment, TeachingProfile,
+};
+pub use inductive::{
+    InductiveConstructor, InductiveConstructorSpec, InductiveDeclaration, InductiveError,
+    InductiveFieldType, InductiveSignature, InductiveSpec, InstantiatedConstructor,
 };
 pub use proofs::{check_hol_proof, HolDraftProof, HolKernelProof, HolProofContext, ProofError};
 pub use terms::{
