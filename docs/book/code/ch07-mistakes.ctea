@@ -12,19 +12,13 @@ def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
 
 def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
 
--- Mistake 1: forgetting to unfold. The definition hides the forall,
--- and intro cannot see through the name.
-theorem forgot_to_unfold (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
-  intro x
-  exact modeq_refl
-
--- Mistake 2: unfolding the wrong definition.
+-- Mistake 1: unfolding the wrong definition.
 theorem wrong_property (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
   unfold Symmetric
   intro x
   exact modeq_refl
 
--- Mistake 3: wishful thinking — le is not symmetric, and the proof
+-- Mistake 2: wishful thinking — le is not symmetric, and the proof
 -- runs aground exactly where the two sides trade places.
 theorem le_symmetric_wish : Symmetric(fun x y : Nat => le(x, y)) := by
   unfold Symmetric

@@ -373,10 +373,13 @@ pub struct Env {
 - theorem schema proposition variables
 - theorem schema predicate variables
 
-The environment is global for a checking session. Imports add declarations to
-the same environment as the root file. Dot-qualified top-level names are
-accepted, and namespace blocks prefix declaration names, but imports remain
-unqualified and namespace blocks do not yet give scoped unqualified lookup.
+The environment is global for a checking session. Unaliased imports keep the
+legacy behavior of adding declarations to the same environment as the root
+file. Aliased imports check imported declarations under the alias namespace, so
+`import std/nat.ctea as nat` exposes names such as `nat.add_comm` without also
+exposing that import's short names. Dot-qualified top-level names are accepted,
+and namespace blocks prefix declarations and resolve sibling top-level
+references through the current namespace.
 
 The context is local to a theorem proof or definition body. It is built from
 the declaration parameters and extended by tactics such as `intro`, `cases`,
@@ -689,6 +692,7 @@ built-in computation.
 Important functions:
 
 - `normalize_formula_defs`
+- `normalize_formula_for_kernel`
 - `normalize_term`
 - `normalize_rec_def`
 - `normalize_term_compute`
@@ -704,6 +708,14 @@ def HappyMother (x : Person) : Prop := Happy(mother(x))
 and then prove goals involving `HappyMother(alice)` by unfolding or simplifying
 to `Happy(mother(alice))`.
 
+Kernel conversion also enforces datatype no-confusion. Applications of
+different constructors are disjoint, and equality of two applications of the
+same constructor is equivalent to equality of their corresponding arguments.
+This stronger kernel normalization is separate from tactic-facing display
+normalization: ordinary goals such as `cons(a, as) = cons(b, bs)` remain visibly
+equalities, while projections and proof checking may use constructor
+injectivity.
+
 Term definitions support named and parameterized set builders:
 
 ```text
@@ -712,8 +724,9 @@ def LikesSet (y : Person) : Set Person := { x : Person | Likes(x, y) }
 def TruthSet (T : Type) (P : T -> Prop) : Set T := { x : T | P(x) }
 ```
 
-Recursive definitions are deliberately narrower. `defrec` defines unary
-primitive recursion over `Nat`:
+Recursive definitions are deliberately narrower. `defrec` defines structural
+primitive recursion over `Nat` or a declared data type, with optional fixed
+parameters after the recursive first argument:
 
 ```text
 defrec double (n : Nat) : Nat
@@ -1017,7 +1030,7 @@ Cetacea is not trying to be Lean, Coq, or Agda. The implementation favors:
 
 That explains several current choices:
 
-- dot-qualified top-level names, but no namespace blocks or import aliases yet
+- dot-qualified names, namespace blocks, and deliberately small import aliases
 - no tactic language expressions
 - no theorem-driven simplifier yet
 - no dependent type theory
@@ -1125,11 +1138,13 @@ The existing `Span` field in `Diagnostic` is a placeholder for this direction.
 
 Important limitations to account for when extending the system:
 
-- Imports are global and unqualified.
-- Dot-qualified top-level names and namespace blocks are accepted, but namespace
-  blocks do not yet give scoped unqualified lookup and there are no import
-  aliases yet.
-- Namespace implementation should follow
+- Unaliased imports are legacy global imports; aliased imports expose imported
+  declarations under the alias namespace.
+- Dot-qualified top-level names and namespace blocks are accepted. Namespace
+  blocks prefix declarations and resolve sibling top-level references through
+  the current namespace, but Cetacea still does not have a full module system
+  with private exports or `open` scopes.
+- Remaining namespace migration work is tracked in
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md); qualified names affect
   the parser, environment lookup, imports, theorem search, and proof
   projections.

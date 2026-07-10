@@ -196,13 +196,18 @@ The parser now handles the most common tutorial shapes, including
 wrapped explicit theorem-argument lists and inline predicate lambdas
 whose binder names overlap with names introduced later in the proof.
 
-### 9. Imports and names are global
+### 9. Imports and names are partly namespaced
 
-Dot-qualified top-level names and namespace blocks are accepted, but namespace
-blocks do not yet give scoped unqualified lookup, and there are no qualified
-import aliases yet. Imported declarations enter one global environment, and
-built-in names such as `add`, `mul`, `sub`, and `le` cannot be reused for local
-functions or predicates.
+Dot-qualified top-level names, namespace blocks, and qualified import aliases
+are supported. Unaliased imports keep the legacy global-import behavior, while
+an aliased import such as `import std/nat.ctea as nat` exposes imported
+declarations as names like `nat.add_comm`.
+
+The standard library now includes `std/qualified_prelude.ctea`, which imports
+the main library modules under aliases such as `nat`, `set`, `list`, and `eq`.
+Some course and book files still use the legacy prelude and `_demo` suffixes
+until they are migrated. Built-in names such as `add`, `mul`, `sub`, and `le`
+still cannot be reused for local functions or predicates.
 
 This is simple and readable at the current project size, but larger
 course libraries will eventually want namespaces.

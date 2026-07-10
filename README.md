@@ -23,6 +23,8 @@ compatibility, and argument type compatibility.
 - `web`: static browser UI.
 - `docs/USAGE.md`: language and proving guide.
 - `docs/DESIGN_AND_CODE.md`: implementation and design guide.
+- `docs/DISCRETE_MATH_GAP_AUDIT.md`: curriculum coverage audit and staged
+  course-readiness plan.
 - `std`: checked theorem-library files.
 - `std/prelude.ctea`: imports the current standard-library theorem files.
 - `std/list.ctea`: `List` data type over `Nat`, recursive `length` and
@@ -123,6 +125,9 @@ loaded once.
 - monomorphic inductive `data` declarations whose constructors become
   constants or functions, with structural `induction ... with` over them,
   including one induction hypothesis per recursive constructor argument
+- checked datatype no-confusion: distinct constructors are disjoint and
+  equal applications of one constructor expose equality of corresponding
+  arguments
 - primitive recursive `defrec` definitions over `Nat` and over declared data
   types, computed by `simp` and `refl`; additional fixed parameters after the
   recursive one support binary operations such as
@@ -145,9 +150,9 @@ loaded once.
   arity, inferred type parameters, and proposition/predicate parameters
 - validation for primitive recursive definitions, including per-constructor
   case coverage and binder counts
-- dot-qualified top-level declaration and reference names, plus
-  `namespace` / `end` blocks that prefix declarations; import aliases remain
-  future work
+- dot-qualified top-level declaration and reference names, `namespace` /
+  `end` blocks that prefix declarations, and import aliases such as
+  `import std/nat.ctea as nat`
 - validation for typed set membership and subset compatibility
 - axiom declarations for trusted principles such as set extensionality
 - checked library files for propositional logic, first-order logic, equality,
@@ -208,4 +213,5 @@ loaded once.
 3. Cardinality and counting support for the combinatorics side of a discrete
    math course.
 4. Decision procedures for modular arithmetic goals.
-5. Qualified imports and standard-library namespace migration.
+5. Finish migrating book and course examples to qualified standard-library
+   names where that removes `_demo` collision workarounds.

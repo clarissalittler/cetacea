@@ -326,27 +326,17 @@ you certify the two properties the library already proves.)
 Run [`code/ch07-mistakes.ctea`](code/ch07-mistakes.ctea) — intended to
 fail.
 
-**Mistake 1: forgetting to unfold.** The proof charges straight at
-`Reflexive(...)` with `intro`:
+One formerly common mistake is gone: `intro`, `split`, `left`, `right`,
+and `exists` now look through a folded definition when its outer shape
+requires it. An `intro x` aimed directly at `Reflexive(R)` therefore
+opens the hidden `forall`; explicit `unfold Reflexive` remains useful
+when you want to show that step.
+
+**Mistake 1: unfolding the wrong property.** Automatic unfolding cannot
+make an unrelated name occur in the goal:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:18: theorem `forgot_to_unfold` failed: intro expects an implication or universal goal
-  note: target: Reflexive(fun x y : Nat => ModEq(m, x, y))
-  help: Match the goal shape
-    `intro` only opens implication or universal goals. The current target is `Reflexive(fun x y : Nat => ModEq(m, x, y))`.
-```
-
-The same "trench coat" failure as Chapter 6's subset — a definition
-hides the `forall`, and `intro` doesn't peek inside names. The fix is
-one `unfold Reflexive` (or a `simp`, which also unfolds definitions
-when it helps). If your tactic seems blind to structure you *know* is
-there, ask what's folded.
-
-**Mistake 2: unfolding the wrong property.** A cousin error, with its
-own message:
-
-```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:23: theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => ModEq(m, x, y))`
+error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:17: theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => ModEq(m, x, y))`
   note: target: Reflexive(fun x y : Nat => ModEq(m, x, y))
 ```
 
@@ -355,13 +345,13 @@ Harmless, but common once a file juggles three look-alike definitions
 and what's actually there. Read errors like a detective: the checker
 always tells you which world *it* is living in.
 
-**Mistake 3: wishful symmetry.** The file claims `le` is symmetric and
+**Mistake 2: wishful symmetry.** The file claims `le` is symmetric and
 plays the proof as far as it goes. After `unfold`, intros, and
 assuming `h : le(x, y)`, the goal is `le(y, x)` — and the only thing
 in reach is `h` itself:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:34: theorem `le_symmetric_wish` failed: exact proof does not solve the goal: proof has type `le(x, y)`, but expected `le(y, x)`
+error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:28: theorem `le_symmetric_wish` failed: exact proof does not solve the goal: proof has type `le(x, y)`, but expected `le(y, x)`
   note: target: le(y, x)
   note: the open arithmetic goal does not follow from the current hypotheses: it is false when x = 0, y = 1. Reconsider the earlier proof steps.
 ```

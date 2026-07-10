@@ -345,6 +345,13 @@ itself; those recursive arguments are what structural induction and `defrec`
 recurse on. Data types are monomorphic: there are no type parameters, so
 `std/list.ctea`'s `List` is specifically a list of `Nat`.
 
+Constructors of a declared data type are disjoint and injective. Consequently,
+`off = on -> False` is provable immediately for two different nullary
+constructors, and a hypothesis
+`cons(h, t) = cons(h2, t2)` exposes `h = h2` as `.left` and `t = t2` as
+`.right`. These are checked datatype principles; defining a separate tag or
+projection function is not required.
+
 User-defined recursive functions use `defrec`, over `Nat`:
 
 ```text
@@ -505,10 +512,11 @@ end nat
 ```
 
 The theorem above is stored as `nat.add_zero_right`. References inside a
-namespace block are not scoped yet, so use explicit names such as
-`nat.add_zero_right` when referring to names declared in the block. Local
-binders and hypotheses remain ordinary short names. Import aliases are not
-implemented yet, so imports still load declarations into one environment.
+namespace block resolve sibling declarations by short name, while explicit
+qualified names remain available. Local binders and hypotheses remain ordinary
+short names. An aliased import such as `import std/nat.ctea as nat` exposes the
+imported declarations as qualified names such as `nat.add_comm`; unaliased
+imports retain the legacy global behavior.
 
 ## Definitions
 
@@ -1634,10 +1642,12 @@ theorem add_succ_right (n m : Nat) : add(n, succ(m)) = succ(add(n, m)) := by
 
 Cetacea is intentionally small. Important current limitations:
 
-- Dot-qualified top-level names and namespace blocks are accepted, but namespace
-  blocks do not yet give scoped unqualified lookup.
-- There are no qualified import aliases yet.
-- Imported declarations enter one global environment.
+- Dot-qualified top-level names, namespace blocks, and import aliases are
+  supported. Namespace blocks prefix declarations and resolve sibling
+  top-level references through the current namespace.
+- Unaliased imports keep the legacy global-import behavior. Aliased imports
+  expose imported declarations under the alias namespace; for example,
+  `import std/nat.ctea as nat` provides names such as `nat.add_comm`.
 - The parser is line-oriented and intentionally simple.
 - Parse diagnostics carry line-local token spans where possible, but checked
   declaration and tactic execution errors still report line numbers rather than

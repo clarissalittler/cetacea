@@ -1182,7 +1182,15 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
             None,
         );
     }
-    if message.contains("refl expects") || message.contains("refl cannot prove") {
+    if message.contains("distinct datatype constructors") {
+        push(
+            &mut suggestions,
+            "Distinct constructors cannot be equal",
+            "A datatype value built with one constructor cannot equal a value built with a different constructor. Check the statement or the constructor case you are in."
+                .to_string(),
+            None,
+        );
+    } else if message.contains("refl expects") || message.contains("refl cannot prove") {
         push(
             &mut suggestions,
             "Use equality simplification first",
@@ -3733,7 +3741,9 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
             );
         }
         Formula::False => {
-            if context_has_false(&goal.context) || context_has_negation_pair(&goal.context) {
+            if context_has_false(env, &goal.context)
+                || context_has_negation_pair(env, &goal.context)
+            {
                 push_goal_hint(
                     &mut hints,
                     "Find a contradiction",
@@ -3810,7 +3820,7 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
     }
 
     if !matches!(&goal.target, Formula::False)
-        && (context_has_false(&goal.context) || context_has_negation_pair(&goal.context))
+        && (context_has_false(env, &goal.context) || context_has_negation_pair(env, &goal.context))
     {
         push_goal_hint(
             &mut hints,
@@ -3888,21 +3898,24 @@ fn first_term_of_type(env: &Env, ctx: &Context, ty: &Type) -> Option<String> {
     constants.into_iter().next()
 }
 
-fn context_has_false(ctx: &Context) -> bool {
-    ctx.proofs()
-        .iter()
-        .any(|binding| matches!(&binding.formula, Formula::False))
+fn context_has_false(env: &Env, ctx: &Context) -> bool {
+    ctx.proofs().iter().any(|binding| {
+        formulas_def_eq(env, ctx, &binding.formula, &Formula::False).unwrap_or(false)
+    })
 }
 
-fn context_has_negation_pair(ctx: &Context) -> bool {
+fn context_has_negation_pair(env: &Env, ctx: &Context) -> bool {
     for left in ctx.proofs() {
         for right in ctx.proofs() {
-            if let Formula::Implies(premise, conclusion) = &right.formula {
-                if matches!(conclusion.as_ref(), Formula::False)
-                    && premise.as_ref() == &left.formula
-                {
-                    return true;
-                }
+            let Ok(Formula::Implies(premise, conclusion)) =
+                normalize_formula_defs(env, ctx, &right.formula)
+            else {
+                continue;
+            };
+            if formulas_def_eq(env, ctx, &conclusion, &Formula::False).unwrap_or(false)
+                && formulas_def_eq(env, ctx, &premise, &left.formula).unwrap_or(false)
+            {
+                return true;
             }
         }
     }
@@ -5573,6 +5586,13 @@ fn collect_first_order_term_signature(
                 sig.free_vars.insert(name.clone(), ty.clone());
                 return Ok(ty.clone());
             }
+            // The bounded first-order model finder treats ordinary constants
+            // as freely interpreted. Datatype constructors are not free in
+            // that sense: they obey no-confusion and injectivity. Decline to
+            // report a model until the search can enforce those constraints.
+            if is_data_constructor_name(env, name) {
+                return Err(());
+            }
             if let Some(ty) = env.consts.get(name) {
                 sig.sorts.insert(first_order_sort_name(ty).ok_or(())?);
                 sig.consts.insert(name.clone(), ty.clone());
@@ -5957,7 +5977,7 @@ pub fn infer_proof(
         }
         Proof::AndElimLeft(proof) => {
             let checked = infer_proof(env, ctx, proof, allowed_mode)?;
-            let formula = normalize_formula_defs(env, ctx, &checked.formula)?;
+            let formula = normalize_formula_for_kernel(env, ctx, &checked.formula)?;
             let Formula::And(left, _) = formula else {
                 return Err(KernelError::new(
                     "`.left` can only be used on a conjunction",
@@ -5970,7 +5990,7 @@ pub fn infer_proof(
         }
         Proof::AndElimRight(proof) => {
             let checked = infer_proof(env, ctx, proof, allowed_mode)?;
-            let formula = normalize_formula_defs(env, ctx, &checked.formula)?;
+            let formula = normalize_formula_for_kernel(env, ctx, &checked.formula)?;
             let Formula::And(_, right) = formula else {
                 return Err(KernelError::new(
                     "`.right` can only be used on a conjunction",
@@ -7279,9 +7299,102 @@ fn formulas_def_eq(
     right: &Formula,
 ) -> Result<bool, ValidationError> {
     Ok(alpha_eq_formula(
-        &normalize_formula_defs(env, ctx, left)?,
-        &normalize_formula_defs(env, ctx, right)?,
+        &normalize_formula_for_kernel(env, ctx, left)?,
+        &normalize_formula_for_kernel(env, ctx, right)?,
     ))
+}
+
+/// Kernel conversion includes datatype no-confusion. This is deliberately
+/// stronger than tactic-facing simplification: a displayed goal such as
+/// `cons(a, as) = cons(b, bs)` remains an equality, so existing `refl` and
+/// rewrite proofs stay stable, while the checker may use the equivalent
+/// component equalities when validating a proof.
+fn normalize_formula_for_kernel(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+) -> Result<Formula, ValidationError> {
+    let formula = normalize_formula_defs(env, ctx, formula)?;
+    Ok(expand_data_constructor_equalities(env, ctx, formula))
+}
+
+fn expand_data_constructor_equalities(env: &Env, ctx: &Context, formula: Formula) -> Formula {
+    match formula {
+        Formula::Eq(left, right) => {
+            let Some((left_data, left_ctor, left_args)) =
+                data_constructor_application(env, ctx, &left)
+            else {
+                return Formula::eq(left, right);
+            };
+            let Some((right_data, right_ctor, right_args)) =
+                data_constructor_application(env, ctx, &right)
+            else {
+                return Formula::eq(left, right);
+            };
+            if left_data != right_data {
+                return Formula::eq(left, right);
+            }
+            if left_ctor != right_ctor {
+                return Formula::False;
+            }
+
+            let equalities = left_args
+                .iter()
+                .cloned()
+                .zip(right_args.iter().cloned())
+                .map(|(left, right)| {
+                    expand_data_constructor_equalities(env, ctx, Formula::eq(left, right))
+                })
+                .collect::<Vec<_>>();
+            let Some(last) = equalities.last().cloned() else {
+                return Formula::True;
+            };
+            equalities
+                .into_iter()
+                .rev()
+                .skip(1)
+                .fold(last, |right, left| Formula::and(left, right))
+        }
+        Formula::And(left, right) => Formula::and(
+            expand_data_constructor_equalities(env, ctx, *left),
+            expand_data_constructor_equalities(env, ctx, *right),
+        ),
+        Formula::Or(left, right) => Formula::or(
+            expand_data_constructor_equalities(env, ctx, *left),
+            expand_data_constructor_equalities(env, ctx, *right),
+        ),
+        Formula::Implies(left, right) => Formula::implies(
+            expand_data_constructor_equalities(env, ctx, *left),
+            expand_data_constructor_equalities(env, ctx, *right),
+        ),
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            Formula::forall(
+                var,
+                var_type,
+                expand_data_constructor_equalities(env, &body_ctx, *body),
+            )
+        }
+        Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut body_ctx = ctx.clone();
+            body_ctx.add_term(var.clone(), var_type.clone());
+            Formula::exists(
+                var,
+                var_type,
+                expand_data_constructor_equalities(env, &body_ctx, *body),
+            )
+        }
+        other => other,
+    }
 }
 
 #[derive(Default)]
@@ -7564,11 +7677,15 @@ fn unfold_formula_defs(
             if only.is_some() {
                 return Ok((formula.clone(), false));
             }
-            let simplified = Formula::eq(
-                normalize_term(env, ctx, left)?,
-                normalize_term(env, ctx, right)?,
-            );
-            Ok((simplified.clone(), &simplified != formula))
+            let left = normalize_term(env, ctx, left)?;
+            let right = normalize_term(env, ctx, right)?;
+            let simplified = simplify_data_constructor_equality(env, ctx, left, right);
+            let changed = &simplified != formula;
+            if changed && !matches!(&simplified, Formula::Eq(_, _)) {
+                let (simplified, _) = unfold_formula_defs(env, ctx, &simplified, only)?;
+                return Ok((simplified, true));
+            }
+            Ok((simplified, changed))
         }
         Formula::In(elem, set) => {
             if only.is_some() {
@@ -7682,6 +7799,65 @@ fn simplify_le_formula(left: Term, right: Term) -> Formula {
         (Term::Succ(left), Term::Succ(right)) => simplify_le_formula(*left, *right),
         (left, right) => Formula::PredApp("le".to_string(), vec![left, right]),
     }
+}
+
+/// Constructor equality is part of the datatype theory, not an accidental
+/// consequence of whichever `defrec` discriminators happen to be declared.
+/// Distinct constructors are disjoint, while equal applications of the same
+/// constructor are equivalent to equality of their arguments.
+fn simplify_data_constructor_equality(
+    env: &Env,
+    ctx: &Context,
+    left: Term,
+    right: Term,
+) -> Formula {
+    let Some((left_data, left_ctor, _left_args)) = data_constructor_application(env, ctx, &left)
+    else {
+        return Formula::eq(left, right);
+    };
+    let Some((right_data, right_ctor, _right_args)) =
+        data_constructor_application(env, ctx, &right)
+    else {
+        return Formula::eq(left, right);
+    };
+    if left_data != right_data {
+        return Formula::eq(left, right);
+    }
+    if left_ctor != right_ctor {
+        return Formula::False;
+    }
+    Formula::eq(left, right)
+}
+
+fn data_constructor_application<'e, 't>(
+    env: &'e Env,
+    ctx: &Context,
+    term: &'t Term,
+) -> Option<(&'e str, &'e str, &'t [Term])> {
+    let (name, args): (&str, &[Term]) = match term {
+        // A local term may shadow a nullary constructor at the surface level.
+        // Canonical constructor recognition must not reinterpret that local.
+        Term::Var(name) if ctx.lookup_term(name).is_none() => (name, &[]),
+        Term::App(name, args) => (name, args),
+        _ => return None,
+    };
+
+    for data in env.data_defs.values() {
+        if let Some(ctor) = data
+            .ctors
+            .iter()
+            .find(|ctor| ctor.name == name && ctor.arg_types.len() == args.len())
+        {
+            return Some((&data.name, &ctor.name, args));
+        }
+    }
+    None
+}
+
+fn is_data_constructor_name(env: &Env, name: &str) -> bool {
+    env.data_defs
+        .values()
+        .any(|data| data.ctors.iter().any(|ctor| ctor.name == name))
 }
 
 fn normalize_term_compute(term: &Term) -> Term {
@@ -12331,6 +12507,19 @@ fn run_tactic_step_inner(
                         new_goals: Vec::new(),
                         notes: Vec::new(),
                     });
+                }
+                if matches!(
+                    simplify_data_constructor_equality(
+                        env,
+                        &goal.context,
+                        norm_left.clone(),
+                        norm_right.clone(),
+                    ),
+                    Formula::False
+                ) {
+                    return Err(TacticError::new(format!(
+                        "refl cannot prove `{left} = {right}` because they use distinct datatype constructors"
+                    )));
                 }
                 return Err(TacticError::new(format!(
                     "refl cannot prove `{left} = {right}` because the sides are not identical"
@@ -18659,6 +18848,112 @@ theorem len_snoc_one (l : NatList) : len(snoc_one(l)) = succ(len(l)) := by
       rewrite ih
       refl
 "#,
+        );
+    }
+
+    #[test]
+    fn data_constructors_are_disjoint_without_a_discriminator() {
+        check_ok(
+            r#"
+mode constructive
+
+data Bit
+| off
+| on
+
+theorem constructors_distinct : off = on -> False := by
+  intro h
+  contradiction
+
+theorem constructors_distinct_by_simp : off = on -> False := by
+  intro h
+  simp at h
+  exact h
+
+defrec tag (b : Bit) : Nat
+| off => 0
+| on => 1
+
+theorem constructors_distinct_after_discriminator : off = on -> False := by
+  intro h
+  contradiction
+"#,
+        );
+    }
+
+    #[test]
+    fn data_constructors_are_injective_in_every_argument() {
+        check_ok(
+            r#"
+mode constructive
+
+data Triple
+| triple(Nat, Nat, Nat)
+
+theorem triple_first (a b c x y z : Nat)
+  : triple(a, b, c) = triple(x, y, z) -> a = x := by
+  intro h
+  exact h.left
+
+theorem triple_second (a b c x y z : Nat)
+  : triple(a, b, c) = triple(x, y, z) -> b = y := by
+  intro h
+  exact h.right.left
+
+theorem triple_third (a b c x y z : Nat)
+  : triple(a, b, c) = triple(x, y, z) -> c = z := by
+  intro h
+  exact h.right.right
+"#,
+        );
+    }
+
+    #[test]
+    fn local_terms_are_not_reinterpreted_as_nullary_constructors() {
+        check_err_contains(
+            r#"
+mode constructive
+
+data Bit
+| off
+| on
+
+theorem not_constructor_off : (forall off : Bit, off = on -> False) := by
+  intro off
+  intro h
+  contradiction
+"#,
+            "no contradiction found in the context",
+        );
+    }
+
+    #[test]
+    fn first_order_countermodels_decline_datatype_constructor_claims() {
+        let result = check_file(
+            r#"
+mode constructive
+
+data Bit
+| off
+| on
+
+theorem bad : off = on := by
+  refl
+"#,
+        );
+        assert!(diagnostics_have_errors(&result.diagnostics));
+        let rendered = format!("{:#?}", result.diagnostics);
+        assert!(
+            !rendered.contains("1-element domain"),
+            "datatype-blind countermodel was reported:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("distinct datatype constructors"),
+            "constructor-specific error was not reported:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("simp\\nrefl"),
+            "impossible equality suggested simplification and refl:\n{rendered}"
         );
     }
 
