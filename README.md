@@ -47,6 +47,7 @@ compatibility, and argument type compatibility.
 
 ```sh
 cargo test
+./scripts/check_all.sh
 cargo run -p cetacea_cli -- examples/prop.ctea
 cargo run -p cetacea_cli -- examples/fol.ctea
 cargo run -p cetacea_cli -- examples/fol_advanced.ctea
@@ -57,6 +58,11 @@ cargo run -p cetacea_cli -- std/prelude.ctea
 cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
+
+The corpus script checks every standard-library, example, CS250, and book
+companion file. Every theorem in a `mistakes`, `fallacies`, or `negative`
+fixture must be individually rejected, so one earlier diagnostic cannot hide
+an accidentally accepted teaching example.
 
 Use strict, machine-readable checking for assignments and automation with:
 

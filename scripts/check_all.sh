@@ -53,6 +53,39 @@ for file in "${files[@]}"; do
       fi
       status=1
     fi
+
+    json_output="$("$checker" --json "$file" 2>/dev/null)"
+    json_code=$?
+    if [[ $json_code -ne 1 ]]; then
+      printf 'error: %s JSON check exited with %s, but is expected to exit 1\n' \
+        "$file" "$json_code" >&2
+      status=1
+    fi
+
+    mapfile -t negative_theorems < <(
+      sed -nE \
+        's/^[[:space:]]*theorem[[:space:]]+([A-Za-z_][A-Za-z0-9_.]*).*/\1/p' \
+        "$file"
+    )
+    if [[ ${#negative_theorems[@]} -eq 0 ]]; then
+      printf 'error: %s is marked negative but declares no theorems\n' "$file" >&2
+      status=1
+    fi
+    for theorem in "${negative_theorems[@]}"; do
+      theorem_accepted=0
+      while IFS= read -r json_record; do
+        if [[ "$json_record" == *"\"name\":\"$theorem\""* ]] && \
+          [[ "$json_record" == *'"is_imported":false'* ]]; then
+          theorem_accepted=1
+          break
+        fi
+      done < <(printf '%s\n' "$json_output" | sed 's/},{/}\n{/g')
+      if [[ $theorem_accepted -eq 1 ]]; then
+        printf 'error: theorem %s in %s passed, but every theorem in a negative file must fail\n' \
+          "$theorem" "$file" >&2
+        status=1
+      fi
+    done
     continue
   fi
 

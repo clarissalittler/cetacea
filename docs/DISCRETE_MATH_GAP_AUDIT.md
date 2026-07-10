@@ -47,10 +47,14 @@ Strict and machine-readable course checking is also implemented: `--strict`
 rejects root axioms and direct or transitive `sorry`, the component policies
 may be selected separately, `--deny-classical` enforces constructive work, and
 `--json` reports declarations, diagnostics, policy settings, and violations.
+The corpus check now uses that declaration-level output to require every theorem
+in a book `mistakes`, `fallacies`, or `negative` fixture to fail individually;
+this closes the hole where one earlier diagnostic could mask a later example
+that had silently started checking.
 
 Still outstanding in Phase 0 are separating `Sorry` from kernel-valid proofs,
-executable documentation excerpts, and further isolation of the trusted kernel
-boundary.
+checking quoted diagnostic excerpts against the current checker, and further
+isolation of the trusted kernel boundary.
 
 ## Evidence reviewed
 
@@ -182,28 +186,26 @@ explicit environment interface and adversarial tests.
 
 ### Documentation as executable behavior
 
-The corpus script confirms only that a negative file fails somewhere. It does
-not ensure that every intended mistake still fails or that quoted output still
-matches. For example, Chapter 7 still presents "forgetting to unfold" as an
-error, but structural tactics now unfold such goals automatically and that
-theorem succeeds.
+The corpus script now confirms that every declared theorem in a negative file
+fails, closing the masking bug found during this audit. The stale Chapter 7
+"forgetting to unfold" example has been replaced.
 
-Phase 0 should add a reproducible mechanism for checking diagnostic excerpts,
-or replace literal output blocks with generated fixtures. Absolute local paths
-in quoted diagnostics should be normalized.
+Quoted output still is not checked. Phase 0 should add a reproducible mechanism
+for checking diagnostic excerpts, or replace literal output blocks with
+generated fixtures. Absolute local paths in quoted diagnostics should be
+normalized.
 
 ### Strict course and grading mode
 
-Add a machine-readable strict mode with controls such as:
+The CLI now provides machine-readable strict checking with controls to:
 
-- fail on `sorry`;
-- optionally fail on newly declared axioms or classical reasoning;
-- restrict allowed imports;
-- freeze expected theorem signatures;
-- emit JSON suitable for an autograder.
+- fail on direct or transitive `sorry`;
+- fail on root axioms or classical reasoning; and
+- emit declaration, diagnostic, and policy JSON suitable for an autograder.
 
-Without these controls, a student can change a statement, add an axiom, or rely
-on a success exit code that still contains incomplete proofs.
+Restricting allowed imports and freezing expected theorem signatures remain
+outstanding; without those controls, a student can still change an assigned
+statement or import a stronger library than intended.
 
 ## Phase 1: stabilize the existing book and tutorials
 
