@@ -369,14 +369,17 @@ Both produce trust-free `fol+induction` receipts and exercise deliberate type,
 termination, and positivity rejections. The finite example now adds two checked
 finite datatypes, exhaustive duplicate-free enumerations, structural
 encode/decode maps, inverse proofs, and a shared cardinality witness, again with
-no trust. It is intentionally a concrete transport instance; turning it into a
-reusable theorem over arbitrary stored bijections remains an H3.5 deliverable.
-H3.5 now adds stable
+no trust. H3.5 now adds a reusable, stored cardinality-transport theorem and
+checked `map` lemmas for length, membership, duplicate-freedom, and coverage.
+The concrete theorem is checked both directly and by reusing this generic
+result: the direct proof remains `fol+induction`, while the reused proof is
+honestly `hol` because its transitive dependency quantifies over functions.
+H3.5 also adds stable
 checked theorem IDs, explicit type-instantiated theorem references, schematic
 type-scope validation, and transitive theorem/structural-definition receipts
 derived from statements and hole-free evidence. The three examples have been
-migrated off caller-authored dependencies. The generic cardinality theorem,
-linked Wasm measurement, and mechanical compatibility lowering map remain.
+migrated off caller-authored dependencies. The linked Wasm measurement and
+mechanical compatibility lowering map remain.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:

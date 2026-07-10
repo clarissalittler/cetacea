@@ -5,6 +5,7 @@
 //! passed its stop/go gate.
 
 pub mod fragments;
+mod h35_cardinality;
 pub mod h3_examples;
 pub mod inductive;
 pub mod proofs;

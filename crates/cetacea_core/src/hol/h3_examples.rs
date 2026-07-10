@@ -5,6 +5,7 @@
 //! and the diagnostics from deliberate rejection cases.
 
 use super::fragments::DeclarationReceipt;
+use super::h35_cardinality::declare_cardinality_transport;
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
 use super::proofs::HolDraftProof;
 use super::recursion::{StructuralArmLayout, StructuralArmSpec, StructuralDefinitionSpec};
@@ -34,6 +35,7 @@ pub struct H3GraphSpikeReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct H3FiniteSpikeReport {
     pub bijection_cardinality: DeclarationReceipt,
+    pub generic_transport_instance: DeclarationReceipt,
     pub declared_definitions: Vec<String>,
     pub type_error: String,
     pub termination_error: String,
@@ -841,6 +843,18 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         ],
     })?;
 
+    let transport = declare_cardinality_transport(
+        &mut elaborator,
+        list,
+        nil,
+        cons,
+        member,
+        nodup,
+        length,
+        nat.clone(),
+        succ,
+    )?;
+
     let encode = elaborator.declare_structural_definition(StructuralDefinitionSpec {
         name: "encode".to_string(),
         type_parameters: Vec::new(),
@@ -1064,27 +1078,74 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
                 )),
             )
         };
-    let color_has_card_proof =
-        has_card_proof(color_type.clone(), color, red, blue, color_enumeration);
-    let bit_has_card_proof = has_card_proof(bit_type.clone(), bit, off, on, bit_enumeration);
-    let proof = HolDraftProof::ExistsIntro {
+    let color_has_card_proof = has_card_proof(
+        color_type.clone(),
+        color,
+        red,
+        blue,
+        color_enumeration.clone(),
+    );
+    let direct_bit_has_card_proof =
+        has_card_proof(bit_type.clone(), bit, off, on, bit_enumeration.clone());
+    let mut transported_bit_has_card_proof = HolDraftProof::TheoremRef {
+        theorem: transport.theorem,
+        type_arguments: vec![color_type.clone(), bit_type.clone()],
+    };
+    for argument in [CoreTerm::Constant(encode), CoreTerm::Constant(decode)] {
+        transported_bit_has_card_proof = HolDraftProof::ForallElim {
+            proof_forall: Box::new(transported_bit_has_card_proof),
+            argument,
+        };
+    }
+    for argument in [color_inverse_proof.clone(), bit_inverse_proof.clone()] {
+        transported_bit_has_card_proof = HolDraftProof::ImpElim {
+            proof_implication: Box::new(transported_bit_has_card_proof),
+            proof_argument: Box::new(argument),
+        };
+    }
+    transported_bit_has_card_proof = HolDraftProof::ForallElim {
+        proof_forall: Box::new(transported_bit_has_card_proof),
+        argument: color_enumeration,
+    };
+    for argument in [
+        HolDraftProof::AndElimLeft(Box::new(color_has_card_proof.clone())),
+        HolDraftProof::AndElimRight(Box::new(HolDraftProof::AndElimRight(Box::new(
+            color_has_card_proof.clone(),
+        )))),
+    ] {
+        transported_bit_has_card_proof = HolDraftProof::ImpElim {
+            proof_implication: Box::new(transported_bit_has_card_proof),
+            proof_argument: Box::new(argument),
+        };
+    }
+    let package_cardinality = |bit_has_card_proof| HolDraftProof::ExistsIntro {
         domain: nat.clone(),
-        body,
-        witness: two,
+        body: body.clone(),
+        witness: two.clone(),
         proof_body: Box::new(HolDraftProof::AndIntro(
             Box::new(HolDraftProof::AndIntro(
-                Box::new(color_inverse_proof),
-                Box::new(bit_inverse_proof),
+                Box::new(color_inverse_proof.clone()),
+                Box::new(bit_inverse_proof.clone()),
             )),
             Box::new(HolDraftProof::AndIntro(
-                Box::new(color_has_card_proof),
+                Box::new(color_has_card_proof.clone()),
                 Box::new(bit_has_card_proof),
             )),
         )),
     };
 
-    let (_, bijection_cardinality) =
-        elaborator.declare_theorem("bijection_cardinality", Vec::new(), statement, proof)?;
+    let (_, bijection_cardinality) = elaborator.declare_theorem(
+        "bijection_cardinality",
+        Vec::new(),
+        statement.clone(),
+        package_cardinality(direct_bit_has_card_proof),
+    )?;
+    let (_, generic_transport_instance) = elaborator.declare_theorem(
+        "bijection_cardinality_via_transport",
+        Vec::new(),
+        statement,
+        package_cardinality(transported_bit_has_card_proof),
+    )?;
 
     let malformed_encode = CoreTerm::apply(CoreTerm::Constant(encode), CoreTerm::Constant(off));
     let type_error = infer_type(
@@ -1131,10 +1192,12 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
 
     Ok(H3FiniteSpikeReport {
         bijection_cardinality,
+        generic_transport_instance,
         declared_definitions: vec![
             format!("Member#{}", member.0),
             format!("Nodup#{}", nodup.0),
             format!("length#{}", length.0),
+            format!("map#{}", transport.map.0),
             format!("encode#{}", encode.0),
             format!("decode#{}", decode.0),
         ],
@@ -1222,7 +1285,7 @@ mod tests {
     #[test]
     fn finite_h3_spike_checks_bijection_and_shared_cardinality_evidence() {
         let report = run_finite_h3_spike().expect("finite H3 spike");
-        assert_eq!(report.declared_definitions.len(), 5);
+        assert_eq!(report.declared_definitions.len(), 6);
         assert_eq!(
             report.bijection_cardinality.proof().statement_fragment(),
             StatementFragment::FirstOrderInductive
@@ -1250,6 +1313,36 @@ mod tests {
             .is_empty());
         assert!(ReceiptPolicy::new(TeachingProfile::FirstOrderInductive)
             .check(&report.bijection_cardinality)
+            .is_empty());
+        assert_eq!(
+            report
+                .generic_transport_instance
+                .proof()
+                .statement_fragment(),
+            StatementFragment::FirstOrderInductive
+        );
+        assert_eq!(
+            report
+                .generic_transport_instance
+                .proof()
+                .required_fragment(),
+            StatementFragment::HigherOrder
+        );
+        assert!(report
+            .generic_transport_instance
+            .proof()
+            .axiom_dependencies()
+            .is_empty());
+        assert!(report
+            .generic_transport_instance
+            .proof()
+            .incomplete_dependencies()
+            .is_empty());
+        assert!(!ReceiptPolicy::new(TeachingProfile::FirstOrderInductive)
+            .check(&report.generic_transport_instance)
+            .is_empty());
+        assert!(ReceiptPolicy::new(TeachingProfile::HigherOrder)
+            .check(&report.generic_transport_instance)
             .is_empty());
         assert!(report.type_error.contains("application argument has type"));
         assert!(report.termination_error.contains("calls itself directly"));

@@ -50,8 +50,20 @@ a first-order-looking theorem facade over induction, a recursive definition
 mentioned only in discarded proof evidence, unknown theorem IDs, duplicate
 theorem names, and undeclared schematic type parameters.
 
-The remaining H3.5 gates are the reusable bijection/cardinality theorem, a
-linked native/Wasm measurement, and the mechanical FOL-to-HOL lowering map.
+The reusable bijection/cardinality theorem is now also checked. It proves that
+mapping a duplicate-free exhaustive list along a function with a two-sided
+inverse preserves duplicate-freedom, length, and exhaustiveness. Its stored
+proof reuses separate checked lemmas for `map` length, forward and reflected
+membership, injective `Nodup`, and surjective coverage.
+
+The concrete Color/Bit statement is checked twice. Its direct proof retains a
+`fol+induction` receipt. A second proof reuses the generic theorem and therefore
+has the same first-order statement but an honest `hol` required fragment. This
+is intentional: restricted FOL mode must reject a genuinely higher-order lemma
+even when its concrete conclusion happens to be first-order.
+
+The remaining H3.5 gates are a linked native/Wasm measurement and the
+mechanical FOL-to-HOL lowering map.
 
 ## What the spike now checks
 
@@ -89,14 +101,16 @@ receipt are both `fol+induction`, with the exact transitive feature set
 ### Finite enumeration and cardinality
 
 The finite example declares two two-element datatypes, explicit duplicate-free
-exhaustive enumerations, and structural `encode`/`decode` functions. It proves
-both inverse laws and constructs a common natural-number witness for `HasCard`
-on the two types. The theorem is constructive, trust-free, and classified as
-`fol+induction`.
+exhaustive enumerations, structural `encode`/`decode` functions, and generic
+list `map`. It proves both inverse laws and constructs a common natural-number
+witness for `HasCard` on the two types. The direct theorem is constructive,
+trust-free, and classified as `fol+induction`.
 
-This is a concrete cardinality-transport instance, not yet the final reusable
-theorem over arbitrary bijection evidence. That missing abstraction is the main
-logical deliverable for H3.5.
+H3.5 additionally stores and reuses a schematic transport theorem over two
+types, functions in both directions, and their inverse laws. Its supporting
+list lemmas and the final transport theorem are all hole-free and axiom-free.
+The reused concrete proof is correctly classified as `hol` through its
+transitive dependency, demonstrating rather than bypassing fragment isolation.
 
 ### Rejection cases
 
@@ -176,7 +190,7 @@ before the Wasm gate is considered passed.
 | Native latency is acceptable | Pass | No measurable regression in warm tests or corpus verification. |
 | Wasm size and latency are acceptable | Provisional | Artifact is currently dead-code-eliminated; linked measurement remains. |
 | Credible mechanical lowering of existing corpus | Not demonstrated | The old corpus is still only guarded by the unchanged semantic oracle. |
-| Generic cardinality preservation under bijection | Partial | Concrete checked instance passes; reusable theorem/reference machinery remains. |
+| Generic cardinality preservation under bijection | Pass | Checked `map` lemmas and a stored schematic transport theorem are reused at Color/Bit; the dependency honestly raises that proof to HOL. |
 
 ## H3.5 scope and exit gate
 
