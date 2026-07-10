@@ -8,6 +8,11 @@ Measured commit: `7a2573adc60566430b47c0d1261817e18c229007`
 **Conditional go for a bounded H3.5 bridge; no wholesale compatibility
 migration yet.**
 
+H3.5 is now complete. Its exit decision authorizes a bounded H4a compatibility
+substrate while retaining the legacy checker; see
+[`H35_EXIT_DECISION.md`](H35_EXIT_DECISION.md). The text and measurements below
+retain the original H3 checkpoint, followed by the work that closed its gates.
+
 The spike is strong evidence that a small constructive HOL core can support the
 generic libraries needed by a discrete-mathematics course while certifying
 ordinary exercises as `fol+induction`. It is not yet evidence that Cetacea
@@ -62,8 +67,10 @@ has the same first-order statement but an honest `hol` required fragment. This
 is intentional: restricted FOL mode must reject a genuinely higher-order lemma
 even when its concrete conclusion happens to be first-order.
 
-The remaining H3.5 gates are a linked native/Wasm measurement and the
-mechanical FOL-to-HOL lowering map.
+The linked measurement and mechanical lowering map are now complete. See the
+exit decision for the measured `101ec15` artifacts and
+[`FOL_TO_HOL_LOWERING.md`](FOL_TO_HOL_LOWERING.md) for the form-by-form map and
+eight H4a prerequisites.
 
 ## What the spike now checks
 
@@ -172,10 +179,9 @@ lines before their `#[cfg(test)]` sections:
 - inductive declarations; and
 - structural recursion.
 
-The Wasm size result is **not yet a linked-engine comparison**. None of the
-current Wasm exports calls the HOL spike, so linker dead-code elimination can
-remove most or all of it. H3.5 must expose a temporary measurement entry point
-before the Wasm gate is considered passed.
+At this measured H3 commit, the Wasm result was **not yet a linked-engine
+comparison**. H3.5 closed that gap; the exit report records the reachable
+1,227,302-byte Wasm artifact and smoke latency.
 
 ## Gate assessment
 
@@ -183,13 +189,13 @@ before the Wasm gate is considered passed.
 |---|---|---|
 | No new untracked axiom | Pass | All three theorem receipts have empty axiom and incomplete sets. |
 | Examples clearer than FOL encodings | Conditional pass | Generic definitions and the path theorem are natural; hand-built de Bruijn proof evidence is intentionally not a student surface. |
-| Trusted core remains auditable | Conditional pass | About 3,030 pre-test lines in five guarded modules; theorem storage/references may still change this. |
-| Ordinary examples certify as FOL/FOL+induction | Pass | All three example receipts require exactly `fol+induction`. |
-| HOL dependency laundering is rejected | Pass at receipt layer | Adversarial transitive-receipt tests pass; automatic dependency discovery is still missing. |
+| Trusted core remains auditable | Conditional pass | H3.5 has about 3,713 pre-test lines in six guarded HOL modules, including theorem storage. |
+| Ordinary examples certify as FOL/FOL+induction | Pass | The direct list, graph, and finite proofs require `fol+induction`; generic HOL reuse is separately and honestly labeled `hol`. |
+| HOL dependency laundering is rejected | Pass | Theorem and definition dependencies are now discovered from statements and hole-free evidence, including adversarial facades. |
 | Type, positivity, and termination errors are rejected | Pass | Each executable example exercises all three classes. |
 | Native latency is acceptable | Pass | No measurable regression in warm tests or corpus verification. |
-| Wasm size and latency are acceptable | Provisional | Artifact is currently dead-code-eliminated; linked measurement remains. |
-| Credible mechanical lowering of existing corpus | Not demonstrated | The old corpus is still only guarded by the unchanged semantic oracle. |
+| Wasm size and latency are acceptable | Conditional pass | Linked Wasm is 1,227,302 bytes (+25.6% from H3); mean smoke time is 0.0441 ms. Re-measure throughout H4a. |
+| Credible mechanical lowering of existing corpus | Pass for H4a planning | Every legacy form is mapped; eight required compatibility mechanisms are explicit in the lowering document. |
 | Generic cardinality preservation under bijection | Pass | Checked `map` lemmas and a stored schematic transport theorem are reused at Color/Bit; the dependency honestly raises that proof to HOL. |
 
 ## H3.5 scope and exit gate
@@ -220,6 +226,6 @@ The exit gate is a second short decision note. Phase H4 is authorized only if:
 
 ## Recommendation
 
-Continue on the `hol` branch through H3.5. Do not delete, freeze, or weaken the
-existing FOL checker, and do not expand the production parser yet. The logical
-architecture has earned another bounded experiment, but not a cutover.
+Proceed with the bounded H4a substrate in the exit decision. Do not delete,
+freeze, or weaken the existing FOL checker, and do not expand the production
+parser yet. The architecture has earned compatibility work, not a cutover.

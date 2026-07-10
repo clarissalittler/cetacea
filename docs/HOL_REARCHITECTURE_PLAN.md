@@ -340,10 +340,12 @@ ill-typed terms, capture bugs, and disallowed classical steps are rejected.
 
 ### Phase H3 — inductive and polymorphic spike
 
-Decision: **conditional go for a bounded H3.5 bridge; H4 is not yet
-authorized.** See [`hol/H3_DECISION_REPORT.md`](hol/H3_DECISION_REPORT.md) for
-the executable examples, measurements, gate assessment, and current H3.5
-progress.
+Decision: **H3.5 is complete and a bounded H4a compatibility substrate is
+authorized; cutover is not.** See
+[`hol/H35_EXIT_DECISION.md`](hol/H35_EXIT_DECISION.md) for the exit decision and
+linked measurements, and
+[`hol/H3_DECISION_REPORT.md`](hol/H3_DECISION_REPORT.md) for the original H3
+checkpoint.
 
 Status: the checked declaration substrate now supports transactional,
 parameterized inductive types and explicit polymorphic constructor schemes.
@@ -378,8 +380,10 @@ H3.5 also adds stable
 checked theorem IDs, explicit type-instantiated theorem references, schematic
 type-scope validation, and transitive theorem/structural-definition receipts
 derived from statements and hole-free evidence. The three examples have been
-migrated off caller-authored dependencies. The linked Wasm measurement and
-mechanical compatibility lowering map remain.
+migrated off caller-authored dependencies. A compact release smoke now keeps
+the engine reachable in native and Wasm artifacts. The mechanical map in
+[`hol/FOL_TO_HOL_LOWERING.md`](hol/FOL_TO_HOL_LOWERING.md) covers every legacy
+form and identifies the eight compatibility prerequisites for H4a.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:
@@ -406,6 +410,11 @@ If this gate fails, retain the FOL kernel and port only the successful library o
 fragment-receipt ideas.
 
 ### Phase H4 — compatibility elaborator
+
+Status: **bounded H4a substrate authorized.** Implement the prerequisites and
+ordering in the H3.5 exit decision before routing any normal course file to the
+HOL engine. The legacy checker remains authoritative until the exact dual-check
+exit gate passes.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.
