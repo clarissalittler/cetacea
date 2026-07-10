@@ -139,6 +139,19 @@ struct Constant {
     ty: CoreType,
 }
 
+/// A checked, closed, nonrecursive abbreviation. Definitions are installed in
+/// declaration order, so their bodies can mention only earlier constants and
+/// delta reduction is acyclic.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransparentDefinition {
+    pub name: String,
+    pub constant: ConstantId,
+    pub type_parameters: Vec<TypeParameter>,
+    pub ty: CoreType,
+    pub body: CoreTerm,
+    pub direct_dependencies: BTreeSet<ConstantId>,
+}
+
 /// Kernel reduction data installed only after the recursion checker has
 /// validated a definition. These fields are crate-private so surface code
 /// cannot manufacture computation rules.
@@ -163,6 +176,7 @@ pub(crate) struct StructuralReduction {
 pub struct TermSignature {
     constants: Vec<Constant>,
     names: HashMap<String, ConstantId>,
+    transparent_definitions: HashMap<ConstantId, TransparentDefinition>,
     structural_reductions: HashMap<ConstantId, StructuralReduction>,
 }
 
@@ -206,8 +220,86 @@ impl TermSignature {
         Ok(id)
     }
 
+    pub fn declare_transparent_definition(
+        &mut self,
+        types: &TypeSignature,
+        name: impl Into<String>,
+        ty: CoreType,
+        body: CoreTerm,
+    ) -> Result<ConstantId, TermError> {
+        self.declare_polymorphic_transparent_definition(types, name, Vec::new(), ty, body)
+    }
+
+    /// Check and install a closed rank-one definition transactionally.
+    ///
+    /// The proposed constant is absent while its body is checked. Consequently
+    /// self-reference and references to future declarations are rejected as
+    /// unknown IDs, while references to earlier transparent or structural
+    /// definitions remain available.
+    pub fn declare_polymorphic_transparent_definition(
+        &mut self,
+        types: &TypeSignature,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        ty: CoreType,
+        body: CoreTerm,
+    ) -> Result<ConstantId, TermError> {
+        let name = name.into();
+        if self.names.contains_key(&name) {
+            return Err(TermError::new(format!(
+                "constant `{name}` is already declared"
+            )));
+        }
+        types.validate_scheme(&type_parameters, &ty)?;
+        validate_term_type_scheme(types, &type_parameters, &body)?;
+        let proposed_id = self.next_constant_id()?;
+        let direct_dependencies = term_constant_dependencies(&body);
+        if direct_dependencies.contains(&proposed_id) {
+            return Err(TermError::new(format!(
+                "transparent definition `{name}` cannot refer to itself"
+            )));
+        }
+        let actual = infer_type(types, self, &TermContext::new(), &body).map_err(|error| {
+            TermError::new(format!(
+                "transparent definition `{name}` is ill-typed: {}",
+                error.message
+            ))
+        })?;
+        if actual != ty {
+            return Err(TermError::new(format!(
+                "transparent definition `{name}` has type `{actual:?}`, but expected `{ty:?}`"
+            )));
+        }
+
+        let mut staged = self.clone();
+        let constant =
+            staged.declare_polymorphic(types, name.clone(), type_parameters.clone(), ty.clone())?;
+        if constant != proposed_id {
+            return Err(TermError::new(
+                "transparent definition and term signatures do not share declaration history",
+            ));
+        }
+        staged.transparent_definitions.insert(
+            constant,
+            TransparentDefinition {
+                name,
+                constant,
+                type_parameters,
+                ty,
+                body,
+                direct_dependencies,
+            },
+        );
+        *self = staged;
+        Ok(constant)
+    }
+
     pub fn resolve(&self, name: &str) -> Option<ConstantId> {
         self.names.get(name).copied()
+    }
+
+    pub fn transparent_definition(&self, id: ConstantId) -> Option<&TransparentDefinition> {
+        self.transparent_definitions.get(&id)
     }
 
     pub(crate) fn next_constant_id(&self) -> Result<ConstantId, TermError> {
@@ -370,7 +462,8 @@ fn expect_prop(
     }
 }
 
-/// Normalize a well-typed simply typed term by beta reduction.
+/// Normalize a well-typed simply typed term by beta reduction and checked
+/// delta/structural computation.
 ///
 /// Type checking occurs first, so untyped self-application cannot turn this
 /// total operation into general evaluation.
@@ -429,14 +522,26 @@ pub fn instantiate_binder(
 
 fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTerm, TermError> {
     match term {
-        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
-            Ok(term.clone())
+        CoreTerm::Bound(_) | CoreTerm::Truth | CoreTerm::Falsity => Ok(term.clone()),
+        CoreTerm::Constant(id) => {
+            if let Some(body) = unfold_transparent_constant(constants, *id, &[])? {
+                normalize_typed(constants, &body)
+            } else {
+                Ok(term.clone())
+            }
         }
         CoreTerm::TypeApplication {
             constant,
             arguments,
-        } if arguments.is_empty() => Ok(CoreTerm::Constant(*constant)),
-        CoreTerm::TypeApplication { .. } => Ok(term.clone()),
+        } => {
+            if let Some(body) = unfold_transparent_constant(constants, *constant, arguments)? {
+                normalize_typed(constants, &body)
+            } else if arguments.is_empty() {
+                normalize_typed(constants, &CoreTerm::Constant(*constant))
+            } else {
+                Ok(term.clone())
+            }
+        }
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -484,6 +589,31 @@ fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTer
             normalize_typed(constants, body)?,
         )),
     }
+}
+
+fn unfold_transparent_constant(
+    constants: &TermSignature,
+    constant: ConstantId,
+    type_arguments: &[CoreType],
+) -> Result<Option<CoreTerm>, TermError> {
+    let Some(definition) = constants.transparent_definitions.get(&constant) else {
+        return Ok(None);
+    };
+    if type_arguments.len() != definition.type_parameters.len() {
+        return Err(TermError::new(format!(
+            "checked transparent definition `{}` received {} type argument(s), but expects {}",
+            definition.name,
+            type_arguments.len(),
+            definition.type_parameters.len()
+        )));
+    }
+    let substitution = definition
+        .type_parameters
+        .iter()
+        .zip(type_arguments)
+        .map(|(parameter, argument)| (parameter.id, argument.clone()))
+        .collect::<HashMap<_, _>>();
+    Ok(Some(substitute_term_types(&definition.body, &substitution)))
 }
 
 fn reduce_structural_application(
@@ -1005,6 +1135,91 @@ mod tests {
             ),
             Ok(true)
         );
+    }
+
+    #[test]
+    fn transparent_definitions_delta_reduce_through_dependency_chains() {
+        let (types, mut terms, nat, zero) = signatures();
+        let identity_type = CoreType::arrow(nat.clone(), nat.clone());
+        let identity = terms
+            .declare_transparent_definition(
+                &types,
+                "identity_nat",
+                identity_type.clone(),
+                CoreTerm::lambda(nat.clone(), CoreTerm::Bound(0)),
+            )
+            .expect("checked identity definition");
+        let alias = terms
+            .declare_transparent_definition(
+                &types,
+                "identity_alias",
+                identity_type,
+                CoreTerm::Constant(identity),
+            )
+            .expect("definition may use an earlier definition");
+        assert_eq!(
+            terms
+                .transparent_definition(alias)
+                .expect("stored alias")
+                .direct_dependencies,
+            BTreeSet::from([identity])
+        );
+
+        let application = CoreTerm::apply(CoreTerm::Constant(alias), CoreTerm::Constant(zero));
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &application),
+            Ok(CoreTerm::Constant(zero))
+        );
+    }
+
+    #[test]
+    fn polymorphic_transparent_definitions_substitute_types_before_beta_reduction() {
+        let (types, mut terms, nat, zero) = signatures();
+        let parameter = TypeParameter::any(41);
+        let identity = terms
+            .declare_polymorphic_transparent_definition(
+                &types,
+                "identity",
+                vec![parameter],
+                CoreType::arrow(
+                    CoreType::Parameter(parameter),
+                    CoreType::Parameter(parameter),
+                ),
+                CoreTerm::lambda(CoreType::Parameter(parameter), CoreTerm::Bound(0)),
+            )
+            .expect("checked polymorphic definition");
+        let application = CoreTerm::apply(
+            CoreTerm::instantiate_constant(identity, vec![nat]),
+            CoreTerm::Constant(zero),
+        );
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &application),
+            Ok(CoreTerm::Constant(zero))
+        );
+    }
+
+    #[test]
+    fn invalid_transparent_definitions_are_transactional_and_nonrecursive() {
+        let (types, mut terms, nat, _) = signatures();
+        let proposed = terms.next_constant_id().expect("next constant id");
+        let recursive = terms
+            .declare_transparent_definition(
+                &types,
+                "loop",
+                nat.clone(),
+                CoreTerm::Constant(proposed),
+            )
+            .expect_err("transparent definitions cannot be recursive");
+        assert!(recursive.message.contains("cannot refer to itself"));
+        assert_eq!(terms.resolve("loop"), None);
+        assert_eq!(terms.next_constant_id(), Ok(proposed));
+
+        let ill_typed = terms
+            .declare_transparent_definition(&types, "bad", nat, CoreTerm::Truth)
+            .expect_err("definition body must have its declared type");
+        assert!(ill_typed.message.contains("has type `Prop`"));
+        assert_eq!(terms.resolve("bad"), None);
+        assert_eq!(terms.next_constant_id(), Ok(proposed));
     }
 
     #[test]

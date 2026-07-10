@@ -62,8 +62,8 @@ rejected.
 | `const c : A` | Declare a monomorphic constant `c : lower(A)`. | Supported. |
 | `func f : A1 -> ... -> B` | Declare a curried constant `A1 -> ... -> B`; surface applications must be saturated in FOL mode. | Supported by core types/terms. |
 | `pred R(A1, ..., An)` | Declare a curried constant `A1 -> ... -> An -> Prop`; surface applications must be saturated in FOL mode. | Supported. |
-| Formula `def D ... : Prop := F` | Check a polymorphic constant with a transparent body `lambda params. lower(F)`. | Needs checked, acyclic nonrecursive definitions and delta reduction. |
-| Term `def d ... : A := t` | Check a polymorphic constant with a transparent body `lambda params. lower(t)`. | Same missing transparent-definition layer. |
+| Formula `def D ... : Prop := F` | Check a polymorphic constant with a transparent body `lambda params. lower(F)`. | H4a core declarations and delta reduction are implemented; surface parameter/body lowering remains. |
+| Term `def d ... : A := t` | Check a polymorphic constant with a transparent body `lambda params. lower(t)`. | Same implemented core substrate and remaining surface work. |
 | `data D | ...` | Transactionally declare a zero-parameter inductive type; a field exactly equal to `D` is `Recursive`, every other field is checked existing data. | All positive corpus datatypes use supported direct recursion. Nested/mutual recursion remains rejected. |
 | `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | Core currently puts the recursive argument last, while legacy syntax puts it first. H4 must add a checked recursive-argument position (preferred) or a transparent eta wrapper. |
 | `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | H4a core storage and receipt propagation are implemented; surface lowering remains. |
@@ -186,8 +186,13 @@ These are compatibility prerequisites, not optional language expansion:
    explicit-reference substrate is implemented. Surface inference/lowering is
    still required for pervasive `(P : Prop)`, `(x : A)`, and
    `(R : A -> ... -> Prop)` parameters.
-2. **Checked transparent definitions and delta reduction.** Required by formula
-   definitions, term definitions, `unfold`, `simp`, and definitional `Convert`.
+2. **Checked transparent definitions and delta reduction.** Implemented in the
+   H4a core for closed monomorphic and rank-one polymorphic bodies. Definitions
+   are checked before their constant is installed, can refer only to earlier
+   declarations, and therefore normalize acyclically. Definition receipts
+   preserve transitive dependencies while concrete uses are delta-normalized
+   before fragment classification. Surface `def`, selective `unfold`, `simp`,
+   and `Convert` lowering remain.
 3. **Legacy first-order sets.** Add the `Set A` wrapper and audited computation
    equations; retain `set_ext` as a visible trusted axiom.
 4. **Product term computation.** Add typed pair, first projection, and second

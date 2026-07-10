@@ -42,7 +42,7 @@ pub use recursion::{
 pub use spike::{SpikeElaborator, SpikeError};
 pub use terms::{
     definitionally_equal, infer_type, instantiate_binder, normalize, ConstantId, CoreTerm,
-    TermContext, TermError, TermSignature,
+    TermContext, TermError, TermSignature, TransparentDefinition,
 };
 pub use theorems::{
     HolTheoremDeclaration, HolTheoremSignature, HolTheoremStatus, TheoremError, TheoremId,

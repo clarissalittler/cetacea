@@ -16,6 +16,7 @@ use super::types::{CoreType, TypeParameter};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkedHolSmokeReport {
     pub structural_required: StatementFragment,
+    pub transparent_required: StatementFragment,
     pub facade_required: StatementFragment,
     pub polymorphic_required: StatementFragment,
     pub axiom_dependencies: usize,
@@ -67,6 +68,20 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         "always_nil",
         Vec::new(),
         CoreTerm::apply(CoreTerm::Constant(always), nil_nat.clone()),
+        HolDraftProof::TruthIntro,
+    )?;
+    let always_alias = elaborator.declare_transparent_definition(
+        "AlwaysAlias",
+        CoreType::arrow(list_nat.clone(), CoreType::Prop),
+        CoreTerm::lambda(
+            list_nat.clone(),
+            CoreTerm::apply(CoreTerm::Constant(always), CoreTerm::Bound(0)),
+        ),
+    )?;
+    let (_, transparent) = elaborator.declare_theorem(
+        "always_alias_nil",
+        Vec::new(),
+        CoreTerm::apply(CoreTerm::Constant(always_alias), nil_nat.clone()),
         HolDraftProof::TruthIntro,
     )?;
 
@@ -177,9 +192,10 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         },
     )?;
 
-    let receipts = [&structural, &facade, &polymorphic];
+    let receipts = [&structural, &transparent, &facade, &polymorphic];
     Ok(LinkedHolSmokeReport {
         structural_required: structural.proof().required_fragment(),
+        transparent_required: transparent.proof().required_fragment(),
         facade_required: facade.proof().required_fragment(),
         polymorphic_required: polymorphic.proof().required_fragment(),
         axiom_dependencies: receipts
@@ -205,6 +221,10 @@ mod tests {
         let report = run_linked_hol_smoke().expect("linked HOL smoke");
         assert_eq!(
             report.structural_required,
+            StatementFragment::FirstOrderInductive
+        );
+        assert_eq!(
+            report.transparent_required,
             StatementFragment::FirstOrderInductive
         );
         assert_eq!(

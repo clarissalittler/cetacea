@@ -427,7 +427,12 @@ explicitly allowed. Typed incomplete theorem drafts are now checked and retained
 outside the kernel, can depend on other incomplete drafts, and produce
 transitive incomplete receipts. The checked theorem-reference path rejects
 incomplete declarations, preventing dependency laundering. Surface
-axiom/classical/incomplete lowering remains.
+axiom/classical/incomplete lowering remains. H4a also has checked, closed,
+rank-one transparent definitions: the body is validated before its constant is
+installed, declaration order rules out delta cycles, and normalization unfolds
+definitions through beta and existing structural computation. Their receipts
+retain dependencies while concrete instances determine the statement fragment.
+Surface `def`, `unfold`, `simp`, and conversion lowering remains.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

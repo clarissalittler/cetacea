@@ -154,6 +154,54 @@ impl SpikeElaborator {
             .declare_polymorphic(&self.types, name, type_parameters, ty)?)
     }
 
+    pub fn declare_transparent_definition(
+        &mut self,
+        name: impl Into<String>,
+        ty: CoreType,
+        body: CoreTerm,
+    ) -> Result<ConstantId, SpikeError> {
+        self.declare_polymorphic_transparent_definition(name, Vec::new(), ty, body)
+    }
+
+    /// Check and receipt a conservative nonrecursive abbreviation. The
+    /// definition receipt itself is fragment-neutral: concrete uses are
+    /// delta-normalized before classification, while dependencies of the body
+    /// still propagate transitively.
+    pub fn declare_polymorphic_transparent_definition(
+        &mut self,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        ty: CoreType,
+        body: CoreTerm,
+    ) -> Result<ConstantId, SpikeError> {
+        let referenced_constants = term_constant_dependencies(&body);
+        let dependency_receipts = referenced_constants
+            .iter()
+            .filter_map(|constant| self.definition_receipts.get(constant).cloned())
+            .collect::<Vec<_>>();
+        let receipt_id = DeclarationId(self.next_receipt_id);
+        let next_receipt_id = self
+            .next_receipt_id
+            .checked_add(1)
+            .ok_or_else(|| SpikeError::new("too many spike declaration receipts"))?;
+        let id = self.constants.declare_polymorphic_transparent_definition(
+            &self.types,
+            name,
+            type_parameters,
+            ty,
+            body,
+        )?;
+        let receipt = DeclarationReceipt::checked(
+            receipt_id,
+            StatementFragment::Prop,
+            [],
+            dependency_receipts.iter(),
+        );
+        self.definition_receipts.insert(id, receipt);
+        self.next_receipt_id = next_receipt_id;
+        Ok(id)
+    }
+
     pub fn declare_inductive(
         &mut self,
         spec: InductiveSpec,
