@@ -46,6 +46,13 @@ pub enum HolDraftProof {
         motive: CoreTerm,
         proof_left: Box<HolDraftProof>,
     },
+    ConstructorDisjoint {
+        proof_equality: Box<HolDraftProof>,
+    },
+    ConstructorInjective {
+        proof_equality: Box<HolDraftProof>,
+        field: usize,
+    },
     ForallIntro {
         domain: CoreType,
         body: Box<HolDraftProof>,
@@ -80,6 +87,17 @@ pub enum HolDraftProof {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HolKernelProof(HolDraftProof);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HolProofAudit {
+    uses_induction: bool,
+}
+
+impl HolProofAudit {
+    pub fn uses_induction(self) -> bool {
+        self.uses_induction
+    }
+}
 
 impl TryFrom<HolDraftProof> for HolKernelProof {
     type Error = ProofError;
@@ -185,6 +203,25 @@ pub fn check_hol_proof(
     proof: &HolKernelProof,
     expected: &CoreTerm,
 ) -> Result<(), ProofError> {
+    check_hol_proof_audit(
+        types,
+        constants,
+        term_context,
+        proof_context,
+        proof,
+        expected,
+    )
+    .map(|_| ())
+}
+
+pub fn check_hol_proof_audit(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    term_context: &TermContext,
+    proof_context: &HolProofContext,
+    proof: &HolKernelProof,
+    expected: &CoreTerm,
+) -> Result<HolProofAudit, ProofError> {
     check_hol_proof_internal(
         types,
         constants,
@@ -193,7 +230,8 @@ pub fn check_hol_proof(
         proof_context,
         proof,
         expected,
-    )
+    )?;
+    Ok(audit_proof(&proof.0))
 }
 
 pub fn check_hol_proof_with_inductives(
@@ -205,6 +243,27 @@ pub fn check_hol_proof_with_inductives(
     proof: &HolKernelProof,
     expected: &CoreTerm,
 ) -> Result<(), ProofError> {
+    check_hol_proof_with_inductives_audit(
+        types,
+        constants,
+        inductives,
+        term_context,
+        proof_context,
+        proof,
+        expected,
+    )
+    .map(|_| ())
+}
+
+pub fn check_hol_proof_with_inductives_audit(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    inductives: &InductiveSignature,
+    term_context: &TermContext,
+    proof_context: &HolProofContext,
+    proof: &HolKernelProof,
+    expected: &CoreTerm,
+) -> Result<HolProofAudit, ProofError> {
     check_hol_proof_internal(
         types,
         constants,
@@ -213,7 +272,8 @@ pub fn check_hol_proof_with_inductives(
         proof_context,
         proof,
         expected,
-    )
+    )?;
+    Ok(audit_proof(&proof.0))
 }
 
 fn check_hol_proof_internal(
@@ -502,6 +562,89 @@ fn infer_proof(
                 &CoreTerm::apply(motive.clone(), *right),
             )?)
         }
+        HolDraftProof::ConstructorDisjoint { proof_equality } => {
+            let inductive_signature = inductives.ok_or_else(|| {
+                ProofError::new(
+                    "constructor disjointness requires a checked inductive signature at the kernel boundary",
+                )
+            })?;
+            let equality = normalized_proof_formula(
+                types,
+                constants,
+                inductives,
+                term_context,
+                proof_context,
+                proof_equality,
+            )?;
+            let CoreTerm::Equality { left, right, .. } = equality else {
+                return Err(ProofError::new(
+                    "constructor disjointness expects an equality proof",
+                ));
+            };
+            let left = constructor_application(inductive_signature, &left)?;
+            let right = constructor_application(inductive_signature, &right)?;
+            if left.datatype != right.datatype {
+                return Err(ProofError::new(
+                    "constructor equality compares different inductive datatypes",
+                ));
+            }
+            if left.constructor == right.constructor {
+                return Err(ProofError::new(
+                    "constructor disjointness needs two distinct constructors",
+                ));
+            }
+            Ok(CoreTerm::Falsity)
+        }
+        HolDraftProof::ConstructorInjective {
+            proof_equality,
+            field,
+        } => {
+            let inductive_signature = inductives.ok_or_else(|| {
+                ProofError::new(
+                    "constructor injectivity requires a checked inductive signature at the kernel boundary",
+                )
+            })?;
+            let equality = normalized_proof_formula(
+                types,
+                constants,
+                inductives,
+                term_context,
+                proof_context,
+                proof_equality,
+            )?;
+            let CoreTerm::Equality { left, right, .. } = equality else {
+                return Err(ProofError::new(
+                    "constructor injectivity expects an equality proof",
+                ));
+            };
+            let left = constructor_application(inductive_signature, &left)?;
+            let right = constructor_application(inductive_signature, &right)?;
+            if left.datatype != right.datatype || left.constructor != right.constructor {
+                return Err(ProofError::new(
+                    "constructor injectivity needs applications of the same constructor",
+                ));
+            }
+            let left_field = left.fields.get(*field).ok_or_else(|| {
+                ProofError::new(format!(
+                    "constructor `{}` has {} field(s), so field `{field}` is invalid",
+                    left.constructor.0,
+                    left.fields.len()
+                ))
+            })?;
+            let right_field = right.fields.get(*field).ok_or_else(|| {
+                ProofError::new(format!(
+                    "constructor `{}` has {} field(s), so field `{field}` is invalid",
+                    right.constructor.0,
+                    right.fields.len()
+                ))
+            })?;
+            let field_type = infer_type(types, constants, term_context, left_field)?;
+            Ok(CoreTerm::equality(
+                field_type,
+                (*left_field).clone(),
+                (*right_field).clone(),
+            ))
+        }
         HolDraftProof::ForallIntro { domain, body } => {
             types.validate(domain)?;
             let body_term_context = term_context.clone().with_bound(domain.clone());
@@ -731,6 +874,65 @@ fn infer_proof(
     }
 }
 
+struct ConstructorApplication<'a> {
+    datatype: TypeConstructorId,
+    constructor: super::terms::ConstantId,
+    fields: Vec<&'a CoreTerm>,
+}
+
+fn constructor_application<'a>(
+    inductives: &InductiveSignature,
+    term: &'a CoreTerm,
+) -> Result<ConstructorApplication<'a>, ProofError> {
+    let mut fields = Vec::new();
+    let head = constructor_application_spine(term, &mut fields);
+    let constructor = match head {
+        CoreTerm::Constant(id) => *id,
+        CoreTerm::TypeApplication { constant, .. } => *constant,
+        _ => {
+            return Err(ProofError::new(
+                "no-confusion rule expects fully applied constructor terms",
+            ));
+        }
+    };
+    let (declaration, metadata) =
+        inductives
+            .constructor_declaration(constructor)
+            .ok_or_else(|| {
+                ProofError::new(format!(
+                    "constant `{}` is not an inductive constructor",
+                    constructor.0
+                ))
+            })?;
+    if fields.len() != metadata.field_types.len() {
+        return Err(ProofError::new(format!(
+            "constructor `{}` expects {} field(s), but no-confusion received {}",
+            metadata.name,
+            metadata.field_types.len(),
+            fields.len()
+        )));
+    }
+    Ok(ConstructorApplication {
+        datatype: declaration.type_constructor,
+        constructor,
+        fields,
+    })
+}
+
+fn constructor_application_spine<'a>(
+    term: &'a CoreTerm,
+    fields: &mut Vec<&'a CoreTerm>,
+) -> &'a CoreTerm {
+    match term {
+        CoreTerm::Apply { function, argument } => {
+            let head = constructor_application_spine(function, fields);
+            fields.push(argument);
+            head
+        }
+        _ => term,
+    }
+}
+
 fn check_draft(
     types: &TypeSignature,
     constants: &TermSignature,
@@ -844,11 +1046,84 @@ fn proof_has_hole(proof: &HolDraftProof) -> bool {
             proof_left,
             ..
         } => proof_has_hole(proof_equality) || proof_has_hole(proof_left),
+        HolDraftProof::ConstructorDisjoint { proof_equality }
+        | HolDraftProof::ConstructorInjective { proof_equality, .. } => {
+            proof_has_hole(proof_equality)
+        }
         HolDraftProof::ExistsIntro { proof_body, .. } => proof_has_hole(proof_body),
         HolDraftProof::ExistsElim {
             proof_exists, body, ..
         } => proof_has_hole(proof_exists) || proof_has_hole(body),
         HolDraftProof::Induction { cases, .. } => cases.iter().any(proof_has_hole),
+    }
+}
+
+fn audit_proof(proof: &HolDraftProof) -> HolProofAudit {
+    HolProofAudit {
+        uses_induction: proof_uses_induction(proof),
+    }
+}
+
+fn proof_uses_induction(proof: &HolDraftProof) -> bool {
+    match proof {
+        HolDraftProof::Induction { .. } => true,
+        HolDraftProof::Hypothesis(_)
+        | HolDraftProof::TruthIntro
+        | HolDraftProof::EqualityRefl(_)
+        | HolDraftProof::Sorry { .. } => false,
+        HolDraftProof::FalseElim { proof_false, .. }
+        | HolDraftProof::AndElimLeft(proof_false)
+        | HolDraftProof::AndElimRight(proof_false)
+        | HolDraftProof::ForallIntro {
+            body: proof_false, ..
+        }
+        | HolDraftProof::ForallElim {
+            proof_forall: proof_false,
+            ..
+        }
+        | HolDraftProof::OrIntroLeft {
+            proof_left: proof_false,
+            ..
+        }
+        | HolDraftProof::OrIntroRight {
+            proof_right: proof_false,
+            ..
+        }
+        | HolDraftProof::ConstructorDisjoint {
+            proof_equality: proof_false,
+        }
+        | HolDraftProof::ConstructorInjective {
+            proof_equality: proof_false,
+            ..
+        }
+        | HolDraftProof::ExistsIntro {
+            proof_body: proof_false,
+            ..
+        } => proof_uses_induction(proof_false),
+        HolDraftProof::AndIntro(left, right)
+        | HolDraftProof::ImpElim {
+            proof_implication: left,
+            proof_argument: right,
+        } => proof_uses_induction(left) || proof_uses_induction(right),
+        HolDraftProof::OrElim {
+            proof_or,
+            left_case,
+            right_case,
+            ..
+        } => {
+            proof_uses_induction(proof_or)
+                || proof_uses_induction(left_case)
+                || proof_uses_induction(right_case)
+        }
+        HolDraftProof::ImpIntro { body, .. } => proof_uses_induction(body),
+        HolDraftProof::EqualityElim {
+            proof_equality,
+            proof_left,
+            ..
+        } => proof_uses_induction(proof_equality) || proof_uses_induction(proof_left),
+        HolDraftProof::ExistsElim {
+            proof_exists, body, ..
+        } => proof_uses_induction(proof_exists) || proof_uses_induction(body),
     }
 }
 
@@ -1339,7 +1614,7 @@ mod tests {
             }),
         };
         let kernel = fixture.kernel(proof);
-        check_hol_proof_with_inductives(
+        let audit = check_hol_proof_with_inductives_audit(
             &fixture.types,
             &fixture.terms,
             &inductives,
@@ -1349,6 +1624,7 @@ mod tests {
             &expected,
         )
         .expect("constructive list induction principle");
+        assert!(audit.uses_induction());
     }
 
     #[test]
@@ -1409,5 +1685,79 @@ mod tests {
         };
         let error = HolKernelProof::try_from(draft).expect_err("induction hole must fail");
         assert!(error.message.contains("not kernel proofs"));
+    }
+
+    #[test]
+    fn datatype_no_confusion_proves_disjointness_and_field_injectivity() {
+        let mut fixture = Fixture::new();
+        let (inductives, list, nil, cons) = declare_list(&mut fixture);
+        let list_nat = CoreType::constructor(list, vec![fixture.nat.clone()]);
+        let nil_nat = CoreTerm::instantiate_constant(nil, vec![fixture.nat.clone()]);
+        let cons_term = |head: CoreTerm| {
+            CoreTerm::apply(
+                CoreTerm::apply(
+                    CoreTerm::instantiate_constant(cons, vec![fixture.nat.clone()]),
+                    head,
+                ),
+                nil_nat.clone(),
+            )
+        };
+
+        let disjoint_equality = CoreTerm::equality(
+            list_nat.clone(),
+            nil_nat.clone(),
+            cons_term(CoreTerm::Constant(fixture.zero)),
+        );
+        let disjoint_context = HolProofContext::new()
+            .with_assumption(
+                &fixture.types,
+                &fixture.terms,
+                &TermContext::new(),
+                disjoint_equality,
+            )
+            .expect("impossible constructor equality hypothesis");
+        check_hol_proof_with_inductives(
+            &fixture.types,
+            &fixture.terms,
+            &inductives,
+            &TermContext::new(),
+            &disjoint_context,
+            &fixture.kernel(HolDraftProof::ConstructorDisjoint {
+                proof_equality: Box::new(HolDraftProof::Hypothesis(0)),
+            }),
+            &CoreTerm::Falsity,
+        )
+        .expect("nil and cons are disjoint");
+
+        let injective_equality = CoreTerm::equality(
+            list_nat,
+            cons_term(CoreTerm::Constant(fixture.zero)),
+            cons_term(CoreTerm::Constant(fixture.one)),
+        );
+        let injective_context = HolProofContext::new()
+            .with_assumption(
+                &fixture.types,
+                &fixture.terms,
+                &TermContext::new(),
+                injective_equality,
+            )
+            .expect("constructor equality hypothesis");
+        check_hol_proof_with_inductives(
+            &fixture.types,
+            &fixture.terms,
+            &inductives,
+            &TermContext::new(),
+            &injective_context,
+            &fixture.kernel(HolDraftProof::ConstructorInjective {
+                proof_equality: Box::new(HolDraftProof::Hypothesis(0)),
+                field: 0,
+            }),
+            &CoreTerm::equality(
+                fixture.nat.clone(),
+                CoreTerm::Constant(fixture.zero),
+                CoreTerm::Constant(fixture.one),
+            ),
+        )
+        .expect("cons is injective in its head");
     }
 }

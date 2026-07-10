@@ -352,7 +352,12 @@ also enforced at every core type occurrence. The proof checker now has an
 explicit structural-induction rule whose exhaustive cases receive constructor
 fields and induction hypotheses only for recorded recursive fields; a
 hand-built constructive `List` induction principle passes. The small surface
-elaborator and the three end-to-end examples remain to be built.
+spike elaborator now resolves names immediately to stable core IDs, maintains
+fragment metadata, kernel-checks proofs, and derives induction features from
+checked evidence before constructing receipts. Typed constructor disjointness
+and injectivity are also explicit kernel rules backed by the inductive
+signature. The three full curriculum examples remain to be built on this
+substrate.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:

@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use super::proofs::HolProofAudit;
 use super::terms::{
     infer_type, normalize, ConstantId, CoreTerm, TermContext, TermError, TermSignature,
 };
@@ -405,6 +406,14 @@ impl ProofFeature {
             | Self::Choice => StatementFragment::HigherOrder,
         }
     }
+}
+
+pub fn proof_features_from_audit(audit: HolProofAudit) -> BTreeSet<ProofFeature> {
+    let mut features = BTreeSet::new();
+    if audit.uses_induction() {
+        features.insert(ProofFeature::Induction);
+    }
+    features
 }
 
 impl fmt::Display for ProofFeature {

@@ -290,6 +290,15 @@ impl InductiveSignature {
             .get(constructor)
     }
 
+    pub fn constructor_declaration(
+        &self,
+        id: ConstantId,
+    ) -> Option<(&InductiveDeclaration, &InductiveConstructor)> {
+        let (declaration, constructor) = *self.by_constructor.get(&id)?;
+        let declaration = self.declarations.get(declaration)?;
+        Some((declaration, declaration.constructors.get(constructor)?))
+    }
+
     pub fn instantiate_constructor(
         &self,
         types: &TypeSignature,
