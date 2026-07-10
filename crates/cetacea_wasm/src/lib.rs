@@ -40,11 +40,12 @@ pub extern "C" fn cetacea_version() -> *mut u8 {
 pub extern "C" fn cetacea_hol_spike_smoke() -> *mut u8 {
     match run_linked_hol_smoke() {
         Ok(report) => response_json(format!(
-            r#"{{"ok":true,"structural_required":{},"transparent_required":{},"facade_required":{},"polymorphic_required":{},"axioms":{},"incomplete":{},"trusted_deps":{},"incomplete_user_deps":{},"classical_features":{}}}"#,
+            r#"{{"ok":true,"structural_required":{},"transparent_required":{},"facade_required":{},"polymorphic_required":{},"product_required":{},"axioms":{},"incomplete":{},"trusted_deps":{},"incomplete_user_deps":{},"classical_features":{}}}"#,
             json_string(&report.structural_required.to_string()),
             json_string(&report.transparent_required.to_string()),
             json_string(&report.facade_required.to_string()),
             json_string(&report.polymorphic_required.to_string()),
+            json_string(&report.product_required.to_string()),
             report.axiom_dependencies,
             report.incomplete_dependencies,
             report.trusted_user_axiom_dependencies,
@@ -506,6 +507,7 @@ mod tests {
             "{json}"
         );
         assert!(json.contains(r#""polymorphic_required":"hol""#), "{json}");
+        assert!(json.contains(r#""product_required":"fol""#), "{json}");
         assert!(json.contains(r#""axioms":0"#), "{json}");
         assert!(json.contains(r#""incomplete":0"#), "{json}");
         assert!(json.contains(r#""trusted_deps":1"#), "{json}");

@@ -17,11 +17,12 @@ fn main() {
     if args == ["--hol-smoke"] {
         match run_linked_hol_smoke() {
             Ok(report) => println!(
-                "structural={} transparent={} facade={} polymorphic={} axioms={} incomplete={} trusted_deps={} incomplete_user_deps={} classical_features={}",
+                "structural={} transparent={} facade={} polymorphic={} product={} axioms={} incomplete={} trusted_deps={} incomplete_user_deps={} classical_features={}",
                 report.structural_required,
                 report.transparent_required,
                 report.facade_required,
                 report.polymorphic_required,
+                report.product_required,
                 report.axiom_dependencies,
                 report.incomplete_dependencies,
                 report.trusted_user_axiom_dependencies,

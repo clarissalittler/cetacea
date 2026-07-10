@@ -281,8 +281,11 @@ fn term_mentions_constant(term: &CoreTerm, sought: ConstantId) -> bool {
         CoreTerm::TypeApplication { constant, .. } => *constant == sought,
         CoreTerm::Lambda { body, .. }
         | CoreTerm::Forall { body, .. }
-        | CoreTerm::Exists { body, .. } => term_mentions_constant(body, sought),
+        | CoreTerm::Exists { body, .. }
+        | CoreTerm::First(body)
+        | CoreTerm::Second(body) => term_mentions_constant(body, sought),
         CoreTerm::Apply { function, argument }
+        | CoreTerm::Pair(function, argument)
         | CoreTerm::And(function, argument)
         | CoreTerm::Or(function, argument)
         | CoreTerm::Implies(function, argument) => {

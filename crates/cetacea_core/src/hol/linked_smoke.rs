@@ -19,6 +19,7 @@ pub struct LinkedHolSmokeReport {
     pub transparent_required: StatementFragment,
     pub facade_required: StatementFragment,
     pub polymorphic_required: StatementFragment,
+    pub product_required: StatementFragment,
     pub axiom_dependencies: usize,
     pub incomplete_dependencies: usize,
     pub trusted_user_axiom_dependencies: usize,
@@ -132,9 +133,16 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         ),
         HolDraftProof::TheoremRef {
             theorem: identity,
-            type_arguments: vec![nat],
+            type_arguments: vec![nat.clone()],
             term_arguments: vec![CoreTerm::Constant(zero)],
         },
+    )?;
+    let pair = CoreTerm::pair(CoreTerm::Constant(zero), CoreTerm::Constant(zero));
+    let (_, product) = elaborator.declare_theorem(
+        "first_pair_zero",
+        Vec::new(),
+        CoreTerm::equality(nat, CoreTerm::first(pair), CoreTerm::Constant(zero)),
+        HolDraftProof::EqualityRefl(CoreTerm::Constant(zero)),
     )?;
 
     let (trusted_axiom, _) =
@@ -192,12 +200,13 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         },
     )?;
 
-    let receipts = [&structural, &transparent, &facade, &polymorphic];
+    let receipts = [&structural, &transparent, &facade, &polymorphic, &product];
     Ok(LinkedHolSmokeReport {
         structural_required: structural.proof().required_fragment(),
         transparent_required: transparent.proof().required_fragment(),
         facade_required: facade.proof().required_fragment(),
         polymorphic_required: polymorphic.proof().required_fragment(),
+        product_required: product.proof().required_fragment(),
         axiom_dependencies: receipts
             .iter()
             .map(|receipt| receipt.proof().axiom_dependencies().len())
@@ -232,6 +241,7 @@ mod tests {
             StatementFragment::FirstOrderInductive
         );
         assert_eq!(report.polymorphic_required, StatementFragment::HigherOrder);
+        assert_eq!(report.product_required, StatementFragment::FirstOrder);
         assert_eq!(report.axiom_dependencies, 0);
         assert_eq!(report.incomplete_dependencies, 0);
         assert_eq!(report.trusted_user_axiom_dependencies, 1);

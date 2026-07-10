@@ -33,7 +33,7 @@ spans remain in the elaborator for diagnostics.
 | `Nat` | Predeclared inductive constructor `Nat#id` | First-order inductive type. `zero` and `succ` are checked constructors. |
 | Named sort `S` | Zero-argument `TypeConstructorId` | First-order unless its declaration says otherwise. |
 | Type schema parameter `(A : Type)` | `TypeParameter::first_order(id)` | Legacy `Type` arguments cannot be arrows or `Prop`, so this is narrower and more accurate than `Any`. |
-| `Prod A B` | `CoreType::Product(A, B)` | First-order iff both components are first-order. Pair/projection computation is a prerequisite listed below. |
+| `Prod A B` | `CoreType::Product(A, B)` | First-order iff both components are first-order. H4a now includes typed pair/projection terms and definitional projection reduction. |
 | `Set A` | Predeclared `Set#id A`, with a first-order parameter class | Do **not** lower legacy sets to `A -> Prop`: doing so would silently turn the set chapters into HOL. Membership and set computation remain checked primitives. |
 | New surface arrow type `A -> B` | `CoreType::Arrow(A, B)` | Higher-order when used as a quantified domain or data value. Existing arrows occur only in predicate-schema parameter kinds. |
 | Proposition schema `(P : Prop)` | Rank-one proposition-symbol parameter | A meta-level schema parameter, not object-level `forall P : Prop`. This distinction preserves the propositional profile of `std/prop.ctea`. |
@@ -86,7 +86,7 @@ restricted FOL profile.
 | `PredLambda { params, body }` | Nested typed `CoreTerm::Lambda` ending in `lower(body) : Prop`. Beta/delta normalization may erase it; a retained predicate value is HOL. |
 | `Zero`, `Succ(t)` | Predeclared `zero` and `succ(t)`. Decimal literals are elaborator sugar. |
 | `Add`, `Mul`, `Sub` | Applications of checked structural Nat definitions with the legacy computation equations. |
-| `Pair`, `Fst`, `Snd` | Typed product introduction/projections with definitional projection reduction. |
+| `Pair`, `Fst`, `Snd` | H4a `CoreTerm::Pair`, `First`, and `Second`; both projections reduce definitionally and preserve FOL classification for first-order components. Surface lowering remains. |
 | `EmptySet`, `Universe`, `Singleton`, `Union`, `Inter`, `Diff`, `Complement`, `CartProd`, `Powerset` | Explicit polymorphic applications of predeclared legacy-set operators. |
 | `SetBuilder { x : A | P }` | A checked set-comprehension term whose membership reduction is `member(y, setOf(lambda x. P)) = P[y/x]`. The set value remains the first-order `Set A` wrapper. |
 
@@ -195,8 +195,11 @@ These are compatibility prerequisites, not optional language expansion:
    and `Convert` lowering remain.
 3. **Legacy first-order sets.** Add the `Set A` wrapper and audited computation
    equations; retain `set_ext` as a visible trusted axiom.
-4. **Product term computation.** Add typed pair, first projection, and second
-   projection reduction for the existing product type.
+4. **Product term computation.** Implemented in the H4a core. Pairing infers a
+   product type; projections reject non-products, compute definitionally on
+   pairs, traverse binders/type schemes capture-safely, and retain the least
+   first-order fragment when both components are first-order. Surface AST
+   lowering remains.
 5. **Structural recursion argument position.** Preserve the legacy recursive
    first argument for definitions such as `append`, `replicate`, and `addl`.
 6. **Trusted and incomplete declaration storage.** Implemented in the H4a core.

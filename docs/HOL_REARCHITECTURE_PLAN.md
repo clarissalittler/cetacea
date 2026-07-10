@@ -433,6 +433,10 @@ installed, declaration order rules out delta cycles, and normalization unfolds
 definitions through beta and existing structural computation. Their receipts
 retain dependencies while concrete instances determine the statement fragment.
 Surface `def`, `unfold`, `simp`, and conversion lowering remains.
+Typed product introduction and both projections are now core terms as well;
+projection reduction is definitional, capture-safe under binders, and
+first-order whenever the component types are first-order. Legacy `Pair`/`Fst`/
+`Snd` lowering remains to be connected.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

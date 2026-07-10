@@ -169,7 +169,10 @@ fn classify_proposition(
             proposition,
             ApplicationResult::Proposition,
         ),
-        CoreTerm::Lambda { .. } => Ok(StatementFragment::HigherOrder),
+        CoreTerm::Lambda { .. }
+        | CoreTerm::Pair(_, _)
+        | CoreTerm::First(_)
+        | CoreTerm::Second(_) => Ok(StatementFragment::HigherOrder),
     }
 }
 
@@ -216,6 +219,16 @@ fn classify_first_order_term(
             term,
             ApplicationResult::Data,
         ),
+        CoreTerm::Pair(left, right) => Ok(type_fragment
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, left,
+            )?)
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, right,
+            )?)),
+        CoreTerm::First(pair) | CoreTerm::Second(pair) => Ok(type_fragment.combine(
+            classify_first_order_term(types, constants, context, metadata, pair)?,
+        )),
         CoreTerm::Lambda { .. }
         | CoreTerm::Truth
         | CoreTerm::Falsity
@@ -945,6 +958,31 @@ mod tests {
         assert_eq!(
             classify(&fixture, &TermContext::new(), &statement),
             StatementFragment::FirstOrder
+        );
+    }
+
+    #[test]
+    fn product_terms_and_projections_preserve_the_least_fragment() {
+        let fixture = fixture();
+        let product = CoreType::product(fixture.nat.clone(), fixture.nat.clone());
+        let projected = CoreTerm::first(CoreTerm::Bound(0));
+        let statement = CoreTerm::forall(
+            product,
+            CoreTerm::equality(fixture.nat.clone(), projected.clone(), projected),
+        );
+        assert_eq!(
+            classify(&fixture, &TermContext::new(), &statement),
+            StatementFragment::FirstOrder
+        );
+
+        let proposition_product = CoreType::product(fixture.nat.clone(), CoreType::Prop);
+        assert_eq!(
+            classify(
+                &fixture,
+                &TermContext::new(),
+                &CoreTerm::forall(proposition_product, CoreTerm::Truth),
+            ),
+            StatementFragment::HigherOrder
         );
     }
 

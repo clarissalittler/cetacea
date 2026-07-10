@@ -24,6 +24,9 @@ pub enum CoreTerm {
         function: Box<CoreTerm>,
         argument: Box<CoreTerm>,
     },
+    Pair(Box<CoreTerm>, Box<CoreTerm>),
+    First(Box<CoreTerm>),
+    Second(Box<CoreTerm>),
     Truth,
     Falsity,
     And(Box<CoreTerm>, Box<CoreTerm>),
@@ -68,6 +71,18 @@ impl CoreTerm {
             function: Box::new(function),
             argument: Box::new(argument),
         }
+    }
+
+    pub fn pair(left: Self, right: Self) -> Self {
+        Self::Pair(Box::new(left), Box::new(right))
+    }
+
+    pub fn first(pair: Self) -> Self {
+        Self::First(Box::new(pair))
+    }
+
+    pub fn second(pair: Self) -> Self {
+        Self::Second(Box::new(pair))
     }
 
     pub fn and(left: Self, right: Self) -> Self {
@@ -419,6 +434,28 @@ pub fn infer_type(
             }
             Ok(*codomain)
         }
+        CoreTerm::Pair(left, right) => Ok(CoreType::product(
+            infer_type(types, constants, context, left)?,
+            infer_type(types, constants, context, right)?,
+        )),
+        CoreTerm::First(pair) => {
+            let pair_type = infer_type(types, constants, context, pair)?;
+            let CoreType::Product(left, _) = pair_type else {
+                return Err(TermError::new(format!(
+                    "first projection expects a product, but its argument has type `{pair_type:?}`"
+                )));
+            };
+            Ok(*left)
+        }
+        CoreTerm::Second(pair) => {
+            let pair_type = infer_type(types, constants, context, pair)?;
+            let CoreType::Product(_, right) = pair_type else {
+                return Err(TermError::new(format!(
+                    "second projection expects a product, but its argument has type `{pair_type:?}`"
+                )));
+            };
+            Ok(*right)
+        }
         CoreTerm::Truth | CoreTerm::Falsity => Ok(CoreType::Prop),
         CoreTerm::And(left, right) | CoreTerm::Or(left, right) | CoreTerm::Implies(left, right) => {
             expect_prop(types, constants, context, left, "left operand")?;
@@ -561,6 +598,26 @@ fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTer
                 } else {
                     Ok(application)
                 }
+            }
+        }
+        CoreTerm::Pair(left, right) => Ok(CoreTerm::pair(
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
+        )),
+        CoreTerm::First(pair) => {
+            let pair = normalize_typed(constants, pair)?;
+            if let CoreTerm::Pair(left, _) = pair {
+                Ok(*left)
+            } else {
+                Ok(CoreTerm::first(pair))
+            }
+        }
+        CoreTerm::Second(pair) => {
+            let pair = normalize_typed(constants, pair)?;
+            if let CoreTerm::Pair(_, right) = pair {
+                Ok(*right)
+            } else {
+                Ok(CoreTerm::second(pair))
             }
         }
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
@@ -786,6 +843,12 @@ fn substitute_term_types(
             substitute_term_types(function, substitution),
             substitute_term_types(argument, substitution),
         ),
+        CoreTerm::Pair(left, right) => CoreTerm::pair(
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::First(pair) => CoreTerm::first(substitute_term_types(pair, substitution)),
+        CoreTerm::Second(pair) => CoreTerm::second(substitute_term_types(pair, substitution)),
         CoreTerm::And(left, right) => CoreTerm::and(
             substitute_term_types(left, substitution),
             substitute_term_types(right, substitution),
@@ -835,11 +898,15 @@ pub(crate) fn validate_term_type_scheme(
             validate_term_type_scheme(types, parameters, body)
         }
         CoreTerm::Apply { function, argument }
+        | CoreTerm::Pair(function, argument)
         | CoreTerm::And(function, argument)
         | CoreTerm::Or(function, argument)
         | CoreTerm::Implies(function, argument) => {
             validate_term_type_scheme(types, parameters, function)?;
             validate_term_type_scheme(types, parameters, argument)
+        }
+        CoreTerm::First(pair) | CoreTerm::Second(pair) => {
+            validate_term_type_scheme(types, parameters, pair)
         }
         CoreTerm::Equality { ty, left, right } => {
             types.validate_scheme(parameters, ty)?;
@@ -918,6 +985,16 @@ fn instantiate_term_parameters_at_depth(
             instantiate_term_parameters_at_depth(function, arguments, depth)?,
             instantiate_term_parameters_at_depth(argument, arguments, depth)?,
         )),
+        CoreTerm::Pair(left, right) => Ok(CoreTerm::pair(
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::First(pair) => Ok(CoreTerm::first(instantiate_term_parameters_at_depth(
+            pair, arguments, depth,
+        )?)),
+        CoreTerm::Second(pair) => Ok(CoreTerm::second(instantiate_term_parameters_at_depth(
+            pair, arguments, depth,
+        )?)),
         CoreTerm::Truth => Ok(CoreTerm::Truth),
         CoreTerm::Falsity => Ok(CoreTerm::Falsity),
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
@@ -965,8 +1042,11 @@ fn collect_term_constant_dependencies(term: &CoreTerm, dependencies: &mut BTreeS
         }
         CoreTerm::Lambda { body, .. }
         | CoreTerm::Forall { body, .. }
-        | CoreTerm::Exists { body, .. } => collect_term_constant_dependencies(body, dependencies),
+        | CoreTerm::Exists { body, .. }
+        | CoreTerm::First(body)
+        | CoreTerm::Second(body) => collect_term_constant_dependencies(body, dependencies),
         CoreTerm::Apply { function, argument }
+        | CoreTerm::Pair(function, argument)
         | CoreTerm::And(function, argument)
         | CoreTerm::Or(function, argument)
         | CoreTerm::Implies(function, argument) => {
@@ -1005,6 +1085,12 @@ fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<Co
             substitute(function, target, replacement)?,
             substitute(argument, target, replacement)?,
         )),
+        CoreTerm::Pair(left, right) => Ok(CoreTerm::pair(
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::First(pair) => Ok(CoreTerm::first(substitute(pair, target, replacement)?)),
+        CoreTerm::Second(pair) => Ok(CoreTerm::second(substitute(pair, target, replacement)?)),
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
             substitute(left, target, replacement)?,
             substitute(right, target, replacement)?,
@@ -1058,6 +1144,12 @@ fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermErro
             shift(function, amount, cutoff)?,
             shift(argument, amount, cutoff)?,
         )),
+        CoreTerm::Pair(left, right) => Ok(CoreTerm::pair(
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::First(pair) => Ok(CoreTerm::first(shift(pair, amount, cutoff)?)),
+        CoreTerm::Second(pair) => Ok(CoreTerm::second(shift(pair, amount, cutoff)?)),
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
             shift(left, amount, cutoff)?,
             shift(right, amount, cutoff)?,
@@ -1239,6 +1331,57 @@ mod tests {
         assert_eq!(
             normalize(&types, &terms, &context, &application),
             Ok(CoreTerm::lambda(nat, CoreTerm::Bound(1)))
+        );
+    }
+
+    #[test]
+    fn products_are_typed_and_projections_compute_definitionally() {
+        let (types, terms, nat, zero) = signatures();
+        let pair = CoreTerm::pair(CoreTerm::Constant(zero), CoreTerm::Truth);
+        assert_eq!(
+            infer_type(&types, &terms, &TermContext::new(), &pair),
+            Ok(CoreType::product(nat, CoreType::Prop))
+        );
+        assert_eq!(
+            normalize(
+                &types,
+                &terms,
+                &TermContext::new(),
+                &CoreTerm::first(pair.clone()),
+            ),
+            Ok(CoreTerm::Constant(zero))
+        );
+        let second = CoreTerm::second(pair);
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &second),
+            Ok(CoreTerm::Truth)
+        );
+
+        let error = infer_type(
+            &types,
+            &terms,
+            &TermContext::new(),
+            &CoreTerm::first(CoreTerm::Constant(zero)),
+        )
+        .expect_err("projection requires a product");
+        assert!(error.message.contains("first projection expects a product"));
+    }
+
+    #[test]
+    fn product_reduction_and_substitution_avoid_capture_under_binders() {
+        let (types, terms, nat, _) = signatures();
+        // In a context containing y, reduce
+        //   (fun x => (y, x).1) y
+        // to y. The outer y is index 1 inside the lambda.
+        let context = TermContext::new().with_bound(nat.clone());
+        let function = CoreTerm::lambda(
+            nat,
+            CoreTerm::first(CoreTerm::pair(CoreTerm::Bound(1), CoreTerm::Bound(0))),
+        );
+        let application = CoreTerm::apply(function, CoreTerm::Bound(0));
+        assert_eq!(
+            normalize(&types, &terms, &context, &application),
+            Ok(CoreTerm::Bound(0))
         );
     }
 
