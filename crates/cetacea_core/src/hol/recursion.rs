@@ -33,7 +33,10 @@ pub struct StructuralDefinitionSpec {
     pub type_parameters: Vec<TypeParameter>,
     pub datatype: TypeConstructorId,
     pub datatype_arguments: Vec<CoreType>,
-    /// Fixed arguments precede the final recursive datatype argument.
+    /// Position of the datatype argument among all source arguments.
+    pub recursive_argument_index: usize,
+    /// Nonrecursive arguments in source order, with the datatype argument
+    /// omitted.
     pub fixed_parameter_types: Vec<CoreType>,
     pub result_type: CoreType,
     pub arms: Vec<StructuralArmSpec>,
@@ -46,6 +49,7 @@ pub struct StructuralDefinition {
     pub type_parameters: Vec<TypeParameter>,
     pub datatype: TypeConstructorId,
     pub datatype_arguments: Vec<CoreType>,
+    pub recursive_argument_index: usize,
     pub fixed_parameter_types: Vec<CoreType>,
     pub result_type: CoreType,
     pub arms: Vec<StructuralArmSpec>,
@@ -159,6 +163,14 @@ impl RecursionSignature {
             types.validate_scheme(&spec.type_parameters, parameter_type)?;
         }
         types.validate_scheme(&spec.type_parameters, &spec.result_type)?;
+        if spec.recursive_argument_index > spec.fixed_parameter_types.len() {
+            return Err(RecursionError::new(format!(
+                "structural definition `{}` has recursive argument index {}, but only {} total argument(s)",
+                spec.name,
+                spec.recursive_argument_index,
+                spec.fixed_parameter_types.len() + 1
+            )));
+        }
 
         if spec.arms.len() != datatype_declaration.constructors.len() {
             return Err(RecursionError::new(format!(
@@ -220,10 +232,14 @@ impl RecursionSignature {
             });
         }
 
-        let definition_type = spec.fixed_parameter_types.iter().rev().fold(
-            CoreType::arrow(datatype_type, spec.result_type.clone()),
-            |result, parameter| CoreType::arrow(parameter.clone(), result),
-        );
+        let mut argument_types = spec.fixed_parameter_types.clone();
+        argument_types.insert(spec.recursive_argument_index, datatype_type);
+        let definition_type = argument_types
+            .iter()
+            .rev()
+            .fold(spec.result_type.clone(), |result, parameter| {
+                CoreType::arrow(parameter.clone(), result)
+            });
         let mut staged_constants = constants.clone();
         let constant = staged_constants.declare_polymorphic(
             types,
@@ -241,6 +257,7 @@ impl RecursionSignature {
             StructuralReduction {
                 type_parameters: spec.type_parameters.clone(),
                 fixed_parameter_count: spec.fixed_parameter_types.len(),
+                recursive_argument_index: spec.recursive_argument_index,
                 arms: reduction_arms,
             },
         )?;
@@ -253,6 +270,7 @@ impl RecursionSignature {
             type_parameters: spec.type_parameters,
             datatype: spec.datatype,
             datatype_arguments: spec.datatype_arguments,
+            recursive_argument_index: spec.recursive_argument_index,
             fixed_parameter_types: spec.fixed_parameter_types,
             result_type: spec.result_type,
             arms: spec.arms,
@@ -395,6 +413,7 @@ mod tests {
                     datatype: fixture.list,
                     datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
                     fixed_parameter_types: Vec::new(),
+                    recursive_argument_index: 0,
                     result_type: fixture.nat.clone(),
                     arms: vec![
                         StructuralArmSpec::new(fixture.nil, CoreTerm::Constant(fixture.zero)),
@@ -470,6 +489,7 @@ mod tests {
                         CoreType::Parameter(fixture.parameter),
                         CoreType::Prop,
                     )],
+                    recursive_argument_index: 1,
                     result_type: CoreType::Prop,
                     arms: vec![
                         StructuralArmSpec::new(fixture.nil, CoreTerm::Truth),
@@ -513,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn reduction_under_an_outer_binder_avoids_capture() {
+    fn first_recursive_argument_reduces_and_avoids_capture() {
         let mut fixture = fixture();
         let default = CoreType::Parameter(fixture.parameter);
         let definition = fixture
@@ -528,6 +548,7 @@ mod tests {
                     datatype: fixture.list,
                     datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
                     fixed_parameter_types: vec![default.clone()],
+                    recursive_argument_index: 0,
                     result_type: default,
                     arms: vec![
                         StructuralArmSpec::new(
@@ -548,14 +569,117 @@ mod tests {
         let call = CoreTerm::apply(
             CoreTerm::apply(
                 CoreTerm::instantiate_constant(definition, vec![fixture.nat.clone()]),
-                CoreTerm::Bound(0),
+                nil(&fixture),
             ),
-            nil(&fixture),
+            CoreTerm::Bound(0),
         );
         assert_eq!(
             normalize(&fixture.types, &fixture.constants, &context, &call),
             Ok(CoreTerm::Bound(0))
         );
+        assert_eq!(
+            fixture
+                .recursion
+                .definition(definition)
+                .expect("stored head_or")
+                .recursive_argument_index,
+            0
+        );
+    }
+
+    #[test]
+    fn recursive_calls_preserve_a_first_recursive_argument_position() {
+        let mut fixture = fixture();
+        let list_parameter =
+            CoreType::constructor(fixture.list, vec![CoreType::Parameter(fixture.parameter)]);
+        let nil_layout = StructuralArmLayout::new(0, 0, 1);
+        let cons_layout = StructuralArmLayout::new(2, 1, 1);
+        let append = fixture
+            .recursion
+            .declare(
+                &fixture.types,
+                &mut fixture.constants,
+                &fixture.inductives,
+                StructuralDefinitionSpec {
+                    name: "append_first".to_string(),
+                    type_parameters: vec![fixture.parameter],
+                    datatype: fixture.list,
+                    datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
+                    fixed_parameter_types: vec![list_parameter.clone()],
+                    recursive_argument_index: 0,
+                    result_type: list_parameter,
+                    arms: vec![
+                        StructuralArmSpec::new(
+                            fixture.nil,
+                            nil_layout.fixed_parameter(0).expect("right list"),
+                        ),
+                        StructuralArmSpec::new(
+                            fixture.cons,
+                            CoreTerm::apply(
+                                CoreTerm::apply(
+                                    CoreTerm::instantiate_constant(
+                                        fixture.cons,
+                                        vec![CoreType::Parameter(fixture.parameter)],
+                                    ),
+                                    cons_layout.field(0).expect("head"),
+                                ),
+                                cons_layout.recursive_result(0).expect("appended tail"),
+                            ),
+                        ),
+                    ],
+                },
+            )
+            .expect("append with its recursive list first");
+        let singleton = cons(&fixture, CoreTerm::Constant(fixture.zero), nil(&fixture));
+        let call = CoreTerm::apply(
+            CoreTerm::apply(
+                CoreTerm::instantiate_constant(append, vec![fixture.nat.clone()]),
+                singleton.clone(),
+            ),
+            singleton,
+        );
+        let expected = cons(
+            &fixture,
+            CoreTerm::Constant(fixture.zero),
+            cons(&fixture, CoreTerm::Constant(fixture.zero), nil(&fixture)),
+        );
+        assert_eq!(
+            normalize(
+                &fixture.types,
+                &fixture.constants,
+                &TermContext::new(),
+                &call,
+            ),
+            Ok(expected)
+        );
+    }
+
+    #[test]
+    fn invalid_recursive_argument_positions_are_transactional() {
+        let mut fixture = fixture();
+        let error = fixture
+            .recursion
+            .declare(
+                &fixture.types,
+                &mut fixture.constants,
+                &fixture.inductives,
+                StructuralDefinitionSpec {
+                    name: "bad_position".to_string(),
+                    type_parameters: vec![fixture.parameter],
+                    datatype: fixture.list,
+                    datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
+                    fixed_parameter_types: vec![CoreType::Parameter(fixture.parameter)],
+                    recursive_argument_index: 2,
+                    result_type: CoreType::Parameter(fixture.parameter),
+                    arms: vec![
+                        StructuralArmSpec::new(fixture.nil, CoreTerm::Bound(0)),
+                        StructuralArmSpec::new(fixture.cons, CoreTerm::Bound(0)),
+                    ],
+                },
+            )
+            .expect_err("position must be within the source argument list");
+        assert!(error.message.contains("recursive argument index 2"));
+        assert_eq!(fixture.constants.resolve("bad_position"), None);
     }
 
     #[test]
@@ -578,6 +702,7 @@ mod tests {
                     datatype: fixture.list,
                     datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
                     fixed_parameter_types: Vec::new(),
+                    recursive_argument_index: 0,
                     result_type: fixture.nat.clone(),
                     arms: vec![
                         StructuralArmSpec::new(fixture.nil, CoreTerm::Constant(fixture.zero)),
@@ -605,6 +730,7 @@ mod tests {
                     datatype: fixture.list,
                     datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
                     fixed_parameter_types: Vec::new(),
+                    recursive_argument_index: 0,
                     result_type: fixture.nat.clone(),
                     arms: vec![StructuralArmSpec::new(
                         fixture.nil,
@@ -628,6 +754,7 @@ mod tests {
                     datatype: fixture.list,
                     datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
                     fixed_parameter_types: Vec::new(),
+                    recursive_argument_index: 0,
                     result_type: fixture.nat.clone(),
                     arms: vec![
                         StructuralArmSpec::new(fixture.nil, CoreTerm::Truth),
@@ -676,6 +803,7 @@ mod tests {
                     datatype: fixture.list,
                     datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
                     fixed_parameter_types: Vec::new(),
+                    recursive_argument_index: 0,
                     result_type: CoreType::Prop,
                     arms: vec![
                         StructuralArmSpec::new(fixture.nil, CoreTerm::Truth),

@@ -8,7 +8,7 @@
 use super::fragments::StatementFragment;
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
 use super::proofs::HolDraftProof;
-use super::recursion::{StructuralArmSpec, StructuralDefinitionSpec};
+use super::recursion::{StructuralArmLayout, StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
 use super::terms::CoreTerm;
 use super::types::{CoreType, TypeParameter};
@@ -52,38 +52,68 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
     let cons = elaborator.resolve_constant("cons")?;
     let list_nat = CoreType::constructor(list, vec![nat.clone()]);
     let nil_nat = CoreTerm::instantiate_constant(nil, vec![nat.clone()]);
+    let singleton_nat = CoreTerm::apply(
+        CoreTerm::apply(
+            CoreTerm::instantiate_constant(cons, vec![nat.clone()]),
+            CoreTerm::Constant(zero),
+        ),
+        nil_nat.clone(),
+    );
 
     let always = elaborator.declare_structural_definition(StructuralDefinitionSpec {
         name: "AlwaysNat".to_string(),
         type_parameters: Vec::new(),
         datatype: list,
         datatype_arguments: vec![nat.clone()],
-        fixed_parameter_types: Vec::new(),
+        fixed_parameter_types: vec![nat.clone()],
+        recursive_argument_index: 0,
         result_type: CoreType::Prop,
         arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Truth),
-            StructuralArmSpec::new(cons, CoreTerm::Truth),
+            StructuralArmSpec::new(
+                nil,
+                CoreTerm::equality(
+                    nat.clone(),
+                    StructuralArmLayout::new(0, 0, 1)
+                        .fixed_parameter(0)
+                        .expect("fallback value"),
+                    StructuralArmLayout::new(0, 0, 1)
+                        .fixed_parameter(0)
+                        .expect("fallback value"),
+                ),
+            ),
+            StructuralArmSpec::new(
+                cons,
+                StructuralArmLayout::new(2, 1, 1)
+                    .recursive_result(0)
+                    .expect("recursive proposition"),
+            ),
         ],
     })?;
     let (_, structural) = elaborator.declare_theorem(
-        "always_nil",
+        "always_singleton",
         Vec::new(),
-        CoreTerm::apply(CoreTerm::Constant(always), nil_nat.clone()),
-        HolDraftProof::TruthIntro,
+        CoreTerm::apply(
+            CoreTerm::apply(CoreTerm::Constant(always), singleton_nat),
+            CoreTerm::Constant(zero),
+        ),
+        HolDraftProof::EqualityRefl(CoreTerm::Constant(zero)),
     )?;
     let always_alias = elaborator.declare_transparent_definition(
         "AlwaysAlias",
         CoreType::arrow(list_nat.clone(), CoreType::Prop),
         CoreTerm::lambda(
             list_nat.clone(),
-            CoreTerm::apply(CoreTerm::Constant(always), CoreTerm::Bound(0)),
+            CoreTerm::apply(
+                CoreTerm::apply(CoreTerm::Constant(always), CoreTerm::Bound(0)),
+                CoreTerm::Constant(zero),
+            ),
         ),
     )?;
     let (_, transparent) = elaborator.declare_theorem(
         "always_alias_nil",
         Vec::new(),
         CoreTerm::apply(CoreTerm::Constant(always_alias), nil_nat.clone()),
-        HolDraftProof::TruthIntro,
+        HolDraftProof::EqualityRefl(CoreTerm::Constant(zero)),
     )?;
 
     let (induction_source, _) = elaborator.declare_theorem(

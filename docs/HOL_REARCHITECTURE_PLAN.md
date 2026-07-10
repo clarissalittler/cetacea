@@ -437,6 +437,11 @@ Typed product introduction and both projections are now core terms as well;
 projection reduction is definitional, capture-safe under binders, and
 first-order whenever the component types are first-order. Legacy `Pair`/`Fst`/
 `Snd` lowering remains to be connected.
+Structural definitions now carry a checked recursive-argument index. The
+declared function type, reduction scrutinee, and every generated recursive call
+use that position consistently; invalid indices leave signatures unchanged.
+This removes the former reversed-argument workaround from the graph `append`
+spike and matches legacy `defrec`, whose recursive parameter is first.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

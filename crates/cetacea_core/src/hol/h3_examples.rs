@@ -79,6 +79,7 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: vec![CoreType::arrow(parameter_type.clone(), CoreType::Prop)],
+        recursive_argument_index: 1,
         result_type: CoreType::Prop,
         arms: vec![
             StructuralArmSpec::new(nil, CoreTerm::Truth),
@@ -105,6 +106,7 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: vec![parameter_type.clone()],
+        recursive_argument_index: 1,
         result_type: CoreType::Prop,
         arms: vec![
             StructuralArmSpec::new(nil, CoreTerm::Falsity),
@@ -140,6 +142,7 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: Vec::new(),
+        recursive_argument_index: 0,
         result_type: CoreType::Prop,
         arms: vec![
             StructuralArmSpec::new(nil, CoreTerm::Truth),
@@ -162,6 +165,7 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: vec![list_parameter.clone()],
+        recursive_argument_index: 0,
         result_type: list_parameter.clone(),
         arms: vec![
             StructuralArmSpec::new(
@@ -192,6 +196,7 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: Vec::new(),
+        recursive_argument_index: 0,
         result_type: nat.clone(),
         arms: vec![
             StructuralArmSpec::new(nil, CoreTerm::Constant(zero)),
@@ -280,6 +285,7 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
             datatype: list,
             datatype_arguments: vec![parameter_type],
             fixed_parameter_types: Vec::new(),
+            recursive_argument_index: 0,
             result_type: nat.clone(),
             arms: vec![
                 StructuralArmSpec::new(nil, CoreTerm::Constant(zero)),
@@ -357,9 +363,8 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
         ),
     )?;
 
-    // The structural argument is last in the primitive definition, so the
-    // checked constant has type List A -> List A -> List A as
-    // `append right left`. The helper below presents the usual left/right order.
+    // Match the legacy and mathematical argument order: recurse on the first
+    // list and carry the right list as the fixed argument.
     let append_layout = StructuralArmLayout::new(2, 1, 1);
     let append = elaborator.declare_structural_definition(StructuralDefinitionSpec {
         name: "append".to_string(),
@@ -367,6 +372,7 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: vec![list_parameter.clone()],
+        recursive_argument_index: 0,
         result_type: list_parameter.clone(),
         arms: vec![
             StructuralArmSpec::new(
@@ -400,6 +406,7 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: Vec::new(),
+        recursive_argument_index: 0,
         result_type: CoreType::arrow(
             parameter_type.clone(),
             CoreType::arrow(parameter_type.clone(), CoreType::Prop),
@@ -454,9 +461,9 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
         CoreTerm::apply(
             CoreTerm::apply(
                 CoreTerm::instantiate_constant(append, vec![vertex.clone()]),
-                right,
+                left,
             ),
-            left,
+            right,
         )
     };
     let valid_path = |path: CoreTerm, start: CoreTerm, finish: CoreTerm| {
@@ -664,6 +671,7 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
             datatype: list,
             datatype_arguments: vec![parameter_type],
             fixed_parameter_types: Vec::new(),
+            recursive_argument_index: 0,
             result_type: CoreType::arrow(
                 CoreType::Parameter(parameter),
                 CoreType::arrow(CoreType::Parameter(parameter), CoreType::Prop),
@@ -773,6 +781,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: vec![parameter_type.clone()],
+        recursive_argument_index: 1,
         result_type: CoreType::Prop,
         arms: vec![
             StructuralArmSpec::new(nil, CoreTerm::Falsity),
@@ -806,6 +815,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type.clone()],
         fixed_parameter_types: Vec::new(),
+        recursive_argument_index: 0,
         result_type: CoreType::Prop,
         arms: vec![
             StructuralArmSpec::new(nil, CoreTerm::Truth),
@@ -828,6 +838,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         datatype: list,
         datatype_arguments: vec![parameter_type],
         fixed_parameter_types: Vec::new(),
+        recursive_argument_index: 0,
         result_type: nat.clone(),
         arms: vec![
             StructuralArmSpec::new(nil, CoreTerm::Constant(zero)),
@@ -861,6 +872,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         datatype: color,
         datatype_arguments: Vec::new(),
         fixed_parameter_types: Vec::new(),
+        recursive_argument_index: 0,
         result_type: bit_type.clone(),
         arms: vec![
             StructuralArmSpec::new(red, CoreTerm::Constant(off)),
@@ -873,6 +885,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         datatype: bit,
         datatype_arguments: Vec::new(),
         fixed_parameter_types: Vec::new(),
+        recursive_argument_index: 0,
         result_type: color_type.clone(),
         arms: vec![
             StructuralArmSpec::new(off, CoreTerm::Constant(red)),
@@ -1167,6 +1180,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
             datatype: color,
             datatype_arguments: Vec::new(),
             fixed_parameter_types: Vec::new(),
+            recursive_argument_index: 0,
             result_type: bit_type,
             arms: vec![
                 StructuralArmSpec::new(red, bad_call),

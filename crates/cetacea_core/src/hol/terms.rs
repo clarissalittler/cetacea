@@ -184,6 +184,7 @@ pub(crate) struct StructuralReductionArm {
 pub(crate) struct StructuralReduction {
     pub type_parameters: Vec<TypeParameter>,
     pub fixed_parameter_count: usize,
+    pub recursive_argument_index: usize,
     pub arms: Vec<StructuralReductionArm>,
 }
 
@@ -688,6 +689,11 @@ fn reduce_structural_application(
     if arguments.len() != definition.fixed_parameter_count + 1 {
         return Ok(None);
     }
+    if definition.recursive_argument_index > definition.fixed_parameter_count {
+        return Err(TermError::new(
+            "checked structural reduction has an invalid recursive argument index",
+        ));
+    }
     if type_arguments.len() != definition.type_parameters.len() {
         return Err(TermError::new(
             "checked structural reduction received inconsistent type arguments",
@@ -700,8 +706,14 @@ fn reduce_structural_application(
         .map(|(parameter, argument)| (parameter.id, argument.clone()))
         .collect::<HashMap<_, _>>();
 
-    let fixed_arguments = &arguments[..definition.fixed_parameter_count];
-    let scrutinee = arguments[definition.fixed_parameter_count];
+    let scrutinee = arguments[definition.recursive_argument_index];
+    let fixed_arguments = arguments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, argument)| {
+            (index != definition.recursive_argument_index).then_some(*argument)
+        })
+        .collect::<Vec<_>>();
     let mut constructor_arguments = Vec::new();
     let constructor_head = term_application_spine(scrutinee, &mut constructor_arguments);
     let Some(constructor_id) = declared_constant_id(constructor_head) else {
@@ -727,10 +739,17 @@ fn reduce_structural_application(
             TermError::new("checked structural reduction has an invalid recursive field index")
         })?;
         let mut recursive_call = head.clone();
-        for fixed_argument in fixed_arguments {
-            recursive_call = CoreTerm::apply(recursive_call, (*fixed_argument).clone());
+        let mut fixed_index = 0;
+        for argument_index in 0..arguments.len() {
+            let argument = if argument_index == definition.recursive_argument_index {
+                (**recursive_argument).clone()
+            } else {
+                let argument = fixed_arguments[fixed_index].clone();
+                fixed_index += 1;
+                argument
+            };
+            recursive_call = CoreTerm::apply(recursive_call, argument);
         }
-        recursive_call = CoreTerm::apply(recursive_call, (*recursive_argument).clone());
         values.push(recursive_call);
     }
     values.extend(fixed_arguments.iter().map(|argument| (*argument).clone()));

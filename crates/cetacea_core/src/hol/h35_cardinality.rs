@@ -47,6 +47,7 @@ pub(crate) fn declare_cardinality_transport(
             datatype: list,
             datatype_arguments: vec![a.clone()],
             fixed_parameter_types: vec![f_type.clone()],
+            recursive_argument_index: 1,
             result_type: list_b.clone(),
             arms: vec![
                 StructuralArmSpec::new(nil, CoreTerm::instantiate_constant(nil, vec![b.clone()])),

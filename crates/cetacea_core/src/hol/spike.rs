@@ -715,6 +715,7 @@ mod tests {
                 datatype: list,
                 datatype_arguments: vec![CoreType::constructor(nat_id, Vec::new())],
                 fixed_parameter_types: Vec::new(),
+                recursive_argument_index: 0,
                 result_type: CoreType::Prop,
                 arms: vec![
                     StructuralArmSpec::new(nil_id, CoreTerm::Truth),

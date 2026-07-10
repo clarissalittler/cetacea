@@ -65,7 +65,7 @@ rejected.
 | Formula `def D ... : Prop := F` | Check a polymorphic constant with a transparent body `lambda params. lower(F)`. | H4a core declarations and delta reduction are implemented; surface parameter/body lowering remains. |
 | Term `def d ... : A := t` | Check a polymorphic constant with a transparent body `lambda params. lower(t)`. | Same implemented core substrate and remaining surface work. |
 | `data D | ...` | Transactionally declare a zero-parameter inductive type; a field exactly equal to `D` is `Recursive`, every other field is checked existing data. | All positive corpus datatypes use supported direct recursion. Nested/mutual recursion remains rejected. |
-| `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | Core currently puts the recursive argument last, while legacy syntax puts it first. H4 must add a checked recursive-argument position (preferred) or a transparent eta wrapper. |
+| `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | H4a stores and validates the recursive argument index, so legacy declarations use index zero without eta wrappers; other checked definitions may recurse at any one declared position. |
 | `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | H4a core storage and receipt propagation are implemented; surface lowering remains. |
 | Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | H3 supports the monomorphic/type-schematic subset. |
 | Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | H4a core storage is implemented, including draft-to-draft references and transitive incomplete receipts; surface lowering remains. |
@@ -200,8 +200,13 @@ These are compatibility prerequisites, not optional language expansion:
    pairs, traverse binders/type schemes capture-safely, and retain the least
    first-order fragment when both components are first-order. Surface AST
    lowering remains.
-5. **Structural recursion argument position.** Preserve the legacy recursive
-   first argument for definitions such as `append`, `replicate`, and `addl`.
+5. **Structural recursion argument position.** Implemented in the H4a core.
+   The datatype argument has an explicit checked source index; definition types,
+   reduction scrutinees, and generated recursive calls all preserve it.
+   Out-of-range positions fail transactionally. The graph spike now uses
+   natural `append left right`, while generic `map` continues to demonstrate a
+   checked last recursive argument. Surface `defrec` lowering should select
+   index zero for the existing corpus.
 6. **Trusted and incomplete declaration storage.** Implemented in the H4a core.
    Typed trusted axioms are kernel-visible and transitively reported. Typed
    drafts retain holes and may reference other incomplete declarations, but
