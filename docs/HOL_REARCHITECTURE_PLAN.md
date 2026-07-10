@@ -361,8 +361,12 @@ list example checks generic
 `All`, `Member`, `Nodup`, `append`, and `length`, while the graph example proves
 constructively that concatenating endpoint-valid paths preserves validity.
 Both produce trust-free `fol+induction` receipts and exercise deliberate type,
-termination, and positivity rejections. Building finite enumeration/cardinality
-evidence is the remaining H3 example.
+termination, and positivity rejections. The finite example now adds two checked
+finite datatypes, exhaustive duplicate-free enumerations, structural
+encode/decode maps, inverse proofs, and a shared cardinality witness, again with
+no trust. It is intentionally a concrete transport instance; a reusable theorem
+over arbitrary stored bijections still depends on theorem-reference elaboration
+and is recorded as an H3 decision-report limitation.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:

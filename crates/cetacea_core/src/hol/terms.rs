@@ -46,9 +46,13 @@ pub enum CoreTerm {
 
 impl CoreTerm {
     pub fn instantiate_constant(constant: ConstantId, arguments: Vec<CoreType>) -> Self {
-        Self::TypeApplication {
-            constant,
-            arguments,
+        if arguments.is_empty() {
+            Self::Constant(constant)
+        } else {
+            Self::TypeApplication {
+                constant,
+                arguments,
+            }
         }
     }
 
@@ -425,11 +429,14 @@ pub fn instantiate_binder(
 
 fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTerm, TermError> {
     match term {
-        CoreTerm::Bound(_)
-        | CoreTerm::Constant(_)
-        | CoreTerm::TypeApplication { .. }
-        | CoreTerm::Truth
-        | CoreTerm::Falsity => Ok(term.clone()),
+        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
+            Ok(term.clone())
+        }
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } if arguments.is_empty() => Ok(CoreTerm::Constant(*constant)),
+        CoreTerm::TypeApplication { .. } => Ok(term.clone()),
         CoreTerm::Lambda {
             parameter_type,
             body,
@@ -979,7 +986,9 @@ mod tests {
             &CoreTerm::instantiate_constant(generic, Vec::new()),
         )
         .expect_err("missing type argument must fail");
-        assert!(arity_error.message.contains("expects 1 type argument"));
+        assert!(arity_error
+            .message
+            .contains("expects 1 explicit type argument"));
 
         let predicate = CoreType::arrow(nat, CoreType::Prop);
         let class_error = infer_type(
@@ -990,6 +999,23 @@ mod tests {
         )
         .expect_err("predicate is not first-order data");
         assert!(class_error.message.contains("must be first-order"));
+    }
+
+    #[test]
+    fn empty_type_application_is_canonicalized_to_a_monomorphic_constant() {
+        let (types, terms, _, zero) = signatures();
+        let redundant = CoreTerm::TypeApplication {
+            constant: zero,
+            arguments: Vec::new(),
+        };
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &redundant),
+            Ok(CoreTerm::Constant(zero))
+        );
+        assert_eq!(
+            CoreTerm::instantiate_constant(zero, Vec::new()),
+            CoreTerm::Constant(zero)
+        );
     }
 
     #[test]

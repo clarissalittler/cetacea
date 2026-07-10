@@ -19,7 +19,8 @@ pub use fragments::{
     ReceiptPolicy, StatementFragment, TeachingProfile,
 };
 pub use h3_examples::{
-    run_graph_h3_spike, run_list_h3_spike, H3GraphSpikeReport, H3ListSpikeReport,
+    run_finite_h3_spike, run_graph_h3_spike, run_list_h3_spike, H3FiniteSpikeReport,
+    H3GraphSpikeReport, H3ListSpikeReport,
 };
 pub use inductive::{
     InductiveConstructor, InductiveConstructorSpec, InductiveDeclaration, InductiveError,
