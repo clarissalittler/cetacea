@@ -384,7 +384,7 @@ will differ on your machine.
 says `exact h.left`:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch01-mistakes.ctea:13: theorem `wrong_half` failed: exact proof does not solve the goal: proof has type `P`, but expected `Q`
+error: docs/book/code/ch01-mistakes.ctea:13: theorem `wrong_half` failed: exact proof does not solve the goal: proof has type `P`, but expected `Q`
   note: target: Q
   help: Match the proof to the target
     `exact` closes the goal only when the expression proves the current target `Q`. Check which hypothesis (or which projection, `.left`/`.right`) proves exactly this target; for an implication or theorem whose conclusion matches, use `apply`.
@@ -401,7 +401,7 @@ a `help:` paragraph suggesting a fix. Here the fix is obvious:
 buried under two arrows):
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch01-mistakes.ctea:17: theorem `split_too_soon` failed: split expects a conjunction goal
+error: docs/book/code/ch01-mistakes.ctea:17: theorem `split_too_soon` failed: split expects a conjunction goal
   note: target: P -> Q -> P /\ Q
   help: Use `split` only for conjunctions
     `split` works when the current target has the form `P /\ Q`; here it is `P -> Q -> P /\ Q`.
@@ -414,7 +414,7 @@ outside? `intro` first.
 goal, forget the second:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch01-mistakes.ctea:20: theorem `forgot_a_goal` failed: unsolved goal `Q`
+error: docs/book/code/ch01-mistakes.ctea:20: theorem `forgot_a_goal` failed: unsolved goal `Q`
   note: target: Q
 ```
 
@@ -423,7 +423,7 @@ Every goal you open, you must close. The error names the orphan.
 **Mistake 4: reusing a name.** Two `intro h` in a row:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch01-mistakes.ctea:29: theorem `name_reuse` failed: `intro` would shadow existing hypothesis `h`
+error: docs/book/code/ch01-mistakes.ctea:29: theorem `name_reuse` failed: `intro` would shadow existing hypothesis `h`
   note: target: P -> P
 ```
 
@@ -437,7 +437,7 @@ mistakes file isn't wrong so much as unfinished: it inserts the tactic
 are:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch01-mistakes.ctea:36: theorem `peek_at_the_goal` failed: current goal is `Q`
+error: docs/book/code/ch01-mistakes.ctea:36: theorem `peek_at_the_goal` failed: current goal is `Q`
   note: target: Q
 ```
 

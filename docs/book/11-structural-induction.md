@@ -246,7 +246,7 @@ first, so the `nil` arm comes first — the proof below leads with
 `cons`:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch11-mistakes.ctea:14: theorem `arms_out_of_order` failed: induction arm `cons` does not match constructor `nil`; arms must follow the declaration order
+error: docs/book/code/ch11-mistakes.ctea:14: theorem `arms_out_of_order` failed: induction arm `cons` does not match constructor `nil`; arms must follow the declaration order
   note: target: append(l, nil) = l
 ```
 
@@ -257,7 +257,7 @@ else.
 `| cons h t =>` looks plausible — two arguments, two names:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch11-mistakes.ctea:25: theorem `missing_binders` failed: induction arm `cons` expects 3 binder(s): one per constructor argument, then one induction hypothesis per recursive argument
+error: docs/book/code/ch11-mistakes.ctea:25: theorem `missing_binders` failed: induction arm `cons` expects 3 binder(s): one per constructor argument, then one induction hypothesis per recursive argument
   note: target: append(l, nil) = l
 ```
 
@@ -269,7 +269,7 @@ Section 11.2, word for word.
 the same miscount — `| node l v r ih =>`:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch11-mistakes.ctea:44: theorem `one_ih_for_node` failed: induction arm `node` expects 5 binder(s): one per constructor argument, then one induction hypothesis per recursive argument
+error: docs/book/code/ch11-mistakes.ctea:44: theorem `one_ih_for_node` failed: induction arm `node` expects 5 binder(s): one per constructor argument, then one induction hypothesis per recursive argument
   note: target: le(0, size(t))
 ```
 

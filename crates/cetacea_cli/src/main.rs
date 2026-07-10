@@ -2158,7 +2158,13 @@ fn diagnostic_json(diagnostic: &Diagnostic) -> String {
         .map(|location| {
             format!(
                 r#"{{"path":{},"line":{}}}"#,
-                optional_json_string(location.path.as_deref()),
+                optional_json_string(
+                    location
+                        .path
+                        .as_deref()
+                        .map(display_diagnostic_path)
+                        .as_deref()
+                ),
                 location.line
             )
         })
@@ -2243,6 +2249,7 @@ fn print_diagnostics(diagnostics: &[Diagnostic]) {
         match &diagnostic.location {
             Some(location) => match &location.path {
                 Some(path) => {
+                    let path = display_diagnostic_path(path);
                     eprintln!("{label}: {path}:{}: {}", location.line, diagnostic.message)
                 }
                 None => eprintln!("{label}: line {}: {}", location.line, diagnostic.message),
@@ -2260,6 +2267,16 @@ fn print_diagnostics(diagnostics: &[Diagnostic]) {
             }
         }
     }
+}
+
+fn display_diagnostic_path(path: &str) -> String {
+    let path = Path::new(path);
+    if let Ok(current_dir) = env::current_dir() {
+        if let Ok(relative) = path.strip_prefix(current_dir) {
+            return relative.display().to_string();
+        }
+    }
+    path.display().to_string()
 }
 
 fn diagnostic_label(diagnostic: &Diagnostic) -> &'static str {
@@ -2415,5 +2432,21 @@ theorem unfinished : True := by
         assert!(json.contains(r#""kind":"sorry""#));
         assert!(json.contains(r#""declaration":"unfinished""#));
         assert_eq!(json_string("a\"b\\c\n"), r#""a\"b\\c\n""#);
+    }
+
+    #[test]
+    fn diagnostic_paths_are_relative_inside_the_working_directory() {
+        let current_dir = env::current_dir().expect("working directory should be available");
+        let absolute = current_dir.join("docs/book/code/example.ctea");
+        assert_eq!(
+            display_diagnostic_path(absolute.to_str().expect("test path should be UTF-8")),
+            Path::new("docs/book/code/example.ctea")
+                .display()
+                .to_string()
+        );
+        assert_eq!(
+            display_diagnostic_path("already/relative.ctea"),
+            Path::new("already/relative.ctea").display().to_string()
+        );
     }
 }

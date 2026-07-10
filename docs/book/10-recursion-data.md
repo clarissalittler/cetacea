@@ -308,7 +308,7 @@ everything — yours and the library's — in one global namespace, and
 `length` is taken:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch10-mistakes.ctea:13: cannot redeclare `length` as a recursive definition
+error: docs/book/code/ch10-mistakes.ctea:13: cannot redeclare `length` as a recursive definition
 ```
 
 When this bites, you were usually about to redefine something that
@@ -319,7 +319,7 @@ idea (pick another — this book's `_demo` suffixes are one convention).
 below binds `h` and `rec` but forgets the tail `t`:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch10-mistakes.ctea:22: recursive definition case `cons` expects 3 binder(s), but got 2
+error: docs/book/code/ch10-mistakes.ctea:22: recursive definition case `cons` expects 3 binder(s), but got 2
   note: bind the 2 constructor argument(s) first, then 1 recursive result(s)
 ```
 
@@ -332,7 +332,7 @@ three names, in that order.
 argument, so `append(l, nil)` is stuck while `l` is symbolic:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch10-mistakes.ctea:28: theorem `append_nil_right` failed: refl cannot prove `append(l, nil) = l` because the sides are not identical
+error: docs/book/code/ch10-mistakes.ctea:28: theorem `append_nil_right` failed: refl cannot prove `append(l, nil) = l` because the sides are not identical
   note: target: append(l, nil) = l
 ```
 

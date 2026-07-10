@@ -270,7 +270,7 @@ two perfectly correct classical proofs — in a file that never says
 `mode classical`. Intended to fail; run it and read:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch03-mistakes.ctea:12: theorem `em_needs_permission` failed: by_cases uses excluded middle for `P` and requires classical mode
+error: docs/book/code/ch03-mistakes.ctea:12: theorem `em_needs_permission` failed: by_cases uses excluded middle for `P` and requires classical mode
   note: target: P \/ (not P)
   help: Switch modes or avoid the classical rule
     This tactic uses classical reasoning. Put `mode classical` before the theorem, or prove a constructive version instead.
@@ -279,7 +279,7 @@ error: /home/left_adjoint/cetacea/docs/book/code/ch03-mistakes.ctea:12: theorem 
 ```
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch03-mistakes.ctea:21: theorem `dne_needs_permission` failed: by_contra introduces a classical proof of `P`
+error: docs/book/code/ch03-mistakes.ctea:21: theorem `dne_needs_permission` failed: by_contra introduces a classical proof of `P`
   note: target: P
   help: Switch modes or avoid the classical rule
     This tactic uses classical reasoning. Put `mode classical` before the theorem, or prove a constructive version instead.

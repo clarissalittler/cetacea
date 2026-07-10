@@ -103,7 +103,7 @@ theorem comm_by_computation (n m : Nat) : add(n, m) = add(m, n) := by
 ```
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch09-mistakes.ctea:15: theorem `comm_by_computation` failed: refl cannot prove `add(n, m) = add(m, n)` because the sides are not identical
+error: docs/book/code/ch09-mistakes.ctea:15: theorem `comm_by_computation` failed: refl cannot prove `add(n, m) = add(m, n)` because the sides are not identical
   note: target: add(n, m) = add(m, n)
   help: Use equality simplification first
     `refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.
@@ -256,7 +256,7 @@ already seen its first error (Section 9.4); here are the other three.
 reaches the `succ` arm and immediately plays `exact ih`:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch09-mistakes.ctea:26: theorem `ih_is_not_the_theorem` failed: exact proof does not solve the goal: proof has type `add(k, m) = add(m, k)`, but expected `add(succ(k), m) = add(m, succ(k))`
+error: docs/book/code/ch09-mistakes.ctea:26: theorem `ih_is_not_the_theorem` failed: exact proof does not solve the goal: proof has type `add(k, m) = add(m, k)`, but expected `add(succ(k), m) = add(m, succ(k))`
   note: target: add(succ(k), m) = add(m, succ(k))
 ```
 
@@ -274,7 +274,7 @@ wrong.
 after all, it's "the same variable," right?
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch09-mistakes.ctea:31: theorem `shadowed_binder` failed: induction binder `n` would shadow an existing variable
+error: docs/book/code/ch09-mistakes.ctea:31: theorem `shadowed_binder` failed: induction binder `n` would shadow an existing variable
   note: target: sub(n, n) = 0
 ```
 
@@ -290,7 +290,7 @@ already.)
 attempt `intro`s the premise `le(1, n)` and *then* starts induction:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch09-mistakes.ctea:43: theorem `square_positive` failed: cannot induct on `n` while hypothesis `h` depends on it
+error: docs/book/code/ch09-mistakes.ctea:43: theorem `square_positive` failed: cannot induct on `n` while hypothesis `h` depends on it
   note: target: le(1, mul(n, n))
   help: Induct before introducing dependent hypotheses
     Hypothesis `h` mentions `n`, so it cannot be kept unchanged while `n` is split into cases. Leave the implication or forall in the goal, run induction first, then introduce `h` inside each arm.

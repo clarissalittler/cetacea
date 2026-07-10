@@ -62,7 +62,8 @@ cargo run -p cetacea_cli -- std/nat.ctea
 The corpus script checks every standard-library, example, CS250, and book
 companion file. Every theorem in a `mistakes`, `fallacies`, or `negative`
 fixture must be individually rejected, so one earlier diagnostic cannot hide
-an accidentally accepted teaching example.
+an accidentally accepted teaching example. Quoted book error headlines and
+acceptance receipts are also checked against live CLI output.
 
 Use strict, machine-readable checking for assignments and automation with:
 

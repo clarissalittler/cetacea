@@ -379,7 +379,7 @@ fail, as always.
 equation's *right* side:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:21: theorem `wrong_direction` failed: rewrite could not find `superman` in goal `Flies(clark)`
+error: docs/book/code/ch05-mistakes.ctea:21: theorem `wrong_direction` failed: rewrite could not find `superman` in goal `Flies(clark)`
   note: target: Flies(clark)
 ```
 
@@ -394,7 +394,7 @@ sides and compares. If the equation is false, no tactic can help, and
 the error shows you the computation-eye view:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides are not identical
+error: docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides are not identical
   note: target: add(2, 2) = 5
   note: the arithmetic statement is false when it is false outright. No proof can close it; check the statement itself.
   help: Use equality simplification first
@@ -419,7 +419,7 @@ stated — it will not quietly accept a proof of something else, not
 even the mirror image of what you asked for:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:31: theorem `have_backwards` failed: have proof has type `clark = superman`, but the stated formula is `superman = clark`
+error: docs/book/code/ch05-mistakes.ctea:31: theorem `have_backwards` failed: have proof has type `clark = superman`, but the stated formula is `superman = clark`
   note: target: superman = clark
 ```
 
@@ -432,7 +432,7 @@ superman = clark := eq_symm h`.
 Section 5.1, enforced:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch05-mistakes.ctea:35: theorem `type_confusion` has invalid statement
+error: docs/book/code/ch05-mistakes.ctea:35: theorem `type_confusion` has invalid statement
   note: equality compares `clark` of type `Person` with `0` of type `Nat`
   note: target: clark = 0
 ```

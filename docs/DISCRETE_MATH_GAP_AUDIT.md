@@ -50,11 +50,12 @@ may be selected separately, `--deny-classical` enforces constructive work, and
 The corpus check now uses that declaration-level output to require every theorem
 in a book `mistakes`, `fallacies`, or `negative` fixture to fail individually;
 this closes the hole where one earlier diagnostic could mask a later example
-that had silently started checking.
+that had silently started checking. It also verifies every quoted error headline
+and acceptance receipt against live CLI output. Diagnostic paths are now relative
+to the working directory in both text and JSON, so those excerpts are portable.
 
 Still outstanding in Phase 0 are separating `Sorry` from kernel-valid proofs,
-checking quoted diagnostic excerpts against the current checker, and further
-isolation of the trusted kernel boundary.
+and further isolation of the trusted kernel boundary.
 
 ## Evidence reviewed
 
@@ -188,12 +189,10 @@ explicit environment interface and adversarial tests.
 
 The corpus script now confirms that every declared theorem in a negative file
 fails, closing the masking bug found during this audit. The stale Chapter 7
-"forgetting to unfold" example has been replaced.
-
-Quoted output still is not checked. Phase 0 should add a reproducible mechanism
-for checking diagnostic excerpts, or replace literal output blocks with
-generated fixtures. Absolute local paths in quoted diagnostics should be
-normalized.
+"forgetting to unfold" example has been replaced. It also treats each quoted
+error headline and acceptance receipt as an assertion about live output.
+Diagnostic paths are rendered relative to the working directory, eliminating
+the machine-specific absolute paths that were embedded throughout the book.
 
 ### Strict course and grading mode
 
@@ -214,7 +213,8 @@ statement or import a stronger library than intended.
 3. Add proposition/iff rewriting and a controlled simplifier registry.
 4. Preserve exact source spans for checked expressions and tactics.
 5. Finish namespace migration in the book and tutorials.
-6. Check quoted diagnostics and accepted output automatically.
+6. Extend executable documentation beyond the now-checked diagnostic headlines
+   and acceptance receipts to longer, generated transcript blocks where useful.
 7. Add repeated "erase the tactics" exercises that turn checked derivations
    into polished prose proofs and assess proof exposition.
 

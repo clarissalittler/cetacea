@@ -403,7 +403,7 @@ fail.
 compares *expressions*, and these are different expressions:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch06-mistakes.ctea:21: theorem `sets_equal_by_staring` failed: refl cannot prove `union(A, B) = union(B, A)` because the sides are not identical
+error: docs/book/code/ch06-mistakes.ctea:21: theorem `sets_equal_by_staring` failed: refl cannot prove `union(A, B) = union(B, A)` because the sides are not identical
   note: target: union(A, B) = union(B, A)
 ```
 
@@ -417,7 +417,7 @@ actual mathematical content of "sets are equal."
 **Mistake 2: `intro` before the coat comes off.**
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch06-mistakes.ctea:25: theorem `subset_too_fast` failed: intro expects an implication or universal goal
+error: docs/book/code/ch06-mistakes.ctea:25: theorem `subset_too_fast` failed: intro expects an implication or universal goal
   note: target: A subset A
   help: Match the goal shape
     `intro` only opens implication or universal goals. The current target is `A subset A`.
@@ -435,7 +435,7 @@ what it looks like to find that out mid-proof. The attempt assumes
 until the hypothesis is asked to run backwards:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch06-mistakes.ctea:35: theorem `subset_flip` failed: cannot use this proof here: its conclusion `x1 in B` does not match goal `x in A`
+error: docs/book/code/ch06-mistakes.ctea:35: theorem `subset_flip` failed: cannot use this proof here: its conclusion `x1 in B` does not match goal `x in A`
   note: target: x in A
 ```
 
@@ -449,7 +449,7 @@ indeed false: take `A` empty and `B` not.
 **Mistake 4: an element is not a one-element set.**
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch06-mistakes.ctea:39: theorem `element_confusion` has invalid statement
+error: docs/book/code/ch06-mistakes.ctea:39: theorem `element_confusion` has invalid statement
   note: subset expects set arguments, but got `Student` and `Set Student`
   note: target: ana subset CS
 ```

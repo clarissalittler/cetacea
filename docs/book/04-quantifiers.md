@@ -320,7 +320,7 @@ fail, as usual.
 `0`:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch04-mistakes.ctea:19: theorem `wrong_witness` failed: exists witness `0` has type `Nat`, but the goal needs a `Person`
+error: docs/book/code/ch04-mistakes.ctea:19: theorem `wrong_witness` failed: exists witness `0` has type `Nat`, but the goal needs a `Person`
   note: target: exists x : Person, Happy(x)
 ```
 
@@ -337,7 +337,7 @@ everyone." The proof tries to `cases` the universal hypothesis, hoping
 to shake a single witness out of it:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch04-mistakes.ctea:31: theorem `everyone_has_an_admirer_so_someone_admires_everyone` failed: cases with `| intro a b` expects an existential or conjunction proof
+error: docs/book/code/ch04-mistakes.ctea:31: theorem `everyone_has_an_admirer_so_someone_admires_everyone` failed: cases with `| intro a b` expects an existential or conjunction proof
   note: target: exists x : A, forall y : A, R(x, y)
   note: the first-order statement is false in a 2-element domain where R = {(a,b), (b,a)}. No proof can close it; check the statement itself.
 ```

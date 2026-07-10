@@ -336,7 +336,7 @@ when you want to show that step.
 make an unrelated name occur in the goal:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:17: theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => ModEq(m, x, y))`
+error: docs/book/code/ch07-mistakes.ctea:17: theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => ModEq(m, x, y))`
   note: target: Reflexive(fun x y : Nat => ModEq(m, x, y))
 ```
 
@@ -351,7 +351,7 @@ assuming `h : le(x, y)`, the goal is `le(y, x)` — and the only thing
 in reach is `h` itself:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch07-mistakes.ctea:28: theorem `le_symmetric_wish` failed: exact proof does not solve the goal: proof has type `le(x, y)`, but expected `le(y, x)`
+error: docs/book/code/ch07-mistakes.ctea:28: theorem `le_symmetric_wish` failed: exact proof does not solve the goal: proof has type `le(x, y)`, but expected `le(y, x)`
   note: target: le(y, x)
   note: the open arithmetic goal does not follow from the current hypotheses: it is false when x = 0, y = 1. Reconsider the earlier proof steps.
 ```

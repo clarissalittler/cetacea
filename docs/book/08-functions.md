@@ -295,7 +295,7 @@ fail.
 offers... `x`:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch08-mistakes.ctea:22: theorem `witness_from_wrong_column` failed: exists witness `x` has type `Person`, but the goal needs a `Nat`
+error: docs/book/code/ch08-mistakes.ctea:22: theorem `witness_from_wrong_column` failed: exists witness `x` has type `Person`, but the goal needs a `Nat`
   note: target: exists y : Nat, AgeIs(x, y)
 ```
 
@@ -312,7 +312,7 @@ from Section 8.4, mistaken for sameness — the file tries to *derive*
 hypothesis the injectivity data:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch08-mistakes.ctea:37: theorem `single_valued_is_not_injective` failed: cannot use proof `h` with an argument: proof has type `G(x1, y)`, but expected `G(x1, x2)`
+error: docs/book/code/ch08-mistakes.ctea:37: theorem `single_valued_is_not_injective` failed: cannot use proof `h` with an argument: proof has type `G(x1, y)`, but expected `G(x1, x2)`
   note: target: x1 = x2
 ```
 
@@ -334,7 +334,7 @@ column each quantifier ranges over.*
 `sub(y, 1)` as the preimage and asks `refl` to check:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch08-mistakes.ctea:45: theorem `succ_surjective_wish` failed: refl cannot prove `succ(sub(y, 1)) = y` because the sides are not identical
+error: docs/book/code/ch08-mistakes.ctea:45: theorem `succ_surjective_wish` failed: refl cannot prove `succ(sub(y, 1)) = y` because the sides are not identical
   note: target: succ(sub(y, 1)) = y
   note: the open arithmetic goal does not follow from the current hypotheses: it is false when y = 0. Reconsider the earlier proof steps.
   help: Use equality simplification first

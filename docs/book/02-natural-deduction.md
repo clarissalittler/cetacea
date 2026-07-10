@@ -288,7 +288,7 @@ Section 2.1: `(P -> Q) -> Q -> P`. The file's best attempt ends with
 `exact hq`, offering the `Q` it has for the `P` it owes:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch02-fallacies.ctea:15: theorem `affirming_the_consequent` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:15: theorem `affirming_the_consequent` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
   note: target: P
   note: the statement is not a tautology: it is false when P = false, Q = true. No proof can close it; check the statement itself.
   help: Match the proof to the target
@@ -312,7 +312,7 @@ no proof exists.** The flaw is in the claim, not in you.
 countermodel, same verdict:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch02-fallacies.ctea:24: theorem `denying_the_antecedent` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:24: theorem `denying_the_antecedent` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
   note: target: P
   note: the statement is not a tautology: it is false when P = false, Q = true. No proof can close it; check the statement itself.
 ```
@@ -327,7 +327,7 @@ right arm — the world where only `Q` holds — where the fallacy has
 nowhere to hide:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch02-fallacies.ctea:34: theorem `or_gives_both` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:34: theorem `or_gives_both` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
   note: target: P
   note: the statement is not a tautology: it is false when P = false, Q = true. No proof can close it; check the statement itself.
 ```
@@ -338,7 +338,7 @@ goes `left` when it should go `right`. Read this error next to the
 three above, carefully:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch02-fallacies.ctea:42: theorem `wrong_turn` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:42: theorem `wrong_turn` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
   note: target: P
   note: the open goal does not follow from the current hypotheses: it is false when P = false, Q = true. Reconsider the earlier proof steps.
 ```

@@ -52,6 +52,10 @@ Each chapter comes with three (sometimes four) companion files in
 | `chNN-solutions.ctea` | Full solutions. Genuinely try the exercises first. |
 | `chNN-mistakes.ctea` / `ch02-fallacies.ctea` | **Intended to fail.** Deliberately wrong proofs whose error messages the chapter dissects. Run them; read the errors. |
 
+From the repository root, `./scripts/check_all.sh` verifies the companion files,
+requires each deliberately wrong theorem to fail independently, and checks the
+book's quoted error headlines and acceptance receipts against current output.
+
 The rhythm for each chapter:
 
 1. Read the chapter with the examples file open next to it.

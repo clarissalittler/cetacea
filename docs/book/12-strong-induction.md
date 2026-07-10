@@ -61,7 +61,7 @@ theorem one_rung_short (n : Nat) : bulb(n) = 0 := by
 ```
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch12-mistakes.ctea:25: theorem `one_rung_short` failed: exact proof does not solve the goal: proof has type `bulb(k) = 0`, but expected `bulb(pred(k)) = 0`
+error: docs/book/code/ch12-mistakes.ctea:25: theorem `one_rung_short` failed: exact proof does not solve the goal: proof has type `bulb(k) = 0`, but expected `bulb(pred(k)) = 0`
   note: target: bulb(pred(k)) = 0
 ```
 
@@ -233,7 +233,7 @@ second is the scaffolding error everyone makes once:
 feels like it should work — the goal is right there:
 
 ```text
-error: /home/left_adjoint/cetacea/docs/book/code/ch12-mistakes.ctea:31: theorem `which_predicate` failed: cannot use theorem `strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`
+error: docs/book/code/ch12-mistakes.ctea:31: theorem `which_predicate` failed: cannot use theorem `strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`
   note: target: bulb(n) = 0
   help: Provide the predicate parameter
     Theorem `strong_induction` has predicate parameter `P`, and predicate parameters are not inferred from the goal. Spell `P` out with a lambda.

@@ -34,10 +34,36 @@ allows_incomplete() {
 mapfile -t files < <(find std examples docs/cs250/code docs/book/code -type f -name '*.ctea' | sort)
 
 status=0
+book_error_lines=""
+book_receipt_lines=""
+
+contains_line() {
+  local lines="$1"
+  local expected="$2"
+  local line
+  while IFS= read -r line; do
+    if [[ "$line" == "$expected" ]]; then
+      return 0
+    fi
+  done <<< "$lines"
+  return 1
+}
 
 for file in "${files[@]}"; do
   output="$("$checker" "$file" 2>&1)"
   code=$?
+
+  if [[ "$file" == docs/book/code/* ]]; then
+    if is_negative_file "$file"; then
+      while IFS= read -r line; do
+        book_error_lines+="$line"$'\n'
+      done < <(printf '%s\n' "$output" | sed -n '/^error: /p')
+    else
+      while IFS= read -r line; do
+        book_receipt_lines+="$line"$'\n'
+      done < <(printf '%s\n' "$output" | sed -n '/^accepted \(theorem\|axiom\) /p')
+    fi
+  fi
 
   if is_negative_file "$file"; then
     if [[ $code -eq 0 ]]; then
@@ -104,6 +130,20 @@ for file in "${files[@]}"; do
     status=1
   fi
 done
+
+while IFS= read -r expected; do
+  if ! contains_line "$book_error_lines" "$expected"; then
+    printf 'error: quoted book diagnostic is stale: %s\n' "$expected" >&2
+    status=1
+  fi
+done < <(sed -n '/^error: /p' docs/book/*.md)
+
+while IFS= read -r expected; do
+  if ! contains_line "$book_receipt_lines" "$expected"; then
+    printf 'error: quoted book acceptance receipt is stale: %s\n' "$expected" >&2
+    status=1
+  fi
+done < <(sed -n '/^accepted \(theorem\|axiom\) /p' docs/book/*.md)
 
 if [[ $status -eq 0 ]]; then
   printf 'checked %s .ctea files\n' "${#files[@]}"
