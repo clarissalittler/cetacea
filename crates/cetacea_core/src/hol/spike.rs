@@ -346,13 +346,6 @@ impl SpikeElaborator {
             .iter()
             .filter_map(|constant| self.definition_receipts.get(constant).cloned())
             .collect::<Vec<_>>();
-        let fragment = structural_definition_fragment(
-            &self.types,
-            spec.datatype,
-            &spec.datatype_arguments,
-            &spec.fixed_parameter_types,
-            &spec.result_type,
-        )?;
         let receipt_id = DeclarationId(self.next_receipt_id);
         let next_receipt_id = self
             .next_receipt_id
@@ -364,7 +357,12 @@ impl SpikeElaborator {
         self.fragments.mark_structurally_recursive_constant(id);
         let receipt = DeclarationReceipt::checked(
             receipt_id,
-            fragment,
+            // A definition has no proposition of its own. Its concrete use is
+            // normalized and classified at the use site, while recursion and
+            // every transitive dependency remain visible through the receipt.
+            // In particular, an implementation helper may accept an arrow
+            // without making a fully saturated first-order client HOL.
+            StatementFragment::Prop,
             [ProofFeature::StructuralRecursion],
             dependency_receipts.iter(),
         );
@@ -629,70 +627,6 @@ impl SpikeElaborator {
         self.theorem_receipts.insert(theorem, receipt.clone());
         self.next_receipt_id = next_receipt_id;
         Ok((theorem, receipt))
-    }
-}
-
-fn structural_definition_fragment(
-    types: &TypeSignature,
-    datatype: TypeConstructorId,
-    datatype_arguments: &[CoreType],
-    fixed_parameters: &[CoreType],
-    result: &CoreType,
-) -> Result<StatementFragment, SpikeError> {
-    let datatype = CoreType::constructor(datatype, datatype_arguments.to_vec());
-    if first_order_scheme_status(types, &datatype)? != super::types::FirstOrderStatus::FirstOrder
-        || fixed_parameters.iter().any(|parameter| {
-            first_order_scheme_status(types, parameter).ok()
-                != Some(super::types::FirstOrderStatus::FirstOrder)
-        })
-        || !first_order_symbol_result(types, result)?
-    {
-        Ok(StatementFragment::HigherOrder)
-    } else {
-        Ok(StatementFragment::FirstOrderInductive)
-    }
-}
-
-/// Classify the least fragment of a schematic definition. An unconstrained
-/// parameter can later receive a higher-order argument, but that concrete use
-/// is classified from the checked theorem term. Treating parameters as
-/// first-order placeholders here avoids tainting every first-order instance of
-/// an otherwise parametric definition.
-fn first_order_scheme_status(
-    types: &TypeSignature,
-    ty: &CoreType,
-) -> Result<super::types::FirstOrderStatus, SpikeError> {
-    fn narrow_parameters(ty: &CoreType) -> CoreType {
-        match ty {
-            CoreType::Prop => CoreType::Prop,
-            CoreType::Parameter(parameter) => {
-                CoreType::Parameter(TypeParameter::first_order(parameter.id.0))
-            }
-            CoreType::Constructor { id, arguments } => {
-                CoreType::constructor(*id, arguments.iter().map(narrow_parameters).collect())
-            }
-            CoreType::Arrow(domain, codomain) => {
-                CoreType::arrow(narrow_parameters(domain), narrow_parameters(codomain))
-            }
-            CoreType::Product(left, right) => {
-                CoreType::product(narrow_parameters(left), narrow_parameters(right))
-            }
-        }
-    }
-
-    Ok(types.first_order_status(&narrow_parameters(ty))?)
-}
-
-fn first_order_symbol_result(types: &TypeSignature, result: &CoreType) -> Result<bool, SpikeError> {
-    match result {
-        CoreType::Prop => Ok(true),
-        CoreType::Arrow(domain, codomain) => Ok(first_order_scheme_status(types, domain)?
-            == super::types::FirstOrderStatus::FirstOrder
-            && first_order_symbol_result(types, codomain)?),
-        _ => {
-            Ok(first_order_scheme_status(types, result)?
-                == super::types::FirstOrderStatus::FirstOrder)
-        }
     }
 }
 

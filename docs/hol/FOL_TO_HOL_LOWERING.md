@@ -84,16 +84,23 @@ restricted FOL profile.
 | `Var(name)` | Nearest resolved term/symbol parameter or local `Bound(index)`; otherwise a resolved nullary constant. |
 | `App(name, args)` | Resolved constant or transparent definition, followed by explicit type application and `CoreTerm::Apply` for each argument. |
 | `PredLambda { params, body }` | Nested typed `CoreTerm::Lambda` ending in `lower(body) : Prop`. Beta/delta normalization may erase it; a retained predicate value is HOL. |
-| `Zero`, `Succ(t)` | Predeclared `zero` and `succ(t)`. Decimal literals are elaborator sugar. |
-| `Add`, `Mul`, `Sub` | Applications of checked structural Nat definitions with the legacy computation equations. |
-| `Pair`, `Fst`, `Snd` | H4a `CoreTerm::Pair`, `First`, and `Second`; both projections reduce definitionally and preserve FOL classification for first-order components. Surface lowering remains. |
-| `EmptySet`, `Universe`, `Singleton`, `Union`, `Inter`, `Diff`, `Complement`, `CartProd`, `Powerset` | H4a first-order set terms with checked element types and definitional membership equations. Surface lowering remains. |
-| `SetBuilder { x : A | P }` | H4a checked comprehension under an element binder; membership substitutes capture-avoidantly into `P`. The set value remains the first-order `Set A` wrapper. |
+| `Zero`, `Succ(t)` | Predeclared checked constructors `zero` and `succ(t)`. Decimal literals are elaborator sugar. Parser-independent lowering is implemented. |
+| `Add`, `Mul`, `Sub` | Applications of checked structural Nat definitions. The terminating structural equations and all closed numerals compute in the kernel; the additional legacy simp orientations must be discharged by checked compatibility lemmas. Parser-independent lowering is implemented. |
+| `Pair`, `Fst`, `Snd` | H4a `CoreTerm::Pair`, `First`, and `Second`; both projections reduce definitionally and preserve FOL classification for first-order components. Parser-independent lowering is implemented. |
+| `EmptySet`, `Universe`, `Singleton`, `Union`, `Inter`, `Diff`, `Complement`, `CartProd`, `Powerset` | H4a first-order set terms with checked element types and definitional membership equations. Parser-independent lowering is implemented. |
+| `SetBuilder { x : A | P }` | H4a checked comprehension under an element binder; membership substitutes capture-avoidantly into `P`. The set value remains the first-order `Set A` wrapper. Parser-independent lowering is implemented. |
 
-Nat reduction must reproduce the current `add`, `mul`, truncated `sub`, `pred`,
-and `le` equations. Legacy product support needs typed pair/projection core terms
-or equivalently checked primitive reductions; the present H3 core has the
-product type but not those term constructors.
+The compatibility prelude now installs inductive `Nat`, its constructors,
+structural `add`, `mul`, truncated `sub`, and a nested-structural `le`; it also
+installs the distinguished first-order `Set`. Primary open equations and every
+closed numeral reduce definitionally. The legacy normalizer additionally uses
+overlapping equations on either argument. Those equations are not stable under
+substitution (the two `mul` orientations already give different open normal
+forms after constructor substitution), so copying them into HOL conversion
+would compromise the new kernel. H4 instead must install checked secondary simp
+lemmas and make compatibility `simp`/`Convert` lowering emit their evidence.
+`pred` remains the ordinary checked `std/nat.ctea` structural definition; an
+internal predecessor used by `sub` does not occupy that surface name.
 
 Legacy set compatibility needs a narrow, audited primitive layer. Membership
 normalization must reproduce the current equations for empty, universe,
@@ -117,10 +124,15 @@ must not enter definitional equality.
 | `Forall x : A, P` | `CoreTerm::Forall { domain: lower(A), body: lower(P) }` |
 | `Exists x : A, P` | `CoreTerm::Exists { domain: lower(A), body: lower(P) }` |
 
-The elaborator must lower definitions and beta/delta-normalize scaffolding before
-statement classification. A formula that retains a predicate value, partial
-application, arrow/`Prop` quantifier, or higher-order equality is HOL. Saturated
-schema predicates over first-order domains remain FOL.
+The parser-independent elaborator now lowers every current `Type`, `Term`, and
+`Formula` form, including expected-type-directed predicate lambdas, explicit
+rank-one instantiation, and shadowing-safe de Bruijn binders. It checks each
+produced term immediately. Declaration/import resolution and proof lowering
+are not connected yet. Definitions and beta/delta scaffolding must be
+normalized before statement classification. A formula that retains a
+predicate value, partial application, arrow/`Prop` quantifier, or higher-order
+equality is HOL. Saturated schema predicates over first-order domains remain
+FOL.
 
 ## Proof-evidence lowering
 
@@ -183,9 +195,10 @@ checking.
 These are compatibility prerequisites, not optional language expansion:
 
 1. **Rank-one term/symbol theorem schemes.** The checked core template and
-   explicit-reference substrate is implemented. Surface inference/lowering is
-   still required for pervasive `(P : Prop)`, `(x : A)`, and
-   `(R : A -> ... -> Prop)` parameters.
+   explicit-reference substrate is implemented. The parser-independent scope
+   now lowers `(P : Prop)`, `(x : A)`, and `(R : A -> ... -> Prop)` parameters
+   and infers explicit type applications. Theorem-declaration and reference
+   integration is still required.
 2. **Checked transparent definitions and delta reduction.** Implemented in the
    H4a core for closed monomorphic and rank-one polymorphic bodies. Definitions
    are checked before their constant is installed, can refer only to earlier
@@ -199,19 +212,20 @@ These are compatibility prerequisites, not optional language expansion:
    powersets/subset, and capture-safe comprehensions. Quantification over sets
    remains FOL. Set equality does not compute extensionally: `set_ext` is stored
    and propagated as a visible trusted axiom, as in the legacy standard library.
-   Surface/prelude lowering remains.
+   The compatibility prelude and parser-independent surface lowering are
+   implemented; declaration/import integration remains.
 4. **Product term computation.** Implemented in the H4a core. Pairing infers a
    product type; projections reject non-products, compute definitionally on
    pairs, traverse binders/type schemes capture-safely, and retain the least
-   first-order fragment when both components are first-order. Surface AST
-   lowering remains.
+   first-order fragment when both components are first-order. Parser-independent
+   lowering is implemented; declaration integration remains.
 5. **Structural recursion argument position.** Implemented in the H4a core.
    The datatype argument has an explicit checked source index; definition types,
    reduction scrutinees, and generated recursive calls all preserve it.
    Out-of-range positions fail transactionally. The graph spike now uses
    natural `append left right`, while generic `map` continues to demonstrate a
-   checked last recursive argument. Surface `defrec` lowering should select
-   index zero for the existing corpus.
+   checked last recursive argument. Declaration lowering still needs to select
+   index zero for legacy `defrec`.
 6. **Trusted and incomplete declaration storage.** Implemented in the H4a core.
    Typed trusted axioms are kernel-visible and transitively reported. Typed
    drafts retain holes and may reference other incomplete declarations, but
@@ -246,13 +260,21 @@ proofs, and incomplete exercise files. None can be postponed until after the
 2. Add transparent nonrecursive definitions, product reduction, and a recursive
    argument index; prove each extension transactional and terminating.
 3. Add the compatibility prelude for Nat and legacy `Set`, including golden
-   reduction tests for every current builtin equation.
+   reduction tests for every sound structural equation and checked lemmas for
+   the legacy secondary simp orientations. The prelude, primary equations, and
+   closed-numeral tests are implemented; checked secondary lemmas remain.
 4. Lower types, terms, formulas, declarations, and proof nodes in isolation;
    compare canonical statements and receipts with the legacy checker.
+   Type/term/formula lowering is implemented; declarations and proofs remain.
 5. Run both engines on all 74 files. Every one of the 588 recorded root
    declarations must match status, constructive/classical use, axiom/incomplete
    closure, and canonical surface statement; every one of the 38 negative
    theorems must remain rejected individually.
+
+At the parser-independent prelude/lowering checkpoint, the linked release CLI
+is 2,747,480 bytes and the raw Wasm module is 1,349,914 bytes. The latter remains
+below the 1.5 MB review trigger. The exact legacy oracle still reports 74 files,
+588 root declarations, and 38 intended-negative theorems.
 
 Only after that exact dual-check result should the driver route ordinary course
 files to the HOL kernel by default.

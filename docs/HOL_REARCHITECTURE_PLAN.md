@@ -457,6 +457,16 @@ dependency-laundering path. Specialization recurses through generic theorem
 wrappers and reconstructs nested binder contexts rather than trusting the
 generic declaration's conservative fragment.
 
+The checked compatibility prelude now installs inductive `Nat`, first-order
+`Set`, structurally recursive arithmetic, and nested-structural `le`
+transactionally. A parser-independent lowerer covers every legacy type, term,
+and formula form, resolves local names to de Bruijn indices, and infers explicit
+rank-one type applications. It is not connected to imports, declarations,
+proofs, or the production driver. The legacy evaluator's overlapping
+other-argument arithmetic shortcuts are intentionally not kernel conversion:
+they are not substitution-stable and must become checked compatibility simp
+lemmas before proof lowering.
+
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.
 - Preserve existing name resolution and import behavior through stable
