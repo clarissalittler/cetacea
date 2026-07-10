@@ -27,6 +27,36 @@ pub enum CoreTerm {
     Pair(Box<CoreTerm>, Box<CoreTerm>),
     First(Box<CoreTerm>),
     Second(Box<CoreTerm>),
+    EmptySet {
+        element_type: CoreType,
+    },
+    UniverseSet {
+        element_type: CoreType,
+    },
+    SingletonSet(Box<CoreTerm>),
+    SetUnion(Box<CoreTerm>, Box<CoreTerm>),
+    SetIntersection(Box<CoreTerm>, Box<CoreTerm>),
+    SetDifference(Box<CoreTerm>, Box<CoreTerm>),
+    SetComplement(Box<CoreTerm>),
+    SetProduct(Box<CoreTerm>, Box<CoreTerm>),
+    Powerset {
+        element_type: CoreType,
+        set: Box<CoreTerm>,
+    },
+    SetBuilder {
+        element_type: CoreType,
+        body: Box<CoreTerm>,
+    },
+    Membership {
+        element_type: CoreType,
+        element: Box<CoreTerm>,
+        set: Box<CoreTerm>,
+    },
+    Subset {
+        element_type: CoreType,
+        left: Box<CoreTerm>,
+        right: Box<CoreTerm>,
+    },
     Truth,
     Falsity,
     And(Box<CoreTerm>, Box<CoreTerm>),
@@ -83,6 +113,69 @@ impl CoreTerm {
 
     pub fn second(pair: Self) -> Self {
         Self::Second(Box::new(pair))
+    }
+
+    pub fn empty_set(element_type: CoreType) -> Self {
+        Self::EmptySet { element_type }
+    }
+
+    pub fn universe_set(element_type: CoreType) -> Self {
+        Self::UniverseSet { element_type }
+    }
+
+    pub fn singleton_set(element: Self) -> Self {
+        Self::SingletonSet(Box::new(element))
+    }
+
+    pub fn set_union(left: Self, right: Self) -> Self {
+        Self::SetUnion(Box::new(left), Box::new(right))
+    }
+
+    pub fn set_intersection(left: Self, right: Self) -> Self {
+        Self::SetIntersection(Box::new(left), Box::new(right))
+    }
+
+    pub fn set_difference(left: Self, right: Self) -> Self {
+        Self::SetDifference(Box::new(left), Box::new(right))
+    }
+
+    pub fn set_complement(set: Self) -> Self {
+        Self::SetComplement(Box::new(set))
+    }
+
+    pub fn set_product(left: Self, right: Self) -> Self {
+        Self::SetProduct(Box::new(left), Box::new(right))
+    }
+
+    pub fn powerset(element_type: CoreType, set: Self) -> Self {
+        Self::Powerset {
+            element_type,
+            set: Box::new(set),
+        }
+    }
+
+    /// The body is a proposition under one additional element binder.
+    pub fn set_builder(element_type: CoreType, body: Self) -> Self {
+        Self::SetBuilder {
+            element_type,
+            body: Box::new(body),
+        }
+    }
+
+    pub fn membership(element_type: CoreType, element: Self, set: Self) -> Self {
+        Self::Membership {
+            element_type,
+            element: Box::new(element),
+            set: Box::new(set),
+        }
+    }
+
+    pub fn subset(element_type: CoreType, left: Self, right: Self) -> Self {
+        Self::Subset {
+            element_type,
+            left: Box::new(left),
+            right: Box::new(right),
+        }
     }
 
     pub fn and(left: Self, right: Self) -> Self {
@@ -457,6 +550,100 @@ pub fn infer_type(
             };
             Ok(*right)
         }
+        CoreTerm::EmptySet { element_type } | CoreTerm::UniverseSet { element_type } => {
+            Ok(types.legacy_set_type(element_type.clone())?)
+        }
+        CoreTerm::SingletonSet(element) => {
+            let element_type = infer_type(types, constants, context, element)?;
+            Ok(types.legacy_set_type(element_type)?)
+        }
+        CoreTerm::SetUnion(left, right)
+        | CoreTerm::SetIntersection(left, right)
+        | CoreTerm::SetDifference(left, right) => {
+            let left_element = expect_legacy_set_element(types, constants, context, left, "left")?;
+            let right_element =
+                expect_legacy_set_element(types, constants, context, right, "right")?;
+            if left_element != right_element {
+                return Err(TermError::new(format!(
+                    "set operation combines element types `{left_element:?}` and `{right_element:?}`"
+                )));
+            }
+            Ok(types.legacy_set_type(left_element)?)
+        }
+        CoreTerm::SetComplement(set) => {
+            let element_type =
+                expect_legacy_set_element(types, constants, context, set, "complement")?;
+            Ok(types.legacy_set_type(element_type)?)
+        }
+        CoreTerm::SetProduct(left, right) => {
+            let left_element = expect_legacy_set_element(
+                types,
+                constants,
+                context,
+                left,
+                "Cartesian-product left",
+            )?;
+            let right_element = expect_legacy_set_element(
+                types,
+                constants,
+                context,
+                right,
+                "Cartesian-product right",
+            )?;
+            Ok(types.legacy_set_type(CoreType::product(left_element, right_element))?)
+        }
+        CoreTerm::Powerset { element_type, set } => {
+            let expected_base = types.legacy_set_type(element_type.clone())?;
+            let actual_base = infer_type(types, constants, context, set)?;
+            if actual_base != expected_base {
+                return Err(TermError::new(format!(
+                    "powerset base has type `{actual_base:?}`, but expected `{expected_base:?}`"
+                )));
+            }
+            Ok(types.legacy_set_type(expected_base)?)
+        }
+        CoreTerm::SetBuilder { element_type, body } => {
+            let set_type = types.legacy_set_type(element_type.clone())?;
+            let body_context = context.clone().with_bound(element_type.clone());
+            expect_prop(types, constants, &body_context, body, "set-builder body")?;
+            Ok(set_type)
+        }
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => {
+            types.legacy_set_type(element_type.clone())?;
+            let actual_element = infer_type(types, constants, context, element)?;
+            if actual_element != *element_type {
+                return Err(TermError::new(format!(
+                    "membership element has type `{actual_element:?}`, but expected `{element_type:?}`"
+                )));
+            }
+            let expected_set = types.legacy_set_type(element_type.clone())?;
+            let actual_set = infer_type(types, constants, context, set)?;
+            if actual_set != expected_set {
+                return Err(TermError::new(format!(
+                    "membership set has type `{actual_set:?}`, but expected `{expected_set:?}`"
+                )));
+            }
+            Ok(CoreType::Prop)
+        }
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => {
+            let expected_set = types.legacy_set_type(element_type.clone())?;
+            let left_type = infer_type(types, constants, context, left)?;
+            let right_type = infer_type(types, constants, context, right)?;
+            if left_type != expected_set || right_type != expected_set {
+                return Err(TermError::new(format!(
+                    "subset at element type `{element_type:?}` has operand types `{left_type:?}` and `{right_type:?}`"
+                )));
+            }
+            Ok(CoreType::Prop)
+        }
         CoreTerm::Truth | CoreTerm::Falsity => Ok(CoreType::Prop),
         CoreTerm::And(left, right) | CoreTerm::Or(left, right) | CoreTerm::Implies(left, right) => {
             expect_prop(types, constants, context, left, "left operand")?;
@@ -498,6 +685,20 @@ fn expect_prop(
             "{role} must have type `Prop`, but has type `{actual:?}`"
         )))
     }
+}
+
+fn expect_legacy_set_element(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    context: &TermContext,
+    term: &CoreTerm,
+    role: &str,
+) -> Result<CoreType, TermError> {
+    let actual = infer_type(types, constants, context, term)?;
+    types
+        .legacy_set_element(&actual)?
+        .cloned()
+        .ok_or_else(|| TermError::new(format!("{role} operand has type `{actual:?}`, not a set")))
 }
 
 /// Normalize a well-typed simply typed term by beta reduction and checked
@@ -621,6 +822,66 @@ fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTer
                 Ok(CoreTerm::second(pair))
             }
         }
+        CoreTerm::EmptySet { .. } | CoreTerm::UniverseSet { .. } => Ok(term.clone()),
+        CoreTerm::SingletonSet(element) => Ok(CoreTerm::singleton_set(normalize_typed(
+            constants, element,
+        )?)),
+        CoreTerm::SetUnion(left, right) => Ok(CoreTerm::set_union(
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
+        )),
+        CoreTerm::SetIntersection(left, right) => Ok(CoreTerm::set_intersection(
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
+        )),
+        CoreTerm::SetDifference(left, right) => Ok(CoreTerm::set_difference(
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
+        )),
+        CoreTerm::SetComplement(set) => {
+            Ok(CoreTerm::set_complement(normalize_typed(constants, set)?))
+        }
+        CoreTerm::SetProduct(left, right) => Ok(CoreTerm::set_product(
+            normalize_typed(constants, left)?,
+            normalize_typed(constants, right)?,
+        )),
+        CoreTerm::Powerset { element_type, set } => Ok(CoreTerm::powerset(
+            element_type.clone(),
+            normalize_typed(constants, set)?,
+        )),
+        CoreTerm::SetBuilder { element_type, body } => Ok(CoreTerm::set_builder(
+            element_type.clone(),
+            normalize_typed(constants, body)?,
+        )),
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => {
+            let element = normalize_typed(constants, element)?;
+            let set = normalize_typed(constants, set)?;
+            reduce_set_membership(constants, element_type, element, set)
+        }
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => {
+            let left = normalize_typed(constants, left)?;
+            let right = normalize_typed(constants, right)?;
+            let left = shift(&left, 1, 0)?;
+            let right = shift(&right, 1, 0)?;
+            normalize_typed(
+                constants,
+                &CoreTerm::forall(
+                    element_type.clone(),
+                    CoreTerm::implies(
+                        CoreTerm::membership(element_type.clone(), CoreTerm::Bound(0), left),
+                        CoreTerm::membership(element_type.clone(), CoreTerm::Bound(0), right),
+                    ),
+                ),
+            )
+        }
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
             normalize_typed(constants, left)?,
             normalize_typed(constants, right)?,
@@ -647,6 +908,72 @@ fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTer
             normalize_typed(constants, body)?,
         )),
     }
+}
+
+fn reduce_set_membership(
+    constants: &TermSignature,
+    element_type: &CoreType,
+    element: CoreTerm,
+    set: CoreTerm,
+) -> Result<CoreTerm, TermError> {
+    let reduced = match set {
+        CoreTerm::EmptySet { .. } => CoreTerm::Falsity,
+        CoreTerm::UniverseSet { .. } => CoreTerm::Truth,
+        CoreTerm::SingletonSet(singleton) => {
+            CoreTerm::equality(element_type.clone(), element, *singleton)
+        }
+        CoreTerm::SetUnion(left, right) => CoreTerm::or(
+            CoreTerm::membership(element_type.clone(), element.clone(), *left),
+            CoreTerm::membership(element_type.clone(), element, *right),
+        ),
+        CoreTerm::SetIntersection(left, right) => CoreTerm::and(
+            CoreTerm::membership(element_type.clone(), element.clone(), *left),
+            CoreTerm::membership(element_type.clone(), element, *right),
+        ),
+        CoreTerm::SetDifference(left, right) => CoreTerm::and(
+            CoreTerm::membership(element_type.clone(), element.clone(), *left),
+            CoreTerm::implies(
+                CoreTerm::membership(element_type.clone(), element, *right),
+                CoreTerm::Falsity,
+            ),
+        ),
+        CoreTerm::SetComplement(base) => CoreTerm::implies(
+            CoreTerm::membership(element_type.clone(), element, *base),
+            CoreTerm::Falsity,
+        ),
+        CoreTerm::SetProduct(left, right) => {
+            let CoreType::Product(left_type, right_type) = element_type else {
+                return Err(TermError::new(
+                    "checked Cartesian-product membership lacks a product element type",
+                ));
+            };
+            CoreTerm::and(
+                CoreTerm::membership(
+                    (**left_type).clone(),
+                    CoreTerm::first(element.clone()),
+                    *left,
+                ),
+                CoreTerm::membership((**right_type).clone(), CoreTerm::second(element), *right),
+            )
+        }
+        CoreTerm::Powerset {
+            element_type: base_element_type,
+            set: base,
+        } => CoreTerm::subset(base_element_type, element, *base),
+        CoreTerm::SetBuilder {
+            element_type: builder_element_type,
+            body,
+        } => {
+            if builder_element_type != *element_type {
+                return Err(TermError::new(
+                    "checked set-builder membership has inconsistent element types",
+                ));
+            }
+            substitute_top(&element, &body)?
+        }
+        other => return Ok(CoreTerm::membership(element_type.clone(), element, other)),
+    };
+    normalize_typed(constants, &reduced)
 }
 
 fn unfold_transparent_constant(
@@ -868,6 +1195,60 @@ fn substitute_term_types(
         ),
         CoreTerm::First(pair) => CoreTerm::first(substitute_term_types(pair, substitution)),
         CoreTerm::Second(pair) => CoreTerm::second(substitute_term_types(pair, substitution)),
+        CoreTerm::EmptySet { element_type } => {
+            CoreTerm::empty_set(substitute_core_type(element_type, substitution))
+        }
+        CoreTerm::UniverseSet { element_type } => {
+            CoreTerm::universe_set(substitute_core_type(element_type, substitution))
+        }
+        CoreTerm::SingletonSet(element) => {
+            CoreTerm::singleton_set(substitute_term_types(element, substitution))
+        }
+        CoreTerm::SetUnion(left, right) => CoreTerm::set_union(
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::SetIntersection(left, right) => CoreTerm::set_intersection(
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::SetDifference(left, right) => CoreTerm::set_difference(
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::SetComplement(set) => {
+            CoreTerm::set_complement(substitute_term_types(set, substitution))
+        }
+        CoreTerm::SetProduct(left, right) => CoreTerm::set_product(
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::Powerset { element_type, set } => CoreTerm::powerset(
+            substitute_core_type(element_type, substitution),
+            substitute_term_types(set, substitution),
+        ),
+        CoreTerm::SetBuilder { element_type, body } => CoreTerm::set_builder(
+            substitute_core_type(element_type, substitution),
+            substitute_term_types(body, substitution),
+        ),
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => CoreTerm::membership(
+            substitute_core_type(element_type, substitution),
+            substitute_term_types(element, substitution),
+            substitute_term_types(set, substitution),
+        ),
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => CoreTerm::subset(
+            substitute_core_type(element_type, substitution),
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
         CoreTerm::And(left, right) => CoreTerm::and(
             substitute_term_types(left, substitution),
             substitute_term_types(right, substitution),
@@ -926,6 +1307,45 @@ pub(crate) fn validate_term_type_scheme(
         }
         CoreTerm::First(pair) | CoreTerm::Second(pair) => {
             validate_term_type_scheme(types, parameters, pair)
+        }
+        CoreTerm::EmptySet { element_type } | CoreTerm::UniverseSet { element_type } => types
+            .validate_scheme(parameters, element_type)
+            .map_err(Into::into),
+        CoreTerm::SingletonSet(element) | CoreTerm::SetComplement(element) => {
+            validate_term_type_scheme(types, parameters, element)
+        }
+        CoreTerm::SetUnion(left, right)
+        | CoreTerm::SetIntersection(left, right)
+        | CoreTerm::SetDifference(left, right)
+        | CoreTerm::SetProduct(left, right) => {
+            validate_term_type_scheme(types, parameters, left)?;
+            validate_term_type_scheme(types, parameters, right)
+        }
+        CoreTerm::Powerset { element_type, set }
+        | CoreTerm::SetBuilder {
+            element_type,
+            body: set,
+        } => {
+            types.validate_scheme(parameters, element_type)?;
+            validate_term_type_scheme(types, parameters, set)
+        }
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => {
+            types.validate_scheme(parameters, element_type)?;
+            validate_term_type_scheme(types, parameters, element)?;
+            validate_term_type_scheme(types, parameters, set)
+        }
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => {
+            types.validate_scheme(parameters, element_type)?;
+            validate_term_type_scheme(types, parameters, left)?;
+            validate_term_type_scheme(types, parameters, right)
         }
         CoreTerm::Equality { ty, left, right } => {
             types.validate_scheme(parameters, ty)?;
@@ -1014,6 +1434,56 @@ fn instantiate_term_parameters_at_depth(
         CoreTerm::Second(pair) => Ok(CoreTerm::second(instantiate_term_parameters_at_depth(
             pair, arguments, depth,
         )?)),
+        CoreTerm::EmptySet { element_type } => Ok(CoreTerm::empty_set(element_type.clone())),
+        CoreTerm::UniverseSet { element_type } => Ok(CoreTerm::universe_set(element_type.clone())),
+        CoreTerm::SingletonSet(element) => Ok(CoreTerm::singleton_set(
+            instantiate_term_parameters_at_depth(element, arguments, depth)?,
+        )),
+        CoreTerm::SetUnion(left, right) => Ok(CoreTerm::set_union(
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::SetIntersection(left, right) => Ok(CoreTerm::set_intersection(
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::SetDifference(left, right) => Ok(CoreTerm::set_difference(
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::SetComplement(set) => Ok(CoreTerm::set_complement(
+            instantiate_term_parameters_at_depth(set, arguments, depth)?,
+        )),
+        CoreTerm::SetProduct(left, right) => Ok(CoreTerm::set_product(
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
+        CoreTerm::Powerset { element_type, set } => Ok(CoreTerm::powerset(
+            element_type.clone(),
+            instantiate_term_parameters_at_depth(set, arguments, depth)?,
+        )),
+        CoreTerm::SetBuilder { element_type, body } => Ok(CoreTerm::set_builder(
+            element_type.clone(),
+            instantiate_term_parameters_at_depth(body, arguments, depth + 1)?,
+        )),
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => Ok(CoreTerm::membership(
+            element_type.clone(),
+            instantiate_term_parameters_at_depth(element, arguments, depth)?,
+            instantiate_term_parameters_at_depth(set, arguments, depth)?,
+        )),
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => Ok(CoreTerm::subset(
+            element_type.clone(),
+            instantiate_term_parameters_at_depth(left, arguments, depth)?,
+            instantiate_term_parameters_at_depth(right, arguments, depth)?,
+        )),
         CoreTerm::Truth => Ok(CoreTerm::Truth),
         CoreTerm::Falsity => Ok(CoreTerm::Falsity),
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
@@ -1052,7 +1522,11 @@ pub(crate) fn term_constant_dependencies(term: &CoreTerm) -> BTreeSet<ConstantId
 
 fn collect_term_constant_dependencies(term: &CoreTerm, dependencies: &mut BTreeSet<ConstantId>) {
     match term {
-        CoreTerm::Bound(_) | CoreTerm::Truth | CoreTerm::Falsity => {}
+        CoreTerm::Bound(_)
+        | CoreTerm::Truth
+        | CoreTerm::Falsity
+        | CoreTerm::EmptySet { .. }
+        | CoreTerm::UniverseSet { .. } => {}
         CoreTerm::Constant(id) => {
             dependencies.insert(*id);
         }
@@ -1063,9 +1537,19 @@ fn collect_term_constant_dependencies(term: &CoreTerm, dependencies: &mut BTreeS
         | CoreTerm::Forall { body, .. }
         | CoreTerm::Exists { body, .. }
         | CoreTerm::First(body)
-        | CoreTerm::Second(body) => collect_term_constant_dependencies(body, dependencies),
+        | CoreTerm::Second(body)
+        | CoreTerm::SingletonSet(body)
+        | CoreTerm::SetComplement(body)
+        | CoreTerm::Powerset { set: body, .. }
+        | CoreTerm::SetBuilder { body, .. } => {
+            collect_term_constant_dependencies(body, dependencies)
+        }
         CoreTerm::Apply { function, argument }
         | CoreTerm::Pair(function, argument)
+        | CoreTerm::SetUnion(function, argument)
+        | CoreTerm::SetIntersection(function, argument)
+        | CoreTerm::SetDifference(function, argument)
+        | CoreTerm::SetProduct(function, argument)
         | CoreTerm::And(function, argument)
         | CoreTerm::Or(function, argument)
         | CoreTerm::Implies(function, argument) => {
@@ -1073,6 +1557,14 @@ fn collect_term_constant_dependencies(term: &CoreTerm, dependencies: &mut BTreeS
             collect_term_constant_dependencies(argument, dependencies);
         }
         CoreTerm::Equality { left, right, .. } => {
+            collect_term_constant_dependencies(left, dependencies);
+            collect_term_constant_dependencies(right, dependencies);
+        }
+        CoreTerm::Membership { element, set, .. } => {
+            collect_term_constant_dependencies(element, dependencies);
+            collect_term_constant_dependencies(set, dependencies);
+        }
+        CoreTerm::Subset { left, right, .. } => {
             collect_term_constant_dependencies(left, dependencies);
             collect_term_constant_dependencies(right, dependencies);
         }
@@ -1110,6 +1602,60 @@ fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<Co
         )),
         CoreTerm::First(pair) => Ok(CoreTerm::first(substitute(pair, target, replacement)?)),
         CoreTerm::Second(pair) => Ok(CoreTerm::second(substitute(pair, target, replacement)?)),
+        CoreTerm::EmptySet { element_type } => Ok(CoreTerm::empty_set(element_type.clone())),
+        CoreTerm::UniverseSet { element_type } => Ok(CoreTerm::universe_set(element_type.clone())),
+        CoreTerm::SingletonSet(element) => Ok(CoreTerm::singleton_set(substitute(
+            element,
+            target,
+            replacement,
+        )?)),
+        CoreTerm::SetUnion(left, right) => Ok(CoreTerm::set_union(
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::SetIntersection(left, right) => Ok(CoreTerm::set_intersection(
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::SetDifference(left, right) => Ok(CoreTerm::set_difference(
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::SetComplement(set) => Ok(CoreTerm::set_complement(substitute(
+            set,
+            target,
+            replacement,
+        )?)),
+        CoreTerm::SetProduct(left, right) => Ok(CoreTerm::set_product(
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
+        CoreTerm::Powerset { element_type, set } => Ok(CoreTerm::powerset(
+            element_type.clone(),
+            substitute(set, target, replacement)?,
+        )),
+        CoreTerm::SetBuilder { element_type, body } => Ok(CoreTerm::set_builder(
+            element_type.clone(),
+            substitute(body, target + 1, &shift(replacement, 1, 0)?)?,
+        )),
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => Ok(CoreTerm::membership(
+            element_type.clone(),
+            substitute(element, target, replacement)?,
+            substitute(set, target, replacement)?,
+        )),
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => Ok(CoreTerm::subset(
+            element_type.clone(),
+            substitute(left, target, replacement)?,
+            substitute(right, target, replacement)?,
+        )),
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
             substitute(left, target, replacement)?,
             substitute(right, target, replacement)?,
@@ -1169,6 +1715,54 @@ fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermErro
         )),
         CoreTerm::First(pair) => Ok(CoreTerm::first(shift(pair, amount, cutoff)?)),
         CoreTerm::Second(pair) => Ok(CoreTerm::second(shift(pair, amount, cutoff)?)),
+        CoreTerm::EmptySet { element_type } => Ok(CoreTerm::empty_set(element_type.clone())),
+        CoreTerm::UniverseSet { element_type } => Ok(CoreTerm::universe_set(element_type.clone())),
+        CoreTerm::SingletonSet(element) => {
+            Ok(CoreTerm::singleton_set(shift(element, amount, cutoff)?))
+        }
+        CoreTerm::SetUnion(left, right) => Ok(CoreTerm::set_union(
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::SetIntersection(left, right) => Ok(CoreTerm::set_intersection(
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::SetDifference(left, right) => Ok(CoreTerm::set_difference(
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::SetComplement(set) => Ok(CoreTerm::set_complement(shift(set, amount, cutoff)?)),
+        CoreTerm::SetProduct(left, right) => Ok(CoreTerm::set_product(
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
+        CoreTerm::Powerset { element_type, set } => Ok(CoreTerm::powerset(
+            element_type.clone(),
+            shift(set, amount, cutoff)?,
+        )),
+        CoreTerm::SetBuilder { element_type, body } => Ok(CoreTerm::set_builder(
+            element_type.clone(),
+            shift(body, amount, cutoff + 1)?,
+        )),
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => Ok(CoreTerm::membership(
+            element_type.clone(),
+            shift(element, amount, cutoff)?,
+            shift(set, amount, cutoff)?,
+        )),
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => Ok(CoreTerm::subset(
+            element_type.clone(),
+            shift(left, amount, cutoff)?,
+            shift(right, amount, cutoff)?,
+        )),
         CoreTerm::And(left, right) => Ok(CoreTerm::and(
             shift(left, amount, cutoff)?,
             shift(right, amount, cutoff)?,
@@ -1214,6 +1808,12 @@ mod tests {
         let zero = terms
             .declare(&types, "zero", nat.clone())
             .expect("declare zero");
+        (types, terms, nat, zero)
+    }
+
+    fn set_signatures() -> (TypeSignature, TermSignature, CoreType, ConstantId) {
+        let (mut types, terms, nat, zero) = signatures();
+        types.declare_legacy_set("Set").expect("legacy Set");
         (types, terms, nat, zero)
     }
 
@@ -1401,6 +2001,204 @@ mod tests {
         assert_eq!(
             normalize(&types, &terms, &context, &application),
             Ok(CoreTerm::Bound(0))
+        );
+    }
+
+    #[test]
+    fn legacy_set_operations_are_typed_as_first_order_data() {
+        let (types, terms, nat, zero) = set_signatures();
+        let empty = CoreTerm::empty_set(nat.clone());
+        let singleton = CoreTerm::singleton_set(CoreTerm::Constant(zero));
+        let set_nat = types.legacy_set_type(nat.clone()).expect("Set Nat type");
+        assert_eq!(
+            infer_type(&types, &terms, &TermContext::new(), &empty),
+            Ok(set_nat.clone())
+        );
+        assert_eq!(
+            infer_type(&types, &terms, &TermContext::new(), &singleton),
+            Ok(set_nat.clone())
+        );
+        assert_eq!(
+            infer_type(
+                &types,
+                &terms,
+                &TermContext::new(),
+                &CoreTerm::powerset(nat.clone(), singleton.clone()),
+            ),
+            Ok(types.legacy_set_type(set_nat).expect("Set (Set Nat) type"))
+        );
+
+        let bad_set = CoreTerm::singleton_set(CoreTerm::Truth);
+        let error = infer_type(&types, &terms, &TermContext::new(), &bad_set)
+            .expect_err("sets of propositions are not legacy first-order sets");
+        assert!(error.message.contains("must be first-order"));
+
+        let mismatched = CoreTerm::set_union(
+            empty,
+            CoreTerm::empty_set(CoreType::product(nat.clone(), nat)),
+        );
+        let error = infer_type(&types, &terms, &TermContext::new(), &mismatched)
+            .expect_err("set operations need a common element type");
+        assert!(error.message.contains("combines element types"));
+    }
+
+    #[test]
+    fn legacy_membership_computes_for_boolean_set_operations() {
+        let (types, terms, nat, zero) = set_signatures();
+        let element = CoreTerm::Constant(zero);
+        let singleton = CoreTerm::singleton_set(element.clone());
+        let empty = CoreTerm::empty_set(nat.clone());
+        let universe = CoreTerm::universe_set(nat.clone());
+
+        let union = CoreTerm::membership(
+            nat.clone(),
+            element.clone(),
+            CoreTerm::set_union(singleton.clone(), empty.clone()),
+        );
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &union),
+            Ok(CoreTerm::or(
+                CoreTerm::equality(nat.clone(), element.clone(), element.clone()),
+                CoreTerm::Falsity,
+            ))
+        );
+
+        let intersection = CoreTerm::membership(
+            nat.clone(),
+            element.clone(),
+            CoreTerm::set_intersection(singleton.clone(), universe.clone()),
+        );
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &intersection),
+            Ok(CoreTerm::and(
+                CoreTerm::equality(nat.clone(), element.clone(), element.clone()),
+                CoreTerm::Truth,
+            ))
+        );
+
+        let difference = CoreTerm::membership(
+            nat.clone(),
+            element.clone(),
+            CoreTerm::set_difference(universe.clone(), singleton.clone()),
+        );
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &difference),
+            Ok(CoreTerm::and(
+                CoreTerm::Truth,
+                CoreTerm::implies(
+                    CoreTerm::equality(nat.clone(), element.clone(), element.clone()),
+                    CoreTerm::Falsity,
+                ),
+            ))
+        );
+
+        let complement = CoreTerm::membership(
+            nat.clone(),
+            element.clone(),
+            CoreTerm::set_complement(singleton),
+        );
+        assert_eq!(
+            normalize(&types, &terms, &TermContext::new(), &complement),
+            Ok(CoreTerm::implies(
+                CoreTerm::equality(nat, element.clone(), element),
+                CoreTerm::Falsity,
+            ))
+        );
+    }
+
+    #[test]
+    fn set_builder_product_powerset_and_subset_reductions_are_capture_safe() {
+        let (types, terms, nat, zero) = set_signatures();
+        let context = TermContext::new().with_bound(nat.clone());
+        let builder = CoreTerm::set_builder(
+            nat.clone(),
+            CoreTerm::equality(nat.clone(), CoreTerm::Bound(0), CoreTerm::Bound(1)),
+        );
+        let builder_membership = CoreTerm::membership(nat.clone(), CoreTerm::Bound(0), builder);
+        assert_eq!(
+            normalize(&types, &terms, &context, &builder_membership),
+            Ok(CoreTerm::equality(
+                nat.clone(),
+                CoreTerm::Bound(0),
+                CoreTerm::Bound(0),
+            ))
+        );
+
+        let pair_type = CoreType::product(nat.clone(), nat.clone());
+        let product_membership = CoreTerm::membership(
+            pair_type,
+            CoreTerm::pair(CoreTerm::Constant(zero), CoreTerm::Constant(zero)),
+            CoreTerm::set_product(
+                CoreTerm::singleton_set(CoreTerm::Constant(zero)),
+                CoreTerm::universe_set(nat.clone()),
+            ),
+        );
+        let normalized_product =
+            normalize(&types, &terms, &TermContext::new(), &product_membership);
+        assert_eq!(
+            normalized_product,
+            Ok(CoreTerm::and(
+                CoreTerm::equality(
+                    nat.clone(),
+                    CoreTerm::Constant(zero),
+                    CoreTerm::Constant(zero),
+                ),
+                CoreTerm::Truth,
+            ))
+        );
+
+        let singleton = CoreTerm::singleton_set(CoreTerm::Constant(zero));
+        let powerset_membership = CoreTerm::membership(
+            types
+                .legacy_set_type(nat.clone())
+                .expect("Set Nat element type"),
+            singleton,
+            CoreTerm::powerset(nat.clone(), CoreTerm::universe_set(nat.clone())),
+        );
+        let normalized_powerset =
+            normalize(&types, &terms, &TermContext::new(), &powerset_membership);
+        assert_eq!(
+            normalized_powerset,
+            Ok(CoreTerm::forall(
+                nat.clone(),
+                CoreTerm::implies(
+                    CoreTerm::equality(nat, CoreTerm::Bound(0), CoreTerm::Constant(zero)),
+                    CoreTerm::Truth,
+                ),
+            ))
+        );
+    }
+
+    #[test]
+    fn set_builder_binders_preserve_type_and_term_template_scopes() {
+        let (types, _, nat, _) = set_signatures();
+        let parameter = TypeParameter::first_order(93);
+        // The open template parameter is Bound(0) outside the comprehension
+        // and therefore Bound(1) under its element binder.
+        let template = CoreTerm::set_builder(
+            CoreType::Parameter(parameter),
+            CoreTerm::equality(
+                CoreType::Parameter(parameter),
+                CoreTerm::Bound(0),
+                CoreTerm::Bound(1),
+            ),
+        );
+        validate_term_type_scheme(&types, &[parameter], &template).expect("set template scheme");
+        let typed = instantiate_term_type_scheme(
+            &types,
+            &[parameter],
+            &template,
+            std::slice::from_ref(&nat),
+        )
+        .expect("instantiate set element type");
+        let instantiated = instantiate_term_parameters(&typed, &[CoreTerm::Bound(0)])
+            .expect("instantiate outer term parameter");
+        assert_eq!(
+            instantiated,
+            CoreTerm::set_builder(
+                nat.clone(),
+                CoreTerm::equality(nat, CoreTerm::Bound(0), CoreTerm::Bound(1),),
+            )
         );
     }
 

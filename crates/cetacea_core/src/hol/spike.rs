@@ -135,6 +135,13 @@ impl SpikeElaborator {
         Ok(self.types.declare(name, 0, first_order)?)
     }
 
+    pub fn declare_legacy_set_type(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<TypeConstructorId, SpikeError> {
+        Ok(self.types.declare_legacy_set(name)?)
+    }
+
     pub fn declare_constant(
         &mut self,
         name: impl Into<String>,
@@ -1057,6 +1064,89 @@ mod tests {
         assert_eq!(
             classical_draft.proof().direct_features(),
             &std::collections::BTreeSet::from([ProofFeature::Classical])
+        );
+    }
+
+    #[test]
+    fn legacy_set_extensionality_is_first_order_but_explicitly_trusted() {
+        let mut elaborator = SpikeElaborator::new();
+        let nat_id = elaborator.declare_base_type("Nat", true).expect("Nat");
+        elaborator
+            .declare_legacy_set_type("Set")
+            .expect("legacy Set");
+        let nat = CoreType::constructor(nat_id, Vec::new());
+        let parameter = TypeParameter::first_order(77);
+        let element_type = CoreType::Parameter(parameter);
+        let set_type = elaborator
+            .types()
+            .legacy_set_type(element_type.clone())
+            .expect("Set A");
+        let in_left =
+            CoreTerm::membership(element_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(2));
+        let in_right =
+            CoreTerm::membership(element_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(1));
+        let pointwise = CoreTerm::forall(
+            element_type,
+            CoreTerm::and(
+                CoreTerm::implies(in_left.clone(), in_right.clone()),
+                CoreTerm::implies(in_right, in_left),
+            ),
+        );
+        let set_ext_statement = CoreTerm::implies(
+            pointwise,
+            CoreTerm::equality(set_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0)),
+        );
+        let (set_ext, set_ext_receipt) = elaborator
+            .declare_trusted_axiom_with_parameters(
+                "set_ext",
+                vec![parameter],
+                vec![set_type.clone(), set_type],
+                set_ext_statement,
+            )
+            .expect("typed set extensionality axiom");
+        assert_eq!(
+            set_ext_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+
+        let empty = CoreTerm::empty_set(nat.clone());
+        let (_, user_receipt) = elaborator
+            .declare_theorem(
+                "empty_extensional",
+                Vec::new(),
+                CoreTerm::equality(
+                    elaborator
+                        .types()
+                        .legacy_set_type(nat.clone())
+                        .expect("Set Nat"),
+                    empty.clone(),
+                    empty.clone(),
+                ),
+                HolDraftProof::ImpElim {
+                    proof_implication: Box::new(HolDraftProof::TheoremRef {
+                        theorem: set_ext,
+                        type_arguments: vec![nat.clone()],
+                        term_arguments: vec![empty.clone(), empty],
+                    }),
+                    proof_argument: Box::new(HolDraftProof::ForallIntro {
+                        domain: nat,
+                        body: Box::new(HolDraftProof::AndIntro(
+                            Box::new(HolDraftProof::ImpIntro {
+                                premise: CoreTerm::Falsity,
+                                body: Box::new(HolDraftProof::Hypothesis(0)),
+                            }),
+                            Box::new(HolDraftProof::ImpIntro {
+                                premise: CoreTerm::Falsity,
+                                body: Box::new(HolDraftProof::Hypothesis(0)),
+                            }),
+                        )),
+                    }),
+                },
+            )
+            .expect("set extensionality user");
+        assert_eq!(
+            user_receipt.proof().axiom_dependencies(),
+            &std::collections::BTreeSet::from([set_ext_receipt.id()])
         );
     }
 }

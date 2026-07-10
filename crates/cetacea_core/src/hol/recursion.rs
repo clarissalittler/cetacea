@@ -294,22 +294,40 @@ fn context_from_nearest(types: &[CoreType]) -> TermContext {
 
 fn term_mentions_constant(term: &CoreTerm, sought: ConstantId) -> bool {
     match term {
-        CoreTerm::Bound(_) | CoreTerm::Truth | CoreTerm::Falsity => false,
+        CoreTerm::Bound(_)
+        | CoreTerm::Truth
+        | CoreTerm::Falsity
+        | CoreTerm::EmptySet { .. }
+        | CoreTerm::UniverseSet { .. } => false,
         CoreTerm::Constant(id) => *id == sought,
         CoreTerm::TypeApplication { constant, .. } => *constant == sought,
         CoreTerm::Lambda { body, .. }
         | CoreTerm::Forall { body, .. }
         | CoreTerm::Exists { body, .. }
         | CoreTerm::First(body)
-        | CoreTerm::Second(body) => term_mentions_constant(body, sought),
+        | CoreTerm::Second(body)
+        | CoreTerm::SingletonSet(body)
+        | CoreTerm::SetComplement(body)
+        | CoreTerm::Powerset { set: body, .. }
+        | CoreTerm::SetBuilder { body, .. } => term_mentions_constant(body, sought),
         CoreTerm::Apply { function, argument }
         | CoreTerm::Pair(function, argument)
+        | CoreTerm::SetUnion(function, argument)
+        | CoreTerm::SetIntersection(function, argument)
+        | CoreTerm::SetDifference(function, argument)
+        | CoreTerm::SetProduct(function, argument)
         | CoreTerm::And(function, argument)
         | CoreTerm::Or(function, argument)
         | CoreTerm::Implies(function, argument) => {
             term_mentions_constant(function, sought) || term_mentions_constant(argument, sought)
         }
         CoreTerm::Equality { left, right, .. } => {
+            term_mentions_constant(left, sought) || term_mentions_constant(right, sought)
+        }
+        CoreTerm::Membership { element, set, .. } => {
+            term_mentions_constant(element, sought) || term_mentions_constant(set, sought)
+        }
+        CoreTerm::Subset { left, right, .. } => {
             term_mentions_constant(left, sought) || term_mentions_constant(right, sought)
         }
     }

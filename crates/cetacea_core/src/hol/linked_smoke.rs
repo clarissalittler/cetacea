@@ -20,6 +20,7 @@ pub struct LinkedHolSmokeReport {
     pub facade_required: StatementFragment,
     pub polymorphic_required: StatementFragment,
     pub product_required: StatementFragment,
+    pub set_required: StatementFragment,
     pub axiom_dependencies: usize,
     pub incomplete_dependencies: usize,
     pub trusted_user_axiom_dependencies: usize,
@@ -30,6 +31,7 @@ pub struct LinkedHolSmokeReport {
 pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
     let mut elaborator = SpikeElaborator::new();
     let nat_id = elaborator.declare_base_type("Nat", true)?;
+    elaborator.declare_legacy_set_type("Set")?;
     let nat = CoreType::constructor(nat_id, Vec::new());
     let zero = elaborator.declare_constant("zero", nat.clone())?;
 
@@ -171,20 +173,53 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
     let (_, product) = elaborator.declare_theorem(
         "first_pair_zero",
         Vec::new(),
-        CoreTerm::equality(nat, CoreTerm::first(pair), CoreTerm::Constant(zero)),
+        CoreTerm::equality(nat.clone(), CoreTerm::first(pair), CoreTerm::Constant(zero)),
         HolDraftProof::EqualityRefl(CoreTerm::Constant(zero)),
     )?;
 
-    let (trusted_axiom, _) =
-        elaborator.declare_trusted_axiom("trusted_truth", Vec::new(), CoreTerm::Truth)?;
-    let (_, trusted_user) = elaborator.declare_theorem(
-        "uses_trusted_truth",
+    let set_nat = elaborator.types().legacy_set_type(nat.clone())?;
+    let in_left = CoreTerm::membership(nat.clone(), CoreTerm::Bound(0), CoreTerm::Bound(2));
+    let in_right = CoreTerm::membership(nat.clone(), CoreTerm::Bound(0), CoreTerm::Bound(1));
+    let set_ext_statement = CoreTerm::implies(
+        CoreTerm::forall(
+            nat.clone(),
+            CoreTerm::and(
+                CoreTerm::implies(in_left.clone(), in_right.clone()),
+                CoreTerm::implies(in_right, in_left),
+            ),
+        ),
+        CoreTerm::equality(set_nat.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0)),
+    );
+    let (set_ext, _) = elaborator.declare_trusted_axiom_with_parameters(
+        "set_ext_nat",
         Vec::new(),
-        CoreTerm::Truth,
-        HolDraftProof::TheoremRef {
-            theorem: trusted_axiom,
-            type_arguments: Vec::new(),
-            term_arguments: Vec::new(),
+        vec![set_nat.clone(), set_nat.clone()],
+        set_ext_statement,
+    )?;
+    let empty_nat = CoreTerm::empty_set(nat.clone());
+    let (_, trusted_user) = elaborator.declare_theorem(
+        "empty_extensional",
+        Vec::new(),
+        CoreTerm::equality(set_nat, empty_nat.clone(), empty_nat.clone()),
+        HolDraftProof::ImpElim {
+            proof_implication: Box::new(HolDraftProof::TheoremRef {
+                theorem: set_ext,
+                type_arguments: Vec::new(),
+                term_arguments: vec![empty_nat.clone(), empty_nat],
+            }),
+            proof_argument: Box::new(HolDraftProof::ForallIntro {
+                domain: nat.clone(),
+                body: Box::new(HolDraftProof::AndIntro(
+                    Box::new(HolDraftProof::ImpIntro {
+                        premise: CoreTerm::Falsity,
+                        body: Box::new(HolDraftProof::Hypothesis(0)),
+                    }),
+                    Box::new(HolDraftProof::ImpIntro {
+                        premise: CoreTerm::Falsity,
+                        body: Box::new(HolDraftProof::Hypothesis(0)),
+                    }),
+                )),
+            }),
         },
     )?;
 
@@ -237,6 +272,7 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         facade_required: facade.proof().required_fragment(),
         polymorphic_required: polymorphic.proof().required_fragment(),
         product_required: product.proof().required_fragment(),
+        set_required: trusted_user.proof().required_fragment(),
         axiom_dependencies: receipts
             .iter()
             .map(|receipt| receipt.proof().axiom_dependencies().len())
@@ -272,6 +308,7 @@ mod tests {
         );
         assert_eq!(report.polymorphic_required, StatementFragment::HigherOrder);
         assert_eq!(report.product_required, StatementFragment::FirstOrder);
+        assert_eq!(report.set_required, StatementFragment::FirstOrder);
         assert_eq!(report.axiom_dependencies, 0);
         assert_eq!(report.incomplete_dependencies, 0);
         assert_eq!(report.trusted_user_axiom_dependencies, 1);

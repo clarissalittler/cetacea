@@ -442,6 +442,12 @@ declared function type, reduction scrutinee, and every generated recursive call
 use that position consistently; invalid indices leave signatures unchanged.
 This removes the former reversed-argument workaround from the graph `append`
 spike and matches legacy `defrec`, whose recursive parameter is first.
+The H4a core now also has a distinguished first-order `Set A` wrapper rather
+than the tempting higher-order encoding `A -> Prop`. All current membership and
+subset computations—including powersets, Cartesian products, and capture-safe
+comprehensions—are definitional. Set extensionality remains an explicit trusted
+axiom and taints every transitive user; the linked smoke checks that its theorem
+still has an FOL statement receipt alongside that separate trust evidence.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

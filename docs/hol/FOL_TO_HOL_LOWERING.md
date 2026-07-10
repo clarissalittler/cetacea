@@ -34,7 +34,7 @@ spans remain in the elaborator for diagnostics.
 | Named sort `S` | Zero-argument `TypeConstructorId` | First-order unless its declaration says otherwise. |
 | Type schema parameter `(A : Type)` | `TypeParameter::first_order(id)` | Legacy `Type` arguments cannot be arrows or `Prop`, so this is narrower and more accurate than `Any`. |
 | `Prod A B` | `CoreType::Product(A, B)` | First-order iff both components are first-order. H4a now includes typed pair/projection terms and definitional projection reduction. |
-| `Set A` | Predeclared `Set#id A`, with a first-order parameter class | Do **not** lower legacy sets to `A -> Prop`: doing so would silently turn the set chapters into HOL. Membership and set computation remain checked primitives. |
+| `Set A` | Distinguished `Set#id A`, with a first-order parameter class | Implemented in H4a. `Set` rejects `Prop`, arrows, and unconstrained higher-order parameters; it is never lowered to `A -> Prop`. |
 | New surface arrow type `A -> B` | `CoreType::Arrow(A, B)` | Higher-order when used as a quantified domain or data value. Existing arrows occur only in predicate-schema parameter kinds. |
 | Proposition schema `(P : Prop)` | Rank-one proposition-symbol parameter | A meta-level schema parameter, not object-level `forall P : Prop`. This distinction preserves the propositional profile of `std/prop.ctea`. |
 | Term schema `(x : A)` | Rank-one term parameter of type `A` | Stored in the theorem template context and explicitly instantiated at references. |
@@ -87,8 +87,8 @@ restricted FOL profile.
 | `Zero`, `Succ(t)` | Predeclared `zero` and `succ(t)`. Decimal literals are elaborator sugar. |
 | `Add`, `Mul`, `Sub` | Applications of checked structural Nat definitions with the legacy computation equations. |
 | `Pair`, `Fst`, `Snd` | H4a `CoreTerm::Pair`, `First`, and `Second`; both projections reduce definitionally and preserve FOL classification for first-order components. Surface lowering remains. |
-| `EmptySet`, `Universe`, `Singleton`, `Union`, `Inter`, `Diff`, `Complement`, `CartProd`, `Powerset` | Explicit polymorphic applications of predeclared legacy-set operators. |
-| `SetBuilder { x : A | P }` | A checked set-comprehension term whose membership reduction is `member(y, setOf(lambda x. P)) = P[y/x]`. The set value remains the first-order `Set A` wrapper. |
+| `EmptySet`, `Universe`, `Singleton`, `Union`, `Inter`, `Diff`, `Complement`, `CartProd`, `Powerset` | H4a first-order set terms with checked element types and definitional membership equations. Surface lowering remains. |
+| `SetBuilder { x : A | P }` | H4a checked comprehension under an element binder; membership substitutes capture-avoidantly into `P`. The set value remains the first-order `Set A` wrapper. |
 
 Nat reduction must reproduce the current `add`, `mul`, truncated `sub`, `pred`,
 and `le` equations. Legacy product support needs typed pair/projection core terms
@@ -193,8 +193,13 @@ These are compatibility prerequisites, not optional language expansion:
    preserve transitive dependencies while concrete uses are delta-normalized
    before fragment classification. Surface `def`, selective `unfold`, `simp`,
    and `Convert` lowering remain.
-3. **Legacy first-order sets.** Add the `Set A` wrapper and audited computation
-   equations; retain `set_ext` as a visible trusted axiom.
+3. **Legacy first-order sets.** Implemented in the H4a core. The distinguished
+   wrapper accepts only first-order elements. Membership computes for empty and
+   universal sets, singleton, Boolean operations, Cartesian products,
+   powersets/subset, and capture-safe comprehensions. Quantification over sets
+   remains FOL. Set equality does not compute extensionally: `set_ext` is stored
+   and propagated as a visible trusted axiom, as in the legacy standard library.
+   Surface/prelude lowering remains.
 4. **Product term computation.** Implemented in the H4a core. Pairing infers a
    product type; projections reject non-products, compute definitionally on
    pairs, traverse binders/type schemes capture-safely, and retain the least

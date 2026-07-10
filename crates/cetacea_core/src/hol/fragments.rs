@@ -161,6 +161,30 @@ fn classify_proposition(
                 .combine(domain_fragment)
                 .combine(body_fragment))
         }
+        CoreTerm::Membership {
+            element_type,
+            element,
+            set,
+        } => Ok(StatementFragment::FirstOrder
+            .combine(classify_data_type(types, metadata, element_type)?)
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, element,
+            )?)
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, set,
+            )?)),
+        CoreTerm::Subset {
+            element_type,
+            left,
+            right,
+        } => Ok(StatementFragment::FirstOrder
+            .combine(classify_data_type(types, metadata, element_type)?)
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, left,
+            )?)
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, right,
+            )?)),
         CoreTerm::Apply { .. } => classify_declared_application(
             types,
             constants,
@@ -172,7 +196,17 @@ fn classify_proposition(
         CoreTerm::Lambda { .. }
         | CoreTerm::Pair(_, _)
         | CoreTerm::First(_)
-        | CoreTerm::Second(_) => Ok(StatementFragment::HigherOrder),
+        | CoreTerm::Second(_)
+        | CoreTerm::EmptySet { .. }
+        | CoreTerm::UniverseSet { .. }
+        | CoreTerm::SingletonSet(_)
+        | CoreTerm::SetUnion(_, _)
+        | CoreTerm::SetIntersection(_, _)
+        | CoreTerm::SetDifference(_, _)
+        | CoreTerm::SetComplement(_)
+        | CoreTerm::SetProduct(_, _)
+        | CoreTerm::Powerset { .. }
+        | CoreTerm::SetBuilder { .. } => Ok(StatementFragment::HigherOrder),
     }
 }
 
@@ -229,6 +263,40 @@ fn classify_first_order_term(
         CoreTerm::First(pair) | CoreTerm::Second(pair) => Ok(type_fragment.combine(
             classify_first_order_term(types, constants, context, metadata, pair)?,
         )),
+        CoreTerm::EmptySet { element_type } | CoreTerm::UniverseSet { element_type } => {
+            Ok(type_fragment.combine(classify_data_type(types, metadata, element_type)?))
+        }
+        CoreTerm::SingletonSet(element) | CoreTerm::SetComplement(element) => Ok(type_fragment
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, element,
+            )?)),
+        CoreTerm::SetUnion(left, right)
+        | CoreTerm::SetIntersection(left, right)
+        | CoreTerm::SetDifference(left, right)
+        | CoreTerm::SetProduct(left, right) => Ok(type_fragment
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, left,
+            )?)
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, right,
+            )?)),
+        CoreTerm::Powerset { element_type, set } => Ok(type_fragment
+            .combine(classify_data_type(types, metadata, element_type)?)
+            .combine(classify_first_order_term(
+                types, constants, context, metadata, set,
+            )?)),
+        CoreTerm::SetBuilder { element_type, body } => {
+            let body_context = context.clone().with_bound(element_type.clone());
+            Ok(type_fragment
+                .combine(classify_data_type(types, metadata, element_type)?)
+                .combine(classify_proposition(
+                    types,
+                    constants,
+                    &body_context,
+                    metadata,
+                    body,
+                )?))
+        }
         CoreTerm::Lambda { .. }
         | CoreTerm::Truth
         | CoreTerm::Falsity
@@ -237,7 +305,9 @@ fn classify_first_order_term(
         | CoreTerm::Implies(_, _)
         | CoreTerm::Equality { .. }
         | CoreTerm::Forall { .. }
-        | CoreTerm::Exists { .. } => Ok(StatementFragment::HigherOrder),
+        | CoreTerm::Exists { .. }
+        | CoreTerm::Membership { .. }
+        | CoreTerm::Subset { .. } => Ok(StatementFragment::HigherOrder),
     }
 }
 
@@ -888,6 +958,7 @@ mod tests {
         let mut types = TypeSignature::new();
         let nat_id = types.declare("Nat", 0, true).expect("Nat");
         let list_id = types.declare("List", 1, true).expect("List");
+        types.declare_legacy_set("Set").expect("legacy Set");
         let nat = CoreType::constructor(nat_id, Vec::new());
         let list_nat = CoreType::constructor(list_id, vec![nat.clone()]);
 
@@ -983,6 +1054,56 @@ mod tests {
                 &CoreTerm::forall(proposition_product, CoreTerm::Truth),
             ),
             StatementFragment::HigherOrder
+        );
+    }
+
+    #[test]
+    fn legacy_set_membership_and_comprehension_remain_first_order() {
+        let mut fixture = fixture();
+        let set_nat = fixture
+            .types
+            .legacy_set_type(fixture.nat.clone())
+            .expect("Set Nat");
+        let set = fixture
+            .constants
+            .declare(&fixture.types, "A", set_nat.clone())
+            .expect("set constant");
+        let membership = CoreTerm::membership(
+            fixture.nat.clone(),
+            CoreTerm::Constant(fixture.a),
+            CoreTerm::Constant(set),
+        );
+        assert_eq!(
+            classify(&fixture, &TermContext::new(), &membership),
+            StatementFragment::FirstOrder
+        );
+
+        let quantified = CoreTerm::forall(
+            set_nat,
+            CoreTerm::membership(
+                fixture.nat.clone(),
+                CoreTerm::Constant(fixture.a),
+                CoreTerm::Bound(0),
+            ),
+        );
+        assert_eq!(
+            classify(&fixture, &TermContext::new(), &quantified),
+            StatementFragment::FirstOrder
+        );
+
+        let builder = CoreTerm::set_builder(
+            fixture.nat.clone(),
+            CoreTerm::equality(
+                fixture.nat.clone(),
+                CoreTerm::Bound(0),
+                CoreTerm::Constant(fixture.a),
+            ),
+        );
+        let builder_membership =
+            CoreTerm::membership(fixture.nat.clone(), CoreTerm::Constant(fixture.a), builder);
+        assert_eq!(
+            classify(&fixture, &TermContext::new(), &builder_membership),
+            StatementFragment::FirstOrder
         );
     }
 

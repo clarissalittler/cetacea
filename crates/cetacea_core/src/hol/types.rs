@@ -115,6 +115,7 @@ struct TypeConstructor {
 pub struct TypeSignature {
     constructors: Vec<TypeConstructor>,
     names: HashMap<String, TypeConstructorId>,
+    legacy_set_constructor: Option<TypeConstructorId>,
 }
 
 impl TypeSignature {
@@ -157,6 +158,56 @@ impl TypeSignature {
         });
         self.names.insert(name, id);
         Ok(id)
+    }
+
+    /// Declare the distinguished first-order `Set A` wrapper used by the
+    /// compatibility language. Its element parameter is restricted to
+    /// first-order data, so sets never become an encoding of `A -> Prop`.
+    pub fn declare_legacy_set(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<TypeConstructorId, TypeError> {
+        if self.legacy_set_constructor.is_some() {
+            return Err(TypeError::new(
+                "the legacy set type constructor is already declared",
+            ));
+        }
+        let mut staged = self.clone();
+        let id = staged.declare_parameterized(name, vec![TypeParameterClass::FirstOrder], true)?;
+        staged.legacy_set_constructor = Some(id);
+        *self = staged;
+        Ok(id)
+    }
+
+    pub fn legacy_set_constructor(&self) -> Option<TypeConstructorId> {
+        self.legacy_set_constructor
+    }
+
+    pub fn legacy_set_type(&self, element: CoreType) -> Result<CoreType, TypeError> {
+        let constructor = self.legacy_set_constructor.ok_or_else(|| {
+            TypeError::new("the legacy set type constructor has not been declared")
+        })?;
+        let set = CoreType::constructor(constructor, vec![element]);
+        self.validate(&set)?;
+        Ok(set)
+    }
+
+    pub fn legacy_set_element<'a>(
+        &self,
+        ty: &'a CoreType,
+    ) -> Result<Option<&'a CoreType>, TypeError> {
+        self.validate(ty)?;
+        let Some(set_constructor) = self.legacy_set_constructor else {
+            return Ok(None);
+        };
+        match ty {
+            CoreType::Constructor { id, arguments }
+                if *id == set_constructor && arguments.len() == 1 =>
+            {
+                Ok(arguments.first())
+            }
+            _ => Ok(None),
+        }
     }
 
     pub fn resolve(&self, name: &str) -> Option<TypeConstructorId> {
@@ -546,5 +597,44 @@ mod tests {
             .validate(&CoreType::constructor(finite, vec![predicate]))
             .expect_err("first-order constructor parameter cannot be bypassed");
         assert!(error.message.contains("must be first-order"));
+    }
+
+    #[test]
+    fn legacy_sets_are_first_order_wrappers_not_predicate_types() {
+        let (mut signature, nat, _) = signature();
+        let set = signature.declare_legacy_set("Set").expect("legacy Set");
+        let nat = CoreType::constructor(nat, Vec::new());
+        let set_nat = signature.legacy_set_type(nat.clone()).expect("Set Nat");
+        assert_eq!(set_nat, CoreType::constructor(set, vec![nat.clone()]));
+        assert_eq!(
+            signature.first_order_status(&set_nat),
+            Ok(FirstOrderStatus::FirstOrder)
+        );
+        assert_eq!(
+            signature
+                .legacy_set_element(&set_nat)
+                .expect("valid set type"),
+            Some(&nat)
+        );
+        assert_eq!(
+            signature.first_order_status(
+                &signature
+                    .legacy_set_type(set_nat)
+                    .expect("sets of sets remain first-order")
+            ),
+            Ok(FirstOrderStatus::FirstOrder)
+        );
+
+        let predicate = CoreType::arrow(nat, CoreType::Prop);
+        let rejected = signature
+            .legacy_set_type(predicate)
+            .expect_err("Set cannot wrap a predicate type");
+        assert!(rejected.message.contains("must be first-order"));
+
+        let duplicate = signature
+            .declare_legacy_set("OtherSet")
+            .expect_err("there is one distinguished compatibility Set");
+        assert!(duplicate.message.contains("already declared"));
+        assert_eq!(signature.resolve("OtherSet"), None);
     }
 }
