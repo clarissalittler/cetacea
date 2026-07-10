@@ -292,9 +292,10 @@ attempt `intro`s the premise `le(1, n)` and *then* starts induction:
 ```text
 error: docs/book/code/ch09-mistakes.ctea:43: theorem `square_positive` failed: cannot induct on `n` while hypothesis `h` depends on it
   note: target: le(1, mul(n, n))
-  help: Induct before introducing dependent hypotheses
-    Hypothesis `h` mentions `n`, so it cannot be kept unchanged while `n` is split into cases. Leave the implication or forall in the goal, run induction first, then introduce `h` inside each arm.
+  help: Revert dependent hypotheses before induction
+    Hypothesis `h` mentions `n`, so it cannot be kept unchanged while `n` is split into cases. Use `revert h` to move it back into the goal, run induction, then introduce `h` inside each arm.
     try:
+      revert h
       induction n with
       | zero =>
           intro h
@@ -306,10 +307,9 @@ error: docs/book/code/ch09-mistakes.ctea:43: theorem `square_positive` failed: c
 
 The trouble: if the proof splits `n` into `0` and `succ(k)` cases,
 what becomes of `h : le(1, n)`? It talks about the original `n`, and
-Cetacea's induction rule doesn't rewrite hypotheses into each case (in
-the jargon: it doesn't *generalize* them). Rather than do something
-subtly wrong, it stops you. The usual fix is to induct *first* and
-`intro` the premise inside each arm — i.e., prove
+Cetacea cannot keep that same assumption unchanged across both cases. Rather
+than do something subtly wrong, it stops you. Use `revert h` to put the premise
+back into the goal, then induct and `intro` it separately inside each arm — i.e., prove
 `le(1, n) -> le(1, mul(n, n))` by induction on `n` with the
 implication as the goal, not the hypothesis.
 

@@ -160,11 +160,13 @@ through the kernel boundary.
 
 ### Generalized induction
 
-Nat and datatype induction reject any local hypothesis mentioning the
-induction variable. Reordering introductions is worth teaching once, but it is
-too restrictive as the permanent rule. Cetacea needs either automatic
-reversion/generalization or an explicit `revert`, `generalize`, or
-`induction ... generalizing ...` mechanism.
+`revert h` now moves the most recent proof hypothesis back into an implication
+goal, allowing a variable-dependent hypothesis to be reintroduced separately
+inside each induction arm. Kernel induction rejects dependent context only when
+the induction proof actually uses that unreverted hypothesis.
+
+Generalizing additional term variables still needs either term-level `revert`,
+`generalize`, or `induction ... generalizing ...` syntax.
 
 ### Recursive propositions
 

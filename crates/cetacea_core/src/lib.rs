@@ -779,6 +779,38 @@ impl Context {
             .map(|((binding, proof), kernel_formula)| (binding, proof, kernel_formula))
     }
 
+    fn pop_proof(&mut self, name: &str) -> Result<(Formula, DraftProof), TacticError> {
+        let Some(binding) = self.proof_vars.last() else {
+            return Err(TacticError::new(format!(
+                "cannot revert unknown hypothesis `{name}`"
+            )));
+        };
+        if binding.name != name {
+            if self.lookup(name).is_some() {
+                return Err(TacticError::new(format!(
+                    "cannot revert `{name}` while later hypothesis `{}` remains; revert later hypotheses first",
+                    binding.name
+                )));
+            }
+            return Err(TacticError::new(format!(
+                "cannot revert unknown hypothesis `{name}`"
+            )));
+        }
+        let formula = self
+            .proof_vars
+            .pop()
+            .expect("last proof binding was just inspected")
+            .formula;
+        let proof = self
+            .proof_terms
+            .pop()
+            .expect("proof binding and witness stacks stay aligned");
+        self.proof_kernel_formulas
+            .pop()
+            .expect("proof binding and kernel formula stacks stay aligned");
+        Ok((formula, proof))
+    }
+
     fn has_schema_name(&self, name: &str) -> bool {
         self.has_type_var(name)
             || self.has_prop_var(name)
@@ -1259,12 +1291,12 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
         let hyp = extract_backtick_after(message, "while hypothesis `").unwrap_or("h");
         push(
             &mut suggestions,
-            "Induct before introducing dependent hypotheses",
+            "Revert dependent hypotheses before induction",
             format!(
-                "Hypothesis `{hyp}` mentions `{var}`, so it cannot be kept unchanged while `{var}` is split into cases. Leave the implication or forall in the goal, run induction first, then introduce `{hyp}` inside each arm."
+                "Hypothesis `{hyp}` mentions `{var}`, so it cannot be kept unchanged while `{var}` is split into cases. Use `revert {hyp}` to move it back into the goal, run induction, then introduce `{hyp}` inside each arm."
             ),
             Some(&format!(
-                "induction {var} with\n| zero =>\n    intro {hyp}\n    ...\n| succ k ih =>\n    intro {hyp}\n    ..."
+                "revert {hyp}\ninduction {var} with\n| zero =>\n    intro {hyp}\n    ...\n| succ k ih =>\n    intro {hyp}\n    ..."
             )),
         );
     }
@@ -4099,6 +4131,16 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
                     .to_string(),
             ],
         },
+        Tactic::Revert(name) => match goal.context.lookup(name) {
+            Some(formula) => vec![
+                format!("Move hypothesis `{name} : {formula}` back into the goal."),
+                format!(
+                    "The new target is `{}`; introducing `{name}` later recovers the same assumption.",
+                    Formula::implies(formula.clone(), goal.target.clone())
+                ),
+            ],
+            None => vec![format!("No local hypothesis named `{name}` can be reverted.")],
+        },
         Tactic::Exact(expr) => vec![
             format!(
                 "Use `{}` as a complete proof of the current goal.",
@@ -4304,6 +4346,7 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
 fn tactic_label(tactic: &Tactic) -> String {
     match tactic {
         Tactic::Intro(name) => format!("intro {name}"),
+        Tactic::Revert(name) => format!("revert {name}"),
         Tactic::Sorry => "sorry".to_string(),
         Tactic::Have {
             name,
@@ -6001,6 +6044,97 @@ fn draft_proof_has_holes(proof: &DraftProof) -> bool {
     found
 }
 
+fn draft_proof_uses_free_hyp(proof: &DraftProof, name: &str, shadowed: bool) -> bool {
+    match proof {
+        DraftProof::Hyp(found) => !shadowed && found == name,
+        DraftProof::TrueIntro
+        | DraftProof::EqRefl(_)
+        | DraftProof::TheoremRef { .. }
+        | DraftProof::Sorry { .. } => false,
+        DraftProof::FalseElim { proof_false, .. } => {
+            draft_proof_uses_free_hyp(proof_false, name, shadowed)
+        }
+        DraftProof::AndIntro(left, right) => {
+            draft_proof_uses_free_hyp(left, name, shadowed)
+                || draft_proof_uses_free_hyp(right, name, shadowed)
+        }
+        DraftProof::AndElimLeft(inner) | DraftProof::AndElimRight(inner) => {
+            draft_proof_uses_free_hyp(inner, name, shadowed)
+        }
+        DraftProof::OrIntroLeft { proof_left, .. } => {
+            draft_proof_uses_free_hyp(proof_left, name, shadowed)
+        }
+        DraftProof::OrIntroRight { proof_right, .. } => {
+            draft_proof_uses_free_hyp(proof_right, name, shadowed)
+        }
+        DraftProof::OrElim {
+            proof_or,
+            left_name,
+            left_case,
+            right_name,
+            right_case,
+            ..
+        } => {
+            draft_proof_uses_free_hyp(proof_or, name, shadowed)
+                || draft_proof_uses_free_hyp(left_case, name, shadowed || left_name == name)
+                || draft_proof_uses_free_hyp(right_case, name, shadowed || right_name == name)
+        }
+        DraftProof::ImpIntro { hyp_name, body, .. } => {
+            draft_proof_uses_free_hyp(body, name, shadowed || hyp_name == name)
+        }
+        DraftProof::ImpElim {
+            proof_imp,
+            proof_arg,
+        } => {
+            draft_proof_uses_free_hyp(proof_imp, name, shadowed)
+                || draft_proof_uses_free_hyp(proof_arg, name, shadowed)
+        }
+        DraftProof::EqSubst {
+            eq_proof,
+            proof_body,
+            ..
+        } => {
+            draft_proof_uses_free_hyp(eq_proof, name, shadowed)
+                || draft_proof_uses_free_hyp(proof_body, name, shadowed)
+        }
+        DraftProof::Convert { proof_body, .. } | DraftProof::ExistsIntro { proof_body, .. } => {
+            draft_proof_uses_free_hyp(proof_body, name, shadowed)
+        }
+        DraftProof::ForallIntro { body, .. } => draft_proof_uses_free_hyp(body, name, shadowed),
+        DraftProof::ForallElim { proof_forall, .. } => {
+            draft_proof_uses_free_hyp(proof_forall, name, shadowed)
+        }
+        DraftProof::ExistsElim {
+            proof_exists,
+            hyp_name,
+            body,
+            ..
+        } => {
+            draft_proof_uses_free_hyp(proof_exists, name, shadowed)
+                || draft_proof_uses_free_hyp(body, name, shadowed || hyp_name == name)
+        }
+        DraftProof::NatInd {
+            base_case,
+            ih_name,
+            step_case,
+            ..
+        } => {
+            draft_proof_uses_free_hyp(base_case, name, shadowed)
+                || draft_proof_uses_free_hyp(step_case, name, shadowed || ih_name == name)
+        }
+        DraftProof::DataInd { arms, .. } => arms.iter().any(|arm| {
+            draft_proof_uses_free_hyp(
+                &arm.proof,
+                name,
+                shadowed || arm.ih_names.iter().any(|ih| ih == name),
+            )
+        }),
+        DraftProof::Classical { args, .. } => args
+            .iter()
+            .any(|arg| draft_proof_uses_free_hyp(arg, name, shadowed)),
+    }
+}
+
 fn draft_proof_mode(env: &Env, proof: &DraftProof) -> LogicMode {
     let mut mode = LogicMode::Constructive;
     visit_proof_nodes(proof, &mut |node| match node {
@@ -6370,7 +6504,10 @@ fn infer_kernel_proof_node(
                 )));
             }
             for binding in ctx.proofs() {
-                if formula_has_free_term(&binding.formula, var_name) {
+                if formula_has_free_term(&binding.formula, var_name)
+                    && (draft_proof_uses_free_hyp(base_case, &binding.name, false)
+                        || draft_proof_uses_free_hyp(step_case, &binding.name, false))
+                {
                     return Err(KernelError::new(format!(
                         "cannot induct on `{var_name}` while hypothesis `{}` depends on it",
                         binding.name
@@ -6423,7 +6560,11 @@ fn infer_kernel_proof_node(
                 )));
             };
             for binding in ctx.proofs() {
-                if formula_has_free_term(&binding.formula, var_name) {
+                if formula_has_free_term(&binding.formula, var_name)
+                    && arms
+                        .iter()
+                        .any(|arm| draft_proof_uses_free_hyp(&arm.proof, &binding.name, false))
+                {
                     return Err(KernelError::new(format!(
                         "cannot induct on `{var_name}` while hypothesis `{}` depends on it",
                         binding.name
@@ -9589,6 +9730,7 @@ fn consume_positional_schema_term_arg(
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Tactic {
     Intro(Name),
+    Revert(Name),
     Exact(ProofExpr),
     Trivial,
     Assumption,
@@ -11223,6 +11365,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
     if let Some(rest) = line.strip_prefix("intro ") {
         return Ok(Tactic::Intro(expect_single_name(rest, "intro")?));
     }
+    if let Some(rest) = line.strip_prefix("revert ") {
+        return Ok(Tactic::Revert(expect_single_name(rest, "revert")?));
+    }
     if let Some(rest) = line.strip_prefix("exact ") {
         let expr = rest.trim();
         let offset = line.find(expr).unwrap_or(0);
@@ -12292,6 +12437,23 @@ fn run_tactic_step_inner(
                 "intro expects an implication or universal goal",
             )),
         },
+        Tactic::Revert(name) => {
+            let mut context = goal.context;
+            let (formula, proof) = context.pop_proof(name)?;
+            let proof_imp_id = fresh_goal(next_goal_id);
+            Ok(StepResult {
+                replacement: PartialProof::ImpElim {
+                    proof_imp: Box::new(PartialProof::Hole(proof_imp_id)),
+                    proof_arg: Box::new(PartialProof::Done(proof)),
+                },
+                new_goals: vec![Goal {
+                    id: proof_imp_id,
+                    context,
+                    target: Formula::implies(formula, goal.target),
+                }],
+                notes: Vec::new(),
+            })
+        }
         Tactic::Exact(expr) => {
             let proof =
                 proof_expr_for_expected(env, &goal.context, expr, &goal.target, allowed_mode)?;
@@ -19653,12 +19815,50 @@ theorem bad (n : Nat) : P(n) -> P(n) := by
         let suggestion = result.diagnostics[0]
             .suggestions
             .iter()
-            .find(|suggestion| suggestion.title == "Induct before introducing dependent hypotheses")
+            .find(|suggestion| suggestion.title == "Revert dependent hypotheses before induction")
             .expect("induction dependency suggestion");
         assert!(suggestion
             .example
             .as_deref()
-            .is_some_and(|example| example.contains("intro h")));
+            .is_some_and(|example| example.starts_with("revert h\ninduction n")));
+    }
+
+    #[test]
+    fn revert_moves_a_dependent_hypothesis_back_before_induction() {
+        check_ok(
+            r#"
+mode constructive
+
+pred P(Nat)
+
+theorem recovered (n : Nat) : P(n) -> P(n) := by
+  intro h
+  revert h
+  induction n with
+  | zero =>
+      intro h
+      exact h
+  | succ k ih =>
+      intro h
+      exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn revert_requires_later_hypotheses_to_be_reverted_first() {
+        let result = check_file(
+            r#"
+mode constructive
+
+theorem order (P Q : Prop) : P -> Q -> P := by
+  intro hp
+  intro hq
+  revert hp
+"#,
+        );
+        let rendered = format!("{:#?}", result.diagnostics);
+        assert!(rendered.contains("cannot revert `hp` while later hypothesis `hq` remains"));
     }
 
     #[test]

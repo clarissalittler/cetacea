@@ -42,3 +42,16 @@ theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
       simp
       rewrite <- ih
       refl
+
+-- Section 9.8: if a dependent premise was introduced too early,
+-- `revert` restores the implication goal before induction.
+theorem revert_before_induction (n : Nat) : le(n, n) -> le(n, n) := by
+  intro h
+  revert h
+  induction n with
+  | zero =>
+      intro h
+      exact h
+  | succ k ih =>
+      intro h
+      exact h

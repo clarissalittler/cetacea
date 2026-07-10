@@ -186,7 +186,7 @@ loaded once.
   disjunction, truth, falsehood, universal quantification, existential
   quantification, equality reflexivity, equality substitution, natural-number
   induction, structural induction, theorem references, and classical rules
-- tactics: `intro`, `exact`, `trivial`, `assumption`, `apply`, `split`,
+- tactics: `intro`, `revert`, `exact`, `trivial`, `assumption`, `apply`, `split`,
   `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `unfold`, `simp`,
   `induction`, `exfalso`, `contradiction`, `by_cases`, `by_contra`,
   `show_goal`, `sorry` (alias `admit`), and `have` for forward reasoning

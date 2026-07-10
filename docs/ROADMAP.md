@@ -77,8 +77,8 @@ with its accurate message; new regression tests for both.
 that has predicate parameters, suggest
 `apply thm {P := fun m : Nat => ...}` — `P` is never inferable, so the
 error site knows the fix; (b) extend the "cannot induct while
-hypothesis depends on it" message with the standard move (state the
-theorem with `forall`, `intro` inside the arms). Acceptance: both
+hypothesis depends on it" message with `revert h`, followed by `intro`
+inside the arms. Acceptance: both
 messages carry `try:` blocks; book ch12/ch9 mistakes quotes updated and
 re-verified.
 

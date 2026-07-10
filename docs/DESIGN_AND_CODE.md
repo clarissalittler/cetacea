@@ -615,6 +615,14 @@ Example: `intro`
 - If the target is `forall x : A, P(x)`, it adds a term variable `x : A` and
   creates a goal for `P(x)`.
 
+Example: `revert`
+
+- If the latest proof hypothesis is `h : P` and the target is `Q`, it removes
+  `h` from the new goal context and creates the target `P -> Q`.
+- The surrounding proof fragment applies the resulting implication proof to
+  the original witness for `h`, so the kernel still checks ordinary implication
+  elimination.
+
 Example: `cases`
 
 - For `P \/ Q`, it creates an `OrElim` proof with a branch context containing
@@ -632,12 +640,14 @@ Example: `rewrite`
 
 ## Kernel Checking
 
-The kernel is implemented by:
+The public kernel boundary is:
 
 ```rust
-pub fn infer_proof(...)
-pub fn check_proof(...)
+pub fn check_proof(..., proof: &KernelProof, ...)
 ```
+
+Node inference is private and only runs after conversion to `KernelProof` has
+recursively excluded draft holes.
 
 `infer_proof` computes the formula proved by a proof object. `check_proof`
 validates that the inferred formula is definitionally equal to the expected

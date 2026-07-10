@@ -693,6 +693,29 @@ the definition automatically and then opens the exposed binder, so no explicit
 `left`, `right`, and `exists`. Explicit `unfold` and `simp` remain available
 when you want the step to be visible in the proof text.
 
+### `revert`
+
+Use `revert h` to move the most recently introduced proof hypothesis back into
+the goal. A context `h : P |- Q` becomes the goal `P -> Q`; `intro h` later
+recovers the assumption. This is especially useful when `h` mentions a variable
+you now want to induct on:
+
+```text
+theorem recovered (n : Nat) : P(n) -> P(n) := by
+  intro h
+  revert h
+  induction n with
+  | zero =>
+      intro h
+      exact h
+  | succ k ih =>
+      intro h
+      exact h
+```
+
+Reversion proceeds from newest hypothesis to oldest. If later hypotheses remain,
+revert those first.
+
 ### `exact`
 
 Use `exact proof_expr` when a hypothesis or theorem has exactly the target
@@ -1104,9 +1127,9 @@ Induction binders must be fresh. Shadowing an existing variable or hypothesis
 is rejected with `induction binder would shadow an existing variable`, and
 this applies to the Nat `| succ k ih` binders as well.
 
-The checker rejects induction if a local hypothesis depends on the induction
-variable, because the current induction rule does not generalize such
-hypotheses.
+If a local hypothesis depends on the induction variable, use `revert h` before
+induction and introduce it again inside each arm. The checker rejects an
+induction that actually uses an unreverted dependent hypothesis.
 
 For strong (course-of-values) induction on `Nat`, use the library theorem
 `strong_induction` from `std/nat.ctea`:
