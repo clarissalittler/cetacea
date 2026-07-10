@@ -5,6 +5,7 @@
 //! production parser/driver and teaching corpus still use the legacy checker
 //! until the exact H4 dual-check gate passes.
 
+pub mod declarations;
 pub mod fragments;
 mod h35_cardinality;
 pub mod h3_examples;
@@ -19,6 +20,7 @@ pub mod terms;
 pub mod theorems;
 pub mod types;
 
+pub use declarations::{CompatibilityDeclarationError, CompatibilityElaborator};
 pub use fragments::{
     classify_statement, proof_features_from_audit, DeclarationId, DeclarationReceipt,
     EvidenceStatus, FragmentError, FragmentMetadata, PolicyViolation, ProofFeature, ProofReceipt,

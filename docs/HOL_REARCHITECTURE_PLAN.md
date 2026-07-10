@@ -461,17 +461,22 @@ The checked compatibility prelude now installs inductive `Nat`, first-order
 `Set`, structurally recursive arithmetic, and nested-structural `le`
 transactionally. A parser-independent lowerer covers every legacy type, term,
 and formula form, resolves local names to de Bruijn indices, and infers explicit
-rank-one type applications. It is not connected to imports, declarations,
-proofs, or the production driver. The legacy evaluator's overlapping
+rank-one type applications. The first transactional declaration slice now
+handles sorts, constants, functions, predicates, polymorphic transparent
+definitions, monomorphic direct-recursive datatypes, and legacy `defrec` with
+its exact branch binder layout. It is not connected to imports, theorem/axiom
+declarations, proofs, or the production driver. The legacy evaluator's overlapping
 other-argument arithmetic shortcuts are intentionally not kernel conversion:
 they are not substitution-stable and must become checked compatibility simp
 lemmas before proof lowering.
 
-- Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
-  formulas, predicate lambdas, and proof expressions into the new core.
+- Lower theorem/axiom declarations and proof expressions into the new core;
+  `sort`, `const`, `func`, `pred`, `def`, `data`, `defrec`, formulas, and
+  predicate lambdas now have parser-independent lowering.
 - Preserve existing name resolution and import behavior through stable
   declaration identities.
-- Elaborate old monomorphic datatypes as zero-parameter inductive types.
+- Done: elaborate old monomorphic direct-recursive datatypes as zero-parameter
+  inductive types.
 - Preserve the current tactic language by changing its generated evidence, not
   rewriting course scripts.
 

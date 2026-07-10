@@ -58,20 +58,21 @@ rejected.
 | `import` | Load once by canonical path; aliases and namespaces point to the same stable declaration IDs and receipts. | Resolver work; no kernel change. |
 | `mode constructive` | Set elaborator allowance to constructive rules. | The receipt records actual features, not the source toggle. |
 | `mode classical` | Permit explicit classical evidence; do not change HOL's constructive base. | Core rules and audit are implemented; surface tactic lowering remains. |
-| `sort S` | Declare a zero-parameter first-order type constructor. | Supported by H3 signatures. |
-| `const c : A` | Declare a monomorphic constant `c : lower(A)`. | Supported. |
-| `func f : A1 -> ... -> B` | Declare a curried constant `A1 -> ... -> B`; surface applications must be saturated in FOL mode. | Supported by core types/terms. |
-| `pred R(A1, ..., An)` | Declare a curried constant `A1 -> ... -> An -> Prop`; surface applications must be saturated in FOL mode. | Supported. |
-| Formula `def D ... : Prop := F` | Check a polymorphic constant with a transparent body `lambda params. lower(F)`. | H4a core declarations and delta reduction are implemented; surface parameter/body lowering remains. |
-| Term `def d ... : A := t` | Check a polymorphic constant with a transparent body `lambda params. lower(t)`. | Same implemented core substrate and remaining surface work. |
-| `data D | ...` | Transactionally declare a zero-parameter inductive type; a field exactly equal to `D` is `Recursive`, every other field is checked existing data. | All positive corpus datatypes use supported direct recursion. Nested/mutual recursion remains rejected. |
-| `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | H4a stores and validates the recursive argument index, so legacy declarations use index zero without eta wrappers; other checked definitions may recurse at any one declared position. |
+| `sort S` | Declare a zero-parameter first-order type constructor. | Parser-independent declaration lowering is implemented transactionally. |
+| `const c : A` | Declare a monomorphic constant `c : lower(A)`. | Parser-independent declaration lowering is implemented transactionally. |
+| `func f : A1 -> ... -> B` | Declare a curried constant `A1 -> ... -> B`; surface applications must be saturated in FOL mode. | Parser-independent declaration lowering and persistent arity metadata are implemented. |
+| `pred R(A1, ..., An)` | Declare a curried constant `A1 -> ... -> An -> Prop`; surface applications must be saturated in FOL mode. | Parser-independent declaration lowering and persistent arity metadata are implemented. |
+| Formula `def D ... : Prop := F` | Check a polymorphic constant with a transparent body `lambda params. lower(F)`. | Parser-independent parameter/body lowering, checking, registration, and delta reduction are implemented. |
+| Term `def d ... : A := t` | Check a polymorphic constant with a transparent body `lambda params. lower(t)`. | Parser-independent parameter/body lowering, checking, registration, and delta reduction are implemented. |
+| `data D | ...` | Transactionally declare a zero-parameter inductive type; a field exactly equal to `D` is `Recursive`, every other field is checked existing data. | Parser-independent lowering is implemented for the corpus's direct recursion; nested/mutual recursion remains rejected. |
+| `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | Parser-independent lowering uses legacy binder order and recursive index zero; focused `length` and `append` computations pass. |
 | `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | H4a core storage and receipt propagation are implemented; surface lowering remains. |
 | Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | H3 supports the monomorphic/type-schematic subset. |
 | Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | H4a core storage is implemented, including draft-to-draft references and transitive incomplete receipts; surface lowering remains. |
 
-Failed type, positivity, termination, duplicate-name, or proof checks must leave
-all signatures and import tables unchanged, matching the transactional H3 APIs.
+Failed type, positivity, termination, or duplicate-name checks now leave both
+core signatures and the persistent compatibility name/arity/data catalogs
+unchanged. Proof and import transactionality remains to be connected.
 
 ## Term lowering
 
@@ -274,7 +275,10 @@ proofs, and incomplete exercise files. None can be postponed until after the
 At the parser-independent prelude/lowering checkpoint, the linked release CLI
 is 2,747,480 bytes and the raw Wasm module is 1,349,914 bytes. The latter remains
 below the 1.5 MB review trigger. The exact legacy oracle still reports 74 files,
-588 root declarations, and 38 intended-negative theorems.
+588 root declarations, and 38 intended-negative theorems. After adding the
+first transactional declaration slice, the corresponding artifacts are
+2,760,416 and 1,349,967 bytes; Wasm growth is only 53 bytes because the new
+parser-independent path is not yet reachable from the production facade.
 
 Only after that exact dual-check result should the driver route ordinary course
 files to the HOL kernel by default.
