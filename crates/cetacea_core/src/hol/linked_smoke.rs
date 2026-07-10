@@ -20,6 +20,8 @@ pub struct LinkedHolSmokeReport {
     pub polymorphic_required: StatementFragment,
     pub axiom_dependencies: usize,
     pub incomplete_dependencies: usize,
+    pub trusted_user_axiom_dependencies: usize,
+    pub classical_user_features: usize,
 }
 
 pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
@@ -119,6 +121,42 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
         },
     )?;
 
+    let (trusted_axiom, _) =
+        elaborator.declare_trusted_axiom("trusted_truth", Vec::new(), CoreTerm::Truth)?;
+    let (_, trusted_user) = elaborator.declare_theorem(
+        "uses_trusted_truth",
+        Vec::new(),
+        CoreTerm::Truth,
+        HolDraftProof::TheoremRef {
+            theorem: trusted_axiom,
+            type_arguments: Vec::new(),
+            term_arguments: Vec::new(),
+        },
+    )?;
+
+    let atom = elaborator.declare_constant("P", CoreType::Prop)?;
+    let proposition = CoreTerm::Constant(atom);
+    let classical_statement = CoreTerm::or(
+        proposition.clone(),
+        CoreTerm::implies(proposition.clone(), CoreTerm::Falsity),
+    );
+    let (classical, _) = elaborator.declare_theorem(
+        "excluded_middle",
+        Vec::new(),
+        classical_statement.clone(),
+        HolDraftProof::ExcludedMiddle { proposition },
+    )?;
+    let (_, classical_user) = elaborator.declare_theorem(
+        "uses_excluded_middle",
+        Vec::new(),
+        classical_statement,
+        HolDraftProof::TheoremRef {
+            theorem: classical,
+            type_arguments: Vec::new(),
+            term_arguments: Vec::new(),
+        },
+    )?;
+
     let receipts = [&structural, &facade, &polymorphic];
     Ok(LinkedHolSmokeReport {
         structural_required: structural.proof().required_fragment(),
@@ -132,6 +170,8 @@ pub fn run_linked_hol_smoke() -> Result<LinkedHolSmokeReport, SpikeError> {
             .iter()
             .map(|receipt| receipt.proof().incomplete_dependencies().len())
             .sum(),
+        trusted_user_axiom_dependencies: trusted_user.proof().axiom_dependencies().len(),
+        classical_user_features: classical_user.proof().transitive_features().len(),
     })
 }
 
@@ -140,7 +180,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linked_smoke_reaches_restricted_and_higher_order_receipts_without_trust() {
+    fn linked_smoke_reaches_fragments_and_reports_trust_transitively() {
         let report = run_linked_hol_smoke().expect("linked HOL smoke");
         assert_eq!(
             report.structural_required,
@@ -153,5 +193,7 @@ mod tests {
         assert_eq!(report.polymorphic_required, StatementFragment::HigherOrder);
         assert_eq!(report.axiom_dependencies, 0);
         assert_eq!(report.incomplete_dependencies, 0);
+        assert_eq!(report.trusted_user_axiom_dependencies, 1);
+        assert_eq!(report.classical_user_features, 1);
     }
 }

@@ -18,9 +18,16 @@ use super::types::{CoreType, TypeError, TypeParameter, TypeSignature};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TheoremId(pub u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HolTheoremStatus {
+    Checked,
+    TrustedAxiom,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HolTheoremDeclaration {
     pub name: String,
+    pub status: HolTheoremStatus,
     pub type_parameters: Vec<TypeParameter>,
     pub term_parameters: Vec<CoreType>,
     pub statement: CoreTerm,
@@ -201,12 +208,74 @@ impl HolTheoremSignature {
             id,
             HolTheoremDeclaration {
                 name,
+                status: HolTheoremStatus::Checked,
                 type_parameters,
                 term_parameters,
                 statement,
                 direct_dependencies,
                 direct_constant_dependencies,
                 audit,
+            },
+        )?;
+        Ok(id)
+    }
+
+    pub fn declare_trusted_axiom(
+        &mut self,
+        types: &TypeSignature,
+        constants: &TermSignature,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        statement: CoreTerm,
+    ) -> Result<TheoremId, TheoremError> {
+        self.declare_trusted_axiom_with_parameters(
+            types,
+            constants,
+            name,
+            type_parameters,
+            Vec::new(),
+            statement,
+        )
+    }
+
+    pub fn declare_trusted_axiom_with_parameters(
+        &mut self,
+        types: &TypeSignature,
+        constants: &TermSignature,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        term_parameters: Vec<CoreType>,
+        statement: CoreTerm,
+    ) -> Result<TheoremId, TheoremError> {
+        let name = name.into();
+        let id = self.reserve_id(&name)?;
+        types.validate_scheme(&type_parameters, &CoreType::Prop)?;
+        for parameter in &term_parameters {
+            types.validate_scheme(&type_parameters, parameter)?;
+        }
+        validate_term_type_scheme(types, &type_parameters, &statement)?;
+        let term_context = term_parameters
+            .iter()
+            .cloned()
+            .fold(TermContext::new(), TermContext::with_bound);
+        let actual = infer_type(types, constants, &term_context, &statement)?;
+        if actual != CoreType::Prop {
+            return Err(TheoremError::new(format!(
+                "trusted axiom `{name}` has type `{actual:?}`, not `Prop`"
+            )));
+        }
+        let direct_constant_dependencies = term_constant_dependencies(&statement);
+        self.insert_checked(
+            id,
+            HolTheoremDeclaration {
+                name,
+                status: HolTheoremStatus::TrustedAxiom,
+                type_parameters,
+                term_parameters,
+                statement,
+                direct_dependencies: BTreeSet::new(),
+                direct_constant_dependencies,
+                audit: HolProofAudit::default(),
             },
         )?;
         Ok(id)
@@ -519,5 +588,59 @@ mod tests {
             .expect_err("free type parameter must fail");
         assert!(free_error.message.contains("is not declared"));
         assert_eq!(theorems.resolve("free_type"), None);
+    }
+
+    #[test]
+    fn explicitly_trusted_axioms_are_typed_and_referenceable() {
+        let fixture = fixture();
+        let mut theorems = HolTheoremSignature::new();
+        let axiom = theorems
+            .declare_trusted_axiom(
+                &fixture.types,
+                &fixture.constants,
+                "trusted_truth",
+                Vec::new(),
+                CoreTerm::Truth,
+            )
+            .expect("typed trusted axiom");
+        assert_eq!(
+            theorems.declaration(axiom).expect("stored axiom").status,
+            HolTheoremStatus::TrustedAxiom
+        );
+
+        let user = theorems
+            .check_and_declare(
+                &fixture.types,
+                &fixture.constants,
+                &fixture.inductives,
+                "uses_trusted_truth",
+                Vec::new(),
+                CoreTerm::Truth,
+                kernel(HolDraftProof::TheoremRef {
+                    theorem: axiom,
+                    type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
+                }),
+            )
+            .expect("kernel-visible trusted axiom");
+        assert_eq!(
+            theorems
+                .declaration(user)
+                .expect("stored axiom user")
+                .direct_dependencies,
+            BTreeSet::from([axiom])
+        );
+
+        let non_prop = theorems
+            .declare_trusted_axiom(
+                &fixture.types,
+                &fixture.constants,
+                "bad_axiom",
+                Vec::new(),
+                CoreTerm::Constant(fixture.zero),
+            )
+            .expect_err("axioms must still be propositions");
+        assert!(non_prop.message.contains("not `Prop`"));
+        assert_eq!(theorems.resolve("bad_axiom"), None);
     }
 }

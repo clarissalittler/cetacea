@@ -419,6 +419,12 @@ term/proposition/predicate-symbol theorem templates, simultaneous
 capture-avoiding reference instantiation, and FOL classification of saturated
 symbol parameters. Missing and ill-typed arguments are rejected
 transactionally; legacy surface parameter inference remains to be connected.
+H4a also now stores typed trusted axiom templates and propagates their IDs
+through checked theorem receipts. Explicit excluded-middle,
+double-negation-elimination, and contradiction evidence is kernel-checked and
+adds a transitive `Classical` feature; constructive policies reject it unless
+explicitly allowed. Surface axiom/classical lowering and incomplete draft
+storage remain.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

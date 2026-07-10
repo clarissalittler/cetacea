@@ -422,6 +422,9 @@ pub fn proof_features_from_audit(audit: HolProofAudit) -> BTreeSet<ProofFeature>
     if audit.uses_induction() {
         features.insert(ProofFeature::Induction);
     }
+    if audit.uses_classical() {
+        features.insert(ProofFeature::Classical);
+    }
     features
 }
 
@@ -593,13 +596,21 @@ impl DeclarationReceipt {
         }
     }
 
-    #[cfg(test)]
-    fn trusted_axiom(id: DeclarationId, statement_fragment: StatementFragment) -> Self {
+    pub(super) fn trusted_axiom_with_dependencies<'a>(
+        id: DeclarationId,
+        statement_fragment: StatementFragment,
+        dependencies: impl IntoIterator<Item = &'a Self>,
+    ) -> Self {
         Self {
             id,
             status: EvidenceStatus::TrustedAxiom,
-            receipt: ProofReceipt::derive(statement_fragment, [], []),
+            receipt: ProofReceipt::derive(statement_fragment, [], dependencies),
         }
+    }
+
+    #[cfg(test)]
+    fn trusted_axiom(id: DeclarationId, statement_fragment: StatementFragment) -> Self {
+        Self::trusted_axiom_with_dependencies(id, statement_fragment, [])
     }
 
     pub fn id(&self) -> DeclarationId {

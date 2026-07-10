@@ -55,7 +55,7 @@ rejected.
 |---|---|---|
 | `import` | Load once by canonical path; aliases and namespaces point to the same stable declaration IDs and receipts. | Resolver work; no kernel change. |
 | `mode constructive` | Set elaborator allowance to constructive rules. | The receipt records actual features, not the source toggle. |
-| `mode classical` | Permit explicit classical evidence; do not change HOL's constructive base. | Needs the explicit classical proof boundary below. |
+| `mode classical` | Permit explicit classical evidence; do not change HOL's constructive base. | Core rules and audit are implemented; surface tactic lowering remains. |
 | `sort S` | Declare a zero-parameter first-order type constructor. | Supported by H3 signatures. |
 | `const c : A` | Declare a monomorphic constant `c : lower(A)`. | Supported. |
 | `func f : A1 -> ... -> B` | Declare a curried constant `A1 -> ... -> B`; surface applications must be saturated in FOL mode. | Supported by core types/terms. |
@@ -64,7 +64,7 @@ rejected.
 | Term `def d ... : A := t` | Check a polymorphic constant with a transparent body `lambda params. lower(t)`. | Same missing transparent-definition layer. |
 | `data D | ...` | Transactionally declare a zero-parameter inductive type; a field exactly equal to `D` is `Recursive`, every other field is checked existing data. | All positive corpus datatypes use supported direct recursion. Nested/mutual recursion remains rejected. |
 | `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | Core currently puts the recursive argument last, while legacy syntax puts it first. H4 must add a checked recursive-argument position (preferred) or a transparent eta wrapper. |
-| `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | Trusted theorem storage is not implemented in H3. |
+| `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | H4a core storage and receipt propagation are implemented; surface lowering remains. |
 | Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | H3 supports the monomorphic/type-schematic subset. |
 | Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | Incomplete declaration/reference storage is not implemented in H3. |
 
@@ -149,10 +149,11 @@ retain the rewrite occurrence chosen by the tactic (or deterministically
 reconstruct the unique motive). It may not turn rewrite into a trusted
 conversion.
 
-The H3 proof enum deliberately has no classical constructor. Before dual
-checking classical corpus files, add the smallest explicit classical boundary
-for excluded middle, contradiction, and double-negation elimination and make
-the audit propagate the feature transitively.
+H4a now has explicit proof nodes for excluded middle, proof by contradiction,
+and double-negation elimination. Each checks its proposition and subevidence,
+and the audit propagates `Classical` transitively. The compatibility tactic
+elaborator still needs to map the three legacy `ClassicalRule` cases to those
+nodes.
 
 ## Receipts, modes, and countermodels
 
@@ -191,11 +192,11 @@ These are compatibility prerequisites, not optional language expansion:
    projection reduction for the existing product type.
 5. **Structural recursion argument position.** Preserve the legacy recursive
    first argument for definitions such as `append`, `replicate`, and `addl`.
-6. **Trusted and incomplete declaration storage.** Axioms must be usable with
-   trust receipts; holes and incomplete dependencies must remain outside the
-   kernel while retaining typed draft status.
-7. **Explicit classical evidence.** Support exactly the current three classical
-   rules first, with a transitive `Classical` feature.
+6. **Trusted and incomplete declaration storage.** Typed trusted axioms and
+   transitive trust receipts are implemented. Holes and incomplete dependencies
+   still need draft-only storage outside the kernel.
+7. **Explicit classical evidence.** The three core rules and transitive
+   `Classical` feature are implemented; legacy tactic lowering remains.
 8. **Instance-aware definition/theorem receipts.** Schematic declarations must
    not taint a first-order instance merely because a parameter could later be
    instantiated at a higher-order type, while actual HOL dependencies must

@@ -40,12 +40,14 @@ pub extern "C" fn cetacea_version() -> *mut u8 {
 pub extern "C" fn cetacea_hol_spike_smoke() -> *mut u8 {
     match run_linked_hol_smoke() {
         Ok(report) => response_json(format!(
-            r#"{{"ok":true,"structural_required":{},"facade_required":{},"polymorphic_required":{},"axioms":{},"incomplete":{}}}"#,
+            r#"{{"ok":true,"structural_required":{},"facade_required":{},"polymorphic_required":{},"axioms":{},"incomplete":{},"trusted_deps":{},"classical_features":{}}}"#,
             json_string(&report.structural_required.to_string()),
             json_string(&report.facade_required.to_string()),
             json_string(&report.polymorphic_required.to_string()),
             report.axiom_dependencies,
             report.incomplete_dependencies,
+            report.trusted_user_axiom_dependencies,
+            report.classical_user_features,
         )),
         Err(error) => response_json(error_json(&error.message)),
     }
@@ -471,7 +473,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linked_hol_smoke_exercises_kernel_features_without_trust() {
+    fn linked_hol_smoke_exercises_kernel_features_and_reports_trust() {
         let ptr = cetacea_hol_spike_smoke();
         assert!(!ptr.is_null());
         let (json, allocation_len) = unsafe {
@@ -500,5 +502,7 @@ mod tests {
         assert!(json.contains(r#""polymorphic_required":"hol""#), "{json}");
         assert!(json.contains(r#""axioms":0"#), "{json}");
         assert!(json.contains(r#""incomplete":0"#), "{json}");
+        assert!(json.contains(r#""trusted_deps":1"#), "{json}");
+        assert!(json.contains(r#""classical_features":1"#), "{json}");
     }
 }

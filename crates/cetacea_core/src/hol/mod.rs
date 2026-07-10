@@ -44,7 +44,9 @@ pub use terms::{
     definitionally_equal, infer_type, instantiate_binder, normalize, ConstantId, CoreTerm,
     TermContext, TermError, TermSignature,
 };
-pub use theorems::{HolTheoremDeclaration, HolTheoremSignature, TheoremError, TheoremId};
+pub use theorems::{
+    HolTheoremDeclaration, HolTheoremSignature, HolTheoremStatus, TheoremError, TheoremId,
+};
 pub use types::{
     CoreType, FirstOrderStatus, TypeConstructorId, TypeError, TypeParameter, TypeParameterClass,
     TypeParameterId, TypeSignature,

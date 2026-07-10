@@ -88,6 +88,17 @@ pub enum HolDraftProof {
         /// One case per constructor, in declaration order.
         cases: Vec<HolDraftProof>,
     },
+    ExcludedMiddle {
+        proposition: CoreTerm,
+    },
+    DoubleNegationElim {
+        proposition: CoreTerm,
+        proof_not_not: Box<HolDraftProof>,
+    },
+    ByContradiction {
+        proposition: CoreTerm,
+        body: Box<HolDraftProof>,
+    },
     Sorry {
         target: CoreTerm,
     },
@@ -99,6 +110,7 @@ pub struct HolKernelProof(HolDraftProof);
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HolProofAudit {
     uses_induction: bool,
+    uses_classical: bool,
     theorem_dependencies: BTreeSet<TheoremId>,
     constant_dependencies: BTreeSet<ConstantId>,
 }
@@ -106,6 +118,10 @@ pub struct HolProofAudit {
 impl HolProofAudit {
     pub fn uses_induction(&self) -> bool {
         self.uses_induction
+    }
+
+    pub fn uses_classical(&self) -> bool {
+        self.uses_classical
     }
 
     pub fn theorem_dependencies(&self) -> &BTreeSet<TheoremId> {
@@ -962,6 +978,69 @@ fn infer_proof(
                 &CoreTerm::apply(motive.clone(), scrutinee.clone()),
             )?)
         }
+        HolDraftProof::ExcludedMiddle { proposition } => {
+            expect_proposition(
+                types,
+                constants,
+                term_context,
+                proposition,
+                "excluded middle",
+            )?;
+            Ok(CoreTerm::or(
+                proposition.clone(),
+                CoreTerm::implies(proposition.clone(), CoreTerm::Falsity),
+            ))
+        }
+        HolDraftProof::DoubleNegationElim {
+            proposition,
+            proof_not_not,
+        } => {
+            expect_proposition(
+                types,
+                constants,
+                term_context,
+                proposition,
+                "double-negation elimination",
+            )?;
+            let not_proposition = CoreTerm::implies(proposition.clone(), CoreTerm::Falsity);
+            check_draft(
+                types,
+                constants,
+                inductives,
+                theorems,
+                term_context,
+                proof_context,
+                proof_not_not,
+                &CoreTerm::implies(not_proposition, CoreTerm::Falsity),
+            )?;
+            Ok(proposition.clone())
+        }
+        HolDraftProof::ByContradiction { proposition, body } => {
+            expect_proposition(
+                types,
+                constants,
+                term_context,
+                proposition,
+                "proof by contradiction",
+            )?;
+            let body_context = proof_context.clone().with_assumption(
+                types,
+                constants,
+                term_context,
+                CoreTerm::implies(proposition.clone(), CoreTerm::Falsity),
+            )?;
+            check_draft(
+                types,
+                constants,
+                inductives,
+                theorems,
+                term_context,
+                &body_context,
+                body,
+                &CoreTerm::Falsity,
+            )?;
+            Ok(proposition.clone())
+        }
         HolDraftProof::Sorry { .. } => Err(ProofError::new(
             "kernel proof unexpectedly contains a `sorry` hole",
         )),
@@ -1115,6 +1194,7 @@ fn proof_has_hole(proof: &HolDraftProof) -> bool {
         HolDraftProof::Hypothesis(_)
         | HolDraftProof::TheoremRef { .. }
         | HolDraftProof::TruthIntro
+        | HolDraftProof::ExcludedMiddle { .. }
         | HolDraftProof::EqualityRefl(_) => false,
         HolDraftProof::FalseElim { proof_false, .. }
         | HolDraftProof::AndElimLeft(proof_false)
@@ -1125,6 +1205,13 @@ fn proof_has_hole(proof: &HolDraftProof) -> bool {
         | HolDraftProof::ForallElim {
             proof_forall: proof_false,
             ..
+        }
+        | HolDraftProof::DoubleNegationElim {
+            proof_not_not: proof_false,
+            ..
+        }
+        | HolDraftProof::ByContradiction {
+            body: proof_false, ..
         } => proof_has_hole(proof_false),
         HolDraftProof::AndIntro(left, right)
         | HolDraftProof::ImpElim {
@@ -1164,6 +1251,7 @@ fn audit_proof(proof: &HolDraftProof) -> HolProofAudit {
     collect_proof_constant_dependencies(proof, &mut constant_dependencies);
     HolProofAudit {
         uses_induction: proof_uses_induction(proof),
+        uses_classical: proof_uses_classical(proof),
         theorem_dependencies,
         constant_dependencies,
     }
@@ -1172,6 +1260,80 @@ fn audit_proof(proof: &HolDraftProof) -> HolProofAudit {
 fn proof_uses_induction(proof: &HolDraftProof) -> bool {
     match proof {
         HolDraftProof::Induction { .. } => true,
+        HolDraftProof::Hypothesis(_)
+        | HolDraftProof::TheoremRef { .. }
+        | HolDraftProof::TruthIntro
+        | HolDraftProof::ExcludedMiddle { .. }
+        | HolDraftProof::EqualityRefl(_)
+        | HolDraftProof::Sorry { .. } => false,
+        HolDraftProof::FalseElim { proof_false, .. }
+        | HolDraftProof::AndElimLeft(proof_false)
+        | HolDraftProof::AndElimRight(proof_false)
+        | HolDraftProof::ForallIntro {
+            body: proof_false, ..
+        }
+        | HolDraftProof::ForallElim {
+            proof_forall: proof_false,
+            ..
+        }
+        | HolDraftProof::OrIntroLeft {
+            proof_left: proof_false,
+            ..
+        }
+        | HolDraftProof::OrIntroRight {
+            proof_right: proof_false,
+            ..
+        }
+        | HolDraftProof::ConstructorDisjoint {
+            proof_equality: proof_false,
+        }
+        | HolDraftProof::ConstructorInjective {
+            proof_equality: proof_false,
+            ..
+        }
+        | HolDraftProof::ExistsIntro {
+            proof_body: proof_false,
+            ..
+        }
+        | HolDraftProof::DoubleNegationElim {
+            proof_not_not: proof_false,
+            ..
+        }
+        | HolDraftProof::ByContradiction {
+            body: proof_false, ..
+        } => proof_uses_induction(proof_false),
+        HolDraftProof::AndIntro(left, right)
+        | HolDraftProof::ImpElim {
+            proof_implication: left,
+            proof_argument: right,
+        } => proof_uses_induction(left) || proof_uses_induction(right),
+        HolDraftProof::OrElim {
+            proof_or,
+            left_case,
+            right_case,
+            ..
+        } => {
+            proof_uses_induction(proof_or)
+                || proof_uses_induction(left_case)
+                || proof_uses_induction(right_case)
+        }
+        HolDraftProof::ImpIntro { body, .. } => proof_uses_induction(body),
+        HolDraftProof::EqualityElim {
+            proof_equality,
+            proof_left,
+            ..
+        } => proof_uses_induction(proof_equality) || proof_uses_induction(proof_left),
+        HolDraftProof::ExistsElim {
+            proof_exists, body, ..
+        } => proof_uses_induction(proof_exists) || proof_uses_induction(body),
+    }
+}
+
+fn proof_uses_classical(proof: &HolDraftProof) -> bool {
+    match proof {
+        HolDraftProof::ExcludedMiddle { .. }
+        | HolDraftProof::DoubleNegationElim { .. }
+        | HolDraftProof::ByContradiction { .. } => true,
         HolDraftProof::Hypothesis(_)
         | HolDraftProof::TheoremRef { .. }
         | HolDraftProof::TruthIntro
@@ -1205,31 +1367,32 @@ fn proof_uses_induction(proof: &HolDraftProof) -> bool {
         | HolDraftProof::ExistsIntro {
             proof_body: proof_false,
             ..
-        } => proof_uses_induction(proof_false),
+        } => proof_uses_classical(proof_false),
         HolDraftProof::AndIntro(left, right)
         | HolDraftProof::ImpElim {
             proof_implication: left,
             proof_argument: right,
-        } => proof_uses_induction(left) || proof_uses_induction(right),
+        } => proof_uses_classical(left) || proof_uses_classical(right),
         HolDraftProof::OrElim {
             proof_or,
             left_case,
             right_case,
             ..
         } => {
-            proof_uses_induction(proof_or)
-                || proof_uses_induction(left_case)
-                || proof_uses_induction(right_case)
+            proof_uses_classical(proof_or)
+                || proof_uses_classical(left_case)
+                || proof_uses_classical(right_case)
         }
-        HolDraftProof::ImpIntro { body, .. } => proof_uses_induction(body),
+        HolDraftProof::ImpIntro { body, .. } => proof_uses_classical(body),
         HolDraftProof::EqualityElim {
             proof_equality,
             proof_left,
             ..
-        } => proof_uses_induction(proof_equality) || proof_uses_induction(proof_left),
+        } => proof_uses_classical(proof_equality) || proof_uses_classical(proof_left),
         HolDraftProof::ExistsElim {
             proof_exists, body, ..
-        } => proof_uses_induction(proof_exists) || proof_uses_induction(body),
+        } => proof_uses_classical(proof_exists) || proof_uses_classical(body),
+        HolDraftProof::Induction { cases, .. } => cases.iter().any(proof_uses_classical),
     }
 }
 
@@ -1240,6 +1403,7 @@ fn collect_theorem_dependencies(proof: &HolDraftProof, dependencies: &mut BTreeS
         }
         HolDraftProof::Hypothesis(_)
         | HolDraftProof::TruthIntro
+        | HolDraftProof::ExcludedMiddle { .. }
         | HolDraftProof::EqualityRefl(_)
         | HolDraftProof::Sorry { .. } => {}
         HolDraftProof::FalseElim { proof_false, .. }
@@ -1270,6 +1434,13 @@ fn collect_theorem_dependencies(proof: &HolDraftProof, dependencies: &mut BTreeS
         | HolDraftProof::ExistsIntro {
             proof_body: proof_false,
             ..
+        }
+        | HolDraftProof::DoubleNegationElim {
+            proof_not_not: proof_false,
+            ..
+        }
+        | HolDraftProof::ByContradiction {
+            body: proof_false, ..
         } => collect_theorem_dependencies(proof_false, dependencies),
         HolDraftProof::AndIntro(left, right)
         | HolDraftProof::ImpElim {
@@ -1424,6 +1595,18 @@ fn collect_proof_constant_dependencies(
                 collect_proof_constant_dependencies(case, dependencies);
             }
         }
+        HolDraftProof::ExcludedMiddle { proposition } => add_term(proposition),
+        HolDraftProof::DoubleNegationElim {
+            proposition,
+            proof_not_not,
+        } => {
+            add_term(proposition);
+            collect_proof_constant_dependencies(proof_not_not, dependencies);
+        }
+        HolDraftProof::ByContradiction { proposition, body } => {
+            add_term(proposition);
+            collect_proof_constant_dependencies(body, dependencies);
+        }
         HolDraftProof::Sorry { target } => add_term(target),
     }
 }
@@ -1562,6 +1745,18 @@ fn validate_draft_proof_type_scheme(
                 validate_draft_proof_type_scheme(types, parameters, case)?;
             }
             Ok(())
+        }
+        HolDraftProof::ExcludedMiddle { proposition } => validate_term(proposition),
+        HolDraftProof::DoubleNegationElim {
+            proposition,
+            proof_not_not,
+        } => {
+            validate_term(proposition)?;
+            validate_draft_proof_type_scheme(types, parameters, proof_not_not)
+        }
+        HolDraftProof::ByContradiction { proposition, body } => {
+            validate_term(proposition)?;
+            validate_draft_proof_type_scheme(types, parameters, body)
         }
         HolDraftProof::Sorry { target } => validate_term(target),
     }
@@ -1798,6 +1993,93 @@ mod tests {
         fixture
             .check(&HolProofContext::new(), proof, &expected)
             .expect("higher-order forall introduction");
+    }
+
+    #[test]
+    fn explicit_classical_rules_check_and_are_audited() {
+        let fixture = Fixture::new();
+        let proposition = fixture.atom_a();
+        let excluded_middle = CoreTerm::or(
+            proposition.clone(),
+            CoreTerm::implies(proposition.clone(), CoreTerm::Falsity),
+        );
+        let em_kernel = fixture.kernel(HolDraftProof::ExcludedMiddle {
+            proposition: proposition.clone(),
+        });
+        let audit = check_hol_proof_audit(
+            &fixture.types,
+            &fixture.terms,
+            &TermContext::new(),
+            &HolProofContext::new(),
+            &em_kernel,
+            &excluded_middle,
+        )
+        .expect("excluded middle");
+        assert!(audit.uses_classical());
+        assert!(!audit.uses_induction());
+
+        let not_proposition = CoreTerm::implies(proposition.clone(), CoreTerm::Falsity);
+        let not_not_proposition = CoreTerm::implies(not_proposition.clone(), CoreTerm::Falsity);
+        let dne_context = HolProofContext::new()
+            .with_assumption(
+                &fixture.types,
+                &fixture.terms,
+                &TermContext::new(),
+                not_not_proposition,
+            )
+            .expect("double-negation hypothesis");
+        fixture
+            .check(
+                &dne_context,
+                HolDraftProof::DoubleNegationElim {
+                    proposition: proposition.clone(),
+                    proof_not_not: Box::new(HolDraftProof::Hypothesis(0)),
+                },
+                &proposition,
+            )
+            .expect("double-negation elimination");
+
+        let contradiction_context = HolProofContext::new()
+            .with_assumption(
+                &fixture.types,
+                &fixture.terms,
+                &TermContext::new(),
+                proposition.clone(),
+            )
+            .expect("positive hypothesis");
+        fixture
+            .check(
+                &contradiction_context,
+                HolDraftProof::ByContradiction {
+                    proposition: proposition.clone(),
+                    body: Box::new(HolDraftProof::ImpElim {
+                        proof_implication: Box::new(HolDraftProof::Hypothesis(0)),
+                        proof_argument: Box::new(HolDraftProof::Hypothesis(1)),
+                    }),
+                },
+                &proposition,
+            )
+            .expect("proof by contradiction");
+
+        let bad = fixture
+            .check(
+                &HolProofContext::new(),
+                HolDraftProof::ExcludedMiddle {
+                    proposition: CoreTerm::Constant(fixture.zero),
+                },
+                &excluded_middle,
+            )
+            .expect_err("classical rules still require propositions");
+        assert!(bad.message.contains("must have type `Prop`"));
+
+        let hidden_hole = HolKernelProof::try_from(HolDraftProof::ByContradiction {
+            proposition: fixture.atom_a(),
+            body: Box::new(HolDraftProof::Sorry {
+                target: CoreTerm::Falsity,
+            }),
+        })
+        .expect_err("classical evidence cannot hide draft holes");
+        assert!(hidden_hole.message.contains("contains `sorry`"));
     }
 
     #[test]

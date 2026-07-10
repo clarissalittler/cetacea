@@ -339,6 +339,68 @@ impl SpikeElaborator {
         self.next_receipt_id = next_receipt_id;
         Ok((theorem, receipt))
     }
+
+    pub fn declare_trusted_axiom(
+        &mut self,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        statement: CoreTerm,
+    ) -> Result<(TheoremId, DeclarationReceipt), SpikeError> {
+        self.declare_trusted_axiom_with_parameters(name, type_parameters, Vec::new(), statement)
+    }
+
+    /// Store an explicitly trusted theorem template. Its statement is fully
+    /// type-checked, but there is deliberately no proof; the receipt status
+    /// makes the axiom and every transitive use policy-visible.
+    pub fn declare_trusted_axiom_with_parameters(
+        &mut self,
+        name: impl Into<String>,
+        type_parameters: Vec<TypeParameter>,
+        term_parameters: Vec<CoreType>,
+        statement: CoreTerm,
+    ) -> Result<(TheoremId, DeclarationReceipt), SpikeError> {
+        let mut staged_theorems = self.theorems.clone();
+        let theorem = staged_theorems.declare_trusted_axiom_with_parameters(
+            &self.types,
+            &self.constants,
+            name,
+            type_parameters,
+            term_parameters.clone(),
+            statement.clone(),
+        )?;
+        let declaration = staged_theorems
+            .declaration(theorem)
+            .expect("a newly declared trusted axiom is stored");
+        let dependency_receipts = declaration
+            .direct_constant_dependencies
+            .iter()
+            .filter_map(|constant| self.definition_receipts.get(constant).cloned())
+            .collect::<Vec<_>>();
+        let term_context = term_parameters
+            .into_iter()
+            .fold(TermContext::new(), TermContext::with_bound);
+        let fragment = classify_statement(
+            &self.types,
+            &self.constants,
+            &term_context,
+            &self.fragments,
+            &statement,
+        )?;
+        let receipt_id = DeclarationId(self.next_receipt_id);
+        let next_receipt_id = self
+            .next_receipt_id
+            .checked_add(1)
+            .ok_or_else(|| SpikeError::new("too many spike declaration receipts"))?;
+        let receipt = DeclarationReceipt::trusted_axiom_with_dependencies(
+            receipt_id,
+            fragment,
+            dependency_receipts.iter(),
+        );
+        self.theorems = staged_theorems;
+        self.theorem_receipts.insert(theorem, receipt.clone());
+        self.next_receipt_id = next_receipt_id;
+        Ok((theorem, receipt))
+    }
 }
 
 fn structural_definition_fragment(
@@ -683,5 +745,97 @@ mod tests {
             instance_receipt.proof().direct_dependencies(),
             &std::collections::BTreeSet::from([template_receipt.id()])
         );
+    }
+
+    #[test]
+    fn trusted_axioms_taint_every_transitive_use() {
+        let mut elaborator = SpikeElaborator::new();
+        let (axiom, axiom_receipt) = elaborator
+            .declare_trusted_axiom("trusted_truth", Vec::new(), CoreTerm::Truth)
+            .expect("trusted truth axiom");
+        assert_eq!(
+            axiom_receipt.status(),
+            crate::hol::fragments::EvidenceStatus::TrustedAxiom
+        );
+        let default_policy = ReceiptPolicy::new(TeachingProfile::Prop);
+        assert!(default_policy.check(&axiom_receipt).contains(
+            &crate::hol::fragments::PolicyViolation::TrustedAxiomNotAllowed(axiom_receipt.id())
+        ));
+
+        let (_, user_receipt) = elaborator
+            .declare_theorem(
+                "uses_trusted_truth",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::TheoremRef {
+                    theorem: axiom,
+                    type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
+                },
+            )
+            .expect("theorem using trusted axiom");
+        assert_eq!(
+            user_receipt.proof().axiom_dependencies(),
+            &std::collections::BTreeSet::from([axiom_receipt.id()])
+        );
+        assert!(!default_policy.check(&user_receipt).is_empty());
+
+        let mut allowed = ReceiptPolicy::new(TeachingProfile::Prop);
+        allowed.allow_axiom(axiom_receipt.id());
+        assert!(allowed.check(&axiom_receipt).is_empty());
+        assert!(allowed.check(&user_receipt).is_empty());
+    }
+
+    #[test]
+    fn explicit_classical_evidence_taints_every_transitive_use() {
+        let mut elaborator = SpikeElaborator::new();
+        let atom = elaborator.declare_constant("P", CoreType::Prop).expect("P");
+        let proposition = CoreTerm::Constant(atom);
+        let excluded_middle = CoreTerm::or(
+            proposition.clone(),
+            CoreTerm::implies(proposition.clone(), CoreTerm::Falsity),
+        );
+        let (classical, classical_receipt) = elaborator
+            .declare_theorem(
+                "excluded_middle",
+                Vec::new(),
+                excluded_middle,
+                HolDraftProof::ExcludedMiddle { proposition },
+            )
+            .expect("explicit classical theorem");
+        assert_eq!(
+            classical_receipt.proof().direct_features(),
+            &std::collections::BTreeSet::from([ProofFeature::Classical])
+        );
+
+        let classical_statement = elaborator
+            .theorems()
+            .declaration(classical)
+            .expect("classical theorem")
+            .statement
+            .clone();
+        let (_, facade_receipt) = elaborator
+            .declare_theorem(
+                "classical_facade",
+                Vec::new(),
+                classical_statement,
+                HolDraftProof::TheoremRef {
+                    theorem: classical,
+                    type_arguments: Vec::new(),
+                    term_arguments: Vec::new(),
+                },
+            )
+            .expect("classical facade");
+        assert!(facade_receipt.proof().direct_features().is_empty());
+        assert_eq!(
+            facade_receipt.proof().transitive_features(),
+            &std::collections::BTreeSet::from([ProofFeature::Classical])
+        );
+        assert!(!ReceiptPolicy::new(TeachingProfile::Prop)
+            .check(&facade_receipt)
+            .is_empty());
+        let mut classical_policy = ReceiptPolicy::new(TeachingProfile::Prop);
+        classical_policy.allow_classical();
+        assert!(classical_policy.check(&facade_receipt).is_empty());
     }
 }
