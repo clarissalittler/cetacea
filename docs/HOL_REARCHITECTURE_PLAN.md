@@ -318,8 +318,12 @@ typed lambdas/application, capture-avoiding beta substitution, and checked
 normalization. Primitive proposition terms and a hole-free constructive proof
 checker now cover connectives, quantifiers over arbitrary simple types, typed
 equality, and equality elimination through explicit predicate motives. The
-checker is still hand-constructed: theorem declarations and surface elaboration
-have not begun.
+new `hol::fragments` layer beta-normalizes and classifies checked statements,
+then derives deterministic transitive receipts and enforces constructive
+Prop/FOL/FOL+induction/HOL policies. Its adversarial tests reject higher-order
+dependency laundering and propagate classical, axiom, and incomplete taint.
+The checker is still hand-constructed: theorem declarations and surface
+elaboration have not begun.
 
 - Add `CoreType` and typed `CoreTerm` without deleting the old AST.
 - Implement capture-avoiding substitution, alpha-equivalence, beta reduction,
@@ -372,6 +376,12 @@ statuses, modes, axiom/incomplete dependencies, and theorem statements. Every
 negative theorem remains rejected individually.
 
 ### Phase H5 — fragment enforcement and assignment manifests
+
+Status: the parser-independent foundation now exists: least-statement
+classification, direct/transitive dependency sets, feature union, required
+fragment calculation, trust/incompleteness propagation, and profile policy
+checks. H5 still owns integration with theorem elaboration, import provenance,
+manifests, result formats, UI, and countermodel eligibility.
 
 - Implement least-fragment classification and transitive feature receipts.
 - Extend text, JSON, Wasm JSON, TUI, and browser results.
