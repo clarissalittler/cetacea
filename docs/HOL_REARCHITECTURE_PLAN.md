@@ -281,6 +281,9 @@ and Wasm APIs as a facade. New receipt fields may be added compatibly to JSON.
 
 ### Phase H0 — freeze and measure
 
+Status: the deterministic semantic corpus oracle and initial artifact/timing
+report are in place. Kernel-boundary adversarial coverage remains part of H0.
+
 - Tag the current FOL baseline and keep `main` releasable.
 - Record golden JSON for the standard library, examples, book, and CS250 corpus.
 - Add adversarial tests for draft holes, datatype no-confusion, axiom receipts,
@@ -469,4 +472,3 @@ support generic discrete-mathematics libraries while an instructor can reliably
 say, and mechanically enforce, “this exercise uses only constructive FOL plus
 induction.” The stronger implementation must reduce incidental encoding burden
 without making the stronger logic invisible or unavoidable.
-
