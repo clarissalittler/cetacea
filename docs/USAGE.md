@@ -43,6 +43,35 @@ status 1 for either a checker error or a policy violation:
 cargo run -p cetacea_cli -- --strict --deny-classical --json homework.ctea
 ```
 
+The experimental HOL branch can also enforce the logical fragment recorded by
+the checked proof receipt. Supplying `--hol-profile` automatically runs the
+non-authoritative HOL shadow checker and accepts one of `prop`, `fol`,
+`fol+induction` (also spelled `fol-induction`), or `hol`:
+
+```sh
+cargo run -p cetacea_cli -- \
+  --hol-profile fol+induction homework.ctea
+```
+
+A teaching profile is constructive, trust-free, and complete by default—even
+`hol` does not silently authorize classical reasoning, axioms, or `sorry`.
+Those dimensions require separate, explicit permissions when an assignment
+needs them:
+
+```sh
+cargo run -p cetacea_cli -- \
+  --hol-profile fol --allow-classical --allow-axioms homework.ctea
+```
+
+`--allow-incomplete` is available for draft exercises. Conflicting flags such
+as `--allow-classical --deny-classical` are rejected. Policy enforcement checks
+root declarations only, but each root receipt includes the dependencies it
+actually uses: an unused imported axiom is harmless, while a root theorem that
+references it needs `--allow-axioms`. Text errors name the affected declaration
+and dependency; `--json` adds `hol_policy` and `hol_policy_violations`. Ordinary
+checking without `--hol-profile` is unchanged, and this migration policy is not
+yet exposed by the browser build.
+
 Start the full-screen terminal TUI with:
 
 ```sh

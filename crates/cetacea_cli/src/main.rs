@@ -4,7 +4,10 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
-use cetacea_core::hol::run_linked_hol_smoke;
+use cetacea_core::hol::{
+    run_linked_hol_smoke, DeclarationId, PolicyViolation as HolReceiptPolicyViolation,
+    ReceiptPolicy, TeachingProfile,
+};
 use cetacea_core::{
     check_file_at_path, check_file_at_path_with_hol_shadow, check_source_at_path,
     explain_theorem_at_path, explain_theorem_in_source_at_path, goals_at_path,
@@ -53,6 +56,7 @@ fn main() {
             config.policy,
             config.output_format,
             config.hol_shadow,
+            config.hol_policy,
         )),
         RunMode::LineInteractive => {
             if let Err(err) = run_interactive(config.path) {
@@ -82,6 +86,7 @@ struct CliConfig {
     policy: CheckPolicy,
     output_format: OutputFormat,
     hol_shadow: bool,
+    hol_policy: Option<HolTeachingPolicy>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -105,6 +110,35 @@ impl CheckPolicy {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct HolTeachingPolicy {
+    profile: TeachingProfile,
+    allow_classical: bool,
+    allow_axioms: bool,
+    allow_incomplete: bool,
+}
+
+impl HolTeachingPolicy {
+    fn profile_label(self) -> &'static str {
+        match self.profile {
+            TeachingProfile::Prop => "prop",
+            TeachingProfile::FirstOrder => "fol",
+            TeachingProfile::FirstOrderInductive => "fol+induction",
+            TeachingProfile::HigherOrder => "hol",
+        }
+    }
+}
+
+fn parse_hol_profile(value: &str) -> Option<TeachingProfile> {
+    match value {
+        "prop" => Some(TeachingProfile::Prop),
+        "fol" => Some(TeachingProfile::FirstOrder),
+        "fol+induction" | "fol-induction" => Some(TeachingProfile::FirstOrderInductive),
+        "hol" => Some(TeachingProfile::HigherOrder),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum OutputFormat {
     #[default]
@@ -118,7 +152,13 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
     let mut policy = CheckPolicy::default();
     let mut output_format = OutputFormat::Text;
     let mut hol_shadow = false;
-    for arg in args {
+    let mut hol_profile = None;
+    let mut allow_classical = false;
+    let mut allow_axioms = false;
+    let mut allow_incomplete = false;
+    let mut index = 0usize;
+    while index < args.len() {
+        let arg = &args[index];
         match arg.as_str() {
             "-i" | "--interactive" | "--tui" => mode = RunMode::Tui,
             "--line" | "--repl" => mode = RunMode::LineInteractive,
@@ -132,14 +172,51 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
             "--deny-classical" => policy.deny_classical = true,
             "--json" => output_format = OutputFormat::Json,
             "--hol-shadow" => hol_shadow = true,
+            "--allow-classical" => allow_classical = true,
+            "--allow-axioms" => allow_axioms = true,
+            "--allow-incomplete" => allow_incomplete = true,
+            "--hol-profile" => {
+                index += 1;
+                let profile = parse_hol_profile(args.get(index)?.as_str())?;
+                if hol_profile.replace(profile).is_some() {
+                    return None;
+                }
+            }
+            value if value.starts_with("--hol-profile=") => {
+                let profile = parse_hol_profile(value.split_once('=')?.1)?;
+                if hol_profile.replace(profile).is_some() {
+                    return None;
+                }
+            }
             _ if arg.starts_with('-') => return None,
             _ if path.is_none() => path = Some(PathBuf::from(arg)),
             _ => return None,
         }
+        index += 1;
     }
 
+    if hol_profile.is_none() && (allow_classical || allow_axioms || allow_incomplete) {
+        return None;
+    }
+    if (allow_classical && policy.deny_classical)
+        || (allow_axioms && policy.deny_root_axioms)
+        || (allow_incomplete && policy.deny_sorry)
+    {
+        return None;
+    }
+    let hol_policy = hol_profile.map(|profile| HolTeachingPolicy {
+        profile,
+        allow_classical,
+        allow_axioms,
+        allow_incomplete,
+    });
+    hol_shadow |= hol_policy.is_some();
+
     if mode != RunMode::Check
-        && (!policy.is_empty() || output_format != OutputFormat::Text || hol_shadow)
+        && (!policy.is_empty()
+            || output_format != OutputFormat::Text
+            || hol_shadow
+            || hol_policy.is_some())
     {
         return None;
     }
@@ -150,12 +227,13 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
         policy,
         output_format,
         hol_shadow,
+        hol_policy,
     })
 }
 
 fn print_usage() {
     eprintln!(
-        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] [--hol-shadow] <file.ctea>\n       cetacea --hol-smoke"
+        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] [--hol-shadow] [--hol-profile prop|fol|fol+induction|hol [--allow-classical] [--allow-axioms] [--allow-incomplete]] <file.ctea>\n       cetacea --hol-smoke"
     );
 }
 
@@ -164,8 +242,10 @@ fn run_check(
     policy: CheckPolicy,
     output_format: OutputFormat,
     run_hol_shadow: bool,
+    hol_policy: Option<HolTeachingPolicy>,
 ) -> i32 {
-    let shadow = run_hol_shadow.then(|| check_file_at_path_with_hol_shadow(path));
+    let shadow =
+        (run_hol_shadow || hol_policy.is_some()).then(|| check_file_at_path_with_hol_shadow(path));
     let standalone;
     let result = if let Some(shadow) = &shadow {
         &shadow.legacy
@@ -174,6 +254,11 @@ fn run_check(
         &standalone
     };
     let violations = check_policy_violations(&result, policy);
+    let hol_violations = shadow
+        .as_ref()
+        .zip(hol_policy)
+        .map(|(shadow, policy)| check_hol_policy_violations(shadow, policy))
+        .unwrap_or_default();
     match output_format {
         OutputFormat::Text => {
             print_accepted(&result);
@@ -184,14 +269,23 @@ fn run_check(
             if let Some(shadow) = &shadow {
                 print_hol_shadow(shadow);
             }
+            print_hol_policy_violations(&hol_violations, hol_policy);
         }
         OutputFormat::Json => println!(
             "{}",
-            check_result_json(result, policy, &violations, shadow.as_ref())
+            check_result_json(
+                result,
+                policy,
+                &violations,
+                shadow.as_ref(),
+                hol_policy,
+                &hol_violations,
+            )
         ),
     }
     if diagnostics_have_errors(&result.diagnostics)
         || !violations.is_empty()
+        || !hol_violations.is_empty()
         || shadow.as_ref().is_some_and(|shadow| !shadow.is_match())
     {
         1
@@ -224,6 +318,99 @@ fn print_hol_shadow(report: &HolShadowReport) {
         eprintln!(
             "  {path}{} `{}`: {}",
             mismatch.kind, mismatch.declaration, mismatch.message
+        );
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct HolPolicyViolation {
+    declaration: String,
+    kind: &'static str,
+    message: String,
+}
+
+fn check_hol_policy_violations(
+    report: &HolShadowReport,
+    config: HolTeachingPolicy,
+) -> Vec<HolPolicyViolation> {
+    let mut policy = ReceiptPolicy::new(config.profile);
+    if config.allow_classical {
+        policy.allow_classical();
+    }
+    if config.allow_axioms {
+        policy.allow_any_axiom();
+    }
+    if config.allow_incomplete {
+        policy.allow_incomplete();
+    }
+
+    report
+        .theorems
+        .iter()
+        .filter(|theorem| !theorem.is_imported)
+        .flat_map(|theorem| {
+            policy
+                .check(&theorem.receipt)
+                .into_iter()
+                .map(|violation| HolPolicyViolation {
+                    declaration: theorem.name.clone(),
+                    kind: hol_policy_violation_kind(violation),
+                    message: describe_hol_policy_violation(report, violation),
+                })
+        })
+        .collect()
+}
+
+fn hol_policy_violation_kind(violation: HolReceiptPolicyViolation) -> &'static str {
+    match violation {
+        HolReceiptPolicyViolation::StatementFragmentExceeds { .. } => "statement_fragment",
+        HolReceiptPolicyViolation::DependencyFragmentExceeds { .. } => "dependency_fragment",
+        HolReceiptPolicyViolation::FeatureNotAllowed(_) => "feature",
+        HolReceiptPolicyViolation::FeatureFragmentExceeds { .. } => "feature_fragment",
+        HolReceiptPolicyViolation::TrustedAxiomNotAllowed(_) => "trusted_axiom",
+        HolReceiptPolicyViolation::IncompleteNotAllowed(_) => "incomplete",
+        HolReceiptPolicyViolation::DependencyNotAllowed(_) => "dependency",
+    }
+}
+
+fn describe_hol_policy_violation(
+    report: &HolShadowReport,
+    violation: HolReceiptPolicyViolation,
+) -> String {
+    let named = |id: DeclarationId| {
+        report
+            .receipt_names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("declaration {}", id.0))
+    };
+    match violation {
+        HolReceiptPolicyViolation::TrustedAxiomNotAllowed(id) => {
+            format!("trusted axiom `{}` is not allowed", named(id))
+        }
+        HolReceiptPolicyViolation::IncompleteNotAllowed(id) => {
+            format!("incomplete declaration `{}` is not allowed", named(id))
+        }
+        HolReceiptPolicyViolation::DependencyNotAllowed(id) => {
+            format!("declaration dependency `{}` is not allowed", named(id))
+        }
+        other => other.to_string(),
+    }
+}
+
+fn print_hol_policy_violations(
+    violations: &[HolPolicyViolation],
+    policy: Option<HolTeachingPolicy>,
+) {
+    let Some(policy) = policy else {
+        return;
+    };
+    for violation in violations {
+        eprintln!(
+            "error: HOL policy `{}`: declaration `{}`: {}",
+            policy.profile_label(),
+            violation.declaration,
+            violation.message
         );
     }
 }
@@ -2208,6 +2395,8 @@ fn check_result_json(
     policy: CheckPolicy,
     violations: &[PolicyViolation],
     shadow: Option<&HolShadowReport>,
+    hol_policy: Option<HolTeachingPolicy>,
+    hol_violations: &[HolPolicyViolation],
 ) -> String {
     let theorems = result
         .theorems
@@ -2228,13 +2417,47 @@ fn check_result_json(
         .join(",");
     let ok = !diagnostics_have_errors(&result.diagnostics)
         && violations.is_empty()
+        && hol_violations.is_empty()
         && shadow.is_none_or(HolShadowReport::is_match);
     let shadow = shadow
         .map(|shadow| format!(r#","hol_shadow":{}"#, hol_shadow_json(shadow)))
         .unwrap_or_default();
+    let hol_policy = hol_policy
+        .map(|policy| {
+            let violations = hol_violations
+                .iter()
+                .map(hol_policy_violation_json)
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                r#","hol_policy":{},"hol_policy_violations":[{}]"#,
+                hol_teaching_policy_json(policy),
+                violations,
+            )
+        })
+        .unwrap_or_default();
     format!(
-        r#"{{"ok":{ok},"policy":{{"deny_sorry":{},"deny_root_axioms":{},"deny_classical":{}}},"theorems":[{theorems}],"diagnostics":[{diagnostics}],"policy_violations":[{violations}]{shadow}}}"#,
+        r#"{{"ok":{ok},"policy":{{"deny_sorry":{},"deny_root_axioms":{},"deny_classical":{}}},"theorems":[{theorems}],"diagnostics":[{diagnostics}],"policy_violations":[{violations}]{shadow}{hol_policy}}}"#,
         policy.deny_sorry, policy.deny_root_axioms, policy.deny_classical,
+    )
+}
+
+fn hol_teaching_policy_json(policy: HolTeachingPolicy) -> String {
+    format!(
+        r#"{{"profile":{},"allow_classical":{},"allow_axioms":{},"allow_incomplete":{}}}"#,
+        json_string(policy.profile_label()),
+        policy.allow_classical,
+        policy.allow_axioms,
+        policy.allow_incomplete,
+    )
+}
+
+fn hol_policy_violation_json(violation: &HolPolicyViolation) -> String {
+    format!(
+        r#"{{"kind":{},"declaration":{},"message":{}}}"#,
+        json_string(violation.kind),
+        json_string(&violation.declaration),
+        json_string(&violation.message),
     )
 }
 
@@ -2510,6 +2733,7 @@ mod tests {
         assert_eq!(config.path, PathBuf::from("submission.ctea"));
         assert_eq!(config.output_format, OutputFormat::Json);
         assert!(!config.hol_shadow);
+        assert!(config.hol_policy.is_none());
         assert_eq!(
             config.policy,
             CheckPolicy {
@@ -2536,6 +2760,168 @@ mod tests {
             .expect("HOL shadow arguments should parse");
         assert!(config.hol_shadow);
         assert_eq!(config.output_format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn parse_args_accepts_hol_profiles_and_rejects_conflicting_permissions() {
+        let config = parse_args(&args(&[
+            "--hol-profile",
+            "fol+induction",
+            "--allow-classical",
+            "--allow-axioms",
+            "submission.ctea",
+        ]))
+        .expect("HOL teaching profile should parse");
+        assert!(config.hol_shadow);
+        assert_eq!(
+            config.hol_policy,
+            Some(HolTeachingPolicy {
+                profile: TeachingProfile::FirstOrderInductive,
+                allow_classical: true,
+                allow_axioms: true,
+                allow_incomplete: false,
+            })
+        );
+
+        let inline = parse_args(&args(&["--hol-profile=fol", "submission.ctea"]))
+            .expect("inline HOL profile should parse");
+        assert_eq!(
+            inline.hol_policy.expect("profile").profile,
+            TeachingProfile::FirstOrder
+        );
+        assert!(parse_args(&args(&["--allow-classical", "submission.ctea"])).is_none());
+        assert!(parse_args(&args(&[
+            "--hol-profile",
+            "hol",
+            "--allow-incomplete",
+            "--deny-sorry",
+            "submission.ctea",
+        ]))
+        .is_none());
+        assert!(parse_args(&args(&[
+            "--hol-profile",
+            "fol",
+            "--hol-profile",
+            "hol",
+            "submission.ctea",
+        ]))
+        .is_none());
+    }
+
+    fn hol_policy(profile: TeachingProfile) -> HolTeachingPolicy {
+        HolTeachingPolicy {
+            profile,
+            allow_classical: false,
+            allow_axioms: false,
+            allow_incomplete: false,
+        }
+    }
+
+    #[test]
+    fn hol_profiles_enforce_fragment_boundaries() {
+        let report = cetacea_core::check_file_with_hol_shadow(
+            r#"
+mode constructive
+sort Person
+
+theorem prop_id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem person_refl (x : Person) : x = x := by
+  refl
+
+theorem nat_refl (n : Nat) : n = n := by
+  refl
+"#,
+        );
+        assert!(report.is_match());
+
+        let prop = check_hol_policy_violations(&report, hol_policy(TeachingProfile::Prop));
+        assert_eq!(prop.len(), 2);
+        assert!(prop
+            .iter()
+            .any(|violation| violation.declaration == "person_refl"));
+        assert!(prop
+            .iter()
+            .any(|violation| violation.declaration == "nat_refl"));
+
+        let fol = check_hol_policy_violations(&report, hol_policy(TeachingProfile::FirstOrder));
+        assert_eq!(fol.len(), 1);
+        assert_eq!(fol[0].declaration, "nat_refl");
+        assert_eq!(fol[0].kind, "statement_fragment");
+
+        let induction =
+            check_hol_policy_violations(&report, hol_policy(TeachingProfile::FirstOrderInductive));
+        assert!(induction.is_empty());
+    }
+
+    #[test]
+    fn hol_profiles_separate_fragment_from_classical_trust_and_incompleteness() {
+        let report = cetacea_core::check_file_with_hol_shadow(
+            r#"
+mode classical
+
+axiom trusted : True
+
+theorem excluded_middle (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+
+theorem unfinished : True := by
+  sorry
+"#,
+        );
+        assert!(report.is_match());
+        let strict = check_hol_policy_violations(&report, hol_policy(TeachingProfile::HigherOrder));
+        assert_eq!(strict.len(), 3);
+        assert!(strict.iter().any(|violation| violation.kind == "feature"));
+        assert!(strict
+            .iter()
+            .any(|violation| violation.message.contains("trusted")));
+        assert!(strict
+            .iter()
+            .any(|violation| violation.message.contains("unfinished")));
+
+        let permissive = check_hol_policy_violations(
+            &report,
+            HolTeachingPolicy {
+                profile: TeachingProfile::HigherOrder,
+                allow_classical: true,
+                allow_axioms: true,
+                allow_incomplete: true,
+            },
+        );
+        assert!(permissive.is_empty());
+    }
+
+    #[test]
+    fn hol_profile_checks_only_root_receipts_but_follows_used_imports() {
+        let imports = vec![cetacea_core::VirtualFile {
+            path: "trusted.ctea".to_string(),
+            source: "axiom imported_trust : True\n".to_string(),
+        }];
+        let report = cetacea_core::check_file_with_imports_and_hol_shadow(
+            r#"
+import trusted.ctea
+
+theorem independent (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem uses_imported_trust : True := by
+  exact imported_trust
+"#,
+            &imports,
+        );
+        assert!(report.is_match());
+        let violations = check_hol_policy_violations(&report, hol_policy(TeachingProfile::Prop));
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].declaration, "uses_imported_trust");
+        assert!(violations[0].message.contains("imported_trust"));
     }
 
     #[test]
@@ -2628,7 +3014,7 @@ theorem unfinished : True := by
         );
         let policy = CheckPolicy::strict();
         let violations = check_policy_violations(&result, policy);
-        let json = check_result_json(&result, policy, &violations, None);
+        let json = check_result_json(&result, policy, &violations, None, None, &[]);
         assert!(json.contains(r#""ok":false"#));
         assert!(json.contains(r#""kind":"sorry""#));
         assert!(json.contains(r#""declaration":"unfinished""#));
@@ -2647,10 +3033,42 @@ theorem identity (P : Prop) : P -> P := by
 "#,
         );
         assert!(report.is_match());
-        let json = check_result_json(&report.legacy, CheckPolicy::default(), &[], Some(&report));
+        let json = check_result_json(
+            &report.legacy,
+            CheckPolicy::default(),
+            &[],
+            Some(&report),
+            None,
+            &[],
+        );
         assert!(json.contains(r#""hol_shadow":{"matches":true"#));
         assert!(json.contains(r#""required_fragment":"prop""#));
         assert!(json.contains(r#""name":"identity""#));
+    }
+
+    #[test]
+    fn json_output_includes_named_hol_profile_violations() {
+        let report = cetacea_core::check_file_with_hol_shadow(
+            r#"
+mode constructive
+theorem nat_refl (n : Nat) : n = n := by
+  refl
+"#,
+        );
+        let policy = hol_policy(TeachingProfile::FirstOrder);
+        let violations = check_hol_policy_violations(&report, policy);
+        let json = check_result_json(
+            &report.legacy,
+            CheckPolicy::default(),
+            &[],
+            Some(&report),
+            Some(policy),
+            &violations,
+        );
+        assert!(json.contains(r#""ok":false"#));
+        assert!(json.contains(r#""hol_policy":{"profile":"fol""#));
+        assert!(json.contains(r#""kind":"statement_fragment""#));
+        assert!(json.contains(r#""declaration":"nat_refl""#));
     }
 
     #[test]

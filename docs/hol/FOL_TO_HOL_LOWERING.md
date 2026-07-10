@@ -312,3 +312,7 @@ module at 1,351,837 bytes—2,540 bytes over the prior checkpoint and below the
 1.5 MB review line. Default routing remains a separate decision: passing the
 shadow gate authorizes H5 policy/result integration and cutover evaluation, not
 silent replacement of the legacy authority.
+
+The first native teaching-policy slice raises the CLI artifact to 3,396,656
+bytes. It consumes shadow receipts only in the native frontend, so the
+feature-isolated Wasm module remains 1,351,837 bytes.

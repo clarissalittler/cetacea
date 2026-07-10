@@ -505,14 +505,22 @@ checking, `cetacea_wasm` disables the `hol-shadow` Cargo feature and remains
 
 ### Phase H5 — fragment enforcement and assignment manifests
 
-Status: the parser-independent foundation now exists: least-statement
-classification, direct/transitive dependency sets, feature union, required
-fragment calculation, trust/incompleteness propagation, and profile policy
-checks. H5 still owns integration with theorem elaboration, import provenance,
-manifests, result formats, UI, and countermodel eligibility.
+Status: **first native CLI policy slice implemented.** The shadow report now
+retains kernel-created declaration receipts and stable names. An opt-in
+`--hol-profile prop|fol|fol+induction|hol` checks root declarations with their
+transitive used dependencies; profiles remain constructive, trust-free, and
+complete unless `--allow-classical`, `--allow-axioms`, or
+`--allow-incomplete` is supplied. Text and JSON results name violations, and
+adversarial tests separate fragment level from classical reasoning, trust,
+incompleteness, and unused imports. Ordinary checking remains unchanged. H5
+still owns manifests, fine-grained allowed imports/axioms, Wasm/TUI/browser
+surfaces, and certified countermodel eligibility. At this checkpoint the native
+CLI release is 3,396,656 bytes; the feature-isolated Wasm module is unchanged at
+1,351,837 bytes.
 
 - Implement least-fragment classification and transitive feature receipts.
-- Extend text, JSON, Wasm JSON, TUI, and browser results.
+- Native CLI text/JSON is implemented; extend Wasm JSON, TUI, and browser
+  results after the policy format settles.
 - Add allowed-import and frozen-signature policies.
 - Ensure model search consumes the certified fragment, not an ad hoc syntax
   guess.

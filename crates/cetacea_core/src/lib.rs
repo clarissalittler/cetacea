@@ -1450,6 +1450,7 @@ pub struct HolShadowTheorem {
     pub incomplete_deps: Vec<Name>,
     pub features: Vec<hol::ProofFeature>,
     pub is_imported: bool,
+    pub receipt: hol::DeclarationReceipt,
 }
 
 /// A disagreement encountered while replaying an accepted legacy declaration
@@ -1475,6 +1476,7 @@ pub struct HolShadowReport {
     pub checked_declarations: Vec<HolShadowDeclaration>,
     pub theorems: Vec<HolShadowTheorem>,
     pub mismatches: Vec<HolShadowMismatch>,
+    pub receipt_names: BTreeMap<hol::DeclarationId, Name>,
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -1663,6 +1665,7 @@ pub fn check_source_at_path_with_hol_shadow(
                 checked_declarations: Vec::new(),
                 theorems: Vec::new(),
                 mismatches: Vec::new(),
+                receipt_names: BTreeMap::new(),
             };
         }
     };
@@ -1716,6 +1719,7 @@ fn unavailable_hol_shadow(
             is_imported: false,
             message: format!("could not initialize HOL shadow: {error}"),
         }],
+        receipt_names: BTreeMap::new(),
     }
 }
 
@@ -2419,6 +2423,7 @@ impl FileChecker {
             checked_declarations: shadow.checked_declarations,
             theorems: shadow.theorems,
             mismatches: shadow.mismatches,
+            receipt_names: shadow.receipt_names.into_iter().collect(),
         }
     }
 
@@ -2558,6 +2563,7 @@ impl FileChecker {
             incomplete_deps,
             features,
             is_imported: checked.is_imported,
+            receipt,
         });
     }
 
