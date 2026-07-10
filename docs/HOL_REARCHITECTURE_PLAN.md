@@ -356,8 +356,13 @@ spike elaborator now resolves names immediately to stable core IDs, maintains
 fragment metadata, kernel-checks proofs, and derives induction features from
 checked evidence before constructing receipts. Typed constructor disjointness
 and injectivity are also explicit kernel rules backed by the inductive
-signature. The three full curriculum examples remain to be built on this
-substrate.
+signature. Two of the three full curriculum examples are now executable: the
+list example checks generic
+`All`, `Member`, `Nodup`, `append`, and `length`, while the graph example proves
+constructively that concatenating endpoint-valid paths preserves validity.
+Both produce trust-free `fol+induction` receipts and exercise deliberate type,
+termination, and positivity rejections. Building finite enumeration/cardinality
+evidence is the remaining H3 example.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:

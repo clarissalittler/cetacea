@@ -150,6 +150,7 @@ pub(crate) struct StructuralReductionArm {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StructuralReduction {
+    pub type_parameters: Vec<TypeParameter>,
     pub fixed_parameter_count: usize,
     pub arms: Vec<StructuralReductionArm>,
 }
@@ -484,7 +485,7 @@ fn reduce_structural_application(
 ) -> Result<Option<CoreTerm>, TermError> {
     let mut arguments = Vec::new();
     let head = term_application_spine(application, &mut arguments);
-    let Some(definition_id) = declared_constant_id(head) else {
+    let Some((definition_id, type_arguments)) = declared_constant_head(head) else {
         return Ok(None);
     };
     let Some(definition) = constants.structural_reductions.get(&definition_id) else {
@@ -493,6 +494,17 @@ fn reduce_structural_application(
     if arguments.len() != definition.fixed_parameter_count + 1 {
         return Ok(None);
     }
+    if type_arguments.len() != definition.type_parameters.len() {
+        return Err(TermError::new(
+            "checked structural reduction received inconsistent type arguments",
+        ));
+    }
+    let type_substitution = definition
+        .type_parameters
+        .iter()
+        .zip(type_arguments)
+        .map(|(parameter, argument)| (parameter.id, argument.clone()))
+        .collect::<HashMap<_, _>>();
 
     let fixed_arguments = &arguments[..definition.fixed_parameter_count];
     let scrutinee = arguments[definition.fixed_parameter_count];
@@ -534,9 +546,12 @@ fn reduce_structural_application(
             "checked structural reduction has inconsistent binder metadata",
         ));
     }
-    let mut instantiated = arm.body.clone();
+    let mut instantiated = substitute_term_types(&arm.body, &type_substitution);
     for binder_type in &arm.binder_types {
-        instantiated = CoreTerm::lambda(binder_type.clone(), instantiated);
+        instantiated = CoreTerm::lambda(
+            substitute_core_type(binder_type, &type_substitution),
+            instantiated,
+        );
     }
     for value in values.iter().rev() {
         instantiated = CoreTerm::apply(instantiated, value.clone());
@@ -563,6 +578,102 @@ fn declared_constant_id(term: &CoreTerm) -> Option<ConstantId> {
         CoreTerm::Constant(id) => Some(*id),
         CoreTerm::TypeApplication { constant, .. } => Some(*constant),
         _ => None,
+    }
+}
+
+fn declared_constant_head(term: &CoreTerm) -> Option<(ConstantId, &[CoreType])> {
+    match term {
+        CoreTerm::Constant(id) => Some((*id, &[])),
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } => Some((*constant, arguments)),
+        _ => None,
+    }
+}
+
+fn substitute_core_type(
+    ty: &CoreType,
+    substitution: &HashMap<super::types::TypeParameterId, CoreType>,
+) -> CoreType {
+    match ty {
+        CoreType::Prop => CoreType::Prop,
+        CoreType::Parameter(parameter) => substitution
+            .get(&parameter.id)
+            .cloned()
+            .unwrap_or_else(|| CoreType::Parameter(*parameter)),
+        CoreType::Constructor { id, arguments } => CoreType::constructor(
+            *id,
+            arguments
+                .iter()
+                .map(|argument| substitute_core_type(argument, substitution))
+                .collect(),
+        ),
+        CoreType::Arrow(domain, codomain) => CoreType::arrow(
+            substitute_core_type(domain, substitution),
+            substitute_core_type(codomain, substitution),
+        ),
+        CoreType::Product(left, right) => CoreType::product(
+            substitute_core_type(left, substitution),
+            substitute_core_type(right, substitution),
+        ),
+    }
+}
+
+fn substitute_term_types(
+    term: &CoreTerm,
+    substitution: &HashMap<super::types::TypeParameterId, CoreType>,
+) -> CoreTerm {
+    match term {
+        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => {
+            term.clone()
+        }
+        CoreTerm::TypeApplication {
+            constant,
+            arguments,
+        } => CoreTerm::instantiate_constant(
+            *constant,
+            arguments
+                .iter()
+                .map(|argument| substitute_core_type(argument, substitution))
+                .collect(),
+        ),
+        CoreTerm::Lambda {
+            parameter_type,
+            body,
+        } => CoreTerm::lambda(
+            substitute_core_type(parameter_type, substitution),
+            substitute_term_types(body, substitution),
+        ),
+        CoreTerm::Apply { function, argument } => CoreTerm::apply(
+            substitute_term_types(function, substitution),
+            substitute_term_types(argument, substitution),
+        ),
+        CoreTerm::And(left, right) => CoreTerm::and(
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::Or(left, right) => CoreTerm::or(
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::Implies(premise, conclusion) => CoreTerm::implies(
+            substitute_term_types(premise, substitution),
+            substitute_term_types(conclusion, substitution),
+        ),
+        CoreTerm::Equality { ty, left, right } => CoreTerm::equality(
+            substitute_core_type(ty, substitution),
+            substitute_term_types(left, substitution),
+            substitute_term_types(right, substitution),
+        ),
+        CoreTerm::Forall { domain, body } => CoreTerm::forall(
+            substitute_core_type(domain, substitution),
+            substitute_term_types(body, substitution),
+        ),
+        CoreTerm::Exists { domain, body } => CoreTerm::exists(
+            substitute_core_type(domain, substitution),
+            substitute_term_types(body, substitution),
+        ),
     }
 }
 

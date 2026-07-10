@@ -239,6 +239,7 @@ impl RecursionSignature {
         staged_constants.register_structural_reduction(
             constant,
             StructuralReduction {
+                type_parameters: spec.type_parameters.clone(),
                 fixed_parameter_count: spec.fixed_parameter_types.len(),
                 arms: reduction_arms,
             },
@@ -654,6 +655,56 @@ mod tests {
         assert_eq!(
             normalize(&fixture.types, &fixture.constants, &context, &call),
             Ok(call)
+        );
+    }
+
+    #[test]
+    fn reduction_substitutes_type_arguments_through_branch_annotations() {
+        let mut fixture = fixture();
+        let definition = fixture
+            .recursion
+            .declare(
+                &fixture.types,
+                &mut fixture.constants,
+                &fixture.inductives,
+                StructuralDefinitionSpec {
+                    name: "head_reflexive".to_string(),
+                    type_parameters: vec![fixture.parameter],
+                    datatype: fixture.list,
+                    datatype_arguments: vec![CoreType::Parameter(fixture.parameter)],
+                    fixed_parameter_types: Vec::new(),
+                    result_type: CoreType::Prop,
+                    arms: vec![
+                        StructuralArmSpec::new(fixture.nil, CoreTerm::Truth),
+                        StructuralArmSpec::new(
+                            fixture.cons,
+                            CoreTerm::equality(
+                                CoreType::Parameter(fixture.parameter),
+                                CoreTerm::Bound(0),
+                                CoreTerm::Bound(0),
+                            ),
+                        ),
+                    ],
+                },
+            )
+            .expect("head_reflexive");
+        let singleton = cons(&fixture, CoreTerm::Constant(fixture.zero), nil(&fixture));
+        let call = CoreTerm::apply(
+            CoreTerm::instantiate_constant(definition, vec![fixture.nat.clone()]),
+            singleton,
+        );
+        assert_eq!(
+            normalize(
+                &fixture.types,
+                &fixture.constants,
+                &TermContext::new(),
+                &call,
+            ),
+            Ok(CoreTerm::equality(
+                fixture.nat,
+                CoreTerm::Constant(fixture.zero),
+                CoreTerm::Constant(fixture.zero),
+            ))
         );
     }
 }

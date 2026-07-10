@@ -5,6 +5,7 @@
 //! passed its stop/go gate.
 
 pub mod fragments;
+pub mod h3_examples;
 pub mod inductive;
 pub mod proofs;
 pub mod recursion;
@@ -16,6 +17,9 @@ pub use fragments::{
     classify_statement, proof_features_from_audit, DeclarationId, DeclarationReceipt,
     EvidenceStatus, FragmentError, FragmentMetadata, PolicyViolation, ProofFeature, ProofReceipt,
     ReceiptPolicy, StatementFragment, TeachingProfile,
+};
+pub use h3_examples::{
+    run_graph_h3_spike, run_list_h3_spike, H3GraphSpikeReport, H3ListSpikeReport,
 };
 pub use inductive::{
     InductiveConstructor, InductiveConstructorSpec, InductiveDeclaration, InductiveError,
