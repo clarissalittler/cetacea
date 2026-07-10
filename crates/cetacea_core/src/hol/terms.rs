@@ -481,6 +481,14 @@ impl TermContext {
         self
     }
 
+    pub(crate) fn depth(&self) -> usize {
+        self.bound.len()
+    }
+
+    pub(crate) fn nearest_types(&self) -> &[CoreType] {
+        &self.bound
+    }
+
     fn lookup(&self, index: u32) -> Result<&CoreType, TermError> {
         self.bound.get(index as usize).ok_or_else(|| {
             TermError::new(format!(
@@ -1387,6 +1395,14 @@ pub(crate) fn instantiate_term_parameters(
     arguments: &[CoreTerm],
 ) -> Result<CoreTerm, TermError> {
     instantiate_term_parameters_at_depth(term, arguments, 0)
+}
+
+pub(crate) fn instantiate_term_parameters_under_binders(
+    term: &CoreTerm,
+    arguments: &[CoreTerm],
+    binder_depth: u32,
+) -> Result<CoreTerm, TermError> {
+    instantiate_term_parameters_at_depth(term, arguments, binder_depth)
 }
 
 fn instantiate_term_parameters_at_depth(

@@ -306,7 +306,7 @@ mod tests {
             report.facade_required,
             StatementFragment::FirstOrderInductive
         );
-        assert_eq!(report.polymorphic_required, StatementFragment::HigherOrder);
+        assert_eq!(report.polymorphic_required, StatementFragment::FirstOrder);
         assert_eq!(report.product_required, StatementFragment::FirstOrder);
         assert_eq!(report.set_required, StatementFragment::FirstOrder);
         assert_eq!(report.axiom_dependencies, 0);

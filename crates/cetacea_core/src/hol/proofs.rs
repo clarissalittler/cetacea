@@ -3,12 +3,13 @@ use std::fmt;
 
 use super::inductive::{InductiveError, InductiveSignature};
 use super::terms::{
-    definitionally_equal, infer_type, instantiate_binder, normalize, shift_under_new_binder,
-    term_constant_dependencies, validate_term_type_scheme, ConstantId, CoreTerm, TermContext,
-    TermError, TermSignature,
+    definitionally_equal, infer_type, instantiate_binder,
+    instantiate_term_parameters_under_binders, instantiate_term_type_scheme, normalize,
+    shift_under_new_binder, term_constant_dependencies, validate_term_type_scheme, ConstantId,
+    CoreTerm, TermContext, TermError, TermSignature,
 };
 use super::theorems::{HolTheoremSignature, TheoremError, TheoremId};
-use super::types::{CoreType, TypeConstructorId, TypeError, TypeSignature};
+use super::types::{CoreType, TypeConstructorId, TypeError, TypeParameter, TypeSignature};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HolDraftProof {
@@ -107,6 +108,113 @@ pub enum HolDraftProof {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HolKernelProof(HolDraftProof);
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HolTheoremReferenceAudit {
+    theorem: TheoremId,
+    type_arguments: Vec<CoreType>,
+    term_arguments: Vec<CoreTerm>,
+    instantiated_statement: CoreTerm,
+    term_context: TermContext,
+}
+
+impl HolTheoremReferenceAudit {
+    pub fn theorem(&self) -> TheoremId {
+        self.theorem
+    }
+
+    pub fn type_arguments(&self) -> &[CoreType] {
+        &self.type_arguments
+    }
+
+    pub fn term_arguments(&self) -> &[CoreTerm] {
+        &self.term_arguments
+    }
+
+    pub fn instantiated_statement(&self) -> &CoreTerm {
+        &self.instantiated_statement
+    }
+
+    pub fn term_context(&self) -> &TermContext {
+        &self.term_context
+    }
+
+    pub(crate) fn specialize_outer_parameters(
+        &self,
+        types: &TypeSignature,
+        outer_type_parameters: &[TypeParameter],
+        outer_term_parameter_count: usize,
+        outer_type_arguments: &[CoreType],
+        outer_term_arguments: &[CoreTerm],
+        outer_context: &TermContext,
+    ) -> Result<Self, ProofError> {
+        if outer_term_arguments.len() != outer_term_parameter_count {
+            return Err(ProofError::new(
+                "checked theorem instance has inconsistent term argument metadata",
+            ));
+        }
+        let local_depth = self
+            .term_context
+            .depth()
+            .checked_sub(outer_term_parameter_count)
+            .ok_or_else(|| {
+                ProofError::new(
+                    "checked theorem reference context is shallower than its template parameters",
+                )
+            })?;
+        let local_depth_u32 = u32::try_from(local_depth)
+            .map_err(|_| ProofError::new("theorem reference binder depth exceeds core limits"))?;
+        let instantiate_term = |term: &CoreTerm| -> Result<CoreTerm, ProofError> {
+            let term = instantiate_term_type_scheme(
+                types,
+                outer_type_parameters,
+                term,
+                outer_type_arguments,
+            )?;
+            Ok(instantiate_term_parameters_under_binders(
+                &term,
+                outer_term_arguments,
+                local_depth_u32,
+            )?)
+        };
+        let type_arguments = self
+            .type_arguments
+            .iter()
+            .map(|argument| {
+                types
+                    .instantiate_scheme(outer_type_parameters, argument, outer_type_arguments)
+                    .map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>, ProofError>>()?;
+        let term_arguments = self
+            .term_arguments
+            .iter()
+            .map(instantiate_term)
+            .collect::<Result<Vec<_>, _>>()?;
+        let instantiated_statement = instantiate_term(&self.instantiated_statement)?;
+        let local_types = self.term_context.nearest_types()[..local_depth]
+            .iter()
+            .map(|ty| {
+                types
+                    .instantiate_scheme(outer_type_parameters, ty, outer_type_arguments)
+                    .map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>, ProofError>>()?;
+        let term_context = local_types
+            .iter()
+            .rev()
+            .fold(outer_context.clone(), |context, ty| {
+                context.with_bound(ty.clone())
+            });
+        Ok(Self {
+            theorem: self.theorem,
+            type_arguments,
+            term_arguments,
+            instantiated_statement,
+            term_context,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HolProofAudit {
     uses_induction: bool,
@@ -114,6 +222,7 @@ pub struct HolProofAudit {
     has_holes: bool,
     theorem_dependencies: BTreeSet<TheoremId>,
     constant_dependencies: BTreeSet<ConstantId>,
+    theorem_references: Vec<HolTheoremReferenceAudit>,
 }
 
 impl HolProofAudit {
@@ -135,6 +244,18 @@ impl HolProofAudit {
 
     pub fn constant_dependencies(&self) -> &BTreeSet<ConstantId> {
         &self.constant_dependencies
+    }
+
+    pub fn theorem_references(&self) -> &[HolTheoremReferenceAudit] {
+        &self.theorem_references
+    }
+
+    fn with_theorem_references(
+        mut self,
+        theorem_references: Vec<HolTheoremReferenceAudit>,
+    ) -> Self {
+        self.theorem_references = theorem_references;
+        self
     }
 }
 
@@ -273,7 +394,7 @@ pub fn check_hol_proof_audit(
     proof: &HolKernelProof,
     expected: &CoreTerm,
 ) -> Result<HolProofAudit, ProofError> {
-    check_hol_proof_internal(
+    let theorem_references = check_hol_proof_internal(
         types,
         constants,
         None,
@@ -283,7 +404,7 @@ pub fn check_hol_proof_audit(
         proof,
         expected,
     )?;
-    Ok(audit_proof(&proof.0))
+    Ok(audit_proof(&proof.0).with_theorem_references(theorem_references))
 }
 
 pub fn check_hol_proof_with_inductives(
@@ -316,7 +437,7 @@ pub fn check_hol_proof_with_inductives_audit(
     proof: &HolKernelProof,
     expected: &CoreTerm,
 ) -> Result<HolProofAudit, ProofError> {
-    check_hol_proof_internal(
+    let theorem_references = check_hol_proof_internal(
         types,
         constants,
         Some(inductives),
@@ -326,7 +447,7 @@ pub fn check_hol_proof_with_inductives_audit(
         proof,
         expected,
     )?;
-    Ok(audit_proof(&proof.0))
+    Ok(audit_proof(&proof.0).with_theorem_references(theorem_references))
 }
 
 pub fn check_hol_proof_with_signatures_audit(
@@ -339,7 +460,7 @@ pub fn check_hol_proof_with_signatures_audit(
     proof: &HolKernelProof,
     expected: &CoreTerm,
 ) -> Result<HolProofAudit, ProofError> {
-    check_hol_proof_internal(
+    let theorem_references = check_hol_proof_internal(
         types,
         constants,
         Some(inductives),
@@ -349,7 +470,7 @@ pub fn check_hol_proof_with_signatures_audit(
         proof,
         expected,
     )?;
-    Ok(audit_proof(&proof.0))
+    Ok(audit_proof(&proof.0).with_theorem_references(theorem_references))
 }
 
 pub(crate) fn check_hol_draft_with_signatures_audit(
@@ -369,18 +490,20 @@ pub(crate) fn check_hol_draft_with_signatures_audit(
         expected,
         "draft proof target",
     )?;
+    let mut theorem_references = Vec::new();
     check_draft(
         types,
         constants,
         Some(inductives),
         Some(theorems),
         EvidenceBoundary::Draft,
+        &mut theorem_references,
         term_context,
         proof_context,
         proof,
         expected,
     )?;
-    Ok(audit_proof(proof))
+    Ok(audit_proof(proof).with_theorem_references(theorem_references))
 }
 
 fn check_hol_proof_internal(
@@ -392,20 +515,22 @@ fn check_hol_proof_internal(
     proof_context: &HolProofContext,
     proof: &HolKernelProof,
     expected: &CoreTerm,
-) -> Result<(), ProofError> {
+) -> Result<Vec<HolTheoremReferenceAudit>, ProofError> {
     expect_proposition(types, constants, term_context, expected, "proof target")?;
+    let mut theorem_references = Vec::new();
     let actual = infer_proof(
         types,
         constants,
         inductives,
         theorems,
         EvidenceBoundary::Kernel,
+        &mut theorem_references,
         term_context,
         proof_context,
         &proof.0,
     )?;
     if proposition_equal(types, constants, term_context, &actual, expected)? {
-        Ok(())
+        Ok(theorem_references)
     } else {
         Err(ProofError::new(format!(
             "proof establishes `{actual:?}`, but expected `{expected:?}`"
@@ -419,6 +544,7 @@ fn infer_proof(
     inductives: Option<&InductiveSignature>,
     theorems: Option<&HolTheoremSignature>,
     boundary: EvidenceBoundary,
+    theorem_references: &mut Vec<HolTheoremReferenceAudit>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -453,6 +579,13 @@ fn infer_proof(
                     term_arguments,
                 ),
             }?;
+            theorem_references.push(HolTheoremReferenceAudit {
+                theorem: *theorem,
+                type_arguments: type_arguments.clone(),
+                term_arguments: term_arguments.clone(),
+                instantiated_statement: statement.clone(),
+                term_context: term_context.clone(),
+            });
             Ok(statement)
         }
         HolDraftProof::TruthIntro => Ok(CoreTerm::Truth),
@@ -466,6 +599,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_false,
@@ -487,6 +621,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 left,
@@ -497,6 +632,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 right,
@@ -509,6 +645,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_and,
@@ -527,6 +664,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_and,
@@ -547,6 +685,7 @@ fn infer_proof(
                     inductives,
                     theorems,
                     boundary,
+                    theorem_references,
                     term_context,
                     proof_context,
                     proof_left,
@@ -564,6 +703,7 @@ fn infer_proof(
                     inductives,
                     theorems,
                     boundary,
+                    theorem_references,
                     term_context,
                     proof_context,
                     proof_right,
@@ -589,6 +729,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_or,
@@ -610,6 +751,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 &left_context,
                 left_case,
@@ -621,6 +763,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 &right_context,
                 right_case,
@@ -641,6 +784,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 &body_context,
                 body,
@@ -657,6 +801,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_implication,
@@ -672,6 +817,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_argument,
@@ -694,6 +840,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -722,6 +869,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_left,
@@ -746,6 +894,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -784,6 +933,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -831,6 +981,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 &body_term_context,
                 &body_proof_context,
                 body,
@@ -847,6 +998,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_forall,
@@ -887,6 +1039,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_body,
@@ -912,6 +1065,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_exists,
@@ -939,6 +1093,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 &body_term_context,
                 &body_proof_context,
                 body,
@@ -1042,6 +1197,7 @@ fn infer_proof(
                     inductives,
                     theorems,
                     boundary,
+                    theorem_references,
                     &case_term_context,
                     &case_proof_context,
                     case,
@@ -1087,6 +1243,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 proof_context,
                 proof_not_not,
@@ -1114,6 +1271,7 @@ fn infer_proof(
                 inductives,
                 theorems,
                 boundary,
+                theorem_references,
                 term_context,
                 &body_context,
                 body,
@@ -1198,6 +1356,7 @@ fn check_draft(
     inductives: Option<&InductiveSignature>,
     theorems: Option<&HolTheoremSignature>,
     boundary: EvidenceBoundary,
+    theorem_references: &mut Vec<HolTheoremReferenceAudit>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -1209,6 +1368,7 @@ fn check_draft(
         inductives,
         theorems,
         boundary,
+        theorem_references,
         term_context,
         proof_context,
         proof,
@@ -1228,6 +1388,7 @@ fn normalized_proof_formula(
     inductives: Option<&InductiveSignature>,
     theorems: Option<&HolTheoremSignature>,
     boundary: EvidenceBoundary,
+    theorem_references: &mut Vec<HolTheoremReferenceAudit>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -1238,6 +1399,7 @@ fn normalized_proof_formula(
         inductives,
         theorems,
         boundary,
+        theorem_references,
         term_context,
         proof_context,
         proof,
@@ -1345,6 +1507,7 @@ fn audit_proof(proof: &HolDraftProof) -> HolProofAudit {
         has_holes: proof_has_hole(proof),
         theorem_dependencies,
         constant_dependencies,
+        theorem_references: Vec::new(),
     }
 }
 

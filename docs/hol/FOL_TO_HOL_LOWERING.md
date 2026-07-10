@@ -220,10 +220,16 @@ These are compatibility prerequisites, not optional language expansion:
    declaration lowering is still required.
 7. **Explicit classical evidence.** The three core rules and transitive
    `Classical` feature are implemented; legacy tactic lowering remains.
-8. **Instance-aware definition/theorem receipts.** Schematic declarations must
-   not taint a first-order instance merely because a parameter could later be
-   instantiated at a higher-order type, while actual HOL dependencies must
-   still propagate.
+8. **Instance-aware definition/theorem receipts.** Implemented in the H4a core.
+   Every checked theorem reference records its instantiated statement and exact
+   local term context. The dependency receipt reclassifies that statement while
+   preserving the declaration's status, proof features, axioms, incomplete
+   dependencies, and transitive closure. Thus an unrestricted generic identity
+   is abstractly HOL, its `Nat` instance contributes only FOL, and its predicate
+   instance still contributes HOL. Nested generic theorem references are
+   recursively re-specialized, including references underneath local binders.
+   Definition bodies normalize at their actual use and retain their transitive
+   receipts. Surface reference lowering remains.
 
 The positive corpus's user datatypes (`List` and `Tree`) use only direct,
 strictly positive recursion, so the H3 inductive subset is sufficient. The

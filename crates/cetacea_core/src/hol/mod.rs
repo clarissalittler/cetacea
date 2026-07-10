@@ -33,7 +33,7 @@ pub use linked_smoke::{run_linked_hol_smoke, LinkedHolSmokeReport};
 pub use proofs::{
     check_hol_proof, check_hol_proof_audit, check_hol_proof_with_inductives,
     check_hol_proof_with_inductives_audit, check_hol_proof_with_signatures_audit, HolDraftProof,
-    HolKernelProof, HolProofAudit, HolProofContext, ProofError,
+    HolKernelProof, HolProofAudit, HolProofContext, HolTheoremReferenceAudit, ProofError,
 };
 pub use recursion::{
     RecursionError, RecursionSignature, StructuralArmLayout, StructuralArmSpec,

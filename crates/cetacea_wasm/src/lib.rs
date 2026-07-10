@@ -507,7 +507,7 @@ mod tests {
             json.contains(r#""facade_required":"fol+induction""#),
             "{json}"
         );
-        assert!(json.contains(r#""polymorphic_required":"hol""#), "{json}");
+        assert!(json.contains(r#""polymorphic_required":"fol""#), "{json}");
         assert!(json.contains(r#""product_required":"fol""#), "{json}");
         assert!(json.contains(r#""set_required":"fol""#), "{json}");
         assert!(json.contains(r#""axioms":0"#), "{json}");

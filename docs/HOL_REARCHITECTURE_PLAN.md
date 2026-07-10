@@ -448,6 +448,14 @@ subset computations—including powersets, Cartesian products, and capture-safe
 comprehensions—are definitional. Set extensionality remains an explicit trusted
 axiom and taints every transitive user; the linked smoke checks that its theorem
 still has an FOL statement receipt alongside that separate trust evidence.
+Theorem dependency receipts are now instance-aware. Proof checking records the
+fully instantiated referenced statement together with its local de Bruijn term
+context; receipt derivation recomputes only that statement fragment and keeps
+all trust, incompleteness, feature, and transitive-dependency evidence. This
+removes false HOL taint from concrete first-order uses without opening a
+dependency-laundering path. Specialization recurses through generic theorem
+wrappers and reconstructs nested binder contexts rather than trusting the
+generic declaration's conservative fragment.
 
 - Lower existing `sort`, `const`, `func`, `pred`, `def`, theorem parameters,
   formulas, predicate lambdas, and proof expressions into the new core.

@@ -10,16 +10,16 @@ use std::fmt;
 
 use super::fragments::{
     classify_statement, proof_features_from_audit, DeclarationId, DeclarationReceipt,
-    FragmentError, FragmentMetadata, ProofFeature, StatementFragment,
+    EvidenceStatus, FragmentError, FragmentMetadata, ProofFeature, StatementFragment,
 };
 use super::inductive::{InductiveError, InductiveSignature, InductiveSpec};
-use super::proofs::{HolDraftProof, HolKernelProof, ProofError};
+use super::proofs::{HolDraftProof, HolKernelProof, HolProofAudit, ProofError};
 use super::recursion::{RecursionError, RecursionSignature, StructuralDefinitionSpec};
 use super::terms::{
     infer_type, term_constant_dependencies, ConstantId, CoreTerm, TermContext, TermError,
     TermSignature,
 };
-use super::theorems::{HolTheoremSignature, TheoremError, TheoremId};
+use super::theorems::{HolTheoremSignature, HolTheoremStatus, TheoremError, TheoremId};
 use super::types::{CoreType, TypeConstructorId, TypeError, TypeParameter, TypeSignature};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -125,6 +125,119 @@ impl SpikeElaborator {
 
     pub fn definition_receipt(&self, id: ConstantId) -> Option<&DeclarationReceipt> {
         self.definition_receipts.get(&id)
+    }
+
+    fn theorem_dependency_receipts(
+        &self,
+        audit: &HolProofAudit,
+    ) -> Result<Vec<DeclarationReceipt>, SpikeError> {
+        self.validate_theorem_reference_audit(audit)?;
+        audit
+            .theorem_references()
+            .iter()
+            .map(|reference| self.theorem_instance_receipt(reference))
+            .collect()
+    }
+
+    fn validate_theorem_reference_audit(&self, audit: &HolProofAudit) -> Result<(), SpikeError> {
+        let traced = audit
+            .theorem_references()
+            .iter()
+            .map(|reference| reference.theorem())
+            .collect::<std::collections::BTreeSet<_>>();
+        if &traced != audit.theorem_dependencies() {
+            Err(SpikeError::new(
+                "checked theorem reference audit is inconsistent with dependency IDs",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn theorem_instance_receipt(
+        &self,
+        reference: &super::proofs::HolTheoremReferenceAudit,
+    ) -> Result<DeclarationReceipt, SpikeError> {
+        let base_receipt = self
+            .theorem_receipts
+            .get(&reference.theorem())
+            .ok_or_else(|| {
+                SpikeError::new(format!(
+                    "theorem dependency `{}` has no receipt",
+                    reference.theorem().0
+                ))
+            })?;
+        let declaration = self
+            .theorems
+            .declaration(reference.theorem())
+            .ok_or_else(|| {
+                SpikeError::new(format!(
+                    "theorem dependency `{}` has no declaration",
+                    reference.theorem().0
+                ))
+            })?;
+        let status_matches = matches!(
+            (declaration.status, base_receipt.status()),
+            (HolTheoremStatus::Checked, EvidenceStatus::Checked)
+                | (HolTheoremStatus::Incomplete, EvidenceStatus::Incomplete)
+                | (HolTheoremStatus::TrustedAxiom, EvidenceStatus::TrustedAxiom)
+        );
+        if !status_matches {
+            return Err(SpikeError::new(
+                "theorem declaration and receipt statuses are inconsistent",
+            ));
+        }
+        self.validate_theorem_reference_audit(&declaration.audit)?;
+
+        let mut dependencies = declaration
+            .audit
+            .theorem_references()
+            .iter()
+            .map(|nested| {
+                let nested = nested.specialize_outer_parameters(
+                    &self.types,
+                    &declaration.type_parameters,
+                    declaration.term_parameters.len(),
+                    reference.type_arguments(),
+                    reference.term_arguments(),
+                    reference.term_context(),
+                )?;
+                self.theorem_instance_receipt(&nested)
+            })
+            .collect::<Result<Vec<_>, SpikeError>>()?;
+        dependencies.extend(
+            declaration
+                .direct_constant_dependencies
+                .iter()
+                .filter_map(|constant| self.definition_receipts.get(constant).cloned()),
+        );
+        let fragment = classify_statement(
+            &self.types,
+            &self.constants,
+            reference.term_context(),
+            &self.fragments,
+            reference.instantiated_statement(),
+        )?;
+        let receipt = match declaration.status {
+            HolTheoremStatus::Checked => DeclarationReceipt::checked(
+                base_receipt.id(),
+                fragment,
+                proof_features_from_audit(declaration.audit.clone()),
+                dependencies.iter(),
+            ),
+            HolTheoremStatus::Incomplete => DeclarationReceipt::incomplete_with_dependencies(
+                base_receipt.id(),
+                fragment,
+                proof_features_from_audit(declaration.audit.clone()),
+                dependencies.iter(),
+            ),
+            HolTheoremStatus::TrustedAxiom => DeclarationReceipt::trusted_axiom_with_dependencies(
+                base_receipt.id(),
+                fragment,
+                dependencies.iter(),
+            ),
+        };
+        Ok(receipt)
     }
 
     pub fn declare_base_type(
@@ -347,21 +460,7 @@ impl SpikeElaborator {
         let declaration = staged_theorems
             .declaration(theorem)
             .expect("a newly checked theorem is stored");
-        let mut dependency_receipts = declaration
-            .direct_dependencies
-            .iter()
-            .map(|dependency| {
-                self.theorem_receipts
-                    .get(dependency)
-                    .cloned()
-                    .ok_or_else(|| {
-                        SpikeError::new(format!(
-                            "checked theorem dependency `{}` has no receipt",
-                            dependency.0
-                        ))
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut dependency_receipts = self.theorem_dependency_receipts(&declaration.audit)?;
         dependency_receipts.extend(
             declaration
                 .direct_constant_dependencies
@@ -436,21 +535,7 @@ impl SpikeElaborator {
         let declaration = staged_theorems
             .declaration(theorem)
             .expect("a newly checked incomplete theorem is stored");
-        let mut dependency_receipts = declaration
-            .direct_dependencies
-            .iter()
-            .map(|dependency| {
-                self.theorem_receipts
-                    .get(dependency)
-                    .cloned()
-                    .ok_or_else(|| {
-                        SpikeError::new(format!(
-                            "incomplete theorem dependency `{}` has no receipt",
-                            dependency.0
-                        ))
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut dependency_receipts = self.theorem_dependency_receipts(&declaration.audit)?;
         dependency_receipts.extend(
             declaration
                 .direct_constant_dependencies
@@ -889,6 +974,191 @@ mod tests {
         assert_eq!(
             instance_receipt.proof().direct_dependencies(),
             &std::collections::BTreeSet::from([template_receipt.id()])
+        );
+    }
+
+    #[test]
+    fn theorem_dependencies_are_classified_at_their_actual_instance() {
+        let mut elaborator = SpikeElaborator::new();
+        let nat_id = elaborator.declare_base_type("Nat", true).expect("Nat");
+        let nat = CoreType::constructor(nat_id, Vec::new());
+        let zero = elaborator
+            .declare_constant("zero", nat.clone())
+            .expect("zero");
+        let parameter = TypeParameter::any(66);
+        let (identity, generic_receipt) = elaborator
+            .declare_theorem_with_parameters(
+                "identity",
+                vec![parameter],
+                vec![CoreType::Parameter(parameter)],
+                CoreTerm::equality(
+                    CoreType::Parameter(parameter),
+                    CoreTerm::Bound(0),
+                    CoreTerm::Bound(0),
+                ),
+                HolDraftProof::EqualityRefl(CoreTerm::Bound(0)),
+            )
+            .expect("unrestricted generic identity");
+        assert_eq!(
+            generic_receipt.proof().required_fragment(),
+            StatementFragment::HigherOrder
+        );
+        let (identity_wrapper, wrapper_receipt) = elaborator
+            .declare_theorem_with_parameters(
+                "identity_wrapper",
+                vec![parameter],
+                vec![CoreType::Parameter(parameter)],
+                CoreTerm::equality(
+                    CoreType::Parameter(parameter),
+                    CoreTerm::Bound(0),
+                    CoreTerm::Bound(0),
+                ),
+                HolDraftProof::TheoremRef {
+                    theorem: identity,
+                    type_arguments: vec![CoreType::Parameter(parameter)],
+                    term_arguments: vec![CoreTerm::Bound(0)],
+                },
+            )
+            .expect("generic identity wrapper");
+        assert_eq!(
+            wrapper_receipt.proof().required_fragment(),
+            StatementFragment::HigherOrder
+        );
+        let generic_quantified_statement = CoreTerm::forall(
+            CoreType::Parameter(parameter),
+            CoreTerm::equality(
+                CoreType::Parameter(parameter),
+                CoreTerm::Bound(0),
+                CoreTerm::Bound(0),
+            ),
+        );
+        let (generic_all_identity, generic_all_receipt) = elaborator
+            .declare_theorem(
+                "all_identity",
+                vec![parameter],
+                generic_quantified_statement,
+                HolDraftProof::ForallIntro {
+                    domain: CoreType::Parameter(parameter),
+                    body: Box::new(HolDraftProof::TheoremRef {
+                        theorem: identity,
+                        type_arguments: vec![CoreType::Parameter(parameter)],
+                        term_arguments: vec![CoreTerm::Bound(0)],
+                    }),
+                },
+            )
+            .expect("generic theorem reference under a local binder");
+        assert_eq!(
+            generic_all_receipt.proof().required_fragment(),
+            StatementFragment::HigherOrder
+        );
+
+        let (_, nat_receipt) = elaborator
+            .declare_theorem(
+                "zero_identity",
+                Vec::new(),
+                CoreTerm::equality(
+                    nat.clone(),
+                    CoreTerm::Constant(zero),
+                    CoreTerm::Constant(zero),
+                ),
+                HolDraftProof::TheoremRef {
+                    theorem: identity,
+                    type_arguments: vec![nat.clone()],
+                    term_arguments: vec![CoreTerm::Constant(zero)],
+                },
+            )
+            .expect("first-order identity instance");
+        assert_eq!(
+            nat_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+        let (_, wrapped_nat_receipt) = elaborator
+            .declare_theorem(
+                "wrapped_zero_identity",
+                Vec::new(),
+                CoreTerm::equality(
+                    nat.clone(),
+                    CoreTerm::Constant(zero),
+                    CoreTerm::Constant(zero),
+                ),
+                HolDraftProof::TheoremRef {
+                    theorem: identity_wrapper,
+                    type_arguments: vec![nat.clone()],
+                    term_arguments: vec![CoreTerm::Constant(zero)],
+                },
+            )
+            .expect("transitive generic dependencies specialize at Nat");
+        assert_eq!(
+            wrapped_nat_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+        let quantified_statement = CoreTerm::forall(
+            nat.clone(),
+            CoreTerm::equality(nat.clone(), CoreTerm::Bound(0), CoreTerm::Bound(0)),
+        );
+        let (_, quantified_receipt) = elaborator
+            .declare_theorem(
+                "all_nat_identity",
+                Vec::new(),
+                quantified_statement,
+                HolDraftProof::ForallIntro {
+                    domain: nat.clone(),
+                    body: Box::new(HolDraftProof::TheoremRef {
+                        theorem: identity,
+                        type_arguments: vec![nat.clone()],
+                        term_arguments: vec![CoreTerm::Bound(0)],
+                    }),
+                },
+            )
+            .expect("instance audit retains the local binder context");
+        assert_eq!(
+            quantified_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+        let concrete_all_statement = CoreTerm::forall(
+            nat.clone(),
+            CoreTerm::equality(nat.clone(), CoreTerm::Bound(0), CoreTerm::Bound(0)),
+        );
+        let (_, specialized_all_receipt) = elaborator
+            .declare_theorem(
+                "all_nat_identity_via_generic",
+                Vec::new(),
+                concrete_all_statement,
+                HolDraftProof::TheoremRef {
+                    theorem: generic_all_identity,
+                    type_arguments: vec![nat.clone()],
+                    term_arguments: Vec::new(),
+                },
+            )
+            .expect("transitive instance specialization retains nested binders");
+        assert_eq!(
+            specialized_all_receipt.proof().required_fragment(),
+            StatementFragment::FirstOrder
+        );
+
+        let predicate_type = CoreType::arrow(nat, CoreType::Prop);
+        let predicate = elaborator
+            .declare_constant("P", predicate_type.clone())
+            .expect("P");
+        let (_, predicate_receipt) = elaborator
+            .declare_theorem(
+                "predicate_identity",
+                Vec::new(),
+                CoreTerm::equality(
+                    predicate_type.clone(),
+                    CoreTerm::Constant(predicate),
+                    CoreTerm::Constant(predicate),
+                ),
+                HolDraftProof::TheoremRef {
+                    theorem: identity,
+                    type_arguments: vec![predicate_type],
+                    term_arguments: vec![CoreTerm::Constant(predicate)],
+                },
+            )
+            .expect("higher-order identity instance");
+        assert_eq!(
+            predicate_receipt.proof().required_fragment(),
+            StatementFragment::HigherOrder
         );
     }
 
