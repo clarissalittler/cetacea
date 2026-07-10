@@ -313,7 +313,9 @@ can run per module.
 
 Status: `hol::types` now defines resolved simple types, stable constructor and
 parameter IDs, constructor-arity validation, and conservative first-order
-domain classification. Core terms and proof checking have not begun.
+domain classification. `hol::terms` adds resolved constants, de Bruijn binders,
+typed lambdas/application, capture-avoiding beta substitution, and checked
+normalization. Logical constants and proof checking have not begun.
 
 - Add `CoreType` and typed `CoreTerm` without deleting the old AST.
 - Implement capture-avoiding substitution, alpha-equivalence, beta reduction,
