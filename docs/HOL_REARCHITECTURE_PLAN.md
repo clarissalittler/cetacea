@@ -340,6 +340,11 @@ ill-typed terms, capture bugs, and disallowed classical steps are rejected.
 
 ### Phase H3 — inductive and polymorphic spike
 
+Decision: **conditional go for a bounded H3.5 bridge; H4 is not yet
+authorized.** See [`hol/H3_DECISION_REPORT.md`](hol/H3_DECISION_REPORT.md) for
+the executable examples, measurements, gate assessment, and remaining theorem
+reference/dependency-discovery work.
+
 Status: the checked declaration substrate now supports transactional,
 parameterized inductive types and explicit polymorphic constructor schemes.
 It derives first-order preservation from constructor fields, records direct
