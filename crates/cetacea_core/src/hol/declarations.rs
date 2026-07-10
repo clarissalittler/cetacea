@@ -1,9 +1,12 @@
 //! Transactional lowering of legacy declarations into the parallel HOL core.
 //!
-//! Imports and production-driver integration deliberately remain outside this
-//! module. The parser-independent path now covers resolved signatures, user
-//! datatypes, transparent/structural definitions, theorem status boundaries,
-//! and every legacy proof-object variant.
+//! This module remains parser-independent: the production driver supplies
+//! canonical declarations after ordinary legacy name resolution. The opt-in
+//! HOL shadow runner owns one persistent elaborator across commands, imports,
+//! and aliases, while this layer transactionally covers resolved signatures,
+//! user datatypes, transparent/structural definitions, theorem status
+//! boundaries, every legacy proof-object variant, and checked compatibility
+//! conversion.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -636,10 +639,9 @@ impl CompatibilityElaborator {
         Ok((theorem, receipt))
     }
 
-    /// Lower the constructive propositional/equality subset of a legacy proof
-    /// object and store the resulting checked theorem transactionally.
-    /// Quantifier, induction, existential, and rewrite evidence currently
-    /// returns a precise unsupported-node error.
+    /// Lower a complete legacy proof object and store the resulting checked
+    /// theorem transactionally. Legacy arithmetic conversion is reconstructed
+    /// from checked compatibility theorems rather than admitted as reduction.
     pub fn declare_legacy_checked_theorem(
         &mut self,
         name: impl Into<String>,
@@ -866,6 +868,21 @@ fn abstract_term(parameters: &[CoreType], body: CoreTerm) -> CoreTerm {
 struct LoweredLegacyProof {
     proof: HolDraftProof,
     proposition: CoreTerm,
+}
+
+#[derive(Clone)]
+struct CompatibilityArithmeticRewrite {
+    ty: CoreType,
+    from: CoreTerm,
+    to: CoreTerm,
+    proof: HolDraftProof,
+}
+
+#[derive(Clone)]
+struct CompatibilityArithmeticStep {
+    before: CoreTerm,
+    after: CoreTerm,
+    rewrite: CompatibilityArithmeticRewrite,
 }
 
 #[derive(Clone)]
@@ -1140,23 +1157,37 @@ impl LegacyProofLowerer<'_> {
                         proposition: target,
                     });
                 }
-                Err(LoweringError::new(
-                    "cannot reconstruct the legacy equality rewrite as a single explicit HOL motive",
-                ))
+                if definitionally_equal(
+                    self.environment.core.types(),
+                    self.environment.core.constants(),
+                    &self.lowerer.core_context(),
+                    &proof_body.proposition,
+                    &target,
+                )? {
+                    // Legacy simplification may normalize the rewritten goal
+                    // back to the displayed source. Keep the explicit equality
+                    // dependency with a constant motive instead of erasing a
+                    // potentially trusted or incomplete theorem reference.
+                    let motive =
+                        CoreTerm::lambda(ty, shift_under_new_binder(&proof_body.proposition)?);
+                    return Ok(LoweredLegacyProof {
+                        proof: HolDraftProof::EqualityElim {
+                            proof_equality: Box::new(equality.proof),
+                            motive,
+                            proof_left: Box::new(proof_body.proof),
+                        },
+                        proposition: target,
+                    });
+                }
+                Err(LoweringError::new(format!(
+                    "cannot reconstruct the legacy equality rewrite from `{:?}` to `{:?}` using `{:?} = {:?}` as a single explicit HOL motive",
+                    proof_body.proposition, target, left, right
+                )))
             }
             LegacyDraftProof::Convert { proof_body, target } => {
                 let proof_body = self.lower(proof_body)?;
                 let target = self.lowerer.lower_formula(target)?;
-                ensure_same_proposition(
-                    self.environment,
-                    &self.lowerer,
-                    &proof_body.proposition,
-                    &target,
-                )?;
-                Ok(LoweredLegacyProof {
-                    proof: proof_body.proof,
-                    proposition: target,
-                })
+                self.lower_compatibility_conversion(proof_body, target)
             }
             LegacyDraftProof::ForallIntro {
                 var,
@@ -1663,6 +1694,261 @@ impl LegacyProofLowerer<'_> {
         Ok(None)
     }
 
+    fn lower_compatibility_conversion(
+        &self,
+        proof_body: LoweredLegacyProof,
+        target: CoreTerm,
+    ) -> Result<LoweredLegacyProof, LoweringError> {
+        if definitionally_equal(
+            self.environment.core.types(),
+            self.environment.core.constants(),
+            &self.lowerer.core_context(),
+            &proof_body.proposition,
+            &target,
+        )? {
+            return Ok(LoweredLegacyProof {
+                proof: proof_body.proof,
+                proposition: target,
+            });
+        }
+
+        let (source_steps, source_normalized) =
+            self.compatibility_arithmetic_path(&proof_body.proposition)?;
+        let (target_steps, target_normalized) = self.compatibility_arithmetic_path(&target)?;
+        if !definitionally_equal(
+            self.environment.core.types(),
+            self.environment.core.constants(),
+            &self.lowerer.core_context(),
+            &source_normalized,
+            &target_normalized,
+        )? {
+            return Err(LoweringError::new(format!(
+                "lowered legacy proof has proposition `{:?}`, but expected `{:?}`; checked arithmetic compatibility normalization reached `{:?}` and `{:?}`",
+                proof_body.proposition, target, source_normalized, target_normalized
+            )));
+        }
+
+        let mut proof = proof_body.proof;
+        for step in &source_steps {
+            let motive = self
+                .find_rewrite_motive(
+                    &step.before,
+                    &step.rewrite.from,
+                    &step.rewrite.to,
+                    &step.rewrite.ty,
+                    &step.after,
+                )?
+                .ok_or_else(|| {
+                    LoweringError::new(
+                        "could not reconstruct a forward checked arithmetic conversion motive",
+                    )
+                })?;
+            proof = HolDraftProof::EqualityElim {
+                proof_equality: Box::new(step.rewrite.proof.clone()),
+                motive,
+                proof_left: Box::new(proof),
+            };
+        }
+        for step in target_steps.iter().rev() {
+            let motive = self
+                .find_rewrite_motive(
+                    &step.after,
+                    &step.rewrite.to,
+                    &step.rewrite.from,
+                    &step.rewrite.ty,
+                    &step.before,
+                )?
+                .ok_or_else(|| {
+                    LoweringError::new(
+                        "could not reconstruct a reverse checked arithmetic conversion motive",
+                    )
+                })?;
+            proof = HolDraftProof::EqualityElim {
+                proof_equality: Box::new(symmetry_proof(
+                    &step.rewrite.ty,
+                    &step.rewrite.from,
+                    step.rewrite.proof.clone(),
+                )?),
+                motive,
+                proof_left: Box::new(proof),
+            };
+        }
+        Ok(LoweredLegacyProof {
+            proof,
+            proposition: target,
+        })
+    }
+
+    fn compatibility_arithmetic_path(
+        &self,
+        proposition: &CoreTerm,
+    ) -> Result<(Vec<CompatibilityArithmeticStep>, CoreTerm), LoweringError> {
+        const MAX_STEPS: usize = 16_384;
+
+        let mut steps = Vec::new();
+        let mut current = proposition.clone();
+        loop {
+            if steps.len() >= MAX_STEPS {
+                return Err(LoweringError::new(
+                    "checked arithmetic compatibility normalization exceeded its step limit",
+                ));
+            }
+            if let Some(rewrite) = self.find_compatibility_arithmetic_rewrite(&current) {
+                let shifted_current = shift_under_new_binder(&current)?;
+                let shifted_from = shift_under_new_binder(&rewrite.from)?;
+                let after = replace_core_term_once(&shifted_current, &shifted_from, 0)?
+                    .into_iter()
+                    .map(|body| {
+                        instantiate_binder(
+                            self.environment.core.types(),
+                            self.environment.core.constants(),
+                            &self.lowerer.core_context(),
+                            &rewrite.ty,
+                            &body,
+                            &rewrite.to,
+                        )
+                        .map_err(LoweringError::from)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .find(|candidate| candidate != &current)
+                    .ok_or_else(|| {
+                        LoweringError::new(
+                            "checked arithmetic compatibility rewrite found no source occurrence",
+                        )
+                    })?;
+                steps.push(CompatibilityArithmeticStep {
+                    before: current,
+                    after: after.clone(),
+                    rewrite,
+                });
+                current = after;
+                continue;
+            }
+
+            let normalized = self.normalize(&current)?;
+            if normalized == current {
+                return Ok((steps, current));
+            }
+            current = normalized;
+        }
+    }
+
+    fn find_compatibility_arithmetic_rewrite(
+        &self,
+        proposition: &CoreTerm,
+    ) -> Option<CompatibilityArithmeticRewrite> {
+        let mut terms = Vec::new();
+        collect_unbound_core_terms_postorder(proposition, &mut terms);
+        terms.into_iter().find_map(|term| {
+            let prelude = self.environment.prelude();
+            let nat = prelude.nat_type();
+            let zero = CoreTerm::Constant(prelude.zero());
+
+            if let Some((left, right)) = binary_constant_application(&term, prelude.addition()) {
+                let normalized_right = self.normalize(right).ok()?;
+                if normalized_right == zero {
+                    return Some(CompatibilityArithmeticRewrite {
+                        ty: nat,
+                        from: term.clone(),
+                        to: left.clone(),
+                        proof: compatibility_theorem_reference(
+                            prelude.addition_zero_right(),
+                            vec![left.clone()],
+                        ),
+                    });
+                }
+                if let Some(predecessor) =
+                    unary_constant_application(&normalized_right, prelude.successor())
+                {
+                    return Some(CompatibilityArithmeticRewrite {
+                        ty: nat,
+                        from: term.clone(),
+                        to: CoreTerm::apply(
+                            CoreTerm::Constant(prelude.successor()),
+                            apply2_core(prelude.addition(), left.clone(), predecessor.clone()),
+                        ),
+                        proof: compatibility_theorem_reference(
+                            prelude.addition_successor_right(),
+                            vec![left.clone(), predecessor.clone()],
+                        ),
+                    });
+                }
+            }
+            if let Some((left, right)) =
+                binary_constant_application(&term, prelude.multiplication())
+            {
+                let normalized_right = self.normalize(right).ok()?;
+                if normalized_right == zero {
+                    return Some(CompatibilityArithmeticRewrite {
+                        ty: nat,
+                        from: term.clone(),
+                        to: zero.clone(),
+                        proof: compatibility_theorem_reference(
+                            prelude.multiplication_zero_right(),
+                            vec![left.clone()],
+                        ),
+                    });
+                }
+                if let Some(predecessor) =
+                    unary_constant_application(&normalized_right, prelude.successor())
+                {
+                    return Some(CompatibilityArithmeticRewrite {
+                        ty: nat,
+                        from: term.clone(),
+                        to: apply2_core(
+                            prelude.addition(),
+                            left.clone(),
+                            apply2_core(
+                                prelude.multiplication(),
+                                left.clone(),
+                                predecessor.clone(),
+                            ),
+                        ),
+                        proof: compatibility_theorem_reference(
+                            prelude.multiplication_successor_right(),
+                            vec![left.clone(), predecessor.clone()],
+                        ),
+                    });
+                }
+            }
+            if let Some((left, right)) = binary_constant_application(&term, prelude.subtraction()) {
+                let normalized_left = self.normalize(left).ok()?;
+                let normalized_right = self.normalize(right).ok()?;
+                if normalized_left == zero {
+                    return Some(CompatibilityArithmeticRewrite {
+                        ty: nat,
+                        from: term.clone(),
+                        to: zero,
+                        proof: compatibility_theorem_reference(
+                            prelude.subtraction_zero_left(),
+                            vec![right.clone()],
+                        ),
+                    });
+                }
+                if let (Some(left_predecessor), Some(right_predecessor)) = (
+                    unary_constant_application(&normalized_left, prelude.successor()),
+                    unary_constant_application(&normalized_right, prelude.successor()),
+                ) {
+                    return Some(CompatibilityArithmeticRewrite {
+                        ty: nat,
+                        from: term.clone(),
+                        to: apply2_core(
+                            prelude.subtraction(),
+                            left_predecessor.clone(),
+                            right_predecessor.clone(),
+                        ),
+                        proof: compatibility_theorem_reference(
+                            prelude.subtraction_successor_successor(),
+                            vec![left_predecessor.clone(), right_predecessor.clone()],
+                        ),
+                    });
+                }
+            }
+            None
+        })
+    }
+
     fn lower_classical(
         &mut self,
         rule: ClassicalRule,
@@ -1931,6 +2217,112 @@ fn replace_core_term_once(
     };
     replacements.append(&mut descendants);
     Ok(replacements)
+}
+
+fn compatibility_theorem_reference(
+    theorem: TheoremId,
+    term_arguments: Vec<CoreTerm>,
+) -> HolDraftProof {
+    HolDraftProof::TheoremRef {
+        theorem,
+        type_arguments: Vec::new(),
+        term_arguments,
+    }
+}
+
+fn apply2_core(function: ConstantId, left: CoreTerm, right: CoreTerm) -> CoreTerm {
+    CoreTerm::apply(CoreTerm::apply(CoreTerm::Constant(function), left), right)
+}
+
+fn binary_constant_application(
+    term: &CoreTerm,
+    constant: ConstantId,
+) -> Option<(&CoreTerm, &CoreTerm)> {
+    let CoreTerm::Apply {
+        function,
+        argument: right,
+    } = term
+    else {
+        return None;
+    };
+    let CoreTerm::Apply {
+        function,
+        argument: left,
+    } = function.as_ref()
+    else {
+        return None;
+    };
+    matches!(function.as_ref(), CoreTerm::Constant(found) if *found == constant)
+        .then_some((left.as_ref(), right.as_ref()))
+}
+
+fn unary_constant_application(term: &CoreTerm, constant: ConstantId) -> Option<&CoreTerm> {
+    let CoreTerm::Apply { function, argument } = term else {
+        return None;
+    };
+    matches!(function.as_ref(), CoreTerm::Constant(found) if *found == constant)
+        .then_some(argument.as_ref())
+}
+
+fn symmetry_proof(
+    ty: &CoreType,
+    left: &CoreTerm,
+    proof_equality: HolDraftProof,
+) -> Result<HolDraftProof, LoweringError> {
+    let shifted_left = shift_under_new_binder(left)?;
+    Ok(HolDraftProof::EqualityElim {
+        proof_equality: Box::new(proof_equality),
+        motive: CoreTerm::lambda(
+            ty.clone(),
+            CoreTerm::equality(ty.clone(), CoreTerm::Bound(0), shifted_left),
+        ),
+        proof_left: Box::new(HolDraftProof::EqualityRefl(left.clone())),
+    })
+}
+
+/// Collect only terms whose free variables are available in the current proof
+/// context. Arithmetic below a term/formula binder is handled when the legacy
+/// proof introduces that binder, so a synthesized theorem reference never
+/// escapes the scope of one of its arguments.
+fn collect_unbound_core_terms_postorder(term: &CoreTerm, terms: &mut Vec<CoreTerm>) {
+    let unary = |child: &CoreTerm, terms: &mut Vec<CoreTerm>| {
+        collect_unbound_core_terms_postorder(child, terms)
+    };
+    let binary = |left: &CoreTerm, right: &CoreTerm, terms: &mut Vec<CoreTerm>| {
+        collect_unbound_core_terms_postorder(left, terms);
+        collect_unbound_core_terms_postorder(right, terms);
+    };
+    match term {
+        CoreTerm::Bound(_)
+        | CoreTerm::Constant(_)
+        | CoreTerm::TypeApplication { .. }
+        | CoreTerm::EmptySet { .. }
+        | CoreTerm::UniverseSet { .. }
+        | CoreTerm::Truth
+        | CoreTerm::Falsity => {}
+        CoreTerm::Lambda { .. }
+        | CoreTerm::SetBuilder { .. }
+        | CoreTerm::Forall { .. }
+        | CoreTerm::Exists { .. } => {}
+        CoreTerm::Apply { function, argument } => binary(function, argument, terms),
+        CoreTerm::Pair(left, right)
+        | CoreTerm::SetUnion(left, right)
+        | CoreTerm::SetIntersection(left, right)
+        | CoreTerm::SetDifference(left, right)
+        | CoreTerm::SetProduct(left, right)
+        | CoreTerm::And(left, right)
+        | CoreTerm::Or(left, right)
+        | CoreTerm::Implies(left, right) => binary(left, right, terms),
+        CoreTerm::First(pair) | CoreTerm::Second(pair) => unary(pair, terms),
+        CoreTerm::SingletonSet(element) => unary(element, terms),
+        CoreTerm::SetComplement(set) => unary(set, terms),
+        CoreTerm::Powerset { set, .. } => unary(set, terms),
+        CoreTerm::Membership { element, set, .. } => binary(element, set, terms),
+        CoreTerm::Subset { left, right, .. } | CoreTerm::Equality { left, right, .. } => {
+            binary(left, right, terms)
+        }
+    }
+    terms.push(term.clone());
 }
 
 #[cfg(test)]
@@ -2719,10 +3111,10 @@ mod tests {
         let unsupported = LegacyDraftProof::EqSubst {
             eq_proof: Box::new(LegacyDraftProof::EqRefl(Term::Zero)),
             proof_body: Box::new(LegacyDraftProof::TrueIntro),
-            target: Formula::True,
+            target: Formula::False,
         };
         assert!(elaborator
-            .declare_legacy_checked_theorem("invalid_rewrite", &[], &Formula::True, &unsupported,)
+            .declare_legacy_checked_theorem("invalid_rewrite", &[], &Formula::False, &unsupported,)
             .is_err());
         assert_eq!(elaborator, before);
     }

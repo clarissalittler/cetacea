@@ -6,10 +6,11 @@ use std::process::{self, Command, Stdio};
 
 use cetacea_core::hol::run_linked_hol_smoke;
 use cetacea_core::{
-    check_file_at_path, check_source_at_path, explain_theorem_at_path,
-    explain_theorem_in_source_at_path, goals_at_path, goals_at_source_path, outline,
-    run_tactic_at_path, CheckResult, CheckedTheorem, DeclarationStatus, Diagnostic,
-    DiagnosticSeverity, ExplanationResult, GoalSnapshot, GoalStepResult, Position, SourceOutline,
+    check_file_at_path, check_file_at_path_with_hol_shadow, check_source_at_path,
+    explain_theorem_at_path, explain_theorem_in_source_at_path, goals_at_path,
+    goals_at_source_path, outline, run_tactic_at_path, CheckResult, CheckedTheorem,
+    DeclarationStatus, Diagnostic, DiagnosticSeverity, ExplanationResult, GoalSnapshot,
+    GoalStepResult, HolShadowMismatch, HolShadowReport, HolShadowTheorem, Position, SourceOutline,
 };
 
 fn main() {
@@ -47,9 +48,12 @@ fn main() {
     };
 
     match config.mode {
-        RunMode::Check => {
-            process::exit(run_check(&config.path, config.policy, config.output_format))
-        }
+        RunMode::Check => process::exit(run_check(
+            &config.path,
+            config.policy,
+            config.output_format,
+            config.hol_shadow,
+        )),
         RunMode::LineInteractive => {
             if let Err(err) = run_interactive(config.path) {
                 eprintln!("error: {err}");
@@ -77,6 +81,7 @@ struct CliConfig {
     path: PathBuf,
     policy: CheckPolicy,
     output_format: OutputFormat,
+    hol_shadow: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -112,6 +117,7 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
     let mut path = None;
     let mut policy = CheckPolicy::default();
     let mut output_format = OutputFormat::Text;
+    let mut hol_shadow = false;
     for arg in args {
         match arg.as_str() {
             "-i" | "--interactive" | "--tui" => mode = RunMode::Tui,
@@ -125,13 +131,16 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
             "--deny-axioms" => policy.deny_root_axioms = true,
             "--deny-classical" => policy.deny_classical = true,
             "--json" => output_format = OutputFormat::Json,
+            "--hol-shadow" => hol_shadow = true,
             _ if arg.starts_with('-') => return None,
             _ if path.is_none() => path = Some(PathBuf::from(arg)),
             _ => return None,
         }
     }
 
-    if mode != RunMode::Check && (!policy.is_empty() || output_format != OutputFormat::Text) {
+    if mode != RunMode::Check
+        && (!policy.is_empty() || output_format != OutputFormat::Text || hol_shadow)
+    {
         return None;
     }
 
@@ -140,17 +149,30 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
         path: path?,
         policy,
         output_format,
+        hol_shadow,
     })
 }
 
 fn print_usage() {
     eprintln!(
-        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] <file.ctea>\n       cetacea --hol-smoke"
+        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] [--hol-shadow] <file.ctea>\n       cetacea --hol-smoke"
     );
 }
 
-fn run_check(path: &Path, policy: CheckPolicy, output_format: OutputFormat) -> i32 {
-    let result = check_file_at_path(path);
+fn run_check(
+    path: &Path,
+    policy: CheckPolicy,
+    output_format: OutputFormat,
+    run_hol_shadow: bool,
+) -> i32 {
+    let shadow = run_hol_shadow.then(|| check_file_at_path_with_hol_shadow(path));
+    let standalone;
+    let result = if let Some(shadow) = &shadow {
+        &shadow.legacy
+    } else {
+        standalone = check_file_at_path(path);
+        &standalone
+    };
     let violations = check_policy_violations(&result, policy);
     match output_format {
         OutputFormat::Text => {
@@ -159,13 +181,50 @@ fn run_check(path: &Path, policy: CheckPolicy, output_format: OutputFormat) -> i
                 print_diagnostics(&result.diagnostics);
             }
             print_policy_violations(&violations);
+            if let Some(shadow) = &shadow {
+                print_hol_shadow(shadow);
+            }
         }
-        OutputFormat::Json => println!("{}", check_result_json(&result, policy, &violations)),
+        OutputFormat::Json => println!(
+            "{}",
+            check_result_json(result, policy, &violations, shadow.as_ref())
+        ),
     }
-    if diagnostics_have_errors(&result.diagnostics) || !violations.is_empty() {
+    if diagnostics_have_errors(&result.diagnostics)
+        || !violations.is_empty()
+        || shadow.as_ref().is_some_and(|shadow| !shadow.is_match())
+    {
         1
     } else {
         0
+    }
+}
+
+fn print_hol_shadow(report: &HolShadowReport) {
+    if report.is_match() {
+        println!(
+            "HOL shadow matched {} accepted declarations ({} theorem receipts).",
+            report.checked_declarations.len(),
+            report.theorems.len()
+        );
+        return;
+    }
+    eprintln!(
+        "error: HOL shadow disagreed on {} of {} accepted declaration attempts",
+        report.mismatches.len(),
+        report.attempted_declarations
+    );
+    for mismatch in &report.mismatches {
+        let path = mismatch
+            .source_path
+            .as_ref()
+            .map(|path| display_diagnostic_path(&path.to_string_lossy()))
+            .map(|path| format!("{path}:{}: ", mismatch.line))
+            .unwrap_or_else(|| format!("line {}: ", mismatch.line));
+        eprintln!(
+            "  {path}{} `{}`: {}",
+            mismatch.kind, mismatch.declaration, mismatch.message
+        );
     }
 }
 
@@ -2148,6 +2207,7 @@ fn check_result_json(
     result: &CheckResult,
     policy: CheckPolicy,
     violations: &[PolicyViolation],
+    shadow: Option<&HolShadowReport>,
 ) -> String {
     let theorems = result
         .theorems
@@ -2166,11 +2226,99 @@ fn check_result_json(
         .map(policy_violation_json)
         .collect::<Vec<_>>()
         .join(",");
-    let ok = !diagnostics_have_errors(&result.diagnostics) && violations.is_empty();
+    let ok = !diagnostics_have_errors(&result.diagnostics)
+        && violations.is_empty()
+        && shadow.is_none_or(HolShadowReport::is_match);
+    let shadow = shadow
+        .map(|shadow| format!(r#","hol_shadow":{}"#, hol_shadow_json(shadow)))
+        .unwrap_or_default();
     format!(
-        r#"{{"ok":{ok},"policy":{{"deny_sorry":{},"deny_root_axioms":{},"deny_classical":{}}},"theorems":[{theorems}],"diagnostics":[{diagnostics}],"policy_violations":[{violations}]}}"#,
-        policy.deny_sorry, policy.deny_root_axioms, policy.deny_classical
+        r#"{{"ok":{ok},"policy":{{"deny_sorry":{},"deny_root_axioms":{},"deny_classical":{}}},"theorems":[{theorems}],"diagnostics":[{diagnostics}],"policy_violations":[{violations}]{shadow}}}"#,
+        policy.deny_sorry, policy.deny_root_axioms, policy.deny_classical,
     )
+}
+
+fn hol_shadow_json(report: &HolShadowReport) -> String {
+    let theorems = report
+        .theorems
+        .iter()
+        .map(hol_shadow_theorem_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mismatches = report
+        .mismatches
+        .iter()
+        .map(hol_shadow_mismatch_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"matches":{},"attempted_declarations":{},"checked_declarations":{},"theorems":[{}],"mismatches":[{}]}}"#,
+        report.is_match(),
+        report.attempted_declarations,
+        report.checked_declarations.len(),
+        theorems,
+        mismatches,
+    )
+}
+
+fn hol_shadow_theorem_json(theorem: &HolShadowTheorem) -> String {
+    let axiom_deps = theorem
+        .axiom_deps
+        .iter()
+        .map(|name| json_string(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    let incomplete_deps = theorem
+        .incomplete_deps
+        .iter()
+        .map(|name| json_string(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    let features = theorem
+        .features
+        .iter()
+        .map(|feature| json_string(&feature.to_string()))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#"{{"name":{},"statement":{},"legacy_status":{},"hol_status":{},"legacy_mode":{},"hol_mode":{},"statement_fragment":{},"required_fragment":{},"axiom_deps":[{}],"incomplete_deps":[{}],"features":[{}],"is_imported":{}}}"#,
+        json_string(&theorem.name),
+        json_string(&theorem.statement),
+        json_string(&theorem.legacy_status.to_string()),
+        json_string(hol_evidence_status_label(theorem.hol_status)),
+        json_string(&theorem.legacy_mode_used.to_string()),
+        json_string(&theorem.hol_mode_used.to_string()),
+        json_string(&theorem.statement_fragment.to_string()),
+        json_string(&theorem.required_fragment.to_string()),
+        axiom_deps,
+        incomplete_deps,
+        features,
+        theorem.is_imported,
+    )
+}
+
+fn hol_shadow_mismatch_json(mismatch: &HolShadowMismatch) -> String {
+    let source_path = mismatch.source_path.as_ref().map(|path| {
+        let path = display_diagnostic_path(&path.to_string_lossy());
+        json_string(&path)
+    });
+    format!(
+        r#"{{"declaration":{},"kind":{},"line":{},"source_path":{},"is_imported":{},"message":{}}}"#,
+        json_string(&mismatch.declaration),
+        json_string(&mismatch.kind.to_string()),
+        mismatch.line,
+        source_path.unwrap_or_else(|| "null".to_string()),
+        mismatch.is_imported,
+        json_string(&mismatch.message),
+    )
+}
+
+fn hol_evidence_status_label(status: cetacea_core::hol::EvidenceStatus) -> &'static str {
+    match status {
+        cetacea_core::hol::EvidenceStatus::Checked => "accepted",
+        cetacea_core::hol::EvidenceStatus::Incomplete => "incomplete",
+        cetacea_core::hol::EvidenceStatus::TrustedAxiom => "trusted_axiom",
+    }
 }
 
 fn checked_theorem_json(theorem: &CheckedTheorem) -> String {
@@ -2361,6 +2509,7 @@ mod tests {
         assert_eq!(config.mode, RunMode::Check);
         assert_eq!(config.path, PathBuf::from("submission.ctea"));
         assert_eq!(config.output_format, OutputFormat::Json);
+        assert!(!config.hol_shadow);
         assert_eq!(
             config.policy,
             CheckPolicy {
@@ -2378,6 +2527,15 @@ mod tests {
     fn parse_args_rejects_check_policy_in_interactive_modes() {
         assert!(parse_args(&args(&["--tui", "--strict", "submission.ctea"])).is_none());
         assert!(parse_args(&args(&["--line", "--json", "submission.ctea"])).is_none());
+        assert!(parse_args(&args(&["--tui", "--hol-shadow", "submission.ctea"])).is_none());
+    }
+
+    #[test]
+    fn parse_args_accepts_hol_shadow_in_check_mode() {
+        let config = parse_args(&args(&["--hol-shadow", "--json", "submission.ctea"]))
+            .expect("HOL shadow arguments should parse");
+        assert!(config.hol_shadow);
+        assert_eq!(config.output_format, OutputFormat::Json);
     }
 
     #[test]
@@ -2470,12 +2628,29 @@ theorem unfinished : True := by
         );
         let policy = CheckPolicy::strict();
         let violations = check_policy_violations(&result, policy);
-        let json = check_result_json(&result, policy, &violations);
+        let json = check_result_json(&result, policy, &violations, None);
         assert!(json.contains(r#""ok":false"#));
         assert!(json.contains(r#""kind":"sorry""#));
         assert!(json.contains(r#""declaration":"unfinished""#));
         assert!(json.contains(r#""status":"incomplete""#));
         assert_eq!(json_string("a\"b\\c\n"), r#""a\"b\\c\n""#);
+    }
+
+    #[test]
+    fn json_output_includes_opt_in_hol_shadow_receipts() {
+        let report = cetacea_core::check_file_with_hol_shadow(
+            r#"
+mode constructive
+theorem identity (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#,
+        );
+        assert!(report.is_match());
+        let json = check_result_json(&report.legacy, CheckPolicy::default(), &[], Some(&report));
+        assert!(json.contains(r#""hol_shadow":{"matches":true"#));
+        assert!(json.contains(r#""required_fragment":"prop""#));
+        assert!(json.contains(r#""name":"identity""#));
     }
 
     #[test]

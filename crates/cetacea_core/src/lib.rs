@@ -1388,6 +1388,102 @@ pub struct CheckResult {
     pub diagnostics: Vec<Diagnostic>,
 }
 
+/// Kind of legacy declaration mirrored by the opt-in HOL shadow checker.
+#[cfg(feature = "hol-shadow")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HolShadowDeclarationKind {
+    Sort,
+    Constant,
+    Function,
+    Predicate,
+    FormulaDefinition,
+    TermDefinition,
+    Data,
+    StructuralDefinition,
+    Axiom,
+    Theorem,
+}
+
+#[cfg(feature = "hol-shadow")]
+impl fmt::Display for HolShadowDeclarationKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Sort => f.write_str("sort"),
+            Self::Constant => f.write_str("constant"),
+            Self::Function => f.write_str("function"),
+            Self::Predicate => f.write_str("predicate"),
+            Self::FormulaDefinition => f.write_str("formula-definition"),
+            Self::TermDefinition => f.write_str("term-definition"),
+            Self::Data => f.write_str("data"),
+            Self::StructuralDefinition => f.write_str("structural-definition"),
+            Self::Axiom => f.write_str("axiom"),
+            Self::Theorem => f.write_str("theorem"),
+        }
+    }
+}
+
+/// A declaration accepted by the legacy checker and successfully mirrored in
+/// the experimental HOL environment.
+#[cfg(feature = "hol-shadow")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HolShadowDeclaration {
+    pub name: Name,
+    pub kind: HolShadowDeclarationKind,
+    pub line: usize,
+    pub source_path: Option<PathBuf>,
+    pub is_imported: bool,
+}
+
+/// Receipt comparison for a theorem accepted by both engines.
+#[cfg(feature = "hol-shadow")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HolShadowTheorem {
+    pub name: Name,
+    pub statement: String,
+    pub legacy_status: DeclarationStatus,
+    pub hol_status: hol::EvidenceStatus,
+    pub legacy_mode_used: LogicMode,
+    pub hol_mode_used: LogicMode,
+    pub statement_fragment: hol::StatementFragment,
+    pub required_fragment: hol::StatementFragment,
+    pub axiom_deps: Vec<Name>,
+    pub incomplete_deps: Vec<Name>,
+    pub features: Vec<hol::ProofFeature>,
+    pub is_imported: bool,
+}
+
+/// A disagreement encountered while replaying an accepted legacy declaration
+/// through the HOL compatibility elaborator.
+#[cfg(feature = "hol-shadow")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HolShadowMismatch {
+    pub declaration: Name,
+    pub kind: HolShadowDeclarationKind,
+    pub line: usize,
+    pub source_path: Option<PathBuf>,
+    pub is_imported: bool,
+    pub message: String,
+}
+
+/// Non-authoritative result of checking a source with the legacy engine and
+/// replaying every accepted declaration through the HOL compatibility path.
+#[cfg(feature = "hol-shadow")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HolShadowReport {
+    pub legacy: CheckResult,
+    pub attempted_declarations: usize,
+    pub checked_declarations: Vec<HolShadowDeclaration>,
+    pub theorems: Vec<HolShadowTheorem>,
+    pub mismatches: Vec<HolShadowMismatch>,
+}
+
+#[cfg(feature = "hol-shadow")]
+impl HolShadowReport {
+    pub fn is_match(&self) -> bool {
+        self.mismatches.is_empty() && self.attempted_declarations == self.checked_declarations.len()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Position {
     pub line: usize,
@@ -1512,6 +1608,115 @@ pub fn check_file_with_imports(source: &str, imports: &[VirtualFile]) -> CheckRe
     let mut checker = FileChecker::with_virtual_files(imports);
     checker.check_source(source, None);
     checker.finish()
+}
+
+/// Check an import-free source with the legacy engine while replaying accepted
+/// declarations through the experimental HOL compatibility elaborator.
+///
+/// HOL mismatches are reported separately and never change the legacy result.
+#[cfg(feature = "hol-shadow")]
+pub fn check_file_with_hol_shadow(source: &str) -> HolShadowReport {
+    match FileChecker::with_hol_shadow() {
+        Ok(mut checker) => {
+            checker.check_source(source, None);
+            checker.finish_hol_shadow()
+        }
+        Err(error) => unavailable_hol_shadow(check_file(source), error),
+    }
+}
+
+/// Path-aware version of [`check_file_with_hol_shadow`], including recursive
+/// imports and namespace aliases.
+#[cfg(feature = "hol-shadow")]
+pub fn check_file_at_path_with_hol_shadow(path: impl AsRef<Path>) -> HolShadowReport {
+    let path = path.as_ref();
+    match FileChecker::with_hol_shadow() {
+        Ok(mut checker) => {
+            checker.check_path(path);
+            checker.finish_hol_shadow()
+        }
+        Err(error) => unavailable_hol_shadow(check_file_at_path(path), error),
+    }
+}
+
+/// Editor-buffer version of [`check_file_at_path_with_hol_shadow`].
+#[cfg(feature = "hol-shadow")]
+pub fn check_source_at_path_with_hol_shadow(
+    source: &str,
+    path: impl AsRef<Path>,
+) -> HolShadowReport {
+    let path = path.as_ref();
+    let (source_path, base_dir) = editor_source_context(path);
+    let file = match parse_file(source) {
+        Ok(file) => file,
+        Err(err) => {
+            return HolShadowReport {
+                legacy: CheckResult {
+                    diagnostics: vec![parse_diagnostic(
+                        Some(source_path.as_path()),
+                        err,
+                        Some(format!("could not parse `{}`", source_path.display())),
+                    )],
+                    ..CheckResult::default()
+                },
+                attempted_declarations: 0,
+                checked_declarations: Vec::new(),
+                theorems: Vec::new(),
+                mismatches: Vec::new(),
+            };
+        }
+    };
+
+    match FileChecker::with_hol_shadow() {
+        Ok(mut checker) => {
+            checker.check_commands(
+                file.commands,
+                base_dir.as_deref(),
+                None,
+                false,
+                Some(source_path.as_path()),
+                None,
+            );
+            checker.finish_hol_shadow()
+        }
+        Err(error) => unavailable_hol_shadow(check_source_at_path(source, path), error),
+    }
+}
+
+/// Virtual-import version of [`check_file_with_hol_shadow`].
+#[cfg(feature = "hol-shadow")]
+pub fn check_file_with_imports_and_hol_shadow(
+    source: &str,
+    imports: &[VirtualFile],
+) -> HolShadowReport {
+    match FileChecker::with_virtual_files_and_hol_shadow(imports) {
+        Ok(mut checker) => {
+            checker.check_source(source, None);
+            checker.finish_hol_shadow()
+        }
+        Err(error) => unavailable_hol_shadow(check_file_with_imports(source, imports), error),
+    }
+}
+
+#[cfg(feature = "hol-shadow")]
+fn unavailable_hol_shadow(
+    legacy: CheckResult,
+    error: hol::CompatibilityDeclarationError,
+) -> HolShadowReport {
+    HolShadowReport {
+        legacy,
+        attempted_declarations: 0,
+        checked_declarations: Vec::new(),
+        theorems: Vec::new(),
+        mismatches: vec![HolShadowMismatch {
+            declaration: "<compatibility-prelude>".to_string(),
+            kind: HolShadowDeclarationKind::Data,
+            line: 0,
+            source_path: None,
+            is_imported: false,
+            message: format!("could not initialize HOL shadow: {error}"),
+        }],
+    }
 }
 
 pub fn outline(source: &str) -> SourceOutline {
@@ -1987,11 +2192,79 @@ fn editor_source_context(path: &Path) -> (PathBuf, Option<PathBuf>) {
 struct FileChecker {
     env: Env,
     result: CheckResult,
+    #[cfg(feature = "hol-shadow")]
+    hol_shadow: Option<HolShadowState>,
     loaded_files: HashSet<(PathBuf, Option<Name>)>,
     import_stack: Vec<PathBuf>,
     virtual_files: HashMap<String, String>,
     loaded_virtual_files: HashSet<(String, Option<Name>)>,
     virtual_import_stack: Vec<String>,
+}
+
+#[cfg(feature = "hol-shadow")]
+struct HolShadowState {
+    elaborator: hol::CompatibilityElaborator,
+    attempted_declarations: usize,
+    checked_declarations: Vec<HolShadowDeclaration>,
+    theorems: Vec<HolShadowTheorem>,
+    mismatches: Vec<HolShadowMismatch>,
+    receipt_names: HashMap<hol::DeclarationId, Name>,
+}
+
+#[cfg(feature = "hol-shadow")]
+impl HolShadowState {
+    fn new() -> Result<Self, hol::CompatibilityDeclarationError> {
+        Ok(Self {
+            elaborator: hol::CompatibilityElaborator::new()?,
+            attempted_declarations: 0,
+            checked_declarations: Vec::new(),
+            theorems: Vec::new(),
+            mismatches: Vec::new(),
+            receipt_names: HashMap::new(),
+        })
+    }
+
+    fn location(
+        name: &str,
+        kind: HolShadowDeclarationKind,
+        line: usize,
+        source_path: Option<&Path>,
+        is_imported: bool,
+    ) -> HolShadowDeclaration {
+        HolShadowDeclaration {
+            name: name.to_string(),
+            kind,
+            line,
+            source_path: source_path.map(Path::to_path_buf),
+            is_imported,
+        }
+    }
+
+    fn mismatch(&mut self, declaration: &HolShadowDeclaration, message: impl Into<String>) {
+        self.mismatches.push(HolShadowMismatch {
+            declaration: declaration.name.clone(),
+            kind: declaration.kind,
+            line: declaration.line,
+            source_path: declaration.source_path.clone(),
+            is_imported: declaration.is_imported,
+            message: message.into(),
+        });
+    }
+
+    fn named_dependencies(&self, dependencies: &BTreeSet<hol::DeclarationId>) -> Vec<Name> {
+        let mut names = dependencies
+            .iter()
+            .map(|id| {
+                self.receipt_names
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("<declaration:{}>", id.0))
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        names
+    }
 }
 
 enum ResolvedImport {
@@ -2091,12 +2364,21 @@ impl FileChecker {
         Self {
             env: Env::new(),
             result: CheckResult::default(),
+            #[cfg(feature = "hol-shadow")]
+            hol_shadow: None,
             loaded_files: HashSet::new(),
             import_stack: Vec::new(),
             virtual_files: HashMap::new(),
             loaded_virtual_files: HashSet::new(),
             virtual_import_stack: Vec::new(),
         }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn with_hol_shadow() -> Result<Self, hol::CompatibilityDeclarationError> {
+        let mut checker = Self::new();
+        checker.hol_shadow = Some(HolShadowState::new()?);
+        Ok(checker)
     }
 
     fn with_virtual_files(files: &[VirtualFile]) -> Self {
@@ -2109,8 +2391,174 @@ impl FileChecker {
         checker
     }
 
+    #[cfg(feature = "hol-shadow")]
+    fn with_virtual_files_and_hol_shadow(
+        files: &[VirtualFile],
+    ) -> Result<Self, hol::CompatibilityDeclarationError> {
+        let mut checker = Self::with_hol_shadow()?;
+        for file in files {
+            checker
+                .virtual_files
+                .insert(normalize_virtual_path(&file.path), file.source.clone());
+        }
+        Ok(checker)
+    }
+
     fn finish(self) -> CheckResult {
         self.result
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn finish_hol_shadow(self) -> HolShadowReport {
+        let shadow = self
+            .hol_shadow
+            .expect("HOL shadow checker must retain its sidecar state");
+        HolShadowReport {
+            legacy: self.result,
+            attempted_declarations: shadow.attempted_declarations,
+            checked_declarations: shadow.checked_declarations,
+            theorems: shadow.theorems,
+            mismatches: shadow.mismatches,
+        }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn shadow_declaration(
+        &mut self,
+        kind: HolShadowDeclarationKind,
+        name: &str,
+        line: usize,
+        source_path: Option<&Path>,
+        is_imported: bool,
+        action: impl FnOnce(
+            &mut hol::CompatibilityElaborator,
+        ) -> Result<(), hol::CompatibilityDeclarationError>,
+    ) {
+        let Some(shadow) = &mut self.hol_shadow else {
+            return;
+        };
+        shadow.attempted_declarations += 1;
+        let declaration = HolShadowState::location(name, kind, line, source_path, is_imported);
+        match action(&mut shadow.elaborator) {
+            Ok(()) => shadow.checked_declarations.push(declaration),
+            Err(error) => shadow.mismatch(&declaration, error.to_string()),
+        }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn shadow_theorem(
+        &mut self,
+        checked: &CheckedTheorem,
+        line: usize,
+        source_path: Option<&Path>,
+        action: impl FnOnce(
+            &mut hol::CompatibilityElaborator,
+        ) -> Result<
+            (hol::TheoremId, hol::DeclarationReceipt),
+            hol::CompatibilityDeclarationError,
+        >,
+    ) {
+        let Some(shadow) = &mut self.hol_shadow else {
+            return;
+        };
+        shadow.attempted_declarations += 1;
+        let kind = if checked.is_axiom {
+            HolShadowDeclarationKind::Axiom
+        } else {
+            HolShadowDeclarationKind::Theorem
+        };
+        let declaration =
+            HolShadowState::location(&checked.name, kind, line, source_path, checked.is_imported);
+        let (_, receipt) = match action(&mut shadow.elaborator) {
+            Ok(declared) => declared,
+            Err(error) => {
+                shadow.mismatch(&declaration, error.to_string());
+                return;
+            }
+        };
+        shadow.checked_declarations.push(declaration.clone());
+        shadow
+            .receipt_names
+            .insert(receipt.id(), checked.name.clone());
+
+        let expected_status = match checked.status {
+            DeclarationStatus::Accepted => hol::EvidenceStatus::Checked,
+            DeclarationStatus::Incomplete => hol::EvidenceStatus::Incomplete,
+            DeclarationStatus::TrustedAxiom => hol::EvidenceStatus::TrustedAxiom,
+        };
+        if receipt.status() != expected_status {
+            shadow.mismatch(
+                &declaration,
+                format!(
+                    "status differs: legacy {:?}, HOL {:?}",
+                    checked.status,
+                    receipt.status()
+                ),
+            );
+        }
+
+        let hol_mode_used = if receipt
+            .proof()
+            .transitive_features()
+            .contains(&hol::ProofFeature::Classical)
+        {
+            LogicMode::Classical
+        } else {
+            LogicMode::Constructive
+        };
+        if !checked.is_axiom && hol_mode_used != checked.mode_used {
+            shadow.mismatch(
+                &declaration,
+                format!(
+                    "logic mode differs: legacy {}, HOL {}",
+                    checked.mode_used, hol_mode_used
+                ),
+            );
+        }
+
+        let mut hol_axiom_deps = shadow.named_dependencies(receipt.proof().axiom_dependencies());
+        if receipt.status() == hol::EvidenceStatus::TrustedAxiom {
+            hol_axiom_deps.push(checked.name.clone());
+            hol_axiom_deps.sort();
+            hol_axiom_deps.dedup();
+        }
+        if hol_axiom_deps != checked.axiom_deps {
+            shadow.mismatch(
+                &declaration,
+                format!(
+                    "axiom dependencies differ: legacy {:?}, HOL {:?}",
+                    checked.axiom_deps, hol_axiom_deps
+                ),
+            );
+        }
+
+        let mut incomplete_deps =
+            shadow.named_dependencies(receipt.proof().incomplete_dependencies());
+        if receipt.status() == hol::EvidenceStatus::Incomplete {
+            incomplete_deps.push(checked.name.clone());
+            incomplete_deps.sort();
+            incomplete_deps.dedup();
+        }
+        let features = receipt
+            .proof()
+            .transitive_features()
+            .iter()
+            .copied()
+            .collect();
+        shadow.theorems.push(HolShadowTheorem {
+            name: checked.name.clone(),
+            statement: checked.statement.clone(),
+            legacy_status: checked.status,
+            hol_status: receipt.status(),
+            legacy_mode_used: checked.mode_used,
+            hol_mode_used,
+            statement_fragment: receipt.proof().statement_fragment(),
+            required_fragment: receipt.proof().required_fragment(),
+            axiom_deps: hol_axiom_deps,
+            incomplete_deps,
+            features,
+            is_imported: checked.is_imported,
+        });
     }
 
     fn check_source(&mut self, source: &str, base_dir: Option<&Path>) {
@@ -2327,6 +2775,15 @@ impl FileChecker {
                         ));
                         continue;
                     }
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_declaration(
+                        HolShadowDeclarationKind::Sort,
+                        &name,
+                        line,
+                        source_path,
+                        is_imported,
+                        |shadow| shadow.declare_sort(name.clone()).map(|_| ()),
+                    );
                     self.env.add_sort(name);
                 }
                 Command::Const(name, ty) => {
@@ -2364,6 +2821,15 @@ impl FileChecker {
                         );
                         continue;
                     }
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_declaration(
+                        HolShadowDeclarationKind::Constant,
+                        &name,
+                        line,
+                        source_path,
+                        is_imported,
+                        |shadow| shadow.declare_constant(name.clone(), &ty).map(|_| ()),
+                    );
                     self.env.add_const(name, ty);
                 }
                 Command::Func(name, args, result_type) => {
@@ -2426,6 +2892,19 @@ impl FileChecker {
                         );
                         continue;
                     }
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_declaration(
+                        HolShadowDeclarationKind::Function,
+                        &name,
+                        line,
+                        source_path,
+                        is_imported,
+                        |shadow| {
+                            shadow
+                                .declare_function(name.clone(), &args, &result_type)
+                                .map(|_| ())
+                        },
+                    );
                     self.env.add_func(name, args, result_type);
                 }
                 Command::Pred(name, args) => {
@@ -2470,6 +2949,15 @@ impl FileChecker {
                         );
                         continue;
                     }
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_declaration(
+                        HolShadowDeclarationKind::Predicate,
+                        &name,
+                        line,
+                        source_path,
+                        is_imported,
+                        |shadow| shadow.declare_predicate(name.clone(), &args).map(|_| ()),
+                    );
                     self.env.add_pred(name, args);
                 }
                 Command::Def(decl) => {
@@ -2528,11 +3016,21 @@ impl FileChecker {
                                 );
                                 continue;
                             }
-                            self.env.add_def(FormulaDef {
+                            let definition = FormulaDef {
                                 name: decl.name,
                                 params,
                                 body,
-                            });
+                            };
+                            #[cfg(feature = "hol-shadow")]
+                            self.shadow_declaration(
+                                HolShadowDeclarationKind::FormulaDefinition,
+                                &definition.name,
+                                line,
+                                source_path,
+                                is_imported,
+                                |shadow| shadow.declare_formula_definition(&definition).map(|_| ()),
+                            );
+                            self.env.add_def(definition);
                         }
                         (DefResult::Term(ty), DefBody::Term(body)) => {
                             let ty = match canonicalize_type(&self.env, &def_ctx, &ty) {
@@ -2577,12 +3075,24 @@ impl FileChecker {
                             };
                             match validate_term(&self.env, &def_ctx, &body) {
                                 Ok(actual) if actual == ty => {
-                                    self.env.add_term_def(TermDef {
+                                    let definition = TermDef {
                                         name: decl.name,
                                         params,
                                         ty,
                                         body,
-                                    });
+                                    };
+                                    #[cfg(feature = "hol-shadow")]
+                                    self.shadow_declaration(
+                                        HolShadowDeclarationKind::TermDefinition,
+                                        &definition.name,
+                                        line,
+                                        source_path,
+                                        is_imported,
+                                        |shadow| {
+                                            shadow.declare_term_definition(&definition).map(|_| ())
+                                        },
+                                    );
+                                    self.env.add_term_def(definition);
                                 }
                                 Ok(actual) => {
                                     self.result.diagnostics.push(
@@ -2707,10 +3217,20 @@ impl FileChecker {
                             );
                         }
                     }
-                    self.env.add_data_def(DataDef {
+                    let definition = DataDef {
                         name: decl.name,
                         ctors: decl.ctors,
-                    });
+                    };
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_declaration(
+                        HolShadowDeclarationKind::Data,
+                        &definition.name,
+                        line,
+                        source_path,
+                        is_imported,
+                        |shadow| shadow.declare_data(&definition).map(|_| ()),
+                    );
+                    self.env.add_data_def(definition);
                 }
                 Command::DataRecDef(decl) => {
                     let mut decl = decl;
@@ -3004,14 +3524,28 @@ impl FileChecker {
                     if !arms_ok {
                         continue;
                     }
-                    self.env.add_data_rec_def(DataRecDef {
+                    let definition = DataRecDef {
                         name: decl.name,
                         param: decl.param,
                         data_name: data.name.clone(),
                         extra_params: decl.extra_params,
                         result_type: decl.result_type,
                         arms,
-                    });
+                    };
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_declaration(
+                        HolShadowDeclarationKind::StructuralDefinition,
+                        &definition.name,
+                        line,
+                        source_path,
+                        is_imported,
+                        |shadow| {
+                            shadow
+                                .declare_structural_definition(&definition)
+                                .map(|_| ())
+                        },
+                    );
+                    self.env.add_data_rec_def(definition);
                 }
                 Command::Axiom(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
@@ -3069,6 +3603,20 @@ impl FileChecker {
                         continue;
                     }
 
+                    let checked = CheckedTheorem {
+                        name: decl.name.clone(),
+                        statement: statement.to_string(),
+                        mode_used: mode,
+                        is_axiom: true,
+                        is_imported,
+                        uses_sorry: false,
+                        axiom_deps: vec![decl.name.clone()],
+                        status: DeclarationStatus::TrustedAxiom,
+                    };
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_theorem(&checked, line, source_path, |shadow| {
+                        shadow.declare_trusted_axiom(decl.name.clone(), &params, &statement)
+                    });
                     self.env.add_theorem(Theorem {
                         name: decl.name.clone(),
                         params,
@@ -3079,16 +3627,7 @@ impl FileChecker {
                         uses_sorry: false,
                         axiom_deps: vec![decl.name.clone()],
                     });
-                    self.result.theorems.push(CheckedTheorem {
-                        name: decl.name.clone(),
-                        statement: statement.to_string(),
-                        mode_used: mode,
-                        is_axiom: true,
-                        is_imported,
-                        uses_sorry: false,
-                        axiom_deps: vec![decl.name],
-                        status: DeclarationStatus::TrustedAxiom,
-                    });
+                    self.result.theorems.push(checked);
                 }
                 Command::Theorem(decl) => {
                     if self.env.has_top_level_name(&decl.name) {
@@ -3270,6 +3809,38 @@ impl FileChecker {
 
                     let uses_sorry = proof_uses_sorry(&self.env, &proof);
                     let axiom_deps = proof_axiom_deps(&self.env, &proof);
+                    let checked = CheckedTheorem {
+                        name: decl.name.clone(),
+                        statement: statement.to_string(),
+                        mode_used,
+                        is_axiom: false,
+                        is_imported,
+                        uses_sorry,
+                        axiom_deps: axiom_deps.clone(),
+                        status: if uses_sorry {
+                            DeclarationStatus::Incomplete
+                        } else {
+                            DeclarationStatus::Accepted
+                        },
+                    };
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_theorem(&checked, line, source_path, |shadow| {
+                        if uses_sorry {
+                            shadow.declare_legacy_incomplete_theorem(
+                                decl.name.clone(),
+                                &params,
+                                &statement,
+                                &proof,
+                            )
+                        } else {
+                            shadow.declare_legacy_checked_theorem(
+                                decl.name.clone(),
+                                &params,
+                                &statement,
+                                &proof,
+                            )
+                        }
+                    });
                     let evidence = if uses_sorry {
                         TheoremEvidence::Incomplete(proof)
                     } else {
@@ -3288,20 +3859,7 @@ impl FileChecker {
                         uses_sorry,
                         axiom_deps: axiom_deps.clone(),
                     });
-                    self.result.theorems.push(CheckedTheorem {
-                        name: decl.name,
-                        statement: statement.to_string(),
-                        mode_used,
-                        is_axiom: false,
-                        is_imported,
-                        uses_sorry,
-                        axiom_deps,
-                        status: if uses_sorry {
-                            DeclarationStatus::Incomplete
-                        } else {
-                            DeclarationStatus::Accepted
-                        },
-                    });
+                    self.result.theorems.push(checked);
                 }
             }
         }
@@ -15641,6 +16199,171 @@ mod tests {
             "diagnostics for `{relative_path}` did not contain `{needle}`:\n{rendered}"
         );
         result
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_matches_signatures_definitions_and_theorem_receipts() {
+        let report = check_file_with_hol_shadow(
+            r#"
+mode constructive
+
+sort Person
+const alice : Person
+func mother : Person -> Person
+pred Student(Person)
+def Both (P Q : Prop) : Prop := P /\ Q
+
+axiom trusted : True
+
+theorem identity (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem uses_trusted : True := by
+  exact trusted
+
+theorem unfinished : True := by
+  sorry
+"#,
+        );
+        assert!(
+            !diagnostics_have_errors(&report.legacy.diagnostics),
+            "unexpected legacy errors: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(
+            report.is_match(),
+            "unexpected HOL mismatches: {:#?}",
+            report.mismatches
+        );
+        assert_eq!(report.attempted_declarations, 9);
+        assert_eq!(report.theorems.len(), 4);
+
+        let uses_trusted = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "uses_trusted")
+            .expect("uses_trusted receipt");
+        assert_eq!(uses_trusted.axiom_deps, vec!["trusted"]);
+        assert_eq!(uses_trusted.hol_status, hol::EvidenceStatus::Checked);
+
+        let unfinished = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "unfinished")
+            .expect("unfinished receipt");
+        assert_eq!(unfinished.hol_status, hol::EvidenceStatus::Incomplete);
+        assert_eq!(unfinished.incomplete_deps, vec!["unfinished"]);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_justifies_legacy_secondary_arithmetic_conversion() {
+        let source = r#"
+mode constructive
+
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
+  simp
+  refl
+"#;
+        let legacy = check_file(source);
+        let report = check_file_with_hol_shadow(source);
+        assert_eq!(report.legacy, legacy);
+        assert!(report.legacy.diagnostics.is_empty());
+        assert_eq!(report.attempted_declarations, 1);
+        assert_eq!(report.checked_declarations.len(), 1);
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_matches_the_checked_nat_library() {
+        let report = check_file_at_path_with_hol_shadow(repo_path("std/nat.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(report.attempted_declarations, 31);
+        assert_eq!(report.theorems.len(), 30);
+        assert!(report.theorems.iter().any(|theorem| {
+            theorem.name == "mul_succ_right"
+                && theorem.features.contains(&hol::ProofFeature::Induction)
+        }));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_noop_rewrite_retains_trusted_dependency() {
+        let report = check_file_with_hol_shadow(
+            r#"
+mode constructive
+
+axiom redundant (n : Nat) : add(n, 0) = n
+
+theorem uses_redundant (n : Nat) : n = n := by
+  rewrite <- redundant {n := n}
+  refl
+"#,
+        );
+        assert!(
+            !diagnostics_have_errors(&report.legacy.diagnostics),
+            "unexpected legacy errors: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        let theorem = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "uses_redundant")
+            .expect("uses_redundant receipt");
+        assert_eq!(theorem.axiom_deps, vec!["redundant"]);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_replays_virtual_import_aliases() {
+        let imports = vec![VirtualFile {
+            path: "lib.ctea".to_string(),
+            source: r#"
+mode constructive
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+"#
+            .to_string(),
+        }];
+        let report = check_file_with_imports_and_hol_shadow(
+            r#"
+import lib.ctea as library
+
+mode constructive
+theorem use_id (P : Prop) : P -> P := by
+  intro h
+  exact library.id h
+"#,
+            &imports,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(
+            report.is_match(),
+            "unexpected HOL mismatches: {:#?}",
+            report.mismatches
+        );
+        assert!(report
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "library.id" && theorem.is_imported));
+        assert!(report
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "use_id" && !theorem.is_imported));
     }
 
     #[test]

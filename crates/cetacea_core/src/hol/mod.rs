@@ -1,9 +1,10 @@
 //! Experimental constructive HOL core.
 //!
-//! This module is developed in parallel with the legacy checker. A checked
-//! compatibility prelude and parser-independent AST lowerer now exist, but the
-//! production parser/driver and teaching corpus still use the legacy checker
-//! until the exact H4 dual-check gate passes.
+//! This module is developed in parallel with the legacy checker. The production
+//! command/import driver can now replay every legacy-accepted declaration into
+//! this core through the opt-in HOL shadow API. The exact H4 corpus gate passes,
+//! but the legacy checker remains authoritative until an explicit cutover
+//! decision; a shadow mismatch never changes legacy acceptance.
 
 pub mod declarations;
 pub mod fragments;

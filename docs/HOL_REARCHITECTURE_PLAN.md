@@ -411,14 +411,20 @@ fragment-receipt ideas.
 
 ### Phase H4 — compatibility elaborator
 
-Status: **bounded H4a substrate authorized.** Implement the prerequisites and
-ordering in the H3.5 exit decision before routing any normal course file to the
-HOL engine. The legacy checker remains authoritative until the exact dual-check
-exit gate passes. The first substrate checkpoint now supports checked rank-one
+Status: **H4 shadow exit gate passed; default cutover is not yet authorized.**
+The production command/import driver now has an opt-in, non-authoritative HOL
+sidecar. It receives the same canonical declarations that the legacy checker
+has accepted, preserves aliases and declaration order, and reports any lowering
+or receipt disagreement separately. `python3 scripts/hol_shadow.py check`
+currently matches all 74 corpus files and all 588 root theorem/axiom receipts,
+while the frozen legacy oracle still rejects all 38 intended-negative theorems.
+The legacy checker remains the default authority until the H5 policy/UI work
+and an explicit cutover decision. The first substrate checkpoint supports checked rank-one
 term/proposition/predicate-symbol theorem templates, simultaneous
 capture-avoiding reference instantiation, and FOL classification of saturated
 symbol parameters. Missing and ill-typed arguments are rejected
-transactionally; legacy surface parameter inference remains to be connected.
+transactionally; legacy surface parameter inference is connected at the shared
+canonical-AST seam.
 H4a also now stores typed trusted axiom templates and propagates their IDs
 through checked theorem receipts. Explicit excluded-middle,
 double-negation-elimination, and contradiction evidence is kernel-checked and
@@ -427,16 +433,16 @@ explicitly allowed. Typed incomplete theorem drafts are now checked and retained
 outside the kernel, can depend on other incomplete drafts, and produce
 transitive incomplete receipts. The checked theorem-reference path rejects
 incomplete declarations, preventing dependency laundering. Surface
-axiom/classical/incomplete lowering remains. H4a also has checked, closed,
+axiom/classical/incomplete lowering is connected. H4a also has checked, closed,
 rank-one transparent definitions: the body is validated before its constant is
 installed, declaration order rules out delta cycles, and normalization unfolds
 definitions through beta and existing structural computation. Their receipts
 retain dependencies while concrete instances determine the statement fragment.
-Surface `def`, `unfold`, `simp`, and conversion lowering remains.
+Surface `def`, `unfold`, `simp`, and conversion evidence is connected.
 Typed product introduction and both projections are now core terms as well;
 projection reduction is definitional, capture-safe under binders, and
 first-order whenever the component types are first-order. Legacy `Pair`/`Fst`/
-`Snd` lowering remains to be connected.
+`Snd` lowering is connected.
 Structural definitions now carry a checked recursive-argument index. The
 declared function type, reduction scrutinee, and every generated recursive call
 use that position consistently; invalid indices leave signatures unchanged.
@@ -457,28 +463,28 @@ dependency-laundering path. Specialization recurses through generic theorem
 wrappers and reconstructs nested binder contexts rather than trusting the
 generic declaration's conservative fragment.
 
-The checked compatibility prelude now installs inductive `Nat`, first-order
-`Set`, structurally recursive arithmetic, and nested-structural `le`
-transactionally. A parser-independent lowerer covers every legacy type, term,
-and formula form, resolves local names to de Bruijn indices, and infers explicit
-rank-one type applications. The first transactional declaration slice now
-handles sorts, constants, functions, predicates, polymorphic transparent
-definitions, monomorphic direct-recursive datatypes, and legacy `defrec` with
-its exact branch binder layout. Trusted, checked, and incomplete theorem
-templates now lower all schema parameter kinds and preserve their receipt
-boundaries. Every legacy proof-object form lowers to explicit HOL evidence,
-including capture-safe rewrite motives, quantifiers, theorem substitutions,
-classical rules, and Nat/data induction. This path is not connected to imports
-or the production driver. The legacy evaluator's overlapping
-other-argument arithmetic shortcuts are intentionally not kernel conversion:
-they are not substitution-stable and must become checked compatibility simp
-lemmas before proof lowering.
+The checked compatibility prelude installs inductive `Nat`, first-order `Set`,
+structurally recursive arithmetic, and nested-structural `le` transactionally.
+The legacy evaluator's overlapping other-argument arithmetic shortcuts remain
+intentionally outside kernel conversion because they are not
+substitution-stable. Seven internal induction theorems prove the secondary
+`add`, `mul`, and `sub` orientations. Legacy `Convert` nodes normalize with
+those theorems and elaborate every step to explicit equality elimination;
+no-op rewrites retain their theorem dependency through a constant motive.
 
-- Done parser-independently: lower theorem/axiom declarations and every legacy
-  proof expression, along with `sort`, `const`, `func`, `pred`, `def`, `data`,
-  `defrec`, formulas, and predicate lambdas. Connect parsed commands next.
-- Preserve existing name resolution and import behavior through stable
-  declaration identities.
+A parser-independent lowerer covers every legacy type, term, formula,
+declaration, and proof-object form, including capture-safe rewrite motives,
+quantifiers, theorem substitutions, classical rules, Nat/data induction,
+polymorphic transparent definitions, monomorphic direct-recursive datatypes,
+and legacy `defrec` with its exact branch binder layout. The shadow driver now
+connects that layer to parsed commands, recursive imports, and aliases without
+changing ordinary checking behavior.
+
+- Done: lower theorem/axiom declarations and every legacy proof expression,
+  along with `sort`, `const`, `func`, `pred`, `def`, `data`, `defrec`, formulas,
+  and predicate lambdas.
+- Done: preserve existing name resolution and import behavior through the
+  legacy driver's qualified canonical declarations and stable HOL identities.
 - Done: elaborate old monomorphic direct-recursive datatypes as zero-parameter
   inductive types.
 - Preserve the current tactic language by changing its generated evidence, not
@@ -486,7 +492,16 @@ lemmas before proof lowering.
 
 Exit gate: all existing positive files check in both engines with matching
 statuses, modes, axiom/incomplete dependencies, and theorem statements. Every
-negative theorem remains rejected individually.
+negative theorem remains rejected individually. **Passed in shadow mode:**
+74/74 files, 588/588 root receipts, 9,389/9,389 accepted declaration
+occurrences, and zero mismatches. Required-fragment distribution is 108 `prop`,
+234 `fol`, and 246 `fol+induction`; status distribution is 483 checked, 81
+incomplete, and 24 trusted axioms. Surface statement identity is shared at the
+canonical AST seam rather than compared through a lossy text round-trip; the
+HOL kernel independently checks the lowered statement and evidence. The native
+CLI release is 3,346,328 bytes. Because the browser API does not expose shadow
+checking, `cetacea_wasm` disables the `hol-shadow` Cargo feature and remains
+1,351,837 bytes, below the 1.5 MB review line.
 
 ### Phase H5 — fragment enforcement and assignment manifests
 

@@ -7,9 +7,11 @@
 //! an extra evaluator or a trusted arithmetic oracle.
 
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
+use super::proofs::HolDraftProof;
 use super::recursion::{StructuralArmLayout, StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
-use super::terms::{ConstantId, CoreTerm};
+use super::terms::{shift_under_new_binder, ConstantId, CoreTerm};
+use super::theorems::TheoremId;
 use super::types::{CoreType, TypeConstructorId};
 
 /// Stable core declarations used when lowering the legacy builtin syntax.
@@ -30,6 +32,13 @@ pub struct CompatibilityPrelude {
     less_equal: ConstantId,
     predecessor: ConstantId,
     less_equal_tail: ConstantId,
+    addition_zero_right: TheoremId,
+    addition_successor_right: TheoremId,
+    addition_left_commute: TheoremId,
+    multiplication_zero_right: TheoremId,
+    multiplication_successor_right: TheoremId,
+    subtraction_zero_left: TheoremId,
+    subtraction_successor_successor: TheoremId,
 }
 
 impl CompatibilityPrelude {
@@ -209,6 +218,71 @@ impl CompatibilityPrelude {
             ],
         })?;
 
+        // The legacy evaluator also simplifies on the non-structural side of
+        // arithmetic operations. Those equations cannot be kernel conversion:
+        // overlapping open reductions are not substitution-stable. Install
+        // ordinary checked induction theorems instead so compatibility
+        // conversion can elaborate each shortcut to explicit equality
+        // elimination.
+        let addition_zero_right = declare_addition_zero_right(
+            &mut staged,
+            nat,
+            nat_type.clone(),
+            zero,
+            successor,
+            addition,
+        )?;
+        let addition_successor_right = declare_addition_successor_right(
+            &mut staged,
+            nat,
+            nat_type.clone(),
+            zero,
+            successor,
+            addition,
+        )?;
+        let addition_left_commute = declare_addition_left_commute(
+            &mut staged,
+            nat,
+            nat_type.clone(),
+            zero,
+            successor,
+            addition,
+            addition_successor_right,
+        )?;
+        let multiplication_zero_right = declare_multiplication_zero_right(
+            &mut staged,
+            nat,
+            nat_type.clone(),
+            zero,
+            multiplication,
+        )?;
+        let multiplication_successor_right = declare_multiplication_successor_right(
+            &mut staged,
+            nat,
+            nat_type.clone(),
+            zero,
+            successor,
+            addition,
+            multiplication,
+            addition_left_commute,
+        )?;
+        let subtraction_zero_left = declare_subtraction_zero_left(
+            &mut staged,
+            nat,
+            nat_type.clone(),
+            zero,
+            subtraction,
+            predecessor,
+        )?;
+        let subtraction_successor_successor = declare_subtraction_successor_successor(
+            &mut staged,
+            nat,
+            nat_type.clone(),
+            successor,
+            subtraction,
+            predecessor,
+        )?;
+
         *elaborator = staged;
         Ok(Self {
             nat,
@@ -221,6 +295,13 @@ impl CompatibilityPrelude {
             less_equal,
             predecessor,
             less_equal_tail,
+            addition_zero_right,
+            addition_successor_right,
+            addition_left_commute,
+            multiplication_zero_right,
+            multiplication_successor_right,
+            subtraction_zero_left,
+            subtraction_successor_successor,
         })
     }
 
@@ -259,16 +340,566 @@ impl CompatibilityPrelude {
     pub fn less_equal(&self) -> ConstantId {
         self.less_equal
     }
+
+    pub fn addition_zero_right(&self) -> TheoremId {
+        self.addition_zero_right
+    }
+
+    pub fn addition_successor_right(&self) -> TheoremId {
+        self.addition_successor_right
+    }
+
+    pub fn multiplication_zero_right(&self) -> TheoremId {
+        self.multiplication_zero_right
+    }
+
+    pub fn multiplication_successor_right(&self) -> TheoremId {
+        self.multiplication_successor_right
+    }
+
+    pub fn subtraction_zero_left(&self) -> TheoremId {
+        self.subtraction_zero_left
+    }
+
+    pub fn subtraction_successor_successor(&self) -> TheoremId {
+        self.subtraction_successor_successor
+    }
 }
 
 fn apply2(function: ConstantId, left: CoreTerm, right: CoreTerm) -> CoreTerm {
     CoreTerm::apply(CoreTerm::apply(CoreTerm::Constant(function), left), right)
 }
 
+fn successor(successor: ConstantId, term: CoreTerm) -> CoreTerm {
+    CoreTerm::apply(CoreTerm::Constant(successor), term)
+}
+
+fn equality(nat: &CoreType, left: CoreTerm, right: CoreTerm) -> CoreTerm {
+    CoreTerm::equality(nat.clone(), left, right)
+}
+
+fn theorem_reference(theorem: TheoremId, term_arguments: Vec<CoreTerm>) -> HolDraftProof {
+    HolDraftProof::TheoremRef {
+        theorem,
+        type_arguments: Vec::new(),
+        term_arguments,
+    }
+}
+
+fn unary_congruence(
+    function: ConstantId,
+    nat: &CoreType,
+    left: CoreTerm,
+    proof_equality: HolDraftProof,
+) -> Result<HolDraftProof, SpikeError> {
+    let shifted_left = shift_under_new_binder(&left)?;
+    let applied_left = CoreTerm::apply(CoreTerm::Constant(function), left);
+    Ok(HolDraftProof::EqualityElim {
+        proof_equality: Box::new(proof_equality),
+        motive: CoreTerm::lambda(
+            nat.clone(),
+            equality(
+                nat,
+                CoreTerm::apply(CoreTerm::Constant(function), shifted_left),
+                CoreTerm::apply(CoreTerm::Constant(function), CoreTerm::Bound(0)),
+            ),
+        ),
+        proof_left: Box::new(HolDraftProof::EqualityRefl(applied_left)),
+    })
+}
+
+fn binary_right_congruence(
+    function: ConstantId,
+    nat: &CoreType,
+    fixed: CoreTerm,
+    left: CoreTerm,
+    proof_equality: HolDraftProof,
+) -> Result<HolDraftProof, SpikeError> {
+    let shifted_fixed = shift_under_new_binder(&fixed)?;
+    let shifted_left = shift_under_new_binder(&left)?;
+    let applied_left = apply2(function, fixed, left);
+    Ok(HolDraftProof::EqualityElim {
+        proof_equality: Box::new(proof_equality),
+        motive: CoreTerm::lambda(
+            nat.clone(),
+            equality(
+                nat,
+                apply2(function, shifted_fixed.clone(), shifted_left),
+                apply2(function, shifted_fixed, CoreTerm::Bound(0)),
+            ),
+        ),
+        proof_left: Box::new(HolDraftProof::EqualityRefl(applied_left)),
+    })
+}
+
+fn symmetry(
+    nat: &CoreType,
+    left: CoreTerm,
+    proof_equality: HolDraftProof,
+) -> Result<HolDraftProof, SpikeError> {
+    let shifted_left = shift_under_new_binder(&left)?;
+    Ok(HolDraftProof::EqualityElim {
+        proof_equality: Box::new(proof_equality),
+        motive: CoreTerm::lambda(nat.clone(), equality(nat, CoreTerm::Bound(0), shifted_left)),
+        proof_left: Box::new(HolDraftProof::EqualityRefl(left)),
+    })
+}
+
+fn transitivity(
+    nat: &CoreType,
+    left: CoreTerm,
+    proof_left: HolDraftProof,
+    proof_right: HolDraftProof,
+) -> Result<HolDraftProof, SpikeError> {
+    let shifted_left = shift_under_new_binder(&left)?;
+    Ok(HolDraftProof::EqualityElim {
+        proof_equality: Box::new(proof_right),
+        motive: CoreTerm::lambda(nat.clone(), equality(nat, shifted_left, CoreTerm::Bound(0))),
+        proof_left: Box::new(proof_left),
+    })
+}
+
+fn declare_addition_zero_right(
+    elaborator: &mut SpikeElaborator,
+    datatype: TypeConstructorId,
+    nat: CoreType,
+    zero: ConstantId,
+    successor_id: ConstantId,
+    addition: ConstantId,
+) -> Result<TheoremId, SpikeError> {
+    let zero_term = CoreTerm::Constant(zero);
+    let statement = equality(
+        &nat,
+        apply2(addition, CoreTerm::Bound(0), zero_term.clone()),
+        CoreTerm::Bound(0),
+    );
+    let motive = CoreTerm::lambda(
+        nat.clone(),
+        equality(
+            &nat,
+            apply2(addition, CoreTerm::Bound(0), zero_term.clone()),
+            CoreTerm::Bound(0),
+        ),
+    );
+    let step_left = apply2(addition, CoreTerm::Bound(0), zero_term.clone());
+    let proof = HolDraftProof::Induction {
+        datatype,
+        type_arguments: Vec::new(),
+        motive,
+        scrutinee: CoreTerm::Bound(0),
+        cases: vec![
+            HolDraftProof::EqualityRefl(zero_term),
+            unary_congruence(successor_id, &nat, step_left, HolDraftProof::Hypothesis(0))?,
+        ],
+    };
+    elaborator
+        .declare_theorem_with_parameters(
+            "@compat.add_zero_right",
+            Vec::new(),
+            vec![nat],
+            statement,
+            proof,
+        )
+        .map(|(theorem, _)| theorem)
+}
+
+fn declare_addition_successor_right(
+    elaborator: &mut SpikeElaborator,
+    datatype: TypeConstructorId,
+    nat: CoreType,
+    _zero: ConstantId,
+    successor_id: ConstantId,
+    addition: ConstantId,
+) -> Result<TheoremId, SpikeError> {
+    let n = CoreTerm::Bound(1);
+    let m = CoreTerm::Bound(0);
+    let statement = equality(
+        &nat,
+        apply2(addition, n.clone(), successor(successor_id, m.clone())),
+        successor(successor_id, apply2(addition, n.clone(), m.clone())),
+    );
+    // Under the motive binder: k = 0, m = 1; the original n is ignored.
+    let k = CoreTerm::Bound(0);
+    let shifted_m = CoreTerm::Bound(1);
+    let motive = CoreTerm::lambda(
+        nat.clone(),
+        equality(
+            &nat,
+            apply2(
+                addition,
+                k.clone(),
+                successor(successor_id, shifted_m.clone()),
+            ),
+            successor(successor_id, apply2(addition, k.clone(), shifted_m.clone())),
+        ),
+    );
+    // In the successor case: k = 0, m = 1.
+    let step_left = apply2(
+        addition,
+        CoreTerm::Bound(0),
+        successor(successor_id, CoreTerm::Bound(1)),
+    );
+    let proof = HolDraftProof::Induction {
+        datatype,
+        type_arguments: Vec::new(),
+        motive,
+        scrutinee: n,
+        cases: vec![
+            HolDraftProof::EqualityRefl(successor(successor_id, m)),
+            unary_congruence(successor_id, &nat, step_left, HolDraftProof::Hypothesis(0))?,
+        ],
+    };
+    elaborator
+        .declare_theorem_with_parameters(
+            "@compat.add_succ_right",
+            Vec::new(),
+            vec![nat.clone(), nat],
+            statement,
+            proof,
+        )
+        .map(|(theorem, _)| theorem)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn declare_addition_left_commute(
+    elaborator: &mut SpikeElaborator,
+    datatype: TypeConstructorId,
+    nat: CoreType,
+    _zero: ConstantId,
+    successor_id: ConstantId,
+    addition: ConstantId,
+    addition_successor_right: TheoremId,
+) -> Result<TheoremId, SpikeError> {
+    let a = CoreTerm::Bound(2);
+    let b = CoreTerm::Bound(1);
+    let c = CoreTerm::Bound(0);
+    let statement = equality(
+        &nat,
+        apply2(addition, a.clone(), apply2(addition, b.clone(), c.clone())),
+        apply2(addition, b.clone(), apply2(addition, a.clone(), c.clone())),
+    );
+    // Under the motive binder: k = 0, c = 1, b = 2.
+    let k = CoreTerm::Bound(0);
+    let shifted_c = CoreTerm::Bound(1);
+    let shifted_b = CoreTerm::Bound(2);
+    let motive = CoreTerm::lambda(
+        nat.clone(),
+        equality(
+            &nat,
+            apply2(
+                addition,
+                k.clone(),
+                apply2(addition, shifted_b.clone(), shifted_c.clone()),
+            ),
+            apply2(
+                addition,
+                shifted_b.clone(),
+                apply2(addition, k.clone(), shifted_c.clone()),
+            ),
+        ),
+    );
+    // In the successor case: k = 0, c = 1, b = 2.
+    let k = CoreTerm::Bound(0);
+    let c = CoreTerm::Bound(1);
+    let b = CoreTerm::Bound(2);
+    let ih_left = apply2(addition, k.clone(), apply2(addition, b.clone(), c.clone()));
+    let lifted_ih = unary_congruence(
+        successor_id,
+        &nat,
+        ih_left.clone(),
+        HolDraftProof::Hypothesis(0),
+    )?;
+    let inner = apply2(addition, k, c);
+    let right_equation =
+        theorem_reference(addition_successor_right, vec![b.clone(), inner.clone()]);
+    let reversed_right = symmetry(
+        &nat,
+        apply2(addition, b.clone(), successor(successor_id, inner.clone())),
+        right_equation,
+    )?;
+    let step = transitivity(
+        &nat,
+        successor(successor_id, ih_left),
+        lifted_ih,
+        reversed_right,
+    )?;
+    let proof = HolDraftProof::Induction {
+        datatype,
+        type_arguments: Vec::new(),
+        motive,
+        scrutinee: a,
+        cases: vec![
+            HolDraftProof::EqualityRefl(apply2(addition, CoreTerm::Bound(1), CoreTerm::Bound(0))),
+            step,
+        ],
+    };
+    elaborator
+        .declare_theorem_with_parameters(
+            "@compat.add_left_comm",
+            Vec::new(),
+            vec![nat.clone(), nat.clone(), nat],
+            statement,
+            proof,
+        )
+        .map(|(theorem, _)| theorem)
+}
+
+fn declare_multiplication_zero_right(
+    elaborator: &mut SpikeElaborator,
+    datatype: TypeConstructorId,
+    nat: CoreType,
+    zero: ConstantId,
+    multiplication: ConstantId,
+) -> Result<TheoremId, SpikeError> {
+    let zero_term = CoreTerm::Constant(zero);
+    let statement = equality(
+        &nat,
+        apply2(multiplication, CoreTerm::Bound(0), zero_term.clone()),
+        zero_term.clone(),
+    );
+    let motive = CoreTerm::lambda(
+        nat.clone(),
+        equality(
+            &nat,
+            apply2(multiplication, CoreTerm::Bound(0), zero_term.clone()),
+            zero_term.clone(),
+        ),
+    );
+    let proof = HolDraftProof::Induction {
+        datatype,
+        type_arguments: Vec::new(),
+        motive,
+        scrutinee: CoreTerm::Bound(0),
+        cases: vec![
+            HolDraftProof::EqualityRefl(zero_term),
+            HolDraftProof::Hypothesis(0),
+        ],
+    };
+    elaborator
+        .declare_theorem_with_parameters(
+            "@compat.mul_zero_right",
+            Vec::new(),
+            vec![nat],
+            statement,
+            proof,
+        )
+        .map(|(theorem, _)| theorem)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn declare_multiplication_successor_right(
+    elaborator: &mut SpikeElaborator,
+    datatype: TypeConstructorId,
+    nat: CoreType,
+    zero: ConstantId,
+    successor_id: ConstantId,
+    addition: ConstantId,
+    multiplication: ConstantId,
+    addition_left_commute: TheoremId,
+) -> Result<TheoremId, SpikeError> {
+    let n = CoreTerm::Bound(1);
+    let m = CoreTerm::Bound(0);
+    let statement = equality(
+        &nat,
+        apply2(
+            multiplication,
+            n.clone(),
+            successor(successor_id, m.clone()),
+        ),
+        apply2(
+            addition,
+            n.clone(),
+            apply2(multiplication, n.clone(), m.clone()),
+        ),
+    );
+    // Under the motive binder: k = 0, m = 1.
+    let k = CoreTerm::Bound(0);
+    let shifted_m = CoreTerm::Bound(1);
+    let motive = CoreTerm::lambda(
+        nat.clone(),
+        equality(
+            &nat,
+            apply2(
+                multiplication,
+                k.clone(),
+                successor(successor_id, shifted_m.clone()),
+            ),
+            apply2(
+                addition,
+                k.clone(),
+                apply2(multiplication, k.clone(), shifted_m.clone()),
+            ),
+        ),
+    );
+
+    // In the successor case: k = 0, m = 1.
+    let k = CoreTerm::Bound(0);
+    let m = CoreTerm::Bound(1);
+    let successor_m = successor(successor_id, m.clone());
+    let ih_left = apply2(multiplication, k.clone(), successor_m);
+    let lifted_add = binary_right_congruence(
+        addition,
+        &nat,
+        m.clone(),
+        ih_left.clone(),
+        HolDraftProof::Hypothesis(0),
+    )?;
+    let lifted_ih = unary_congruence(
+        successor_id,
+        &nat,
+        apply2(addition, m.clone(), ih_left.clone()),
+        lifted_add,
+    )?;
+    let product_k_m = apply2(multiplication, k.clone(), m.clone());
+    let commute = theorem_reference(
+        addition_left_commute,
+        vec![m.clone(), k.clone(), product_k_m.clone()],
+    );
+    let lifted_commute = unary_congruence(
+        successor_id,
+        &nat,
+        apply2(
+            addition,
+            m.clone(),
+            apply2(addition, k.clone(), product_k_m),
+        ),
+        commute,
+    )?;
+    let step = transitivity(
+        &nat,
+        successor(successor_id, apply2(addition, m, ih_left)),
+        lifted_ih,
+        lifted_commute,
+    )?;
+    let zero_term = CoreTerm::Constant(zero);
+    let proof = HolDraftProof::Induction {
+        datatype,
+        type_arguments: Vec::new(),
+        motive,
+        scrutinee: n,
+        cases: vec![HolDraftProof::EqualityRefl(zero_term), step],
+    };
+    elaborator
+        .declare_theorem_with_parameters(
+            "@compat.mul_succ_right",
+            Vec::new(),
+            vec![nat.clone(), nat],
+            statement,
+            proof,
+        )
+        .map(|(theorem, _)| theorem)
+}
+
+fn declare_subtraction_zero_left(
+    elaborator: &mut SpikeElaborator,
+    datatype: TypeConstructorId,
+    nat: CoreType,
+    zero: ConstantId,
+    subtraction: ConstantId,
+    predecessor: ConstantId,
+) -> Result<TheoremId, SpikeError> {
+    let zero_term = CoreTerm::Constant(zero);
+    let statement = equality(
+        &nat,
+        apply2(subtraction, zero_term.clone(), CoreTerm::Bound(0)),
+        zero_term.clone(),
+    );
+    let motive = CoreTerm::lambda(
+        nat.clone(),
+        equality(
+            &nat,
+            apply2(subtraction, zero_term.clone(), CoreTerm::Bound(0)),
+            zero_term.clone(),
+        ),
+    );
+    let step_left = apply2(subtraction, zero_term.clone(), CoreTerm::Bound(0));
+    let proof = HolDraftProof::Induction {
+        datatype,
+        type_arguments: Vec::new(),
+        motive,
+        scrutinee: CoreTerm::Bound(0),
+        cases: vec![
+            HolDraftProof::EqualityRefl(zero_term),
+            unary_congruence(predecessor, &nat, step_left, HolDraftProof::Hypothesis(0))?,
+        ],
+    };
+    elaborator
+        .declare_theorem_with_parameters(
+            "@compat.sub_zero_left",
+            Vec::new(),
+            vec![nat],
+            statement,
+            proof,
+        )
+        .map(|(theorem, _)| theorem)
+}
+
+fn declare_subtraction_successor_successor(
+    elaborator: &mut SpikeElaborator,
+    datatype: TypeConstructorId,
+    nat: CoreType,
+    successor_id: ConstantId,
+    subtraction: ConstantId,
+    predecessor: ConstantId,
+) -> Result<TheoremId, SpikeError> {
+    let n = CoreTerm::Bound(1);
+    let m = CoreTerm::Bound(0);
+    let statement = equality(
+        &nat,
+        apply2(
+            subtraction,
+            successor(successor_id, n.clone()),
+            successor(successor_id, m.clone()),
+        ),
+        apply2(subtraction, n.clone(), m.clone()),
+    );
+    // Under the motive binder: k = 0, n = 2; original m = 1 is ignored.
+    let k = CoreTerm::Bound(0);
+    let shifted_n = CoreTerm::Bound(2);
+    let motive = CoreTerm::lambda(
+        nat.clone(),
+        equality(
+            &nat,
+            apply2(
+                subtraction,
+                successor(successor_id, shifted_n.clone()),
+                successor(successor_id, k.clone()),
+            ),
+            apply2(subtraction, shifted_n, k),
+        ),
+    );
+    // In the successor case: k = 0, n = 2.
+    let k = CoreTerm::Bound(0);
+    let n_in_case = CoreTerm::Bound(2);
+    let ih_left = CoreTerm::apply(
+        CoreTerm::Constant(predecessor),
+        apply2(subtraction, successor(successor_id, n_in_case), k),
+    );
+    let proof = HolDraftProof::Induction {
+        datatype,
+        type_arguments: Vec::new(),
+        motive,
+        scrutinee: m,
+        cases: vec![
+            HolDraftProof::EqualityRefl(n),
+            unary_congruence(predecessor, &nat, ih_left, HolDraftProof::Hypothesis(0))?,
+        ],
+    };
+    elaborator
+        .declare_theorem_with_parameters(
+            "@compat.sub_succ_succ",
+            Vec::new(),
+            vec![nat.clone(), nat],
+            statement,
+            proof,
+        )
+        .map(|(theorem, _)| theorem)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hol::fragments::{StatementFragment, TeachingProfile};
+    use crate::hol::fragments::{EvidenceStatus, ProofFeature, StatementFragment, TeachingProfile};
     use crate::hol::proofs::HolDraftProof;
     use crate::hol::terms::{definitionally_equal, infer_type, normalize, TermContext};
     use crate::hol::{ReceiptPolicy, TypeSignature};
@@ -523,6 +1154,29 @@ mod tests {
                 },
             )
             .expect("well-typed non-conversion"));
+        }
+    }
+
+    #[test]
+    fn secondary_arithmetic_equations_are_checked_induction_theorems() {
+        let (elaborator, prelude) = fixture();
+        for theorem in [
+            prelude.addition_zero_right(),
+            prelude.addition_successor_right(),
+            prelude.multiplication_zero_right(),
+            prelude.multiplication_successor_right(),
+            prelude.subtraction_zero_left(),
+            prelude.subtraction_successor_successor(),
+        ] {
+            let receipt = elaborator
+                .theorem_receipt(theorem)
+                .expect("compatibility theorem receipt");
+            assert_eq!(receipt.status(), EvidenceStatus::Checked);
+            assert!(receipt.proof().axiom_dependencies().is_empty());
+            assert!(receipt
+                .proof()
+                .transitive_features()
+                .contains(&ProofFeature::Induction));
         }
     }
 

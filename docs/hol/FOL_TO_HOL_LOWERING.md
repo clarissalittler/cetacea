@@ -40,13 +40,13 @@ spans remain in the elaborator for diagnostics.
 | Term schema `(x : A)` | Rank-one term parameter of type `A` | Stored in the theorem template context and explicitly instantiated at references. |
 | Predicate schema `(R : A1 -> ... -> Prop)` | Rank-one saturated symbol parameter | Counts as FOL when used only fully applied to first-order arguments; passing, returning, partially applying, or quantifying over it is HOL. |
 
-The first H4a checkpoint now adds the checked term/symbol-parameter context for
+The H4 compatibility layer has the checked term/symbol-parameter context for
 theorem templates. A template statement and proof are checked with those
 parameters in scope, and a `TheoremRef` carries explicit type and term/symbol
 arguments. Instantiation is simultaneous and capture-avoiding, including under
 ambient binders. Saturated predicate-symbol templates retain an FOL receipt;
-partial or value-level uses remain HOL. Surface parameter inference and lowering
-from the legacy `ParamKind` forms still remain. Encoding legacy proposition and
+partial or value-level uses remain HOL. Surface parameter inference and all
+legacy `ParamKind` forms are connected. Encoding legacy proposition and
 predicate schemas as object-level quantifiers would incorrectly make almost the
 entire propositional and FOL standard library HOL, so that shortcut remains
 rejected.
@@ -55,9 +55,9 @@ rejected.
 
 | Surface command | Lowering | Status |
 |---|---|---|
-| `import` | Load once by canonical path; aliases and namespaces point to the same stable declaration IDs and receipts. | Resolver work; no kernel change. |
+| `import` | Load once by canonical path; aliases and namespaces receive stable qualified declaration IDs and receipts. | Connected through the legacy resolver; repeated path/alias pairs replay once. |
 | `mode constructive` | Set elaborator allowance to constructive rules. | The receipt records actual features, not the source toggle. |
-| `mode classical` | Permit explicit classical evidence; do not change HOL's constructive base. | Core rules and audit are implemented; surface tactic lowering remains. |
+| `mode classical` | Permit explicit classical evidence; do not change HOL's constructive base. | Finished production tactic evidence lowers to explicit audited rules. |
 | `sort S` | Declare a zero-parameter first-order type constructor. | Parser-independent declaration lowering is implemented transactionally. |
 | `const c : A` | Declare a monomorphic constant `c : lower(A)`. | Parser-independent declaration lowering is implemented transactionally. |
 | `func f : A1 -> ... -> B` | Declare a curried constant `A1 -> ... -> B`; surface applications must be saturated in FOL mode. | Parser-independent declaration lowering and persistent arity metadata are implemented. |
@@ -67,12 +67,13 @@ rejected.
 | `data D | ...` | Transactionally declare a zero-parameter inductive type; a field exactly equal to `D` is `Recursive`, every other field is checked existing data. | Parser-independent lowering is implemented for the corpus's direct recursion; nested/mutual recursion remains rejected. |
 | `defrec f (x : D) extras : R` | Lower arms to a checked structural definition; constructor fields and recursive results become de Bruijn binders. | Parser-independent lowering uses legacy binder order and recursive index zero; focused `length` and `append` computations pass. |
 | `axiom a ... : P` | Store a trusted declaration template and receipt; references are kernel-visible axioms with transitive trust. | Parser-independent parameter/statement lowering, storage, reference lowering, and transitive trust are implemented. |
-| Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | Every existing `DraftProof` variant now has parser-independent lowering to explicit HOL evidence. Production tactic/driver integration remains. |
+| Completed `theorem t ... : P` | Elaborate tactics to a hole-free `HolKernelProof`, check it, store a theorem template, then derive its receipt. | Every existing `DraftProof` variant is connected to the opt-in production shadow driver. |
 | Theorem containing `sorry` or depending on one | Retain typed draft evidence outside the kernel and store an incomplete receipt; it must never become `HolKernelProof`. | Parser-independent lowering retains holes outside the kernel and supports checked draft-to-draft references with transitive incomplete receipts. |
 
 Failed type, positivity, termination, or duplicate-name checks now leave both
 core signatures and the persistent compatibility name/arity/data catalogs
-unchanged. Proof and import transactionality remains to be connected.
+unchanged. Proof and import replay is transactional within the sidecar and a
+shadow failure never changes legacy acceptance.
 
 ## Term lowering
 
@@ -86,7 +87,7 @@ restricted FOL profile.
 | `App(name, args)` | Resolved constant or transparent definition, followed by explicit type application and `CoreTerm::Apply` for each argument. |
 | `PredLambda { params, body }` | Nested typed `CoreTerm::Lambda` ending in `lower(body) : Prop`. Beta/delta normalization may erase it; a retained predicate value is HOL. |
 | `Zero`, `Succ(t)` | Predeclared checked constructors `zero` and `succ(t)`. Decimal literals are elaborator sugar. Parser-independent lowering is implemented. |
-| `Add`, `Mul`, `Sub` | Applications of checked structural Nat definitions. The terminating structural equations and all closed numerals compute in the kernel; the additional legacy simp orientations must be discharged by checked compatibility lemmas. Parser-independent lowering is implemented. |
+| `Add`, `Mul`, `Sub` | Applications of checked structural Nat definitions. The terminating structural equations and all closed numerals compute in the kernel; seven checked induction theorems discharge the additional legacy simp orientations through equality elimination. |
 | `Pair`, `Fst`, `Snd` | H4a `CoreTerm::Pair`, `First`, and `Second`; both projections reduce definitionally and preserve FOL classification for first-order components. Parser-independent lowering is implemented. |
 | `EmptySet`, `Universe`, `Singleton`, `Union`, `Inter`, `Diff`, `Complement`, `CartProd`, `Powerset` | H4a first-order set terms with checked element types and definitional membership equations. Parser-independent lowering is implemented. |
 | `SetBuilder { x : A | P }` | H4a checked comprehension under an element binder; membership substitutes capture-avoidantly into `P`. The set value remains the first-order `Set A` wrapper. Parser-independent lowering is implemented. |
@@ -98,8 +99,11 @@ closed numeral reduce definitionally. The legacy normalizer additionally uses
 overlapping equations on either argument. Those equations are not stable under
 substitution (the two `mul` orientations already give different open normal
 forms after constructor substitution), so copying them into HOL conversion
-would compromise the new kernel. H4 instead must install checked secondary simp
-lemmas and make compatibility `simp`/`Convert` lowering emit their evidence.
+would compromise the new kernel. H4 therefore installs checked secondary simp
+lemmas and makes compatibility `simp`/`Convert` lowering emit their evidence.
+That path is now implemented: conversion computes a terminating legacy-oriented
+rewrite path, synthesizes capture-safe motives, supports both directions, and
+retains even no-op theorem dependencies with a constant motive.
 `pred` remains the ordinary checked `std/nat.ctea` structural definition; an
 internal predecessor used by `sub` does not occupy that surface name.
 
@@ -128,8 +132,8 @@ must not enter definitional equality.
 The parser-independent elaborator now lowers every current `Type`, `Term`, and
 `Formula` form, including expected-type-directed predicate lambdas, explicit
 rank-one instantiation, and shadowing-safe de Bruijn binders. It checks each
-produced term immediately. Declaration/import resolution and proof lowering
-are not connected yet. Definitions and beta/delta scaffolding must be
+produced term immediately. Declaration/import resolution and proof lowering are
+connected through the shadow driver. Definitions and beta/delta scaffolding are
 normalized before statement classification. A formula that retains a
 predicate value, partial application, arrow/`Prop` quantifier, or higher-order
 equality is HOL. Saturated schema predicates over first-order domains remain
@@ -150,7 +154,7 @@ transform goals, but emit the following explicit core evidence.
 | `ImpIntro`, `ImpElim` | Direct nodes; the named premise becomes the nearest proof hypothesis |
 | `EqRefl(t)` | `EqualityRefl(lower(t))` |
 | `EqSubst` | `EqualityElim` with an explicit typed lambda motive synthesized from the equality, source formula, target formula, direction, and selected occurrence |
-| `Convert` | No proof node. Check the inner evidence against the target up to checked beta/delta/datatype computation. |
+| `Convert` | Definitional conversions erase; legacy secondary arithmetic conversions become chains of checked theorem references and `EqualityElim` motives. |
 | `ForallIntro`, `ForallElim` | Direct nodes with a typed term binder/argument |
 | `ExistsIntro`, `ExistsElim` | Direct nodes with capture-avoiding binder shifting |
 | `NatInd` | `Induction` over the predeclared `Nat` signature |
@@ -170,16 +174,15 @@ existing hypotheses; Nat and data induction abstract the resolved scrutinee
 into an explicit motive; theorem references lower type, proposition, predicate,
 and term substitutions; and equality substitution enumerates one rewritten
 occurrence to reconstruct a capture-safe motive, including reverse rewrites.
-`Convert` is accepted only when the HOL core itself proves definitional
-equality. Consequently, legacy arithmetic shortcuts that are not
-substitution-stable remain an explicit compatibility-lemma blocker rather than
-silently entering kernel conversion.
+`Convert` first uses HOL definitional equality. When legacy arithmetic
+normalization is stronger, it uses only the checked secondary prelude theorems
+and explicit equality elimination. The overlapping shortcuts therefore remain
+outside kernel conversion without blocking existing course proofs.
 
-H4a now has explicit proof nodes for excluded middle, proof by contradiction,
+H4a has explicit proof nodes for excluded middle, proof by contradiction,
 and double-negation elimination. Each checks its proposition and subevidence,
-and the audit propagates `Classical` transitively. The compatibility tactic
-elaborator still needs to map the three legacy `ClassicalRule` cases to those
-nodes.
+and the audit propagates `Classical` transitively. All three legacy
+`ClassicalRule` cases are connected.
 
 ## Receipts, modes, and countermodels
 
@@ -202,52 +205,54 @@ may run only when the new normalized statement receipt certifies a fragment the
 particular model finder supports. No countermodel result participates in proof
 checking.
 
-## Gaps that must close before dual checking
+## Compatibility prerequisites closed by the shadow gate
 
-These are compatibility prerequisites, not optional language expansion:
+These are compatibility prerequisites, not optional language expansion. All
+eight are now connected through the opt-in command/import shadow driver:
 
 1. **Rank-one term/symbol theorem schemes.** The checked core template and
    explicit-reference substrate is implemented. The parser-independent scope
    now lowers `(P : Prop)`, `(x : A)`, and `(R : A -> ... -> Prop)` parameters
-   and infers explicit type applications. Theorem-declaration and reference
-   integration is still required.
+   and infers explicit type applications. Theorem declarations and references
+   replay from the legacy driver's canonical parameter substitution.
 2. **Checked transparent definitions and delta reduction.** Implemented in the
    H4a core for closed monomorphic and rank-one polymorphic bodies. Definitions
    are checked before their constant is installed, can refer only to earlier
    declarations, and therefore normalize acyclically. Definition receipts
    preserve transitive dependencies while concrete uses are delta-normalized
    before fragment classification. Surface `def`, selective `unfold`, `simp`,
-   and `Convert` lowering remain.
+   and `Convert` evidence is connected. Arithmetic conversions use checked
+   compatibility theorems and equality elimination, not extra reduction.
 3. **Legacy first-order sets.** Implemented in the H4a core. The distinguished
    wrapper accepts only first-order elements. Membership computes for empty and
    universal sets, singleton, Boolean operations, Cartesian products,
    powersets/subset, and capture-safe comprehensions. Quantification over sets
    remains FOL. Set equality does not compute extensionally: `set_ext` is stored
    and propagated as a visible trusted axiom, as in the legacy standard library.
-   The compatibility prelude and parser-independent surface lowering are
-   implemented; declaration/import integration remains.
+   The compatibility prelude, surface lowering, declarations, and imports are
+   connected.
 4. **Product term computation.** Implemented in the H4a core. Pairing infers a
    product type; projections reject non-products, compute definitionally on
    pairs, traverse binders/type schemes capture-safely, and retain the least
-   first-order fragment when both components are first-order. Parser-independent
-   lowering is implemented; declaration integration remains.
+   first-order fragment when both components are first-order. Declaration and
+   proof integration is connected.
 5. **Structural recursion argument position.** Implemented in the H4a core.
    The datatype argument has an explicit checked source index; definition types,
    reduction scrutinees, and generated recursive calls all preserve it.
    Out-of-range positions fail transactionally. The graph spike now uses
    natural `append left right`, while generic `map` continues to demonstrate a
-   checked last recursive argument. Declaration lowering still needs to select
-   index zero for legacy `defrec`.
+   checked last recursive argument. Legacy `defrec` lowering selects source
+   index zero and preserves the legacy branch-binder order.
 6. **Trusted and incomplete declaration storage.** Implemented in the H4a core.
    Typed trusted axioms are kernel-visible and transitively reported. Typed
    drafts retain holes and may reference other incomplete declarations, but
    checked theorem lookup rejects them as evidence; incomplete receipts and
    draft bodies remain available for teaching/editor workflows.
-   Parser-independent declaration and reference lowering is implemented;
-   import/driver integration remains.
+   Declaration, reference, import, and driver integration is implemented in
+   shadow mode.
 7. **Explicit classical evidence.** The three core rules and transitive
-   `Classical` feature are implemented, and all three legacy proof forms now
-   lower to explicit audited evidence. Production tactic integration remains.
+   `Classical` feature are implemented, and all three legacy proof forms lower
+   from finished production tactic evidence to explicit audited evidence.
 8. **Instance-aware definition/theorem receipts.** Implemented in the H4a core.
    Every checked theorem reference records its instantiated statement and exact
    local term context. The dependency receipt reclassifies that statement while
@@ -257,15 +262,15 @@ These are compatibility prerequisites, not optional language expansion:
    instance still contributes HOL. Nested generic theorem references are
    recursively re-specialized, including references underneath local binders.
    Definition bodies normalize at their actual use and retain their transitive
-   receipts. Surface reference lowering remains.
+   receipts. Surface reference lowering is connected.
 
 The positive corpus's user datatypes (`List` and `Tree`) use only direct,
 strictly positive recursion, so the H3 inductive subset is sufficient. The
 corpus nevertheless exercises every gap above: proposition and predicate
 schemas, transparent relation and set definitions, set comprehension, product
 and Nat computation, defrec with extra parameters, trusted axioms, classical
-proofs, and incomplete exercise files. None can be postponed until after the
-74-file dual-check gate.
+proofs, and incomplete exercise files. The passing 74-file shadow gate therefore
+exercises the full compatibility boundary rather than a propositional subset.
 
 ## H4 implementation order and exit evidence
 
@@ -275,16 +280,22 @@ proofs, and incomplete exercise files. None can be postponed until after the
    argument index; prove each extension transactional and terminating.
 3. Add the compatibility prelude for Nat and legacy `Set`, including golden
    reduction tests for every sound structural equation and checked lemmas for
-   the legacy secondary simp orientations. The prelude, primary equations, and
-   closed-numeral tests are implemented; checked secondary lemmas remain.
+   the legacy secondary simp orientations. Done: the primary equations remain
+   definitional; seven internal induction theorems prove the secondary
+   orientations, and compatibility conversion constructs explicit motives.
 4. Lower types, terms, formulas, declarations, and proof nodes in isolation;
    compare canonical statements and receipts with the legacy checker.
-   Parser-independent lowering is implemented for every listed form; the next
-   step is command/import integration and per-declaration comparison.
+   Done: parser-independent lowering covers every listed form, and the opt-in
+   sidecar consumes the same canonical command/import stream without affecting
+   legacy acceptance.
 5. Run both engines on all 74 files. Every one of the 588 recorded root
    declarations must match status, constructive/classical use, axiom/incomplete
    closure, and canonical surface statement; every one of the 38 negative
-   theorems must remain rejected individually.
+   theorems must remain rejected individually. Done in shadow mode:
+   `python3 scripts/hol_shadow.py check` reports 74/74 matching files,
+   588/588 root receipts, 9,389/9,389 accepted declaration occurrences, and
+   zero mismatches. The frozen legacy oracle independently retains the exact 38
+   negative rejections and diagnostic identities.
 
 At the parser-independent prelude/lowering checkpoint, the linked release CLI
 is 2,747,480 bytes and the raw Wasm module is 1,349,914 bytes. The latter remains
@@ -294,8 +305,10 @@ first transactional declaration slice, the corresponding artifacts are
 2,760,416 and 1,349,967 bytes; Wasm growth is only 53 bytes because the new
 parser-independent path is not yet reachable from the production facade. With
 all theorem statuses and legacy proof nodes lowered, they are 2,766,776 and
-1,349,297 bytes respectively. The small Wasm decrease is linker noise in still
-unreachable code, and the module remains comfortably below the review trigger.
-
-Only after that exact dual-check result should the driver route ordinary course
-files to the HOL kernel by default.
+1,349,297 bytes respectively. At the command-linked shadow checkpoint, the
+native CLI is 3,346,328 bytes. The browser crate does not expose this native
+migration tool and disables the `hol-shadow` Cargo feature, leaving the raw Wasm
+module at 1,351,837 bytes—2,540 bytes over the prior checkpoint and below the
+1.5 MB review line. Default routing remains a separate decision: passing the
+shadow gate authorizes H5 policy/result integration and cutover evaluation, not
+silent replacement of the legacy authority.

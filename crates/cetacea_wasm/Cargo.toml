@@ -8,4 +8,4 @@ crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
-cetacea_core = { path = "../cetacea_core" }
+cetacea_core = { path = "../cetacea_core", default-features = false }
