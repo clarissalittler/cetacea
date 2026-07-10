@@ -557,7 +557,7 @@ pub struct DeclarationReceipt {
 }
 
 impl DeclarationReceipt {
-    pub fn checked<'a>(
+    pub(super) fn checked<'a>(
         id: DeclarationId,
         statement_fragment: StatementFragment,
         direct_features: impl IntoIterator<Item = ProofFeature>,
@@ -570,7 +570,8 @@ impl DeclarationReceipt {
         }
     }
 
-    pub fn incomplete<'a>(
+    #[cfg(test)]
+    fn incomplete<'a>(
         id: DeclarationId,
         statement_fragment: StatementFragment,
         direct_features: impl IntoIterator<Item = ProofFeature>,
@@ -583,7 +584,8 @@ impl DeclarationReceipt {
         }
     }
 
-    pub fn trusted_axiom(id: DeclarationId, statement_fragment: StatementFragment) -> Self {
+    #[cfg(test)]
+    fn trusted_axiom(id: DeclarationId, statement_fragment: StatementFragment) -> Self {
         Self {
             id,
             status: EvidenceStatus::TrustedAxiom,

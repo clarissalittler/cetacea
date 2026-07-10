@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use super::types::{CoreType, TypeError, TypeParameter, TypeSignature};
@@ -681,6 +681,94 @@ fn substitute_term_types(
             substitute_core_type(domain, substitution),
             substitute_term_types(body, substitution),
         ),
+    }
+}
+
+pub(crate) fn validate_term_type_scheme(
+    types: &TypeSignature,
+    parameters: &[TypeParameter],
+    term: &CoreTerm,
+) -> Result<(), TermError> {
+    match term {
+        CoreTerm::Bound(_) | CoreTerm::Constant(_) | CoreTerm::Truth | CoreTerm::Falsity => Ok(()),
+        CoreTerm::TypeApplication { arguments, .. } => {
+            for argument in arguments {
+                types.validate_scheme(parameters, argument)?;
+            }
+            Ok(())
+        }
+        CoreTerm::Lambda {
+            parameter_type,
+            body,
+        } => {
+            types.validate_scheme(parameters, parameter_type)?;
+            validate_term_type_scheme(types, parameters, body)
+        }
+        CoreTerm::Apply { function, argument }
+        | CoreTerm::And(function, argument)
+        | CoreTerm::Or(function, argument)
+        | CoreTerm::Implies(function, argument) => {
+            validate_term_type_scheme(types, parameters, function)?;
+            validate_term_type_scheme(types, parameters, argument)
+        }
+        CoreTerm::Equality { ty, left, right } => {
+            types.validate_scheme(parameters, ty)?;
+            validate_term_type_scheme(types, parameters, left)?;
+            validate_term_type_scheme(types, parameters, right)
+        }
+        CoreTerm::Forall { domain, body } | CoreTerm::Exists { domain, body } => {
+            types.validate_scheme(parameters, domain)?;
+            validate_term_type_scheme(types, parameters, body)
+        }
+    }
+}
+
+pub(crate) fn instantiate_term_type_scheme(
+    types: &TypeSignature,
+    parameters: &[TypeParameter],
+    term: &CoreTerm,
+    arguments: &[CoreType],
+) -> Result<CoreTerm, TermError> {
+    // Instantiating the dummy body validates parameter uniqueness, argument
+    // arity, argument types, and first-order parameter constraints.
+    types.instantiate_scheme(parameters, &CoreType::Prop, arguments)?;
+    let substitution = parameters
+        .iter()
+        .zip(arguments)
+        .map(|(parameter, argument)| (parameter.id, argument.clone()))
+        .collect::<HashMap<_, _>>();
+    Ok(substitute_term_types(term, &substitution))
+}
+
+pub(crate) fn term_constant_dependencies(term: &CoreTerm) -> BTreeSet<ConstantId> {
+    let mut dependencies = BTreeSet::new();
+    collect_term_constant_dependencies(term, &mut dependencies);
+    dependencies
+}
+
+fn collect_term_constant_dependencies(term: &CoreTerm, dependencies: &mut BTreeSet<ConstantId>) {
+    match term {
+        CoreTerm::Bound(_) | CoreTerm::Truth | CoreTerm::Falsity => {}
+        CoreTerm::Constant(id) => {
+            dependencies.insert(*id);
+        }
+        CoreTerm::TypeApplication { constant, .. } => {
+            dependencies.insert(*constant);
+        }
+        CoreTerm::Lambda { body, .. }
+        | CoreTerm::Forall { body, .. }
+        | CoreTerm::Exists { body, .. } => collect_term_constant_dependencies(body, dependencies),
+        CoreTerm::Apply { function, argument }
+        | CoreTerm::And(function, argument)
+        | CoreTerm::Or(function, argument)
+        | CoreTerm::Implies(function, argument) => {
+            collect_term_constant_dependencies(function, dependencies);
+            collect_term_constant_dependencies(argument, dependencies);
+        }
+        CoreTerm::Equality { left, right, .. } => {
+            collect_term_constant_dependencies(left, dependencies);
+            collect_term_constant_dependencies(right, dependencies);
+        }
     }
 }
 

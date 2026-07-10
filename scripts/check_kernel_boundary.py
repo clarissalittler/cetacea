@@ -18,6 +18,7 @@ KERNEL_PATHS = (
     CORE_SRC / "hol" / "proofs.rs",
     CORE_SRC / "hol" / "inductive.rs",
     CORE_SRC / "hol" / "recursion.rs",
+    CORE_SRC / "hol" / "theorems.rs",
 )
 
 # These names belong outside the trusted logical core. Patterns are purposely

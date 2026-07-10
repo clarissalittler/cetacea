@@ -1,15 +1,22 @@
+use std::collections::BTreeSet;
 use std::fmt;
 
 use super::inductive::{InductiveError, InductiveSignature};
 use super::terms::{
     definitionally_equal, infer_type, instantiate_binder, normalize, shift_under_new_binder,
-    CoreTerm, TermContext, TermError, TermSignature,
+    term_constant_dependencies, validate_term_type_scheme, ConstantId, CoreTerm, TermContext,
+    TermError, TermSignature,
 };
+use super::theorems::{HolTheoremSignature, TheoremError, TheoremId};
 use super::types::{CoreType, TypeConstructorId, TypeError, TypeSignature};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HolDraftProof {
     Hypothesis(u32),
+    TheoremRef {
+        theorem: TheoremId,
+        type_arguments: Vec<CoreType>,
+    },
     TruthIntro,
     FalseElim {
         proof_false: Box<HolDraftProof>,
@@ -88,14 +95,24 @@ pub enum HolDraftProof {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HolKernelProof(HolDraftProof);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HolProofAudit {
     uses_induction: bool,
+    theorem_dependencies: BTreeSet<TheoremId>,
+    constant_dependencies: BTreeSet<ConstantId>,
 }
 
 impl HolProofAudit {
-    pub fn uses_induction(self) -> bool {
+    pub fn uses_induction(&self) -> bool {
         self.uses_induction
+    }
+
+    pub fn theorem_dependencies(&self) -> &BTreeSet<TheoremId> {
+        &self.theorem_dependencies
+    }
+
+    pub fn constant_dependencies(&self) -> &BTreeSet<ConstantId> {
+        &self.constant_dependencies
     }
 }
 
@@ -148,6 +165,12 @@ impl From<TypeError> for ProofError {
 
 impl From<InductiveError> for ProofError {
     fn from(error: InductiveError) -> Self {
+        Self::new(error.message)
+    }
+}
+
+impl From<TheoremError> for ProofError {
+    fn from(error: TheoremError) -> Self {
         Self::new(error.message)
     }
 }
@@ -226,6 +249,7 @@ pub fn check_hol_proof_audit(
         types,
         constants,
         None,
+        None,
         term_context,
         proof_context,
         proof,
@@ -268,6 +292,30 @@ pub fn check_hol_proof_with_inductives_audit(
         types,
         constants,
         Some(inductives),
+        None,
+        term_context,
+        proof_context,
+        proof,
+        expected,
+    )?;
+    Ok(audit_proof(&proof.0))
+}
+
+pub fn check_hol_proof_with_signatures_audit(
+    types: &TypeSignature,
+    constants: &TermSignature,
+    inductives: &InductiveSignature,
+    theorems: &HolTheoremSignature,
+    term_context: &TermContext,
+    proof_context: &HolProofContext,
+    proof: &HolKernelProof,
+    expected: &CoreTerm,
+) -> Result<HolProofAudit, ProofError> {
+    check_hol_proof_internal(
+        types,
+        constants,
+        Some(inductives),
+        Some(theorems),
         term_context,
         proof_context,
         proof,
@@ -280,6 +328,7 @@ fn check_hol_proof_internal(
     types: &TypeSignature,
     constants: &TermSignature,
     inductives: Option<&InductiveSignature>,
+    theorems: Option<&HolTheoremSignature>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolKernelProof,
@@ -290,6 +339,7 @@ fn check_hol_proof_internal(
         types,
         constants,
         inductives,
+        theorems,
         term_context,
         proof_context,
         &proof.0,
@@ -307,12 +357,24 @@ fn infer_proof(
     types: &TypeSignature,
     constants: &TermSignature,
     inductives: Option<&InductiveSignature>,
+    theorems: Option<&HolTheoremSignature>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
 ) -> Result<CoreTerm, ProofError> {
     match proof {
         HolDraftProof::Hypothesis(index) => Ok(proof_context.lookup(*index)?.clone()),
+        HolDraftProof::TheoremRef {
+            theorem,
+            type_arguments,
+        } => {
+            let theorem_signature = theorems.ok_or_else(|| {
+                ProofError::new(
+                    "theorem reference requires a checked theorem signature at the kernel boundary",
+                )
+            })?;
+            Ok(theorem_signature.instantiate_statement(types, *theorem, type_arguments)?)
+        }
         HolDraftProof::TruthIntro => Ok(CoreTerm::Truth),
         HolDraftProof::FalseElim {
             proof_false,
@@ -322,6 +384,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_false,
@@ -341,6 +404,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 left,
@@ -349,6 +413,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 right,
@@ -359,6 +424,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_and,
@@ -375,6 +441,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_and,
@@ -393,6 +460,7 @@ fn infer_proof(
                     types,
                     constants,
                     inductives,
+                    theorems,
                     term_context,
                     proof_context,
                     proof_left,
@@ -408,6 +476,7 @@ fn infer_proof(
                     types,
                     constants,
                     inductives,
+                    theorems,
                     term_context,
                     proof_context,
                     proof_right,
@@ -431,6 +500,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_or,
@@ -450,6 +520,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 &left_context,
                 left_case,
@@ -459,6 +530,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 &right_context,
                 right_case,
@@ -477,6 +549,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 &body_context,
                 body,
@@ -491,6 +564,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_implication,
@@ -504,6 +578,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_argument,
@@ -524,6 +599,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -550,6 +626,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_left,
@@ -572,6 +649,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -608,6 +686,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_equality,
@@ -653,6 +732,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 &body_term_context,
                 &body_proof_context,
                 body,
@@ -667,6 +747,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_forall,
@@ -705,6 +786,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_body,
@@ -728,6 +810,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 term_context,
                 proof_context,
                 proof_exists,
@@ -753,6 +836,7 @@ fn infer_proof(
                 types,
                 constants,
                 inductives,
+                theorems,
                 &body_term_context,
                 &body_proof_context,
                 body,
@@ -854,6 +938,7 @@ fn infer_proof(
                     types,
                     constants,
                     inductives,
+                    theorems,
                     &case_term_context,
                     &case_proof_context,
                     case,
@@ -937,6 +1022,7 @@ fn check_draft(
     types: &TypeSignature,
     constants: &TermSignature,
     inductives: Option<&InductiveSignature>,
+    theorems: Option<&HolTheoremSignature>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -946,6 +1032,7 @@ fn check_draft(
         types,
         constants,
         inductives,
+        theorems,
         term_context,
         proof_context,
         proof,
@@ -963,6 +1050,7 @@ fn normalized_proof_formula(
     types: &TypeSignature,
     constants: &TermSignature,
     inductives: Option<&InductiveSignature>,
+    theorems: Option<&HolTheoremSignature>,
     term_context: &TermContext,
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
@@ -971,6 +1059,7 @@ fn normalized_proof_formula(
         types,
         constants,
         inductives,
+        theorems,
         term_context,
         proof_context,
         proof,
@@ -1015,6 +1104,7 @@ fn proof_has_hole(proof: &HolDraftProof) -> bool {
     match proof {
         HolDraftProof::Sorry { .. } => true,
         HolDraftProof::Hypothesis(_)
+        | HolDraftProof::TheoremRef { .. }
         | HolDraftProof::TruthIntro
         | HolDraftProof::EqualityRefl(_) => false,
         HolDraftProof::FalseElim { proof_false, .. }
@@ -1059,8 +1149,14 @@ fn proof_has_hole(proof: &HolDraftProof) -> bool {
 }
 
 fn audit_proof(proof: &HolDraftProof) -> HolProofAudit {
+    let mut theorem_dependencies = BTreeSet::new();
+    collect_theorem_dependencies(proof, &mut theorem_dependencies);
+    let mut constant_dependencies = BTreeSet::new();
+    collect_proof_constant_dependencies(proof, &mut constant_dependencies);
     HolProofAudit {
         uses_induction: proof_uses_induction(proof),
+        theorem_dependencies,
+        constant_dependencies,
     }
 }
 
@@ -1068,6 +1164,7 @@ fn proof_uses_induction(proof: &HolDraftProof) -> bool {
     match proof {
         HolDraftProof::Induction { .. } => true,
         HolDraftProof::Hypothesis(_)
+        | HolDraftProof::TheoremRef { .. }
         | HolDraftProof::TruthIntro
         | HolDraftProof::EqualityRefl(_)
         | HolDraftProof::Sorry { .. } => false,
@@ -1124,6 +1221,330 @@ fn proof_uses_induction(proof: &HolDraftProof) -> bool {
         HolDraftProof::ExistsElim {
             proof_exists, body, ..
         } => proof_uses_induction(proof_exists) || proof_uses_induction(body),
+    }
+}
+
+fn collect_theorem_dependencies(proof: &HolDraftProof, dependencies: &mut BTreeSet<TheoremId>) {
+    match proof {
+        HolDraftProof::TheoremRef { theorem, .. } => {
+            dependencies.insert(*theorem);
+        }
+        HolDraftProof::Hypothesis(_)
+        | HolDraftProof::TruthIntro
+        | HolDraftProof::EqualityRefl(_)
+        | HolDraftProof::Sorry { .. } => {}
+        HolDraftProof::FalseElim { proof_false, .. }
+        | HolDraftProof::AndElimLeft(proof_false)
+        | HolDraftProof::AndElimRight(proof_false)
+        | HolDraftProof::ForallIntro {
+            body: proof_false, ..
+        }
+        | HolDraftProof::ForallElim {
+            proof_forall: proof_false,
+            ..
+        }
+        | HolDraftProof::OrIntroLeft {
+            proof_left: proof_false,
+            ..
+        }
+        | HolDraftProof::OrIntroRight {
+            proof_right: proof_false,
+            ..
+        }
+        | HolDraftProof::ConstructorDisjoint {
+            proof_equality: proof_false,
+        }
+        | HolDraftProof::ConstructorInjective {
+            proof_equality: proof_false,
+            ..
+        }
+        | HolDraftProof::ExistsIntro {
+            proof_body: proof_false,
+            ..
+        } => collect_theorem_dependencies(proof_false, dependencies),
+        HolDraftProof::AndIntro(left, right)
+        | HolDraftProof::ImpElim {
+            proof_implication: left,
+            proof_argument: right,
+        } => {
+            collect_theorem_dependencies(left, dependencies);
+            collect_theorem_dependencies(right, dependencies);
+        }
+        HolDraftProof::OrElim {
+            proof_or,
+            left_case,
+            right_case,
+            ..
+        } => {
+            collect_theorem_dependencies(proof_or, dependencies);
+            collect_theorem_dependencies(left_case, dependencies);
+            collect_theorem_dependencies(right_case, dependencies);
+        }
+        HolDraftProof::ImpIntro { body, .. } => {
+            collect_theorem_dependencies(body, dependencies);
+        }
+        HolDraftProof::EqualityElim {
+            proof_equality,
+            proof_left,
+            ..
+        } => {
+            collect_theorem_dependencies(proof_equality, dependencies);
+            collect_theorem_dependencies(proof_left, dependencies);
+        }
+        HolDraftProof::ExistsElim {
+            proof_exists, body, ..
+        } => {
+            collect_theorem_dependencies(proof_exists, dependencies);
+            collect_theorem_dependencies(body, dependencies);
+        }
+        HolDraftProof::Induction { cases, .. } => {
+            for case in cases {
+                collect_theorem_dependencies(case, dependencies);
+            }
+        }
+    }
+}
+
+fn collect_proof_constant_dependencies(
+    proof: &HolDraftProof,
+    dependencies: &mut BTreeSet<ConstantId>,
+) {
+    let mut add_term = |term: &CoreTerm| {
+        dependencies.extend(term_constant_dependencies(term));
+    };
+    match proof {
+        HolDraftProof::Hypothesis(_)
+        | HolDraftProof::TheoremRef { .. }
+        | HolDraftProof::TruthIntro => {}
+        HolDraftProof::FalseElim {
+            proof_false,
+            target,
+        } => {
+            add_term(target);
+            collect_proof_constant_dependencies(proof_false, dependencies);
+        }
+        HolDraftProof::AndIntro(left, right)
+        | HolDraftProof::ImpElim {
+            proof_implication: left,
+            proof_argument: right,
+        } => {
+            collect_proof_constant_dependencies(left, dependencies);
+            collect_proof_constant_dependencies(right, dependencies);
+        }
+        HolDraftProof::AndElimLeft(inner) | HolDraftProof::AndElimRight(inner) => {
+            collect_proof_constant_dependencies(inner, dependencies);
+        }
+        HolDraftProof::OrIntroLeft { proof_left, right } => {
+            add_term(right);
+            collect_proof_constant_dependencies(proof_left, dependencies);
+        }
+        HolDraftProof::OrIntroRight { left, proof_right } => {
+            add_term(left);
+            collect_proof_constant_dependencies(proof_right, dependencies);
+        }
+        HolDraftProof::OrElim {
+            proof_or,
+            left_case,
+            right_case,
+            target,
+        } => {
+            add_term(target);
+            collect_proof_constant_dependencies(proof_or, dependencies);
+            collect_proof_constant_dependencies(left_case, dependencies);
+            collect_proof_constant_dependencies(right_case, dependencies);
+        }
+        HolDraftProof::ImpIntro { premise, body } => {
+            add_term(premise);
+            collect_proof_constant_dependencies(body, dependencies);
+        }
+        HolDraftProof::EqualityRefl(term) => add_term(term),
+        HolDraftProof::EqualityElim {
+            proof_equality,
+            motive,
+            proof_left,
+        } => {
+            add_term(motive);
+            collect_proof_constant_dependencies(proof_equality, dependencies);
+            collect_proof_constant_dependencies(proof_left, dependencies);
+        }
+        HolDraftProof::ConstructorDisjoint { proof_equality }
+        | HolDraftProof::ConstructorInjective { proof_equality, .. } => {
+            collect_proof_constant_dependencies(proof_equality, dependencies);
+        }
+        HolDraftProof::ForallIntro { body, .. } => {
+            collect_proof_constant_dependencies(body, dependencies);
+        }
+        HolDraftProof::ForallElim {
+            proof_forall,
+            argument,
+        } => {
+            add_term(argument);
+            collect_proof_constant_dependencies(proof_forall, dependencies);
+        }
+        HolDraftProof::ExistsIntro {
+            body,
+            witness,
+            proof_body,
+            ..
+        } => {
+            add_term(body);
+            add_term(witness);
+            collect_proof_constant_dependencies(proof_body, dependencies);
+        }
+        HolDraftProof::ExistsElim {
+            proof_exists,
+            body,
+            target,
+        } => {
+            add_term(target);
+            collect_proof_constant_dependencies(proof_exists, dependencies);
+            collect_proof_constant_dependencies(body, dependencies);
+        }
+        HolDraftProof::Induction {
+            motive,
+            scrutinee,
+            cases,
+            ..
+        } => {
+            add_term(motive);
+            add_term(scrutinee);
+            for case in cases {
+                collect_proof_constant_dependencies(case, dependencies);
+            }
+        }
+        HolDraftProof::Sorry { target } => add_term(target),
+    }
+}
+
+pub(crate) fn validate_kernel_proof_type_scheme(
+    types: &TypeSignature,
+    parameters: &[super::types::TypeParameter],
+    proof: &HolKernelProof,
+) -> Result<(), ProofError> {
+    validate_draft_proof_type_scheme(types, parameters, &proof.0)
+}
+
+fn validate_draft_proof_type_scheme(
+    types: &TypeSignature,
+    parameters: &[super::types::TypeParameter],
+    proof: &HolDraftProof,
+) -> Result<(), ProofError> {
+    let validate_term = |term: &CoreTerm| -> Result<(), ProofError> {
+        validate_term_type_scheme(types, parameters, term)?;
+        Ok(())
+    };
+    match proof {
+        HolDraftProof::Hypothesis(_) | HolDraftProof::TruthIntro => Ok(()),
+        HolDraftProof::TheoremRef { type_arguments, .. } => {
+            for argument in type_arguments {
+                types.validate_scheme(parameters, argument)?;
+            }
+            Ok(())
+        }
+        HolDraftProof::FalseElim {
+            proof_false,
+            target,
+        } => {
+            validate_draft_proof_type_scheme(types, parameters, proof_false)?;
+            validate_term(target)
+        }
+        HolDraftProof::AndIntro(left, right)
+        | HolDraftProof::ImpElim {
+            proof_implication: left,
+            proof_argument: right,
+        } => {
+            validate_draft_proof_type_scheme(types, parameters, left)?;
+            validate_draft_proof_type_scheme(types, parameters, right)
+        }
+        HolDraftProof::AndElimLeft(inner) | HolDraftProof::AndElimRight(inner) => {
+            validate_draft_proof_type_scheme(types, parameters, inner)
+        }
+        HolDraftProof::OrIntroLeft { proof_left, right } => {
+            validate_draft_proof_type_scheme(types, parameters, proof_left)?;
+            validate_term(right)
+        }
+        HolDraftProof::OrIntroRight { left, proof_right } => {
+            validate_term(left)?;
+            validate_draft_proof_type_scheme(types, parameters, proof_right)
+        }
+        HolDraftProof::OrElim {
+            proof_or,
+            left_case,
+            right_case,
+            target,
+        } => {
+            validate_draft_proof_type_scheme(types, parameters, proof_or)?;
+            validate_draft_proof_type_scheme(types, parameters, left_case)?;
+            validate_draft_proof_type_scheme(types, parameters, right_case)?;
+            validate_term(target)
+        }
+        HolDraftProof::ImpIntro { premise, body } => {
+            validate_term(premise)?;
+            validate_draft_proof_type_scheme(types, parameters, body)
+        }
+        HolDraftProof::EqualityRefl(term) => validate_term(term),
+        HolDraftProof::EqualityElim {
+            proof_equality,
+            motive,
+            proof_left,
+        } => {
+            validate_draft_proof_type_scheme(types, parameters, proof_equality)?;
+            validate_term(motive)?;
+            validate_draft_proof_type_scheme(types, parameters, proof_left)
+        }
+        HolDraftProof::ConstructorDisjoint { proof_equality }
+        | HolDraftProof::ConstructorInjective { proof_equality, .. } => {
+            validate_draft_proof_type_scheme(types, parameters, proof_equality)
+        }
+        HolDraftProof::ForallIntro { domain, body } => {
+            types.validate_scheme(parameters, domain)?;
+            validate_draft_proof_type_scheme(types, parameters, body)
+        }
+        HolDraftProof::ForallElim {
+            proof_forall,
+            argument,
+        } => {
+            validate_draft_proof_type_scheme(types, parameters, proof_forall)?;
+            validate_term(argument)
+        }
+        HolDraftProof::ExistsIntro {
+            domain,
+            body,
+            witness,
+            proof_body,
+        } => {
+            types.validate_scheme(parameters, domain)?;
+            validate_term(body)?;
+            validate_term(witness)?;
+            validate_draft_proof_type_scheme(types, parameters, proof_body)
+        }
+        HolDraftProof::ExistsElim {
+            proof_exists,
+            body,
+            target,
+        } => {
+            validate_draft_proof_type_scheme(types, parameters, proof_exists)?;
+            validate_draft_proof_type_scheme(types, parameters, body)?;
+            validate_term(target)
+        }
+        HolDraftProof::Induction {
+            type_arguments,
+            motive,
+            scrutinee,
+            cases,
+            ..
+        } => {
+            for argument in type_arguments {
+                types.validate_scheme(parameters, argument)?;
+            }
+            validate_term(motive)?;
+            validate_term(scrutinee)?;
+            for case in cases {
+                validate_draft_proof_type_scheme(types, parameters, case)?;
+            }
+            Ok(())
+        }
+        HolDraftProof::Sorry { target } => validate_term(target),
     }
 }
 

@@ -342,8 +342,8 @@ ill-typed terms, capture bugs, and disallowed classical steps are rejected.
 
 Decision: **conditional go for a bounded H3.5 bridge; H4 is not yet
 authorized.** See [`hol/H3_DECISION_REPORT.md`](hol/H3_DECISION_REPORT.md) for
-the executable examples, measurements, gate assessment, and remaining theorem
-reference/dependency-discovery work.
+the executable examples, measurements, gate assessment, and current H3.5
+progress.
 
 Status: the checked declaration substrate now supports transactional,
 parameterized inductive types and explicit polymorphic constructor schemes.
@@ -369,9 +369,14 @@ Both produce trust-free `fol+induction` receipts and exercise deliberate type,
 termination, and positivity rejections. The finite example now adds two checked
 finite datatypes, exhaustive duplicate-free enumerations, structural
 encode/decode maps, inverse proofs, and a shared cardinality witness, again with
-no trust. It is intentionally a concrete transport instance; a reusable theorem
-over arbitrary stored bijections still depends on theorem-reference elaboration
-and is recorded as an H3 decision-report limitation.
+no trust. It is intentionally a concrete transport instance; turning it into a
+reusable theorem over arbitrary stored bijections remains an H3.5 deliverable.
+H3.5 now adds stable
+checked theorem IDs, explicit type-instantiated theorem references, schematic
+type-scope validation, and transitive theorem/structural-definition receipts
+derived from statements and hole-free evidence. The three examples have been
+migrated off caller-authored dependencies. The generic cardinality theorem,
+linked Wasm measurement, and mechanical compatibility lowering map remain.
 
 Implement only enough surface elaboration and inductive infrastructure for
 these three end-to-end examples:

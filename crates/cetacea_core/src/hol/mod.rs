@@ -11,6 +11,7 @@ pub mod proofs;
 pub mod recursion;
 pub mod spike;
 pub mod terms;
+pub mod theorems;
 pub mod types;
 
 pub use fragments::{
@@ -28,18 +29,19 @@ pub use inductive::{
 };
 pub use proofs::{
     check_hol_proof, check_hol_proof_audit, check_hol_proof_with_inductives,
-    check_hol_proof_with_inductives_audit, HolDraftProof, HolKernelProof, HolProofAudit,
-    HolProofContext, ProofError,
+    check_hol_proof_with_inductives_audit, check_hol_proof_with_signatures_audit, HolDraftProof,
+    HolKernelProof, HolProofAudit, HolProofContext, ProofError,
 };
 pub use recursion::{
     RecursionError, RecursionSignature, StructuralArmLayout, StructuralArmSpec,
     StructuralDefinition, StructuralDefinitionSpec,
 };
-pub use spike::{CheckedSpikeTheorem, SpikeElaborator, SpikeError};
+pub use spike::{SpikeElaborator, SpikeError};
 pub use terms::{
     definitionally_equal, infer_type, instantiate_binder, normalize, ConstantId, CoreTerm,
     TermContext, TermError, TermSignature,
 };
+pub use theorems::{HolTheoremDeclaration, HolTheoremSignature, TheoremError, TheoremId};
 pub use types::{
     CoreType, FirstOrderStatus, TypeConstructorId, TypeError, TypeParameter, TypeParameterClass,
     TypeParameterId, TypeSignature,

@@ -31,6 +31,28 @@ compatibility elaborator. If theorem reuse or dependency discovery forces a
 large proof-language or kernel expansion, retain the FOL engine and port only
 the successful receipt and generic-library ideas.
 
+## H3.5 progress after the measured checkpoint
+
+The first three bridge items are now implemented:
+
+- checked theorems have stable IDs and can be referenced only through explicit,
+  kernel-checked type instantiations;
+- theorem and structural-definition dependencies are collected from stored
+  statements and hole-free proof evidence, then closed transitively when the
+  receipt is built; and
+- schematic statements and every type annotation embedded in proof evidence
+  are checked against the theorem's declared rank-one type parameters.
+
+The old spike method that accepted a caller-supplied dependency list has been
+removed. The list, graph, and finite examples now use checked theorem storage
+and automatically derived receipts end to end. Focused adversarial tests cover
+a first-order-looking theorem facade over induction, a recursive definition
+mentioned only in discarded proof evidence, unknown theorem IDs, duplicate
+theorem names, and undeclared schematic type parameters.
+
+The remaining H3.5 gates are the reusable bijection/cardinality theorem, a
+linked native/Wasm measurement, and the mechanical FOL-to-HOL lowering map.
+
 ## What the spike now checks
 
 ### List library

@@ -4,7 +4,7 @@
 //! not hand-installed kernel metadata. Each report contains checked receipts
 //! and the diagnostics from deliberate rejection cases.
 
-use super::fragments::{DeclarationId, DeclarationReceipt, ProofFeature, StatementFragment};
+use super::fragments::DeclarationReceipt;
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
 use super::proofs::HolDraftProof;
 use super::recursion::{StructuralArmLayout, StructuralArmSpec, StructuralDefinitionSpec};
@@ -205,25 +205,6 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
         ],
     })?;
 
-    let structural_receipt = |id| {
-        DeclarationReceipt::checked(
-            DeclarationId(id),
-            StatementFragment::FirstOrderInductive,
-            [ProofFeature::StructuralRecursion],
-            [],
-        )
-    };
-    let _all_receipt = structural_receipt(1);
-    let member_receipt = structural_receipt(2);
-    let nodup_receipt = DeclarationReceipt::checked(
-        DeclarationId(3),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [&member_receipt],
-    );
-    let _append_receipt = structural_receipt(4);
-    let _length_receipt = structural_receipt(5);
-
     let nil_nat = CoreTerm::instantiate_constant(nil, vec![nat.clone()]);
     let singleton = CoreTerm::apply(
         CoreTerm::apply(
@@ -236,40 +217,36 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
         CoreTerm::instantiate_constant(nodup, vec![nat.clone()]),
         singleton,
     );
-    let nodup_singleton = elaborator
-        .check_theorem(
-            DeclarationId(10),
-            &nodup_singleton_statement,
-            HolDraftProof::AndIntro(
-                Box::new(HolDraftProof::ImpIntro {
-                    premise: CoreTerm::Falsity,
-                    body: Box::new(HolDraftProof::Hypothesis(0)),
-                }),
-                Box::new(HolDraftProof::TruthIntro),
-            ),
-            [&nodup_receipt],
-        )?
-        .receipt;
+    let (_, nodup_singleton) = elaborator.declare_theorem(
+        "nodup_singleton",
+        Vec::new(),
+        nodup_singleton_statement,
+        HolDraftProof::AndIntro(
+            Box::new(HolDraftProof::ImpIntro {
+                premise: CoreTerm::Falsity,
+                body: Box::new(HolDraftProof::Hypothesis(0)),
+            }),
+            Box::new(HolDraftProof::TruthIntro),
+        ),
+    )?;
 
     let list_nat = CoreType::constructor(list, vec![nat.clone()]);
     let induction_statement = CoreTerm::forall(list_nat.clone(), CoreTerm::Truth);
-    let induction_theorem = elaborator
-        .check_theorem(
-            DeclarationId(11),
-            &induction_statement,
-            HolDraftProof::ForallIntro {
-                domain: list_nat.clone(),
-                body: Box::new(HolDraftProof::Induction {
-                    datatype: list,
-                    type_arguments: vec![nat.clone()],
-                    motive: CoreTerm::lambda(list_nat, CoreTerm::Truth),
-                    scrutinee: CoreTerm::Bound(0),
-                    cases: vec![HolDraftProof::TruthIntro, HolDraftProof::TruthIntro],
-                }),
-            },
-            [],
-        )?
-        .receipt;
+    let (_, induction_theorem) = elaborator.declare_theorem(
+        "list_truth_induction",
+        Vec::new(),
+        induction_statement,
+        HolDraftProof::ForallIntro {
+            domain: list_nat.clone(),
+            body: Box::new(HolDraftProof::Induction {
+                datatype: list,
+                type_arguments: vec![nat.clone()],
+                motive: CoreTerm::lambda(list_nat, CoreTerm::Truth),
+                scrutinee: CoreTerm::Bound(0),
+                cases: vec![HolDraftProof::TruthIntro, HolDraftProof::TruthIntro],
+            }),
+        },
+    )?;
 
     let malformed_cons = CoreTerm::apply(
         CoreTerm::apply(
@@ -653,26 +630,12 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
             cases: vec![nil_case, cons_case],
         }),
     };
-    let append_receipt = DeclarationReceipt::checked(
-        DeclarationId(100),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [],
-    );
-    let path_receipt = DeclarationReceipt::checked(
-        DeclarationId(101),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [],
-    );
-    let path_concatenation = elaborator
-        .check_theorem(
-            DeclarationId(102),
-            &path_concatenation_statement,
-            proof,
-            [&append_receipt, &path_receipt],
-        )?
-        .receipt;
+    let (_, path_concatenation) = elaborator.declare_theorem(
+        "path_concatenation",
+        Vec::new(),
+        path_concatenation_statement,
+        proof,
+    )?;
 
     let malformed_edge = CoreTerm::apply(
         CoreTerm::instantiate_constant(edge, vec![vertex.clone()]),
@@ -1120,49 +1083,8 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         )),
     };
 
-    let member_receipt = DeclarationReceipt::checked(
-        DeclarationId(200),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [],
-    );
-    let nodup_receipt = DeclarationReceipt::checked(
-        DeclarationId(201),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [&member_receipt],
-    );
-    let length_receipt = DeclarationReceipt::checked(
-        DeclarationId(202),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [],
-    );
-    let encode_receipt = DeclarationReceipt::checked(
-        DeclarationId(203),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [],
-    );
-    let decode_receipt = DeclarationReceipt::checked(
-        DeclarationId(204),
-        StatementFragment::FirstOrderInductive,
-        [ProofFeature::StructuralRecursion],
-        [],
-    );
-    let bijection_cardinality = elaborator
-        .check_theorem(
-            DeclarationId(205),
-            &statement,
-            proof,
-            [
-                &nodup_receipt,
-                &length_receipt,
-                &encode_receipt,
-                &decode_receipt,
-            ],
-        )?
-        .receipt;
+    let (_, bijection_cardinality) =
+        elaborator.declare_theorem("bijection_cardinality", Vec::new(), statement, proof)?;
 
     let malformed_encode = CoreTerm::apply(CoreTerm::Constant(encode), CoreTerm::Constant(off));
     let type_error = infer_type(
@@ -1225,7 +1147,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hol::fragments::{ReceiptPolicy, TeachingProfile};
+    use crate::hol::fragments::{ProofFeature, ReceiptPolicy, StatementFragment, TeachingProfile};
 
     #[test]
     fn list_h3_spike_is_positive_trust_free_and_policy_accurate() {
