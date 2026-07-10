@@ -277,7 +277,8 @@ probability.
 
 For classroom deployment, Cetacea should also gain:
 
-- assignment manifests and allowed-import policies;
+- promotion of the experimental native HOL assignment manifests and
+  allowed-import policies to the browser/grading surface;
 - stable tagged releases rather than only a moving Pages build;
 - browser import/export and multiple project files;
 - packaged binaries or a simpler installation path;

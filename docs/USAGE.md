@@ -72,6 +72,22 @@ and dependency; `--json` adds `hol_policy` and `hol_policy_violations`. Ordinary
 checking without `--hol-profile` is unchanged, and this migration policy is not
 yet exposed by the browser build.
 
+For grading, `--assignment PATH` loads a versioned instructor manifest instead
+of accepting policy permissions on the command line. It can fix the profile,
+independent classical/extensionality/choice/trust permissions, the complete
+transitive import allowlist, individually permitted imported axioms, and exact
+root theorem signatures:
+
+```sh
+cargo run -p cetacea_cli -- \
+  --assignment course/week05.ctea-assignment --json homework.ctea
+```
+
+Manifest paths are resolved relative to the manifest, and the manifest is
+mutually exclusive with `--hol-profile` and the `--allow-*` flags. See
+[Assignment manifests](hol/ASSIGNMENT_MANIFESTS.md) for the version 1 grammar,
+security model, and result fields.
+
 Start the full-screen terminal TUI with:
 
 ```sh

@@ -505,29 +505,41 @@ checking, `cetacea_wasm` disables the `hol-shadow` Cargo feature and remains
 
 ### Phase H5 — fragment enforcement and assignment manifests
 
-Status: **first native CLI policy slice implemented.** The shadow report now
+Status: **native CLI policy and assignment-manifest slices implemented.** The
+shadow report now
 retains kernel-created declaration receipts and stable names. An opt-in
 `--hol-profile prop|fol|fol+induction|hol` checks root declarations with their
 transitive used dependencies; profiles remain constructive, trust-free, and
 complete unless `--allow-classical`, `--allow-axioms`, or
 `--allow-incomplete` is supplied. Text and JSON results name violations, and
 adversarial tests separate fragment level from classical reasoning, trust,
-incompleteness, and unused imports. Ordinary checking remains unchanged. H5
-still owns manifests, fine-grained allowed imports/axioms, Wasm/TUI/browser
-surfaces, and certified countermodel eligibility. At this checkpoint the native
-CLI release is 3,396,656 bytes; the feature-isolated Wasm module is unchanged at
-1,351,837 bytes.
+incompleteness, and unused imports. A versioned, fail-closed
+`--assignment` manifest now fixes those dimensions, every transitively resolved
+filesystem import, individually permitted imported axioms, and exact root
+theorem signatures including their canonical parameter telescopes. A local
+student axiom cannot impersonate an allowed imported axiom. Ordinary checking
+remains unchanged. H5 still owns Wasm/TUI/browser surfaces, structural signature
+fingerprints after the syntax stabilizes, and certified countermodel
+eligibility. The first policy checkpoint's native CLI release was 3,396,656
+bytes; the feature-isolated Wasm module was unchanged at 1,351,837 bytes. The
+manifest checkpoint is 3,482,976 bytes natively and 1,351,852 bytes in Wasm;
+the browser artifact grew by only 15 bytes and remains below the 1.5 MB review
+line.
 
 - Implement least-fragment classification and transitive feature receipts.
-- Native CLI text/JSON is implemented; extend Wasm JSON, TUI, and browser
-  results after the policy format settles.
-- Add allowed-import and frozen-signature policies.
+- Native CLI text/JSON and versioned manifests are implemented; extend Wasm
+  JSON, TUI, and browser results after the policy format settles.
+- Native allowed-import, named imported-axiom, and frozen full-signature
+  policies are implemented.
 - Ensure model search consumes the certified fragment, not an ad hoc syntax
   guess.
 
 Exit gate: adversarial tests demonstrate that a syntactically FOL theorem proved
 through HOL, choice, extensionality, classical reasoning, or an unallowed import
-is rejected by the corresponding course policy.
+is rejected by the corresponding course policy. The native manifest portion now
+has executable tests for fragment boundaries, independent classical/trust/draft
+permissions, transitive used axioms, exact resolved imports, named imported
+axioms, missing or changed full signatures, and local-axiom impersonation.
 
 ### Phase H6 — library and curriculum migration
 

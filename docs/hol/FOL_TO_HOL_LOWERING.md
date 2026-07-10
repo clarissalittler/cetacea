@@ -316,3 +316,8 @@ silent replacement of the legacy authority.
 The first native teaching-policy slice raises the CLI artifact to 3,396,656
 bytes. It consumes shadow receipts only in the native frontend, so the
 feature-isolated Wasm module remains 1,351,837 bytes.
+
+At the versioned assignment-manifest checkpoint, the native CLI is 3,482,976
+bytes and the feature-isolated Wasm module is 1,351,852 bytes. Recording
+resolved-import provenance and full canonical signatures changes the browser
+artifact by only 15 bytes; manifest enforcement itself remains native-only.

@@ -386,6 +386,34 @@ pub struct Param {
     pub kind: ParamKind,
 }
 
+#[cfg(feature = "hol-shadow")]
+fn canonical_theorem_signature(params: &[Param], statement: &Formula) -> String {
+    if params.is_empty() {
+        return statement.to_string();
+    }
+    let params = params
+        .iter()
+        .map(|param| {
+            let kind = match &param.kind {
+                ParamKind::Prop => "Prop".to_string(),
+                ParamKind::Predicate(arguments) => {
+                    let mut parts = arguments
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>();
+                    parts.push("Prop".to_string());
+                    parts.join(" -> ")
+                }
+                ParamKind::Type => "Type".to_string(),
+                ParamKind::Term(ty) => ty.to_string(),
+            };
+            format!("({} : {kind})", param.name)
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{params} : {statement}")
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SchemaSubst {
     pub type_args: HashMap<Name, Type>,
@@ -1440,6 +1468,8 @@ pub struct HolShadowDeclaration {
 pub struct HolShadowTheorem {
     pub name: Name,
     pub statement: String,
+    /// Canonical parameter telescope followed by the proposition body.
+    pub signature: String,
     pub legacy_status: DeclarationStatus,
     pub hol_status: hol::EvidenceStatus,
     pub legacy_mode_used: LogicMode,
@@ -1477,6 +1507,10 @@ pub struct HolShadowReport {
     pub theorems: Vec<HolShadowTheorem>,
     pub mismatches: Vec<HolShadowMismatch>,
     pub receipt_names: BTreeMap<hol::DeclarationId, Name>,
+    /// Canonical filesystem identities of every transitively loaded import.
+    pub imported_files: Vec<PathBuf>,
+    /// Normalized virtual identities used by browser/editor-buffer callers.
+    pub imported_virtual_files: Vec<String>,
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -1666,6 +1700,8 @@ pub fn check_source_at_path_with_hol_shadow(
                 theorems: Vec::new(),
                 mismatches: Vec::new(),
                 receipt_names: BTreeMap::new(),
+                imported_files: Vec::new(),
+                imported_virtual_files: Vec::new(),
             };
         }
     };
@@ -1720,6 +1756,8 @@ fn unavailable_hol_shadow(
             message: format!("could not initialize HOL shadow: {error}"),
         }],
         receipt_names: BTreeMap::new(),
+        imported_files: Vec::new(),
+        imported_virtual_files: Vec::new(),
     }
 }
 
@@ -2213,6 +2251,8 @@ struct HolShadowState {
     theorems: Vec<HolShadowTheorem>,
     mismatches: Vec<HolShadowMismatch>,
     receipt_names: HashMap<hol::DeclarationId, Name>,
+    imported_files: BTreeSet<PathBuf>,
+    imported_virtual_files: BTreeSet<String>,
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -2225,6 +2265,8 @@ impl HolShadowState {
             theorems: Vec::new(),
             mismatches: Vec::new(),
             receipt_names: HashMap::new(),
+            imported_files: BTreeSet::new(),
+            imported_virtual_files: BTreeSet::new(),
         })
     }
 
@@ -2424,6 +2466,8 @@ impl FileChecker {
             theorems: shadow.theorems,
             mismatches: shadow.mismatches,
             receipt_names: shadow.receipt_names.into_iter().collect(),
+            imported_files: shadow.imported_files.into_iter().collect(),
+            imported_virtual_files: shadow.imported_virtual_files.into_iter().collect(),
         }
     }
 
@@ -2454,6 +2498,7 @@ impl FileChecker {
     fn shadow_theorem(
         &mut self,
         checked: &CheckedTheorem,
+        signature: &str,
         line: usize,
         source_path: Option<&Path>,
         action: impl FnOnce(
@@ -2553,6 +2598,7 @@ impl FileChecker {
         shadow.theorems.push(HolShadowTheorem {
             name: checked.name.clone(),
             statement: checked.statement.clone(),
+            signature: signature.to_string(),
             legacy_status: checked.status,
             hol_status: receipt.status(),
             legacy_mode_used: checked.mode_used,
@@ -2645,6 +2691,12 @@ impl FileChecker {
     }
 
     fn check_canonical_path(&mut self, path: PathBuf, is_imported: bool, alias: Option<Name>) {
+        #[cfg(feature = "hol-shadow")]
+        if is_imported {
+            if let Some(shadow) = &mut self.hol_shadow {
+                shadow.imported_files.insert(path.clone());
+            }
+        }
         let loaded_key = (path.clone(), alias.clone());
         if self.loaded_files.contains(&loaded_key) {
             return;
@@ -2695,6 +2747,12 @@ impl FileChecker {
     }
 
     fn check_virtual_path(&mut self, path: &str, is_imported: bool, alias: Option<Name>) {
+        #[cfg(feature = "hol-shadow")]
+        if is_imported {
+            if let Some(shadow) = &mut self.hol_shadow {
+                shadow.imported_virtual_files.insert(path.to_string());
+            }
+        }
         let loaded_key = (path.to_string(), alias.clone());
         if self.loaded_virtual_files.contains(&loaded_key) {
             return;
@@ -3620,7 +3678,9 @@ impl FileChecker {
                         status: DeclarationStatus::TrustedAxiom,
                     };
                     #[cfg(feature = "hol-shadow")]
-                    self.shadow_theorem(&checked, line, source_path, |shadow| {
+                    let signature = canonical_theorem_signature(&params, &statement);
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_theorem(&checked, &signature, line, source_path, |shadow| {
                         shadow.declare_trusted_axiom(decl.name.clone(), &params, &statement)
                     });
                     self.env.add_theorem(Theorem {
@@ -3830,7 +3890,9 @@ impl FileChecker {
                         },
                     };
                     #[cfg(feature = "hol-shadow")]
-                    self.shadow_theorem(&checked, line, source_path, |shadow| {
+                    let signature = canonical_theorem_signature(&params, &statement);
+                    #[cfg(feature = "hol-shadow")]
+                    self.shadow_theorem(&checked, &signature, line, source_path, |shadow| {
                         if uses_sorry {
                             shadow.declare_legacy_incomplete_theorem(
                                 decl.name.clone(),
