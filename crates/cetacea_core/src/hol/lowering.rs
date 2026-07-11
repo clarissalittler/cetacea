@@ -13,8 +13,8 @@ use crate::{Formula, LambdaParam, Term, Type};
 use super::prelude::CompatibilityPrelude;
 use super::terms::{infer_type, ConstantId, CoreTerm, TermContext, TermError, TermSignature};
 use super::types::{
-    CoreType, FirstOrderStatus, TypeError, TypeParameter, TypeParameterClass, TypeParameterId,
-    TypeSignature,
+    CoreType, FirstOrderStatus, TypeConstructorId, TypeError, TypeParameter, TypeParameterClass,
+    TypeParameterId, TypeSignature,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -89,6 +89,7 @@ pub struct CompatibilityLowerer<'a> {
     types: &'a TypeSignature,
     constants: &'a TermSignature,
     prelude: &'a CompatibilityPrelude,
+    type_constructors: HashMap<String, TypeConstructorId>,
     type_parameters: HashMap<String, TypeParameter>,
     symbols: HashMap<String, CompatibilitySymbol>,
     bindings: Vec<LocalBinding>,
@@ -104,6 +105,7 @@ impl<'a> CompatibilityLowerer<'a> {
             types,
             constants,
             prelude,
+            type_constructors: HashMap::new(),
             type_parameters: HashMap::new(),
             symbols: HashMap::new(),
             bindings: Vec::new(),
@@ -117,6 +119,22 @@ impl<'a> CompatibilityLowerer<'a> {
             CoreType::Prop,
         )?;
         Ok(lowerer)
+    }
+
+    pub fn register_type_constructor(
+        &mut self,
+        name: impl Into<String>,
+        constructor: TypeConstructorId,
+    ) -> Result<(), LoweringError> {
+        let name = name.into();
+        self.types.constructor_arity(constructor)?;
+        if self.type_constructors.contains_key(&name) || self.type_parameters.contains_key(&name) {
+            return Err(LoweringError::new(format!(
+                "compatibility type name `{name}` is already registered"
+            )));
+        }
+        self.type_constructors.insert(name, constructor);
+        Ok(())
     }
 
     /// Register one already-declared global surface symbol.
@@ -179,6 +197,11 @@ impl<'a> CompatibilityLowerer<'a> {
         if parameter.class != TypeParameterClass::FirstOrder {
             return Err(LoweringError::new(format!(
                 "legacy type parameter `{name}` must be first-order"
+            )));
+        }
+        if self.type_constructors.contains_key(&name) {
+            return Err(LoweringError::new(format!(
+                "legacy type parameter `{name}` conflicts with a registered type constructor"
             )));
         }
         if self
@@ -245,9 +268,14 @@ impl<'a> CompatibilityLowerer<'a> {
                 if let Some(parameter) = self.type_parameters.get(name) {
                     CoreType::Parameter(*parameter)
                 } else {
-                    let constructor = self.types.resolve(name).ok_or_else(|| {
-                        LoweringError::new(format!("unknown compatibility type `{name}`"))
-                    })?;
+                    let constructor = self
+                        .type_constructors
+                        .get(name)
+                        .copied()
+                        .or_else(|| self.types.resolve(name))
+                        .ok_or_else(|| {
+                            LoweringError::new(format!("unknown compatibility type `{name}`"))
+                        })?;
                     CoreType::constructor(constructor, Vec::new())
                 }
             }
@@ -257,9 +285,16 @@ impl<'a> CompatibilityLowerer<'a> {
                         "rank-one type parameter `{name}` cannot be applied to type arguments"
                     )));
                 }
-                let constructor = self.types.resolve(name).ok_or_else(|| {
-                    LoweringError::new(format!("unknown compatibility type constructor `{name}`"))
-                })?;
+                let constructor = self
+                    .type_constructors
+                    .get(name)
+                    .copied()
+                    .or_else(|| self.types.resolve(name))
+                    .ok_or_else(|| {
+                        LoweringError::new(format!(
+                            "unknown compatibility type constructor `{name}`"
+                        ))
+                    })?;
                 CoreType::constructor(
                     constructor,
                     arguments

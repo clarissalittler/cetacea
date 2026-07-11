@@ -19,6 +19,7 @@ use crate::{
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
 use super::library_registry::{
     HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary, InstalledListLibrary,
+    LibraryPackageId,
 };
 use super::lowering::{CompatibilityLowerer, LoweringError};
 use super::prelude::CompatibilityPrelude;
@@ -76,6 +77,18 @@ struct SymbolRegistration {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct TypeConstructorRegistration {
+    name: String,
+    constructor: TypeConstructorId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LibraryAliasRegistration {
+    package: LibraryPackageId,
+    namespace: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct DataRegistration {
     source: DataDef,
     datatype: TypeConstructorId,
@@ -97,10 +110,12 @@ pub struct CompatibilityElaborator {
     core: SpikeElaborator,
     prelude: CompatibilityPrelude,
     names: HashSet<String>,
+    type_constructors: Vec<TypeConstructorRegistration>,
     symbols: Vec<SymbolRegistration>,
     data: HashMap<String, DataRegistration>,
     theorems: Vec<TheoremRegistration>,
     libraries: HolLibraryRegistry,
+    library_aliases: Vec<LibraryAliasRegistration>,
     next_type_parameter: u32,
 }
 
@@ -152,10 +167,12 @@ impl CompatibilityElaborator {
             core,
             prelude,
             names,
+            type_constructors: Vec::new(),
             symbols: Vec::new(),
             data,
             theorems: Vec::new(),
             libraries: HolLibraryRegistry::default(),
+            library_aliases: Vec::new(),
             next_type_parameter: 0,
         })
     }
@@ -184,6 +201,127 @@ impl CompatibilityElaborator {
         Ok(self
             .libraries
             .install_builtin_list_v1(&mut self.core, natural_type, zero, successor)?)
+    }
+
+    /// Atomically install and bind the List package to student-facing names.
+    ///
+    /// `None` requests `List`, `nil`, `cons`, ...; `Some("L")` requests
+    /// `L.List`, `L.nil`, `L.cons`, ... . Reserved core names and stable audit
+    /// names remain unchanged.
+    pub fn import_builtin_list_v1(
+        &mut self,
+        namespace: Option<&str>,
+    ) -> Result<InstalledListLibrary, CompatibilityDeclarationError> {
+        if namespace.is_some_and(|namespace| {
+            namespace.is_empty() || namespace.split('.').any(str::is_empty)
+        }) {
+            return Err(CompatibilityDeclarationError::new(
+                "library import namespace must contain nonempty qualified name segments",
+            ));
+        }
+        let namespace = namespace.map(str::to_string);
+        if self.library_aliases.iter().any(|registration| {
+            registration.package == LibraryPackageId::ListV1 && registration.namespace == namespace
+        }) {
+            return self.install_builtin_list_v1();
+        }
+        let qualify = |leaf: &str| match &namespace {
+            Some(namespace) => format!("{namespace}.{leaf}"),
+            None => leaf.to_string(),
+        };
+        let datatype_name = qualify("List");
+        let nil_name = qualify("nil");
+        let cons_name = qualify("cons");
+        let all_name = qualify("All");
+        let member_name = qualify("Member");
+        let nodup_name = qualify("Nodup");
+        let append_name = qualify("append");
+        let length_name = qualify("length");
+        for name in [
+            &datatype_name,
+            &nil_name,
+            &cons_name,
+            &all_name,
+            &member_name,
+            &nodup_name,
+            &append_name,
+            &length_name,
+        ] {
+            self.ensure_name_free(name)?;
+        }
+
+        let mut staged = self.clone();
+        let installed = staged.install_builtin_list_v1()?;
+        let parameter = installed.lists.element_parameter;
+        let element_type = CoreType::Parameter(parameter);
+        let list_type = installed.lists.list_type(element_type.clone());
+        staged.names.insert(datatype_name.clone());
+        staged.type_constructors.push(TypeConstructorRegistration {
+            name: datatype_name,
+            constructor: installed.lists.datatype,
+        });
+        for registration in [
+            SymbolRegistration {
+                name: nil_name,
+                constant: installed.lists.nil,
+                type_parameters: vec![parameter],
+                parameter_types: Vec::new(),
+                result_type: list_type.clone(),
+            },
+            SymbolRegistration {
+                name: cons_name,
+                constant: installed.lists.cons,
+                type_parameters: vec![parameter],
+                parameter_types: vec![element_type.clone(), list_type.clone()],
+                result_type: list_type.clone(),
+            },
+            SymbolRegistration {
+                name: all_name,
+                constant: installed.lists.all,
+                type_parameters: vec![parameter],
+                parameter_types: vec![
+                    CoreType::arrow(element_type.clone(), CoreType::Prop),
+                    list_type.clone(),
+                ],
+                result_type: CoreType::Prop,
+            },
+            SymbolRegistration {
+                name: member_name,
+                constant: installed.lists.member,
+                type_parameters: vec![parameter],
+                parameter_types: vec![element_type.clone(), list_type.clone()],
+                result_type: CoreType::Prop,
+            },
+            SymbolRegistration {
+                name: nodup_name,
+                constant: installed.lists.nodup,
+                type_parameters: vec![parameter],
+                parameter_types: vec![list_type.clone()],
+                result_type: CoreType::Prop,
+            },
+            SymbolRegistration {
+                name: append_name,
+                constant: installed.lists.append,
+                type_parameters: vec![parameter],
+                parameter_types: vec![list_type.clone(), list_type.clone()],
+                result_type: list_type.clone(),
+            },
+            SymbolRegistration {
+                name: length_name,
+                constant: installed.length.constant,
+                type_parameters: vec![parameter],
+                parameter_types: vec![list_type],
+                result_type: installed.length.natural_type.clone(),
+            },
+        ] {
+            staged.finish_symbol(registration)?;
+        }
+        staged.library_aliases.push(LibraryAliasRegistration {
+            package: LibraryPackageId::ListV1,
+            namespace,
+        });
+        *self = staged;
+        Ok(installed)
     }
 
     /// Install the versioned cardinality-transport package and its generic
@@ -221,6 +359,9 @@ impl CompatibilityElaborator {
     pub fn lowering_scope(&self) -> Result<CompatibilityLowerer<'_>, LoweringError> {
         let mut lowerer =
             CompatibilityLowerer::new(self.core.types(), self.core.constants(), &self.prelude)?;
+        for constructor in &self.type_constructors {
+            lowerer.register_type_constructor(constructor.name.clone(), constructor.constructor)?;
+        }
         for symbol in &self.symbols {
             lowerer.register_symbol(
                 symbol.name.clone(),
@@ -2505,6 +2646,107 @@ mod tests {
             .expect("legacy nil remains the surface meaning");
         assert_eq!(lowered_nil, CoreTerm::Constant(legacy_nil));
         assert_ne!(legacy_nil, installed.lists.nil);
+    }
+
+    #[test]
+    fn list_package_aliases_lower_rank_one_types_and_symbols_atomically() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let installed = elaborator
+            .import_builtin_list_v1(None)
+            .expect("import unqualified List package");
+        let nat = elaborator.prelude().nat_type();
+        assert_eq!(
+            elaborator
+                .lower_type(&Type::App("List".to_string(), vec![Type::Nat]))
+                .expect("lower List Nat"),
+            installed.lists.list_type(nat.clone())
+        );
+        let list_term = Term::App(
+            "cons".to_string(),
+            vec![Term::Zero, Term::Var("nil".to_string())],
+        );
+        let membership =
+            Formula::PredApp("Member".to_string(), vec![Term::Zero, list_term.clone()]);
+        let expected_list = installed.lists.cons_term(
+            nat.clone(),
+            CoreTerm::Constant(elaborator.prelude().zero()),
+            installed.lists.nil_term(nat.clone()),
+        );
+        assert_eq!(
+            elaborator
+                .lower_term(&list_term)
+                .expect("infer List Nat through cons and nil"),
+            expected_list
+        );
+        assert_eq!(
+            elaborator
+                .lower_formula(&membership)
+                .expect("lower generic Member"),
+            installed.lists.member_term(
+                nat,
+                CoreTerm::Constant(elaborator.prelude().zero()),
+                expected_list,
+            )
+        );
+
+        let after_import = elaborator.clone();
+        let repeated = elaborator
+            .import_builtin_list_v1(None)
+            .expect("repeated alias import is idempotent");
+        assert_eq!(repeated, installed);
+        assert_eq!(elaborator, after_import);
+
+        let mut qualified = CompatibilityElaborator::new().expect("qualified elaborator");
+        qualified
+            .declare_data(&list_definition())
+            .expect("legacy List");
+        let qualified_package = qualified
+            .import_builtin_list_v1(Some("L"))
+            .expect("qualified generic List can coexist");
+        assert_eq!(
+            qualified
+                .lower_type(&Type::App("L.List".to_string(), vec![Type::Nat]))
+                .expect("lower qualified List Nat"),
+            qualified_package
+                .lists
+                .list_type(qualified.prelude().nat_type())
+        );
+        let qualified_list = Term::App(
+            "L.cons".to_string(),
+            vec![Term::Zero, Term::Var("L.nil".to_string())],
+        );
+        qualified
+            .lower_formula(&Formula::PredApp(
+                "L.Member".to_string(),
+                vec![Term::Zero, qualified_list],
+            ))
+            .expect("qualified package symbols lower through their checked schemes");
+        assert_ne!(
+            qualified.core().types().resolve("List"),
+            Some(qualified_package.lists.datatype)
+        );
+
+        let mut collision = CompatibilityElaborator::new().expect("collision elaborator");
+        collision
+            .declare_data(&list_definition())
+            .expect("reserve unqualified List");
+        let before_collision = collision.clone();
+        let error = collision
+            .import_builtin_list_v1(None)
+            .expect_err("surface collision rejects package and aliases");
+        assert!(error.message.contains("List"));
+        assert_eq!(collision, before_collision);
+
+        let mut late_collision = CompatibilityElaborator::new().expect("late collision elaborator");
+        late_collision
+            .declare_predicate("L.Member", &[])
+            .expect("reserve a later qualified alias");
+        let before_late_collision = late_collision.clone();
+        let error = late_collision
+            .import_builtin_list_v1(Some("L"))
+            .expect_err("a later alias collision rejects the entire import");
+        assert!(error.message.contains("L.Member"));
+        assert_eq!(late_collision, before_late_collision);
     }
 
     #[test]

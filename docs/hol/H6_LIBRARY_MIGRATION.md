@@ -97,6 +97,16 @@ misused as higher-kinded constructors. A monomorphic legacy `sort List` still
 rejects `List Nat` with an explicit diagnostic until a logical package import
 binds the generic constructor.
 
+That parser-independent binding now exists for `std/hol/list@1`.
+`CompatibilityElaborator::import_builtin_list_v1` atomically binds either the
+unqualified package leaves or a namespace such as `L.List`, `L.nil`, and
+`L.Member` to the registered core handles and their checked rank-one schemes.
+Type inference can determine `nil` from its context inside `cons`; qualified and
+unqualified `Member` applications lower identically. Repeated bindings are
+idempotent, while any early or late alias collision rolls back both registry and
+surface state. A qualified generic package can coexist with the current
+monomorphic `List`.
+
 These are not yet student-visible libraries. The packages target the checked
 core, and `CompatibilityElaborator` exposes explicit list, cardinality, and
 finite installers, but the `.ctea` parser, standard-library import
@@ -107,11 +117,11 @@ can coexist and keep their original meanings.
 
 ## Remaining migration slices
 
-1. Bind the implemented rank-one type-application syntax to atomic logical
-   package imports, add generic declaration syntax, then publish the list
-   package through the standard library. Retain aliases for the current
-   monomorphic list vocabulary for one release cycle. The import seam is
-   specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
+1. Connect the implemented atomic List alias catalog to logical imports in the
+   source driver, add generic declaration syntax, then publish the list package
+   through the standard library. Retain aliases for the current monomorphic list
+   vocabulary for one release cycle. The import seam is specified in
+   [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Route package provenance and receipt names into shadow/JSON results and
    assignment import allowlists when surface imports can request a package.
 3. Register and expose graph instances once surface imports can bind a checked
@@ -139,5 +149,5 @@ can coexist and keep their original meanings.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the rank-one type-surface checkpoint the release CLI is 3,510,712 bytes and
-the raw Wasm module is 1,344,497 bytes, still below the 1.5 MB review line.
+At the List alias-catalog checkpoint the release CLI is 3,518,496 bytes and the
+raw Wasm module is 1,344,520 bytes, still below the 1.5 MB review line.

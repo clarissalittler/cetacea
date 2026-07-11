@@ -214,6 +214,10 @@ impl TypeSignature {
         self.names.get(name).copied()
     }
 
+    pub fn constructor_arity(&self, id: TypeConstructorId) -> Result<usize, TypeError> {
+        Ok(self.constructor(id)?.parameter_classes.len())
+    }
+
     pub fn validate(&self, ty: &CoreType) -> Result<(), TypeError> {
         match ty {
             CoreType::Prop | CoreType::Parameter(_) => Ok(()),

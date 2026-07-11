@@ -424,3 +424,13 @@ still fails until a versioned logical package import binds the generic List.
 The import/authority seam is specified separately in `H6_SURFACE_IMPORTS.md`.
 The checkpoint artifacts are 3,510,712 bytes for the native CLI and 1,344,497
 bytes for Wasm.
+
+The compatibility elaborator can now bind `std/hol/list@1` to surface aliases
+without copying declarations. Unqualified `List`/`nil`/`Member` or qualified
+`L.List`/`L.nil`/`L.Member` resolve to the same registered handles and retain
+their rank-one schemes; inference determines the instance of `nil` from a
+surrounding `cons` or `Member`. Alias preflight and package installation commit
+together, repeated binding is idempotent, and collisions leave both core and
+surface catalogs unchanged. This seam is parser-independent and not yet called
+by source `import`. The checkpoint artifacts are 3,518,496 bytes for the native
+CLI and 1,344,520 bytes for Wasm.

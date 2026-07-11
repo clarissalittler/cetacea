@@ -51,8 +51,9 @@ every existing first-order declaration grammar.
 
 ## Atomic alias binding
 
-The next implementation slice should add a surface-alias catalog owned by
-`CompatibilityElaborator`. A successful package import will:
+The parser-independent List alias catalog is now implemented in
+`CompatibilityElaborator`. `import_builtin_list_v1` already performs the five
+steps that a successful source package import must use:
 
 1. resolve the exact `LibraryPackageId`;
 2. install its complete registry dependency closure;
@@ -66,6 +67,14 @@ collision rejects the whole import. Reserved names such as
 `@library.list.v1.List` remain internal and never appear in student source or
 receipts. Stable audit names remain package-qualified, for example
 `std/hol/finite@1::HasCard`, regardless of the chosen source alias.
+
+Executable tests cover `List Nat`, contextual inference of polymorphic `nil`,
+`Member(0, cons(0, nil))`, the corresponding `L.*` spellings, repeated imports,
+coexistence with a monomorphic List, and collisions at both the first and a
+later alias. The catalog is not yet invoked by `Command::Import`; therefore this
+checkpoint does not expand the capabilities of any source file. Finite and
+cardinality aliases will follow the same catalog after the List driver path is
+end-to-end.
 
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
@@ -86,7 +95,7 @@ end-to-end slice is complete only when:
 - unimported or colliding package names fail transactionally; and
 - the exact legacy corpus remains unchanged for files without logical imports.
 
-The practical sequence is: alias catalog and parser-independent lowering,
-logical import resolution in the shadow driver, end-to-end tactic proof tests,
-then policy/JSON/Wasm exposure. Default acceptance should not be enabled halfway
-through that sequence.
+The alias catalog and parser-independent lowering step is complete. The
+remaining sequence is logical import resolution in the shadow driver,
+end-to-end tactic proof tests, then policy/JSON/Wasm exposure. Default
+acceptance should not be enabled halfway through that sequence.
