@@ -7,11 +7,12 @@
 use super::fragments::DeclarationReceipt;
 use super::h35_cardinality::declare_cardinality_transport;
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
+use super::library::ListLibrary;
 use super::proofs::HolDraftProof;
 use super::recursion::{StructuralArmLayout, StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
 use super::terms::{infer_type, CoreTerm, TermContext};
-use super::types::{CoreType, TypeParameter};
+use super::types::CoreType;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct H3ListSpikeReport {
@@ -51,166 +52,19 @@ pub fn run_list_h3_spike() -> Result<H3ListSpikeReport, SpikeError> {
     let zero = elaborator.declare_constant("zero", nat.clone())?;
     let succ = elaborator.declare_constant("succ", CoreType::arrow(nat.clone(), nat.clone()))?;
 
-    let parameter = TypeParameter::any(0);
+    let lists = ListLibrary::install(&mut elaborator)?;
+    let parameter = lists.element_parameter;
     let parameter_type = CoreType::Parameter(parameter);
-    let list = elaborator.declare_inductive(InductiveSpec::new(
-        "List",
-        vec![parameter],
-        vec![
-            InductiveConstructorSpec::new("nil", Vec::new()),
-            InductiveConstructorSpec::new(
-                "cons",
-                vec![
-                    InductiveFieldType::existing(parameter_type.clone()),
-                    InductiveFieldType::Recursive,
-                ],
-            ),
-        ],
-    ))?;
-    let nil = elaborator.resolve_constant("nil")?;
-    let cons = elaborator.resolve_constant("cons")?;
-    let list_parameter = CoreType::constructor(list, vec![parameter_type.clone()]);
+    let list = lists.datatype;
+    let nil = lists.nil;
+    let cons = lists.cons;
+    let all = lists.all;
+    let member = lists.member;
+    let nodup = lists.nodup;
+    let append = lists.append;
 
-    let nil_layout = StructuralArmLayout::new(0, 0, 1);
-    let cons_predicate_layout = StructuralArmLayout::new(2, 1, 1);
-    let all = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "All".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: vec![CoreType::arrow(parameter_type.clone(), CoreType::Prop)],
-        recursive_argument_index: 1,
-        result_type: CoreType::Prop,
-        arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Truth),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::and(
-                    CoreTerm::apply(
-                        cons_predicate_layout
-                            .fixed_parameter(0)
-                            .expect("All predicate binder"),
-                        cons_predicate_layout.field(0).expect("All head binder"),
-                    ),
-                    cons_predicate_layout
-                        .recursive_result(0)
-                        .expect("All recursive result"),
-                ),
-            ),
-        ],
-    })?;
-
-    let member = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "Member".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: vec![parameter_type.clone()],
-        recursive_argument_index: 1,
-        result_type: CoreType::Prop,
-        arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Falsity),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::or(
-                    CoreTerm::equality(
-                        parameter_type.clone(),
-                        cons_predicate_layout
-                            .fixed_parameter(0)
-                            .expect("Member needle binder"),
-                        cons_predicate_layout.field(0).expect("Member head binder"),
-                    ),
-                    cons_predicate_layout
-                        .recursive_result(0)
-                        .expect("Member recursive result"),
-                ),
-            ),
-        ],
-    })?;
-
-    let cons_nodup_layout = StructuralArmLayout::new(2, 1, 0);
-    let member_of_tail = CoreTerm::apply(
-        CoreTerm::apply(
-            CoreTerm::instantiate_constant(member, vec![parameter_type.clone()]),
-            cons_nodup_layout.field(0).expect("Nodup head binder"),
-        ),
-        cons_nodup_layout.field(1).expect("Nodup tail binder"),
-    );
-    let nodup = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "Nodup".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: Vec::new(),
-        recursive_argument_index: 0,
-        result_type: CoreType::Prop,
-        arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Truth),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::and(
-                    CoreTerm::implies(member_of_tail, CoreTerm::Falsity),
-                    cons_nodup_layout
-                        .recursive_result(0)
-                        .expect("Nodup recursive result"),
-                ),
-            ),
-        ],
-    })?;
-
-    let append_layout = StructuralArmLayout::new(2, 1, 1);
-    let append = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "append".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: vec![list_parameter.clone()],
-        recursive_argument_index: 0,
-        result_type: list_parameter.clone(),
-        arms: vec![
-            StructuralArmSpec::new(
-                nil,
-                nil_layout
-                    .fixed_parameter(0)
-                    .expect("append right list binder"),
-            ),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::apply(
-                    CoreTerm::apply(
-                        CoreTerm::instantiate_constant(cons, vec![parameter_type.clone()]),
-                        append_layout.field(0).expect("append head binder"),
-                    ),
-                    append_layout
-                        .recursive_result(0)
-                        .expect("append recursive result"),
-                ),
-            ),
-        ],
-    })?;
-
-    let length_layout = StructuralArmLayout::new(2, 1, 0);
-    let length = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "length".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: Vec::new(),
-        recursive_argument_index: 0,
-        result_type: nat.clone(),
-        arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Constant(zero)),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::apply(
-                    CoreTerm::Constant(succ),
-                    length_layout
-                        .recursive_result(0)
-                        .expect("length recursive result"),
-                ),
-            ),
-        ],
-    })?;
+    let list_length = lists.install_length(&mut elaborator, nat.clone(), zero, succ)?;
+    let length = list_length.constant;
 
     let nil_nat = CoreTerm::instantiate_constant(nil, vec![nat.clone()]);
     let singleton = CoreTerm::apply(
@@ -334,25 +188,13 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
     let vertex = CoreType::constructor(vertex_id, Vec::new());
     let vertex_a = elaborator.declare_constant("vertex_a", vertex.clone())?;
 
-    let parameter = TypeParameter::first_order(20);
+    let lists = ListLibrary::install(&mut elaborator)?;
+    let parameter = lists.element_parameter;
     let parameter_type = CoreType::Parameter(parameter);
-    let list = elaborator.declare_inductive(InductiveSpec::new(
-        "List",
-        vec![parameter],
-        vec![
-            InductiveConstructorSpec::new("nil", Vec::new()),
-            InductiveConstructorSpec::new(
-                "cons",
-                vec![
-                    InductiveFieldType::existing(parameter_type.clone()),
-                    InductiveFieldType::Recursive,
-                ],
-            ),
-        ],
-    ))?;
-    let nil = elaborator.resolve_constant("nil")?;
-    let cons = elaborator.resolve_constant("cons")?;
-    let list_parameter = CoreType::constructor(list, vec![parameter_type.clone()]);
+    let list = lists.datatype;
+    let nil = lists.nil;
+    let cons = lists.cons;
+    let append = lists.append;
 
     let edge = elaborator.declare_polymorphic_constant(
         "Edge",
@@ -362,39 +204,6 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
             CoreType::arrow(parameter_type.clone(), CoreType::Prop),
         ),
     )?;
-
-    // Match the legacy and mathematical argument order: recurse on the first
-    // list and carry the right list as the fixed argument.
-    let append_layout = StructuralArmLayout::new(2, 1, 1);
-    let append = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "append".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: vec![list_parameter.clone()],
-        recursive_argument_index: 0,
-        result_type: list_parameter.clone(),
-        arms: vec![
-            StructuralArmSpec::new(
-                nil,
-                StructuralArmLayout::new(0, 0, 1)
-                    .fixed_parameter(0)
-                    .expect("append right list"),
-            ),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::apply(
-                    CoreTerm::apply(
-                        CoreTerm::instantiate_constant(cons, vec![parameter_type.clone()]),
-                        append_layout.field(0).expect("append head"),
-                    ),
-                    append_layout
-                        .recursive_result(0)
-                        .expect("append recursive result"),
-                ),
-            ),
-        ],
-    })?;
 
     // ValidPath xs start finish means that following every vertex in xs from
     // `start` ends at `finish`. The recursive result is itself the binary
@@ -457,15 +266,8 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
         ],
     })?;
 
-    let append_term = |left: CoreTerm, right: CoreTerm| {
-        CoreTerm::apply(
-            CoreTerm::apply(
-                CoreTerm::instantiate_constant(append, vec![vertex.clone()]),
-                left,
-            ),
-            right,
-        )
-    };
+    let append_term =
+        |left: CoreTerm, right: CoreTerm| lists.append_term(vertex.clone(), left, right);
     let valid_path = |path: CoreTerm, start: CoreTerm, finish: CoreTerm| {
         CoreTerm::apply(
             CoreTerm::apply(
@@ -479,7 +281,7 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
         )
     };
 
-    let list_vertex = CoreType::constructor(list, vec![vertex.clone()]);
+    let list_vertex = lists.list_type(vertex.clone());
     // Inside the five quantifiers: finish 0, middle 1, start 2,
     // right path 3, left path 4.
     let theorem_body = CoreTerm::implies(
@@ -731,24 +533,11 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let one = CoreTerm::apply(CoreTerm::Constant(succ), CoreTerm::Constant(zero));
     let two = CoreTerm::apply(CoreTerm::Constant(succ), one);
 
-    let parameter = TypeParameter::any(30);
-    let parameter_type = CoreType::Parameter(parameter);
-    let list = elaborator.declare_inductive(InductiveSpec::new(
-        "List",
-        vec![parameter],
-        vec![
-            InductiveConstructorSpec::new("nil", Vec::new()),
-            InductiveConstructorSpec::new(
-                "cons",
-                vec![
-                    InductiveFieldType::existing(parameter_type.clone()),
-                    InductiveFieldType::Recursive,
-                ],
-            ),
-        ],
-    ))?;
-    let nil = elaborator.resolve_constant("nil")?;
-    let cons = elaborator.resolve_constant("cons")?;
+    let lists = ListLibrary::install(&mut elaborator)?;
+    let member = lists.member;
+    let nodup = lists.nodup;
+    let list_length = lists.install_length(&mut elaborator, nat.clone(), zero, succ)?;
+    let length = list_length.constant;
 
     let color = elaborator.declare_inductive(InductiveSpec::new(
         "Color",
@@ -774,97 +563,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let on = elaborator.resolve_constant("on")?;
     let bit_type = CoreType::constructor(bit, Vec::new());
 
-    let member_layout = StructuralArmLayout::new(2, 1, 1);
-    let member = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "Member".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: vec![parameter_type.clone()],
-        recursive_argument_index: 1,
-        result_type: CoreType::Prop,
-        arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Falsity),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::or(
-                    CoreTerm::equality(
-                        parameter_type.clone(),
-                        member_layout.fixed_parameter(0).expect("Member needle"),
-                        member_layout.field(0).expect("Member head"),
-                    ),
-                    member_layout
-                        .recursive_result(0)
-                        .expect("Member recursive result"),
-                ),
-            ),
-        ],
-    })?;
-
-    let nodup_layout = StructuralArmLayout::new(2, 1, 0);
-    let nodup_member = CoreTerm::apply(
-        CoreTerm::apply(
-            CoreTerm::instantiate_constant(member, vec![parameter_type.clone()]),
-            nodup_layout.field(0).expect("Nodup head"),
-        ),
-        nodup_layout.field(1).expect("Nodup tail"),
-    );
-    let nodup = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "Nodup".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: Vec::new(),
-        recursive_argument_index: 0,
-        result_type: CoreType::Prop,
-        arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Truth),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::and(
-                    CoreTerm::implies(nodup_member, CoreTerm::Falsity),
-                    nodup_layout
-                        .recursive_result(0)
-                        .expect("Nodup recursive result"),
-                ),
-            ),
-        ],
-    })?;
-
-    let length_layout = StructuralArmLayout::new(2, 1, 0);
-    let length = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "length".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type],
-        fixed_parameter_types: Vec::new(),
-        recursive_argument_index: 0,
-        result_type: nat.clone(),
-        arms: vec![
-            StructuralArmSpec::new(nil, CoreTerm::Constant(zero)),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::apply(
-                    CoreTerm::Constant(succ),
-                    length_layout
-                        .recursive_result(0)
-                        .expect("length recursive result"),
-                ),
-            ),
-        ],
-    })?;
-
-    let transport = declare_cardinality_transport(
-        &mut elaborator,
-        list,
-        nil,
-        cons,
-        member,
-        nodup,
-        length,
-        nat.clone(),
-        succ,
-    )?;
+    let transport = declare_cardinality_transport(&mut elaborator, &lists, &list_length)?;
 
     let encode = elaborator.declare_structural_definition(StructuralDefinitionSpec {
         name: "encode".to_string(),
@@ -894,17 +593,13 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     })?;
 
     let list_of = |element_type: &CoreType, first, second| {
-        CoreTerm::apply(
-            CoreTerm::apply(
-                CoreTerm::instantiate_constant(cons, vec![element_type.clone()]),
-                first,
-            ),
-            CoreTerm::apply(
-                CoreTerm::apply(
-                    CoreTerm::instantiate_constant(cons, vec![element_type.clone()]),
-                    second,
-                ),
-                CoreTerm::instantiate_constant(nil, vec![element_type.clone()]),
+        lists.cons_term(
+            element_type.clone(),
+            first,
+            lists.cons_term(
+                element_type.clone(),
+                second,
+                lists.nil_term(element_type.clone()),
             ),
         )
     };
@@ -916,27 +611,15 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let bit_enumeration = list_of(&bit_type, CoreTerm::Constant(off), CoreTerm::Constant(on));
 
     let member_call = |element_type: &CoreType, value: CoreTerm, enumeration: CoreTerm| {
-        CoreTerm::apply(
-            CoreTerm::apply(
-                CoreTerm::instantiate_constant(member, vec![element_type.clone()]),
-                value,
-            ),
-            enumeration,
-        )
+        lists.member_term(element_type.clone(), value, enumeration)
     };
     let has_card = |element_type: &CoreType, enumeration: CoreTerm, cardinal: CoreTerm| {
         CoreTerm::and(
-            CoreTerm::apply(
-                CoreTerm::instantiate_constant(nodup, vec![element_type.clone()]),
-                enumeration.clone(),
-            ),
+            lists.nodup_term(element_type.clone(), enumeration.clone()),
             CoreTerm::and(
                 CoreTerm::equality(
                     nat.clone(),
-                    CoreTerm::apply(
-                        CoreTerm::instantiate_constant(length, vec![element_type.clone()]),
-                        enumeration.clone(),
-                    ),
+                    list_length.apply(element_type.clone(), enumeration.clone()),
                     cardinal,
                 ),
                 CoreTerm::forall(

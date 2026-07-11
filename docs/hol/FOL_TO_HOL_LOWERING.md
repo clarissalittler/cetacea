@@ -342,3 +342,13 @@ goal snapshot, and suppresses countermodel engines outside the certified
 fragment. The legacy editor APIs are unchanged, and the feature-disabled Wasm
 surface does not expose the new entry points. At this checkpoint the release
 artifacts are 3,500,184 bytes for the native CLI and 1,351,199 bytes for Wasm.
+
+H6 begins by replacing three test-local list declarations with one reusable,
+transactional `ListLibrary`. Its unrestricted rank-one element parameter can
+serve both HOL clients and concrete restricted clients: tests classify open Nat
+membership as `fol+induction` and a `List Prop` predicate instance as `hol`.
+Graph path concatenation and direct finite cardinality retain their constructive
+`fol+induction` receipts after adopting the package; the generic cardinality
+transport dependency remains honestly `hol`. The package is not connected to
+surface imports yet. The corresponding release artifacts are 3,501,856 bytes
+for the native CLI and 1,361,312 bytes for Wasm.

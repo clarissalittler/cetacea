@@ -11,6 +11,7 @@ pub mod fragments;
 mod h35_cardinality;
 pub mod h3_examples;
 pub mod inductive;
+pub mod library;
 mod linked_smoke;
 pub mod lowering;
 pub mod prelude;
@@ -35,6 +36,7 @@ pub use inductive::{
     InductiveConstructor, InductiveConstructorSpec, InductiveDeclaration, InductiveError,
     InductiveFieldType, InductiveSignature, InductiveSpec, InstantiatedConstructor,
 };
+pub use library::{ListLength, ListLibrary};
 pub use linked_smoke::{run_linked_hol_smoke, LinkedHolSmokeReport};
 pub use lowering::{CompatibilityLowerer, LoweringError};
 pub use prelude::CompatibilityPrelude;

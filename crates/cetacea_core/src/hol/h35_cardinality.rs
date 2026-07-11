@@ -4,12 +4,13 @@
 //! and proof evidence, then submits every lemma to the same HOL kernel boundary
 //! used by the spike examples.
 
+use super::library::{ListLength, ListLibrary};
 use super::proofs::HolDraftProof;
 use super::recursion::{StructuralArmLayout, StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
 use super::terms::{ConstantId, CoreTerm};
 use super::theorems::TheoremId;
-use super::types::{CoreType, TypeConstructorId, TypeParameter};
+use super::types::{CoreType, TypeParameter};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CardinalityTransportLibrary {
@@ -17,18 +18,30 @@ pub(crate) struct CardinalityTransportLibrary {
     pub theorem: TheoremId,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn declare_cardinality_transport(
     elaborator: &mut SpikeElaborator,
-    list: TypeConstructorId,
-    nil: ConstantId,
-    cons: ConstantId,
-    member: ConstantId,
-    nodup: ConstantId,
-    length: ConstantId,
-    nat: CoreType,
-    succ: ConstantId,
+    lists: &ListLibrary,
+    length: &ListLength,
 ) -> Result<CardinalityTransportLibrary, SpikeError> {
+    let mut staged = elaborator.clone();
+    let library = declare_cardinality_transport_into(&mut staged, lists, length)?;
+    *elaborator = staged;
+    Ok(library)
+}
+
+fn declare_cardinality_transport_into(
+    elaborator: &mut SpikeElaborator,
+    lists: &ListLibrary,
+    list_length: &ListLength,
+) -> Result<CardinalityTransportLibrary, SpikeError> {
+    let list = lists.datatype;
+    let nil = lists.nil;
+    let cons = lists.cons;
+    let member = lists.member;
+    let nodup = lists.nodup;
+    let length = list_length.constant;
+    let nat = list_length.natural_type.clone();
+    let succ = list_length.successor;
     let a_parameter = TypeParameter::any(100);
     let b_parameter = TypeParameter::any(101);
     let a = CoreType::Parameter(a_parameter);
@@ -781,4 +794,42 @@ fn stage<T>(label: &str, result: Result<T, SpikeError>) -> Result<T, SpikeError>
     result.map_err(|error| SpikeError {
         message: format!("{label}: {}", error.message),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cardinality_transport_package_is_transactional_on_a_late_collision() {
+        let mut elaborator = SpikeElaborator::new();
+        let nat_id = elaborator
+            .declare_base_type("Nat", true)
+            .expect("declare Nat");
+        let nat = CoreType::constructor(nat_id, Vec::new());
+        let zero = elaborator
+            .declare_constant("zero", nat.clone())
+            .expect("declare zero");
+        let successor = elaborator
+            .declare_constant("succ", CoreType::arrow(nat.clone(), nat.clone()))
+            .expect("declare successor");
+        let lists = ListLibrary::install(&mut elaborator).expect("install List package");
+        let length = lists
+            .install_length(&mut elaborator, nat, zero, successor)
+            .expect("install length");
+
+        elaborator
+            .declare_theorem(
+                "member_map_reverse",
+                Vec::new(),
+                CoreTerm::Truth,
+                HolDraftProof::TruthIntro,
+            )
+            .expect("reserve a theorem name reached after earlier package declarations");
+        let before = elaborator.clone();
+        let error = declare_cardinality_transport(&mut elaborator, &lists, &length)
+            .expect_err("late collision must reject the package");
+        assert!(error.message.contains("member_map_reverse"));
+        assert_eq!(elaborator, before);
+    }
 }
