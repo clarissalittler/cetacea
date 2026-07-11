@@ -617,7 +617,13 @@ atomic catalog for `std/hol/list@1`: unqualified or namespaced type/symbol
 aliases retain checked schemes, contextual polymorphic inference, registry
 identity, collision rollback, and idempotence. It is not connected to source
 `import` yet. The alias-catalog checkpoint is 3,518,496 bytes natively and
-1,344,520 bytes in Wasm.
+1,344,520 bytes in Wasm. The source driver now recognizes the exact
+`std/hol/list@1` ID under HOL-shadow authority. It records constructor arity in
+the transitional legacy environment without copying List computation, so a
+type-only reflexivity theorem is checked by both engines and certified
+`fol+induction`; default checking and unsupported package operations fail
+closed. Reports, JSON, and assignment manifests use the exact package ID. The
+checkpoint artifacts are 3,632,264 bytes natively and 1,349,516 bytes in Wasm.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
@@ -625,7 +631,8 @@ identity, collision rollback, and idempotence. It is not connected to source
   cardinality-transport package and registry record plus finite-enumeration
   evidence generation and its registry record are implemented. Rank-one type
   application syntax, lowering, and parser-independent List alias binding are
-  implemented; source-driver resolution and end-to-end surface imports remain.
+  implemented, together with a type-only logical import under HOL shadow;
+  operation/tactic resolution and ordinary end-to-end acceptance remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

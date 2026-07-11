@@ -434,3 +434,13 @@ together, repeated binding is idempotent, and collisions leave both core and
 surface catalogs unchanged. This seam is parser-independent and not yet called
 by source `import`. The checkpoint artifacts are 3,518,496 bytes for the native
 CLI and 1,344,520 bytes for Wasm.
+
+The first logical import now reaches source checking without pretending that
+the legacy kernel implements a polymorphic List library. In HOL-shadow mode,
+`import std/hol/list@1 as L` records the checked package and exposes the arity of
+`L.List`; both engines verify a reflexivity theorem over `L.List Nat`, and HOL
+certifies it `fol+induction`. Package operation aliases are reserved but not yet
+usable by legacy tactics. Default checking and finite/cardinality surfaces fail
+closed. `HolShadowReport`, CLI JSON, and assignment manifests carry and
+allowlist the exact versioned package ID. The checkpoint artifacts are
+3,632,264 bytes for the native CLI and 1,349,516 bytes for Wasm.

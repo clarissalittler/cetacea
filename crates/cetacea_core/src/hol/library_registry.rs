@@ -33,6 +33,17 @@ pub enum LibraryPackageId {
     FiniteV1,
 }
 
+impl LibraryPackageId {
+    pub fn from_logical_id(logical_id: &str) -> Option<Self> {
+        match logical_id {
+            "std/hol/list@1" => Some(Self::ListV1),
+            "std/hol/cardinality@1" => Some(Self::CardinalityV1),
+            "std/hol/finite@1" => Some(Self::FiniteV1),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for LibraryPackageId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

@@ -68,13 +68,28 @@ collision rejects the whole import. Reserved names such as
 receipts. Stable audit names remain package-qualified, for example
 `std/hol/finite@1::HasCard`, regardless of the chosen source alias.
 
-Executable tests cover `List Nat`, contextual inference of polymorphic `nil`,
-`Member(0, cons(0, nil))`, the corresponding `L.*` spellings, repeated imports,
-coexistence with a monomorphic List, and collisions at both the first and a
-later alias. The catalog is not yet invoked by `Command::Import`; therefore this
-checkpoint does not expand the capabilities of any source file. Finite and
-cardinality aliases will follow the same catalog after the List driver path is
-end-to-end.
+Executable catalog tests cover `List Nat`, contextual inference of polymorphic
+`nil`, `Member(0, cons(0, nil))`, the corresponding `L.*` spellings, repeated
+imports, coexistence with a monomorphic List, and collisions at both the first
+and a later alias.
+
+`Command::Import` now recognizes the exact `std/hol/list@1` ID in HOL-shadow
+mode. The transitional legacy environment records only the constructor arity
+and reserves every operation alias; it does not imitate generic List
+computation. Consequently a theorem such as
+
+```text
+import std/hol/list@1 as L
+theorem list_refl (xs : L.List Nat) : xs = xs := by
+  refl
+```
+
+is checked by the legacy proof UI and independently lowered, checked, and
+classified `fol+induction` by HOL. Default checking rejects the logical import,
+and operations such as `L.Member` remain fail-closed at the source layer until
+their tactic path is ready. Repeated imports are idempotent. Finite and
+cardinality package IDs are recognized but reject with an explicit
+surface-not-implemented diagnostic.
 
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
@@ -95,7 +110,8 @@ end-to-end slice is complete only when:
 - unimported or colliding package names fail transactionally; and
 - the exact legacy corpus remains unchanged for files without logical imports.
 
-The alias catalog and parser-independent lowering step is complete. The
-remaining sequence is logical import resolution in the shadow driver,
-end-to-end tactic proof tests, then policy/JSON/Wasm exposure. Default
-acceptance should not be enabled halfway through that sequence.
+The alias catalog, parser-independent lowering, type-only shadow-driver import,
+stable package reporting, JSON, and exact assignment-manifest allowlisting are
+complete. The remaining sequence is List operation/computation/induction tactic
+support, finite and cardinality aliases, browser/editor verification, then an
+explicit decision about ordinary (non-shadow) acceptance.

@@ -107,23 +107,25 @@ idempotent, while any early or late alias collision rolls back both registry and
 surface state. A qualified generic package can coexist with the current
 monomorphic `List`.
 
-These are not yet student-visible libraries. The packages target the checked
-core, and `CompatibilityElaborator` exposes explicit list, cardinality, and
-finite installers, but the `.ctea` parser, standard-library import
-resolver, browser, and assignment manifests do not yet expose them. Reserved
-package names are not added to the legacy surface: current monomorphic
-`List`/`nil`/`cons`, unqualified `map`, and unqualified `HasCard` declarations
-can coexist and keep their original meanings.
+The first source-driver seam is now live but deliberately type-only. Under
+HOL-shadow authority, `import std/hol/list@1 as L` permits a theorem parameter
+such as `xs : L.List Nat`; a reflexivity theorem over that type is independently
+checked by both engines and certified `fol+induction`. Default legacy checking
+rejects logical HOL imports. List operation names are reserved but remain
+unavailable to legacy tactics, and finite/cardinality imports reject explicitly,
+until their end-to-end surfaces are implemented. Reports and JSON carry the
+exact package ID, and assignment manifests allowlist that ID without filesystem
+canonicalization.
 
 ## Remaining migration slices
 
-1. Connect the implemented atomic List alias catalog to logical imports in the
-   source driver, add generic declaration syntax, then publish the list package
-   through the standard library. Retain aliases for the current monomorphic list
-   vocabulary for one release cycle. The import seam is specified in
-   [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
-2. Route package provenance and receipt names into shadow/JSON results and
-   assignment import allowlists when surface imports can request a package.
+1. Extend the implemented type-only logical List import through operation
+   resolution, computation, induction, and tactics; add generic declaration
+   syntax, then publish it for ordinary checking. Retain aliases for the current
+   monomorphic list vocabulary for one release cycle. The import seam is
+   specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
+2. Extend the implemented package-ID JSON/manifest policy and stable definition
+   receipt names to imported theorem aliases and browser/editor results.
 3. Register and expose graph instances once surface imports can bind a checked
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
@@ -149,5 +151,5 @@ can coexist and keep their original meanings.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the List alias-catalog checkpoint the release CLI is 3,518,496 bytes and the
-raw Wasm module is 1,344,520 bytes, still below the 1.5 MB review line.
+At the type-only logical-import checkpoint the release CLI is 3,632,264 bytes
+and the raw Wasm module is 1,349,516 bytes, still below the 1.5 MB review line.

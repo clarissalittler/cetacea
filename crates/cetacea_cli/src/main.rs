@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 
 use cetacea_core::hol::{
-    run_linked_hol_smoke, DeclarationId, EvidenceStatus,
+    run_linked_hol_smoke, DeclarationId, EvidenceStatus, LibraryPackageId,
     PolicyViolation as HolReceiptPolicyViolation, ReceiptPolicy, TeachingProfile,
 };
 use cetacea_core::{
@@ -146,6 +146,7 @@ struct LoadedAssignment {
     path: PathBuf,
     manifest: AssignmentManifest,
     allowed_imports: BTreeSet<PathBuf>,
+    allowed_package_imports: BTreeSet<String>,
 }
 
 impl LoadedAssignment {
@@ -305,7 +306,15 @@ fn load_assignment(path: &Path) -> Result<LoadedAssignment, String> {
         .parent()
         .expect("canonical manifest path should have a parent");
     let mut allowed_imports = BTreeSet::new();
+    let mut allowed_package_imports = BTreeSet::new();
     for import in &manifest.allowed_imports {
+        if let Some(package) = LibraryPackageId::from_logical_id(import) {
+            let logical_id = package.to_string();
+            if !allowed_package_imports.insert(logical_id.clone()) {
+                return Err(format!("allowed package import `{logical_id}` is repeated"));
+            }
+            continue;
+        }
         let raw = Path::new(import);
         let candidate = if raw.is_absolute() {
             raw.to_path_buf()
@@ -328,6 +337,7 @@ fn load_assignment(path: &Path) -> Result<LoadedAssignment, String> {
         path: canonical_path,
         manifest,
         allowed_imports,
+        allowed_package_imports,
     })
 }
 
@@ -520,6 +530,15 @@ fn check_hol_policy_violations(
                 kind: "import",
                 message: format!("virtual import `{path}` is not allowed by a native manifest"),
             });
+        }
+        for package in &report.imported_packages {
+            if !assignment.allowed_package_imports.contains(package) {
+                violations.push(HolPolicyViolation {
+                    declaration: package.clone(),
+                    kind: "import",
+                    message: format!("logical package import `{package}` is not allowed"),
+                });
+            }
         }
 
         for required in &assignment.manifest.required_theorems {
@@ -2802,13 +2821,20 @@ fn hol_shadow_json(report: &HolShadowReport) -> String {
         .map(|path| json_string(path))
         .collect::<Vec<_>>()
         .join(",");
+    let imported_packages = report
+        .imported_packages
+        .iter()
+        .map(|package| json_string(package))
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        r#"{{"matches":{},"attempted_declarations":{},"checked_declarations":{},"imported_files":[{}],"imported_virtual_files":[{}],"statement_classifications":[{}],"theorems":[{}],"mismatches":[{}]}}"#,
+        r#"{{"matches":{},"attempted_declarations":{},"checked_declarations":{},"imported_files":[{}],"imported_virtual_files":[{}],"imported_packages":[{}],"statement_classifications":[{}],"theorems":[{}],"mismatches":[{}]}}"#,
         report.is_match(),
         report.attempted_declarations,
         report.checked_declarations.len(),
         imported_files,
         imported_virtual_files,
+        imported_packages,
         statement_classifications,
         theorems,
         mismatches,
@@ -3443,6 +3469,54 @@ required_theorem.typed_refl = "(x : Person) : x = x"
     }
 
     #[test]
+    fn assignment_manifest_allows_exact_versioned_hol_package_imports() {
+        let unique = format!(
+            "cetacea-package-assignment-{}-{:?}",
+            process::id(),
+            std::thread::current().id()
+        );
+        let dir = env::temp_dir().join(unique);
+        fs::create_dir_all(&dir).expect("create package assignment fixture");
+        let manifest_path = dir.join("package.ctea-assignment");
+        fs::write(
+            &manifest_path,
+            r#"
+version = 1
+profile = "fol+induction"
+allowed_imports = ["std/hol/list@1"]
+"#,
+        )
+        .expect("write package assignment manifest");
+        let assignment = load_assignment(&manifest_path).expect("load package assignment");
+        assert_eq!(
+            assignment.allowed_package_imports,
+            BTreeSet::from(["std/hol/list@1".to_string()])
+        );
+        let report = cetacea_core::check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as L
+theorem list_refl (xs : L.List Nat) : xs = xs := by
+  refl
+"#,
+        );
+        assert!(report.is_match());
+        assert_eq!(report.imported_packages, ["std/hol/list@1"]);
+        let policy = assignment.teaching_policy();
+        assert!(check_hol_policy_violations(&report, policy, Some(&assignment)).is_empty());
+
+        let mut denied = assignment.clone();
+        denied.allowed_package_imports.clear();
+        let violations = check_hol_policy_violations(&report, policy, Some(&denied));
+        assert!(violations.iter().any(|violation| {
+            violation.kind == "import" && violation.message.contains("std/hol/list@1")
+        }));
+        let json = hol_shadow_json(&report);
+        assert!(json.contains(r#""imported_packages":["std/hol/list@1"]"#));
+
+        fs::remove_dir_all(&dir).expect("remove package assignment fixture");
+    }
+
+    #[test]
     fn assignment_manifest_cannot_whitelist_a_student_local_axiom_by_name() {
         let report = cetacea_core::check_file_with_hol_shadow(
             r#"
@@ -3466,6 +3540,7 @@ allowed_axioms = ["local_trust"]
             path: PathBuf::from("assignment.ctea-assignment"),
             manifest,
             allowed_imports: BTreeSet::new(),
+            allowed_package_imports: BTreeSet::new(),
         };
         let violations =
             check_hol_policy_violations(&report, assignment.teaching_policy(), Some(&assignment));

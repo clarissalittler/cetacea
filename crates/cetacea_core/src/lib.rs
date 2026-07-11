@@ -880,6 +880,8 @@ pub struct Theorem {
 #[derive(Clone, Debug, Default)]
 pub struct Env {
     sorts: HashMap<Name, Type>,
+    type_constructor_arities: HashMap<Name, usize>,
+    package_names: HashSet<Name>,
     consts: HashMap<Name, Type>,
     funcs: HashMap<Name, FuncDecl>,
     preds: HashMap<Name, Vec<Type>>,
@@ -918,6 +920,16 @@ impl Env {
 
     pub fn add_sort(&mut self, name: Name) {
         self.sorts.insert(name.clone(), Type::Named(name));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn add_type_constructor(&mut self, name: Name, arity: usize) {
+        self.type_constructor_arities.insert(name, arity);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn reserve_package_name(&mut self, name: Name) {
+        self.package_names.insert(name);
     }
 
     pub fn add_const(&mut self, name: Name, ty: Type) {
@@ -978,11 +990,23 @@ impl Env {
     }
 
     fn has_sort(&self, name: &str) -> bool {
-        self.sorts.contains_key(name)
+        self.sorts.contains_key(name) || self.type_constructor_arities.contains_key(name)
+    }
+
+    fn type_constructor_arity(&self, name: &str) -> Option<usize> {
+        self.type_constructor_arities
+            .get(name)
+            .copied()
+            .or_else(|| self.sorts.contains_key(name).then_some(0))
     }
 
     fn ambiguous_sort_names(&self, name: &str) -> Option<Vec<Name>> {
-        ambiguous_leaf_names(self.sorts.keys(), name)
+        ambiguous_leaf_names(
+            self.sorts
+                .keys()
+                .chain(self.type_constructor_arities.keys()),
+            name,
+        )
     }
 
     fn has_const(&self, name: &str) -> bool {
@@ -1040,6 +1064,7 @@ impl Env {
             || self.has_pred(name)
             || self.has_def(name)
             || self.has_theorem(name)
+            || self.package_names.contains(name)
     }
 }
 
@@ -1539,6 +1564,8 @@ pub struct HolShadowReport {
     pub imported_files: Vec<PathBuf>,
     /// Normalized virtual identities used by browser/editor-buffer callers.
     pub imported_virtual_files: Vec<String>,
+    /// Exact versioned logical HOL packages installed by source imports.
+    pub imported_packages: Vec<String>,
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -1737,6 +1764,7 @@ pub fn check_source_at_path_with_hol_shadow(
                 receipt_names: BTreeMap::new(),
                 imported_files: Vec::new(),
                 imported_virtual_files: Vec::new(),
+                imported_packages: Vec::new(),
             };
         }
     };
@@ -1794,6 +1822,7 @@ fn unavailable_hol_shadow(
         receipt_names: BTreeMap::new(),
         imported_files: Vec::new(),
         imported_virtual_files: Vec::new(),
+        imported_packages: Vec::new(),
     }
 }
 
@@ -2498,6 +2527,8 @@ struct FileChecker {
     virtual_files: HashMap<String, String>,
     loaded_virtual_files: HashSet<(String, Option<Name>)>,
     virtual_import_stack: Vec<String>,
+    #[cfg(feature = "hol-shadow")]
+    loaded_library_packages: HashSet<(hol::LibraryPackageId, Option<Name>)>,
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -2511,6 +2542,7 @@ struct HolShadowState {
     receipt_names: HashMap<hol::DeclarationId, Name>,
     imported_files: BTreeSet<PathBuf>,
     imported_virtual_files: BTreeSet<String>,
+    imported_packages: BTreeSet<String>,
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -2526,6 +2558,7 @@ impl HolShadowState {
             receipt_names: HashMap::new(),
             imported_files: BTreeSet::new(),
             imported_virtual_files: BTreeSet::new(),
+            imported_packages: BTreeSet::new(),
         })
     }
 
@@ -2676,6 +2709,8 @@ impl FileChecker {
             virtual_files: HashMap::new(),
             loaded_virtual_files: HashSet::new(),
             virtual_import_stack: Vec::new(),
+            #[cfg(feature = "hol-shadow")]
+            loaded_library_packages: HashSet::new(),
         }
     }
 
@@ -2728,6 +2763,7 @@ impl FileChecker {
             receipt_names: shadow.receipt_names.into_iter().collect(),
             imported_files: shadow.imported_files.into_iter().collect(),
             imported_virtual_files: shadow.imported_virtual_files.into_iter().collect(),
+            imported_packages: shadow.imported_packages.into_iter().collect(),
         }
     }
 
@@ -3110,6 +3146,117 @@ impl FileChecker {
         self.loaded_virtual_files.insert(loaded_key);
     }
 
+    fn check_logical_library_import(
+        &mut self,
+        package: hol::LibraryPackageId,
+        logical_id: &str,
+        alias: Option<Name>,
+        line: usize,
+        source_path: Option<&Path>,
+    ) {
+        #[cfg(not(feature = "hol-shadow"))]
+        {
+            let _ = (package, alias);
+            self.result.diagnostics.push(diagnostic_at(
+                source_path,
+                line,
+                format!("logical HOL package import `{logical_id}` requires HOL shadow checking"),
+            ));
+            return;
+        }
+
+        #[cfg(feature = "hol-shadow")]
+        {
+            if self.hol_shadow.is_none() {
+                self.result.diagnostics.push(diagnostic_at(
+                    source_path,
+                    line,
+                    format!(
+                        "logical HOL package import `{logical_id}` requires HOL shadow checking"
+                    ),
+                ));
+                return;
+            }
+            let key = (package, alias.clone());
+            if self.loaded_library_packages.contains(&key) {
+                return;
+            }
+            if package != hol::LibraryPackageId::ListV1 {
+                self.result.diagnostics.push(diagnostic_at(
+                    source_path,
+                    line,
+                    format!(
+                        "logical HOL package `{logical_id}` is registered, but its surface aliases are not implemented yet"
+                    ),
+                ));
+                return;
+            }
+
+            let qualify = |leaf: &str| match &alias {
+                Some(alias) => format!("{alias}.{leaf}"),
+                None => leaf.to_string(),
+            };
+            let datatype_name = qualify("List");
+            let symbol_names = [
+                qualify("nil"),
+                qualify("cons"),
+                qualify("All"),
+                qualify("Member"),
+                qualify("Nodup"),
+                qualify("append"),
+                qualify("length"),
+            ];
+            for name in std::iter::once(&datatype_name).chain(symbol_names.iter()) {
+                if self.env.has_top_level_name(name) {
+                    self.result.diagnostics.push(diagnostic_at(
+                        source_path,
+                        line,
+                        format!("logical package alias `{name}` is already declared"),
+                    ));
+                    return;
+                }
+            }
+            let mut staged_env = self.env.clone();
+            staged_env.add_type_constructor(datatype_name, 1);
+            for name in symbol_names {
+                staged_env.reserve_package_name(name);
+            }
+
+            let shadow = self
+                .hol_shadow
+                .as_mut()
+                .expect("HOL package imports require an initialized sidecar");
+            let installed = match shadow.elaborator.import_builtin_list_v1(alias.as_deref()) {
+                Ok(installed) => installed,
+                Err(error) => {
+                    self.result.diagnostics.push(
+                        diagnostic_at(
+                            source_path,
+                            line,
+                            format!("could not import logical HOL package `{logical_id}`"),
+                        )
+                        .with_note(error.message),
+                    );
+                    return;
+                }
+            };
+            for declaration in &installed.record.declarations {
+                let Some(receipt) = declaration.receipt else {
+                    continue;
+                };
+                let stable_name = shadow
+                    .elaborator
+                    .libraries()
+                    .receipt_name(receipt)
+                    .expect("registered package receipts have stable names");
+                shadow.receipt_names.insert(receipt, stable_name);
+            }
+            shadow.imported_packages.insert(logical_id.to_string());
+            self.env = staged_env;
+            self.loaded_library_packages.insert(key);
+        }
+    }
+
     fn check_commands(
         &mut self,
         commands: Vec<LocatedCommand>,
@@ -3126,6 +3273,17 @@ impl FileChecker {
             let command = located.command;
             match command {
                 Command::Import(decl) => {
+                    let alias = decl.alias.or_else(|| inherited_alias.map(str::to_string));
+                    if let Some(package) = hol::LibraryPackageId::from_logical_id(&decl.path) {
+                        self.check_logical_library_import(
+                            package,
+                            &decl.path,
+                            alias,
+                            line,
+                            source_path,
+                        );
+                        continue;
+                    }
                     let resolved_path =
                         match self.resolve_import_path(&decl.path, base_dir, virtual_base) {
                             Ok(path) => path,
@@ -3135,7 +3293,6 @@ impl FileChecker {
                                 continue;
                             }
                         };
-                    let alias = decl.alias.or_else(|| inherited_alias.map(str::to_string));
                     self.check_resolved_import(resolved_path, true, alias);
                 }
                 Command::Mode(next_mode) => mode = next_mode,
@@ -7982,9 +8139,13 @@ fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationEr
                     "rank-one type parameter `{name}` cannot take type arguments"
                 )));
             }
-            if env.has_sort(name) {
+            if let Some(arity) = env.type_constructor_arity(name) {
+                if arity == arguments.len() {
+                    return Ok(());
+                }
                 return Err(ValidationError::new(format!(
-                    "legacy type `{name}` does not take type arguments"
+                    "type constructor `{name}` expects {arity} argument(s), but got {}",
+                    arguments.len()
                 )));
             }
             if let Some(matches) = env.ambiguous_sort_names(name) {
@@ -7998,8 +8159,14 @@ fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationEr
                 "unknown type constructor `{name}`"
             )))
         }
-        Type::Named(name) if env.has_sort(name) || ctx.has_type_var(name) => Ok(()),
+        Type::Named(name) if ctx.has_type_var(name) => Ok(()),
+        Type::Named(name) if env.type_constructor_arity(name) == Some(0) => Ok(()),
         Type::Named(name) => {
+            if let Some(arity) = env.type_constructor_arity(name) {
+                return Err(ValidationError::new(format!(
+                    "type constructor `{name}` expects {arity} argument(s), but got 0"
+                )));
+            }
             if let Some(matches) = env.ambiguous_sort_names(name) {
                 return Err(ValidationError::new(ambiguous_reference_message(
                     "type", name, &matches,
@@ -16933,7 +17100,7 @@ mod tests {
     fn legacy_monomorphic_sorts_reject_type_arguments_explicitly() {
         check_err_contains(
             "sort List\nconst xs : List Nat\n",
-            "legacy type `List` does not take type arguments",
+            "type constructor `List` expects 0 argument(s), but got 1",
         );
     }
 
@@ -17146,6 +17313,56 @@ theorem use_id (P : Prop) : P -> P := by
             .theorems
             .iter()
             .any(|theorem| theorem.name == "use_id" && !theorem.is_imported));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_checks_a_rank_one_type_theorem_in_both_engines() {
+        let source = r#"
+import std/hol/list@1 as L
+import std/hol/list@1 as L
+
+mode constructive
+theorem list_refl (xs : L.List Nat) : xs = xs := by
+  refl
+"#;
+        let legacy_only = check_file(source);
+        assert!(format!("{:#?}", legacy_only.diagnostics).contains("requires HOL shadow checking"));
+
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(report.imported_packages, ["std/hol/list@1"]);
+        let theorem = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "list_refl")
+            .expect("list_refl receipt");
+        assert_eq!(
+            theorem.statement_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert_eq!(
+            theorem.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(report
+            .receipt_names
+            .values()
+            .any(|name| name == "std/hol/list@1::Member"));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_package_imports_fail_closed_before_their_surface_is_ready() {
+        let report = check_file_with_hol_shadow("import std/hol/finite@1\n");
+        assert!(format!("{:#?}", report.legacy.diagnostics)
+            .contains("surface aliases are not implemented yet"));
+        assert!(report.imported_packages.is_empty());
     }
 
     #[cfg(feature = "hol-shadow")]
@@ -18111,6 +18328,11 @@ theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
     #[test]
     fn missing_import_is_reported() {
         check_err_contains("import definitely_missing.ctea", "could not read import");
+    }
+
+    #[test]
+    fn logical_hol_import_requires_shadow_authority() {
+        check_err_contains("import std/hol/list@1\n", "requires HOL shadow checking");
     }
 
     #[test]
