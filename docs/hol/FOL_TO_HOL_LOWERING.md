@@ -393,3 +393,14 @@ set; a late cardinality collision therefore cannot leave even its newly
 installed List dependency behind. Reserved names remain outside legacy
 lowering, including an unqualified legacy `map`. The checkpoint artifacts are
 3,511,864 bytes for the native CLI and 1,352,784 bytes for Wasm.
+
+Finite-enumeration evidence is now reusable as well. `HasCard A xs n` is a
+transparent checked definition whose receipt depends exactly on `Nodup`,
+`length`, and `Member`. For parameterless nullary datatypes, the package reads
+the checked constructor metadata and synthesizes the full enumeration, Nat
+cardinal, constructor-disjointness proof, and exhaustive induction. A
+three-constructor test remains constructive `fol+induction`; an explicit
+`List Prop` instance is `hol`, and datatypes with constructor fields fail
+without changing theorem state. The Color/Bit spike now references generated
+enumeration theorems instead of constructing two bespoke proofs. The checkpoint
+artifacts are 3,510,136 bytes for the native CLI and 1,349,499 bytes for Wasm.

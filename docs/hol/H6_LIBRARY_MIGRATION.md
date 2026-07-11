@@ -68,6 +68,18 @@ is accepted as idempotent. Stable names such as
 `std/hol/cardinality@1::cardinality_transport` are therefore available to the
 future import-policy layer.
 
+Finite enumeration now has a checked substrate rather than a Color/Bit-only
+proof script. `FiniteEnumerationLibrary` defines polymorphic
+`HasCard A xs n` from `Nodup`, `length`, and exhaustive `Member`; its definition
+receipt pins those three dependencies. For a parameterless datatype whose
+constructors are all nullary, `declare_nullary_inductive` derives the complete
+constructor list, its Nat numeral, a no-duplicates proof from constructor
+disjointness, and an exhaustive-coverage proof by induction. The generated
+theorem is trust-free and remains `fol+induction` at an ordinary finite type,
+while a `List Prop` use is correctly `hol`. The generator is tested with three
+constructors, rejects constructors with fields without changing the core, and
+the Color/Bit spike now reuses its two stored enumeration receipts.
+
 These are not yet student-visible libraries. The packages target the checked
 core, and `CompatibilityElaborator` exposes explicit list and cardinality
 installers, but the `.ctea` parser, standard-library import resolver, browser,
@@ -86,10 +98,11 @@ unqualified `map` declarations can coexist and keep their original meanings.
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
-4. Expose the registered cardinality-transport package through surface imports,
-   add a finite enumeration package, then prove the representative pigeonhole,
-   finite-union-cardinality, and handshake targets through checked library
-   theorems.
+4. Register the finite-enumeration substrate and expose it together with
+   cardinality transport through surface imports, then prove the representative
+   pigeonhole, finite-union-cardinality, and handshake targets through checked
+   library theorems. Extend enumeration generation beyond nullary datatypes only
+   when a course theorem requires it.
 5. Add the finite tree edge/vertex theorem and a pilot chapter sequence. Freeze
    each assignment's profile, imports, trusted principles, and theorem
    signatures with manifests.
@@ -106,5 +119,5 @@ unqualified `map` declarations can coexist and keep their original meanings.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the cardinality-registry checkpoint the release CLI is 3,511,864 bytes and
-the raw Wasm module is 1,352,784 bytes, still below the 1.5 MB review line.
+At the finite-enumeration checkpoint the release CLI is 3,510,136 bytes and the
+raw Wasm module is 1,349,499 bytes, still below the 1.5 MB review line.

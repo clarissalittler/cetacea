@@ -4,6 +4,7 @@
 //! not hand-installed kernel metadata. Each report contains checked receipts
 //! and the diagnostics from deliberate rejection cases.
 
+use super::finite_library::FiniteEnumerationLibrary;
 use super::fragments::DeclarationReceipt;
 use super::graph_library::GraphLibrary;
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
@@ -308,6 +309,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let nodup = lists.nodup;
     let list_length = lists.install_length(&mut elaborator, nat.clone(), zero, succ)?;
     let length = list_length.constant;
+    let finite = FiniteEnumerationLibrary::install(&mut elaborator, &lists, &list_length)?;
 
     let color = elaborator.declare_inductive(InductiveSpec::new(
         "Color",
@@ -332,6 +334,12 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let off = elaborator.resolve_constant("off")?;
     let on = elaborator.resolve_constant("on")?;
     let bit_type = CoreType::constructor(bit, Vec::new());
+
+    let color_evidence =
+        finite.declare_nullary_inductive(&mut elaborator, "color_has_card", color)?;
+    let bit_evidence = finite.declare_nullary_inductive(&mut elaborator, "bit_has_card", bit)?;
+    let color_enumeration = color_evidence.enumeration.clone();
+    let bit_enumeration = bit_evidence.enumeration.clone();
 
     let transport = install_cardinality_transport(&mut elaborator, &lists, &list_length)?;
 
@@ -362,44 +370,6 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         ],
     })?;
 
-    let list_of = |element_type: &CoreType, first, second| {
-        lists.cons_term(
-            element_type.clone(),
-            first,
-            lists.cons_term(
-                element_type.clone(),
-                second,
-                lists.nil_term(element_type.clone()),
-            ),
-        )
-    };
-    let color_enumeration = list_of(
-        &color_type,
-        CoreTerm::Constant(red),
-        CoreTerm::Constant(blue),
-    );
-    let bit_enumeration = list_of(&bit_type, CoreTerm::Constant(off), CoreTerm::Constant(on));
-
-    let member_call = |element_type: &CoreType, value: CoreTerm, enumeration: CoreTerm| {
-        lists.member_term(element_type.clone(), value, enumeration)
-    };
-    let has_card = |element_type: &CoreType, enumeration: CoreTerm, cardinal: CoreTerm| {
-        CoreTerm::and(
-            lists.nodup_term(element_type.clone(), enumeration.clone()),
-            CoreTerm::and(
-                CoreTerm::equality(
-                    nat.clone(),
-                    list_length.apply(element_type.clone(), enumeration.clone()),
-                    cardinal,
-                ),
-                CoreTerm::forall(
-                    element_type.clone(),
-                    member_call(element_type, CoreTerm::Bound(0), enumeration),
-                ),
-            ),
-        )
-    };
-
     let encode_term = |value| CoreTerm::apply(CoreTerm::Constant(encode), value);
     let decode_term = |value| CoreTerm::apply(CoreTerm::Constant(decode), value);
     let color_inverse = CoreTerm::forall(
@@ -422,8 +392,16 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let body = CoreTerm::and(
         bijection,
         CoreTerm::and(
-            has_card(&color_type, color_enumeration.clone(), CoreTerm::Bound(0)),
-            has_card(&bit_type, bit_enumeration.clone(), CoreTerm::Bound(0)),
+            finite.has_card_term(
+                color_type.clone(),
+                color_enumeration.clone(),
+                CoreTerm::Bound(0),
+            ),
+            finite.has_card_term(
+                bit_type.clone(),
+                bit_enumeration.clone(),
+                CoreTerm::Bound(0),
+            ),
         ),
     );
     let statement = CoreTerm::exists(nat.clone(), body.clone());
@@ -469,90 +447,16 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
         }),
     };
 
-    let has_card_proof =
-        |element_type: CoreType, datatype, first, second, enumeration: CoreTerm| {
-            let distinct = CoreTerm::equality(
-                element_type.clone(),
-                CoreTerm::Constant(first),
-                CoreTerm::Constant(second),
-            );
-            let nodup_proof = HolDraftProof::AndIntro(
-                Box::new(HolDraftProof::ImpIntro {
-                    premise: CoreTerm::or(distinct, CoreTerm::Falsity),
-                    body: Box::new(HolDraftProof::OrElim {
-                        proof_or: Box::new(HolDraftProof::Hypothesis(0)),
-                        left_case: Box::new(HolDraftProof::ConstructorDisjoint {
-                            proof_equality: Box::new(HolDraftProof::Hypothesis(0)),
-                        }),
-                        right_case: Box::new(HolDraftProof::Hypothesis(0)),
-                        target: CoreTerm::Falsity,
-                    }),
-                }),
-                Box::new(HolDraftProof::AndIntro(
-                    Box::new(HolDraftProof::ImpIntro {
-                        premise: CoreTerm::Falsity,
-                        body: Box::new(HolDraftProof::Hypothesis(0)),
-                    }),
-                    Box::new(HolDraftProof::TruthIntro),
-                )),
-            );
-            let coverage = HolDraftProof::ForallIntro {
-                domain: element_type.clone(),
-                body: Box::new(HolDraftProof::Induction {
-                    datatype,
-                    type_arguments: Vec::new(),
-                    motive: CoreTerm::lambda(
-                        element_type.clone(),
-                        member_call(&element_type, CoreTerm::Bound(0), enumeration),
-                    ),
-                    scrutinee: CoreTerm::Bound(0),
-                    cases: vec![
-                        HolDraftProof::OrIntroLeft {
-                            proof_left: Box::new(HolDraftProof::EqualityRefl(CoreTerm::Constant(
-                                first,
-                            ))),
-                            right: CoreTerm::or(
-                                CoreTerm::equality(
-                                    element_type.clone(),
-                                    CoreTerm::Constant(first),
-                                    CoreTerm::Constant(second),
-                                ),
-                                CoreTerm::Falsity,
-                            ),
-                        },
-                        HolDraftProof::OrIntroRight {
-                            left: CoreTerm::equality(
-                                element_type.clone(),
-                                CoreTerm::Constant(second),
-                                CoreTerm::Constant(first),
-                            ),
-                            proof_right: Box::new(HolDraftProof::OrIntroLeft {
-                                proof_left: Box::new(HolDraftProof::EqualityRefl(
-                                    CoreTerm::Constant(second),
-                                )),
-                                right: CoreTerm::Falsity,
-                            }),
-                        },
-                    ],
-                }),
-            };
-            HolDraftProof::AndIntro(
-                Box::new(nodup_proof),
-                Box::new(HolDraftProof::AndIntro(
-                    Box::new(HolDraftProof::EqualityRefl(two.clone())),
-                    Box::new(coverage),
-                )),
-            )
-        };
-    let color_has_card_proof = has_card_proof(
-        color_type.clone(),
-        color,
-        red,
-        blue,
-        color_enumeration.clone(),
-    );
-    let direct_bit_has_card_proof =
-        has_card_proof(bit_type.clone(), bit, off, on, bit_enumeration.clone());
+    let color_has_card_proof = HolDraftProof::TheoremRef {
+        theorem: color_evidence.theorem,
+        type_arguments: Vec::new(),
+        term_arguments: Vec::new(),
+    };
+    let direct_bit_has_card_proof = HolDraftProof::TheoremRef {
+        theorem: bit_evidence.theorem,
+        type_arguments: Vec::new(),
+        term_arguments: Vec::new(),
+    };
     let mut transported_bit_has_card_proof = HolDraftProof::TheoremRef {
         theorem: transport.theorem,
         type_arguments: vec![color_type.clone(), bit_type.clone()],
@@ -665,6 +569,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
             format!("Member#{}", member.0),
             format!("Nodup#{}", nodup.0),
             format!("length#{}", length.0),
+            format!("HasCard#{}", finite.has_card.0),
             format!("map#{}", transport.map.0),
             format!("encode#{}", encode.0),
             format!("decode#{}", decode.0),
@@ -753,7 +658,7 @@ mod tests {
     #[test]
     fn finite_h3_spike_checks_bijection_and_shared_cardinality_evidence() {
         let report = run_finite_h3_spike().expect("finite H3 spike");
-        assert_eq!(report.declared_definitions.len(), 6);
+        assert_eq!(report.declared_definitions.len(), 7);
         assert_eq!(
             report.bijection_cardinality.proof().statement_fragment(),
             StatementFragment::FirstOrderInductive

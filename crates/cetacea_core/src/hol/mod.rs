@@ -7,6 +7,7 @@
 //! decision; a shadow mismatch never changes legacy acceptance.
 
 pub mod declarations;
+pub mod finite_library;
 pub mod fragments;
 pub mod graph_library;
 mod h35_cardinality;
@@ -25,6 +26,9 @@ pub mod theorems;
 pub mod types;
 
 pub use declarations::{CompatibilityDeclarationError, CompatibilityElaborator};
+pub use finite_library::{
+    FiniteEnumerationEvidence, FiniteEnumerationLibrary, FiniteEnumerationNames,
+};
 pub use fragments::{
     classify_statement, proof_features_from_audit, DeclarationId, DeclarationReceipt,
     EvidenceStatus, FragmentError, FragmentMetadata, PolicyViolation, ProofFeature, ProofReceipt,
