@@ -57,12 +57,23 @@ tests pin the final theorem's exact direct dependencies on `Member`, `Nodup`,
 as `hol`. The finite spike now consumes this public package rather than a
 private H3.5 builder.
 
-This is not yet a student-visible library. `ListLibrary` currently targets the
-checked core, and `CompatibilityElaborator` exposes the package registry, but
-the `.ctea` parser, standard-library import resolver, browser, and assignment
-manifests do not yet expose generic list declarations. Reserved package names
-are not added to the legacy surface: a current monomorphic `List`/`nil`/`cons`
-declaration can coexist and keeps its original meaning.
+It is also registered as logical module `std/hol/cardinality@1` under reserved
+namespace `@library.cardinality.v1`. The record catalogs `map`, all six theorem
+receipts, and an explicit dependency on `std/hol/list@1`. Installing cardinality
+installs that dependency when necessary, but stages the complete closure as one
+transaction: a late theorem collision rolls back both packages. Reinstallation
+validates the core binding, Nat binding, declaration catalog, individual
+receipts, and the final theorem's cross-package receipt dependencies before it
+is accepted as idempotent. Stable names such as
+`std/hol/cardinality@1::cardinality_transport` are therefore available to the
+future import-policy layer.
+
+These are not yet student-visible libraries. The packages target the checked
+core, and `CompatibilityElaborator` exposes explicit list and cardinality
+installers, but the `.ctea` parser, standard-library import resolver, browser,
+and assignment manifests do not yet expose them. Reserved package names are
+not added to the legacy surface: current monomorphic `List`/`nil`/`cons` and
+unqualified `map` declarations can coexist and keep their original meanings.
 
 ## Remaining migration slices
 
@@ -75,8 +86,8 @@ declaration can coexist and keeps its original meaning.
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
-4. Register and expose the checked cardinality-transport package, add a finite
-   enumeration package, then prove the representative pigeonhole,
+4. Expose the registered cardinality-transport package through surface imports,
+   add a finite enumeration package, then prove the representative pigeonhole,
    finite-union-cardinality, and handshake targets through checked library
    theorems.
 5. Add the finite tree edge/vertex theorem and a pilot chapter sequence. Freeze
@@ -95,5 +106,5 @@ declaration can coexist and keeps its original meaning.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the cardinality-package checkpoint the release CLI is 3,507,984 bytes and
-the raw Wasm module is 1,353,487 bytes, still below the 1.5 MB review line.
+At the cardinality-registry checkpoint the release CLI is 3,511,864 bytes and
+the raw Wasm module is 1,352,784 bytes, still below the 1.5 MB review line.

@@ -6,10 +6,13 @@
 //! imports can later bind aliases to these records without reinstalling or
 //! duplicating kernel declarations.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use super::fragments::DeclarationId;
+use super::h35_cardinality::{
+    install_cardinality_transport_named, CardinalityTransportLibrary, CardinalityTransportNames,
+};
 use super::library::{ListLength, ListLibrary, ListLibraryNames};
 use super::spike::{SpikeElaborator, SpikeError};
 use super::terms::ConstantId;
@@ -17,16 +20,20 @@ use super::types::CoreType;
 
 pub const BUILTIN_LIST_V1_MODULE: &str = "std/hol/list";
 pub const BUILTIN_LIST_V1_NAMESPACE: &str = "@library.list.v1";
+pub const BUILTIN_CARDINALITY_V1_MODULE: &str = "std/hol/cardinality";
+pub const BUILTIN_CARDINALITY_V1_NAMESPACE: &str = "@library.cardinality.v1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LibraryPackageId {
     ListV1,
+    CardinalityV1,
 }
 
 impl fmt::Display for LibraryPackageId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ListV1 => write!(f, "{BUILTIN_LIST_V1_MODULE}@1"),
+            Self::CardinalityV1 => write!(f, "{BUILTIN_CARDINALITY_V1_MODULE}@1"),
         }
     }
 }
@@ -48,6 +55,7 @@ pub enum LibraryDeclarationKind {
     Datatype,
     Constructor,
     Definition,
+    Theorem,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,6 +71,7 @@ pub struct LibraryPackageRecord {
     pub id: LibraryPackageId,
     pub provenance: LibraryPackageProvenance,
     pub core_namespace: String,
+    pub dependencies: Vec<LibraryPackageId>,
     pub declarations: Vec<LibraryDeclaration>,
 }
 
@@ -74,14 +83,22 @@ pub struct InstalledListLibrary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstalledCardinalityLibrary {
+    pub record: LibraryPackageRecord,
+    pub cardinality: CardinalityTransportLibrary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstalledLibraryPackage {
     ListV1(InstalledListLibrary),
+    CardinalityV1(InstalledCardinalityLibrary),
 }
 
 impl InstalledLibraryPackage {
     pub fn record(&self) -> &LibraryPackageRecord {
         match self {
             Self::ListV1(installed) => &installed.record,
+            Self::CardinalityV1(installed) => &installed.record,
         }
     }
 }
@@ -103,7 +120,14 @@ impl HolLibraryRegistry {
     pub fn list_v1(&self) -> Option<&InstalledListLibrary> {
         match self.get(LibraryPackageId::ListV1) {
             Some(InstalledLibraryPackage::ListV1(installed)) => Some(installed),
-            None => None,
+            _ => None,
+        }
+    }
+
+    pub fn cardinality_v1(&self) -> Option<&InstalledCardinalityLibrary> {
+        match self.get(LibraryPackageId::CardinalityV1) {
+            Some(InstalledLibraryPackage::CardinalityV1(installed)) => Some(installed),
+            _ => None,
         }
     }
 
@@ -189,6 +213,7 @@ impl HolLibraryRegistry {
                     source: LibraryPackageSource::Builtin,
                 },
                 core_namespace: BUILTIN_LIST_V1_NAMESPACE.to_string(),
+                dependencies: Vec::new(),
                 declarations: vec![
                     declaration(
                         "List",
@@ -248,12 +273,142 @@ impl HolLibraryRegistry {
         *self = staged_registry;
         Ok(installed)
     }
+
+    /// Install cardinality transport and its versioned List dependency.
+    ///
+    /// The complete dependency closure is staged as one transaction: when List
+    /// is not already installed, a failure in a later cardinality lemma commits
+    /// neither package. Repeated installation validates both registry records
+    /// against the supplied core and is otherwise idempotent.
+    pub fn install_builtin_cardinality_v1(
+        &mut self,
+        core: &mut SpikeElaborator,
+        natural_type: CoreType,
+        zero: ConstantId,
+        successor: ConstantId,
+    ) -> Result<InstalledCardinalityLibrary, SpikeError> {
+        let mut staged_core = core.clone();
+        let mut staged_registry = self.clone();
+        let lists = staged_registry.install_builtin_list_v1(
+            &mut staged_core,
+            natural_type,
+            zero,
+            successor,
+        )?;
+
+        if let Some(installed) = staged_registry.cardinality_v1().cloned() {
+            validate_installed_cardinality_v1(&staged_core, &installed, &lists)?;
+            *core = staged_core;
+            *self = staged_registry;
+            return Ok(installed);
+        }
+
+        let names = CardinalityTransportNames::under_namespace(BUILTIN_CARDINALITY_V1_NAMESPACE);
+        let cardinality = install_cardinality_transport_named(
+            &mut staged_core,
+            &lists.lists,
+            &lists.length,
+            &names,
+        )?;
+        let definition = |logical_name: &str,
+                          core_name: &str,
+                          constant: ConstantId|
+         -> Result<LibraryDeclaration, SpikeError> {
+            let receipt = staged_core
+                .definition_receipt(constant)
+                .ok_or_else(|| SpikeError {
+                    message: format!("checked definition `{core_name}` has no declaration receipt"),
+                })?
+                .id();
+            Ok(LibraryDeclaration {
+                logical_name: logical_name.to_string(),
+                core_name: core_name.to_string(),
+                kind: LibraryDeclarationKind::Definition,
+                receipt: Some(receipt),
+            })
+        };
+        let theorem = |logical_name: &str,
+                       core_name: &str,
+                       theorem: super::theorems::TheoremId|
+         -> Result<LibraryDeclaration, SpikeError> {
+            let receipt = staged_core
+                .theorem_receipt(theorem)
+                .ok_or_else(|| SpikeError {
+                    message: format!("checked theorem `{core_name}` has no declaration receipt"),
+                })?
+                .id();
+            Ok(LibraryDeclaration {
+                logical_name: logical_name.to_string(),
+                core_name: core_name.to_string(),
+                kind: LibraryDeclarationKind::Theorem,
+                receipt: Some(receipt),
+            })
+        };
+        let installed = InstalledCardinalityLibrary {
+            record: LibraryPackageRecord {
+                id: LibraryPackageId::CardinalityV1,
+                provenance: LibraryPackageProvenance {
+                    module: BUILTIN_CARDINALITY_V1_MODULE.to_string(),
+                    version: 1,
+                    source: LibraryPackageSource::Builtin,
+                },
+                core_namespace: BUILTIN_CARDINALITY_V1_NAMESPACE.to_string(),
+                dependencies: vec![LibraryPackageId::ListV1],
+                declarations: vec![
+                    definition("map", &names.map, cardinality.map)?,
+                    theorem("map_length", &names.map_length, cardinality.map_length)?,
+                    theorem(
+                        "member_map_forward",
+                        &names.member_map_forward,
+                        cardinality.member_map_forward,
+                    )?,
+                    theorem(
+                        "member_map_reverse",
+                        &names.member_map_reverse,
+                        cardinality.member_map_reverse,
+                    )?,
+                    theorem(
+                        "nodup_map_injective",
+                        &names.nodup_map_injective,
+                        cardinality.nodup_map_injective,
+                    )?,
+                    theorem(
+                        "map_coverage_surjective",
+                        &names.map_coverage_surjective,
+                        cardinality.map_coverage_surjective,
+                    )?,
+                    theorem(
+                        "cardinality_transport",
+                        &names.cardinality_transport,
+                        cardinality.theorem,
+                    )?,
+                ],
+            },
+            cardinality,
+        };
+        staged_registry.packages.insert(
+            LibraryPackageId::CardinalityV1,
+            InstalledLibraryPackage::CardinalityV1(installed.clone()),
+        );
+        *core = staged_core;
+        *self = staged_registry;
+        Ok(installed)
+    }
 }
 
 fn validate_installed_list_v1(
     core: &SpikeElaborator,
     installed: &InstalledListLibrary,
 ) -> Result<(), SpikeError> {
+    if installed.record.id != LibraryPackageId::ListV1 || !installed.record.dependencies.is_empty()
+    {
+        return Err(SpikeError {
+            message: format!(
+                "invalid package metadata for `{}`",
+                LibraryPackageId::ListV1
+            ),
+        });
+    }
     let names = ListLibraryNames::under_namespace(BUILTIN_LIST_V1_NAMESPACE);
     let matches = core.types().resolve(&names.datatype) == Some(installed.lists.datatype)
         && core.constants().resolve(&names.nil) == Some(installed.lists.nil)
@@ -296,6 +451,158 @@ fn validate_installed_list_v1(
                 ),
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_installed_cardinality_v1(
+    core: &SpikeElaborator,
+    installed: &InstalledCardinalityLibrary,
+    lists: &InstalledListLibrary,
+) -> Result<(), SpikeError> {
+    let package = LibraryPackageId::CardinalityV1;
+    if installed.record.id != package
+        || installed.record.provenance.module != BUILTIN_CARDINALITY_V1_MODULE
+        || installed.record.provenance.version != 1
+        || installed.record.provenance.source != LibraryPackageSource::Builtin
+        || installed.record.core_namespace != BUILTIN_CARDINALITY_V1_NAMESPACE
+        || installed.record.dependencies != [LibraryPackageId::ListV1]
+        || installed.record.declarations.len() != 7
+    {
+        return Err(SpikeError {
+            message: format!("invalid package metadata for `{package}`"),
+        });
+    }
+
+    let names = CardinalityTransportNames::under_namespace(BUILTIN_CARDINALITY_V1_NAMESPACE);
+    let cardinality = &installed.cardinality;
+    let expected_names = [
+        (
+            "map",
+            names.map.as_str(),
+            LibraryDeclarationKind::Definition,
+        ),
+        (
+            "map_length",
+            names.map_length.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "member_map_forward",
+            names.member_map_forward.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "member_map_reverse",
+            names.member_map_reverse.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "nodup_map_injective",
+            names.nodup_map_injective.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "map_coverage_surjective",
+            names.map_coverage_surjective.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "cardinality_transport",
+            names.cardinality_transport.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+    ];
+    if !installed
+        .record
+        .declarations
+        .iter()
+        .zip(expected_names)
+        .all(|(declaration, (logical_name, core_name, kind))| {
+            declaration.logical_name == logical_name
+                && declaration.core_name == core_name
+                && declaration.kind == kind
+                && declaration.receipt.is_some()
+        })
+    {
+        return Err(SpikeError {
+            message: format!("invalid declaration catalog for package `{package}`"),
+        });
+    }
+
+    let handles_match = core.constants().resolve(&names.map) == Some(cardinality.map)
+        && core.theorems().resolve(&names.map_length) == Some(cardinality.map_length)
+        && core.theorems().resolve(&names.member_map_forward)
+            == Some(cardinality.member_map_forward)
+        && core.theorems().resolve(&names.member_map_reverse)
+            == Some(cardinality.member_map_reverse)
+        && core.theorems().resolve(&names.nodup_map_injective)
+            == Some(cardinality.nodup_map_injective)
+        && core.theorems().resolve(&names.map_coverage_surjective)
+            == Some(cardinality.map_coverage_surjective)
+        && core.theorems().resolve(&names.cardinality_transport) == Some(cardinality.theorem);
+    if !handles_match {
+        return Err(SpikeError {
+            message: format!("library registry/core mismatch for package `{package}`"),
+        });
+    }
+
+    for declaration in &installed.record.declarations {
+        let actual_receipt = match declaration.kind {
+            LibraryDeclarationKind::Definition => core
+                .constants()
+                .resolve(&declaration.core_name)
+                .and_then(|constant| core.definition_receipt(constant))
+                .map(|receipt| receipt.id()),
+            LibraryDeclarationKind::Theorem => core
+                .theorems()
+                .resolve(&declaration.core_name)
+                .and_then(|theorem| core.theorem_receipt(theorem))
+                .map(|receipt| receipt.id()),
+            LibraryDeclarationKind::Datatype | LibraryDeclarationKind::Constructor => None,
+        };
+        if actual_receipt != declaration.receipt {
+            return Err(SpikeError {
+                message: format!(
+                    "library receipt mismatch for `{}` in package `{package}`",
+                    declaration.logical_name
+                ),
+            });
+        }
+    }
+
+    let definition_receipt = |constant: ConstantId| {
+        core.definition_receipt(constant)
+            .map(|receipt| receipt.id())
+            .ok_or_else(|| SpikeError {
+                message: format!("library dependency receipt missing for package `{package}`"),
+            })
+    };
+    let theorem_receipt = |theorem| {
+        core.theorem_receipt(theorem)
+            .map(|receipt| receipt.id())
+            .ok_or_else(|| SpikeError {
+                message: format!("library dependency receipt missing for package `{package}`"),
+            })
+    };
+    let expected_dependencies = BTreeSet::from([
+        definition_receipt(lists.lists.member)?,
+        definition_receipt(lists.lists.nodup)?,
+        definition_receipt(lists.length.constant)?,
+        definition_receipt(cardinality.map)?,
+        theorem_receipt(cardinality.nodup_map_injective)?,
+        theorem_receipt(cardinality.map_length)?,
+        theorem_receipt(cardinality.map_coverage_surjective)?,
+    ]);
+    let final_receipt = core
+        .theorem_receipt(cardinality.theorem)
+        .ok_or_else(|| SpikeError {
+            message: format!("final theorem receipt missing for package `{package}`"),
+        })?;
+    if final_receipt.proof().direct_dependencies() != &expected_dependencies {
+        return Err(SpikeError {
+            message: format!("library dependency mismatch for package `{package}`"),
+        });
     }
     Ok(())
 }
@@ -452,6 +759,133 @@ mod tests {
     }
 
     #[test]
+    fn cardinality_v1_install_is_versioned_dependency_bound_and_idempotent() {
+        let (mut core, prelude) = core_with_prelude();
+        let mut registry = HolLibraryRegistry::default();
+        let installed = registry
+            .install_builtin_cardinality_v1(
+                &mut core,
+                prelude.nat_type(),
+                prelude.zero(),
+                prelude.successor(),
+            )
+            .expect("install registered cardinality v1");
+
+        assert_eq!(registry.packages().len(), 2);
+        assert!(registry.list_v1().is_some());
+        assert_eq!(registry.cardinality_v1(), Some(&installed));
+        assert_eq!(installed.record.id, LibraryPackageId::CardinalityV1);
+        assert_eq!(installed.record.id.to_string(), "std/hol/cardinality@1");
+        assert_eq!(
+            installed.record.provenance.module,
+            BUILTIN_CARDINALITY_V1_MODULE
+        );
+        assert_eq!(installed.record.provenance.version, 1);
+        assert_eq!(
+            installed.record.provenance.source,
+            LibraryPackageSource::Builtin
+        );
+        assert_eq!(
+            installed.record.core_namespace,
+            BUILTIN_CARDINALITY_V1_NAMESPACE
+        );
+        assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
+        assert_eq!(installed.record.declarations.len(), 7);
+        assert!(installed
+            .record
+            .declarations
+            .iter()
+            .all(|declaration| declaration.receipt.is_some()
+                && declaration
+                    .core_name
+                    .starts_with(BUILTIN_CARDINALITY_V1_NAMESPACE)));
+        assert_eq!(
+            installed
+                .record
+                .declarations
+                .iter()
+                .filter(|declaration| declaration.kind == LibraryDeclarationKind::Definition)
+                .count(),
+            1
+        );
+        assert_eq!(
+            installed
+                .record
+                .declarations
+                .iter()
+                .filter(|declaration| declaration.kind == LibraryDeclarationKind::Theorem)
+                .count(),
+            6
+        );
+
+        let final_receipt = core
+            .theorem_receipt(installed.cardinality.theorem)
+            .expect("registered transport receipt");
+        assert_eq!(
+            final_receipt.proof().statement_fragment(),
+            StatementFragment::HigherOrder
+        );
+        assert_eq!(
+            final_receipt.proof().required_fragment(),
+            StatementFragment::HigherOrder
+        );
+        assert!(final_receipt.proof().axiom_dependencies().is_empty());
+        assert!(final_receipt.proof().incomplete_dependencies().is_empty());
+        assert_eq!(
+            registry.receipt_name(final_receipt.id()).as_deref(),
+            Some("std/hol/cardinality@1::cardinality_transport")
+        );
+        let dependency_names = final_receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .map(|dependency| {
+                registry
+                    .receipt_name(*dependency)
+                    .expect("every transport dependency belongs to a package")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            dependency_names,
+            BTreeSet::from([
+                "std/hol/cardinality@1::map".to_string(),
+                "std/hol/cardinality@1::map_coverage_surjective".to_string(),
+                "std/hol/cardinality@1::map_length".to_string(),
+                "std/hol/cardinality@1::nodup_map_injective".to_string(),
+                "std/hol/list@1::Member".to_string(),
+                "std/hol/list@1::Nodup".to_string(),
+                "std/hol/list@1::length".to_string(),
+            ])
+        );
+
+        let after_first_install = (core.clone(), registry.clone());
+        let repeated = registry
+            .install_builtin_cardinality_v1(
+                &mut core,
+                prelude.nat_type(),
+                prelude.zero(),
+                prelude.successor(),
+            )
+            .expect("repeat install is idempotent");
+        assert_eq!(repeated, installed);
+        assert_eq!((core.clone(), registry.clone()), after_first_install);
+
+        let mut detached_registry = registry.clone();
+        let (mut detached_core, detached_prelude) = core_with_prelude();
+        let before_detached = (detached_core.clone(), detached_registry.clone());
+        let detached_error = detached_registry
+            .install_builtin_cardinality_v1(
+                &mut detached_core,
+                detached_prelude.nat_type(),
+                detached_prelude.zero(),
+                detached_prelude.successor(),
+            )
+            .expect_err("package handles cannot be reused with another core");
+        assert!(detached_error.message.contains("registry/core mismatch"));
+        assert_eq!((detached_core, detached_registry), before_detached);
+    }
+
+    #[test]
     fn list_v1_install_rolls_back_core_and_metadata_after_a_late_collision() {
         let (mut core, prelude) = core_with_prelude();
         let names = ListLibraryNames::under_namespace(BUILTIN_LIST_V1_NAMESPACE);
@@ -469,6 +903,32 @@ mod tests {
             )
             .expect_err("late collision must reject the package");
         assert!(error.message.contains(&names.nodup));
+        assert_eq!((core, registry), before);
+    }
+
+    #[test]
+    fn cardinality_v1_rolls_back_its_new_list_dependency_after_a_late_collision() {
+        let (mut core, prelude) = core_with_prelude();
+        let names = CardinalityTransportNames::under_namespace(BUILTIN_CARDINALITY_V1_NAMESPACE);
+        core.declare_theorem(
+            names.member_map_reverse.clone(),
+            Vec::new(),
+            CoreTerm::Truth,
+            super::super::proofs::HolDraftProof::TruthIntro,
+        )
+        .expect("reserve a name reached after List and earlier cardinality declarations");
+        let mut registry = HolLibraryRegistry::default();
+        let before = (core.clone(), registry.clone());
+
+        let error = registry
+            .install_builtin_cardinality_v1(
+                &mut core,
+                prelude.nat_type(),
+                prelude.zero(),
+                prelude.successor(),
+            )
+            .expect_err("late cardinality collision must reject the dependency closure");
+        assert!(error.message.contains(&names.member_map_reverse));
         assert_eq!((core, registry), before);
     }
 }

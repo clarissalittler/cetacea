@@ -383,3 +383,13 @@ and the three reused transport lemmas; the entire theorem chain remains
 trust-free and correctly requires `hol`. The finite spike now consumes this
 package. The checkpoint artifacts are 3,507,984 bytes for the native CLI and
 1,353,487 bytes for Wasm.
+
+`std/hol/cardinality@1` now places that package in the same versioned registry
+as `std/hol/list@1`. Registry metadata distinguishes definitions from theorem
+receipts and records the List dependency explicitly. The installer stages both
+packages together when necessary, validates every handle and receipt on
+reinstallation, and checks the final theorem's exact cross-package dependency
+set; a late cardinality collision therefore cannot leave even its newly
+installed List dependency behind. Reserved names remain outside legacy
+lowering, including an unqualified legacy `map`. The checkpoint artifacts are
+3,511,864 bytes for the native CLI and 1,352,784 bytes for Wasm.

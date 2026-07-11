@@ -17,7 +17,9 @@ use crate::{
 };
 
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
-use super::library_registry::{HolLibraryRegistry, InstalledListLibrary};
+use super::library_registry::{
+    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledListLibrary,
+};
 use super::lowering::{CompatibilityLowerer, LoweringError};
 use super::prelude::CompatibilityPrelude;
 use super::proofs::HolDraftProof;
@@ -182,6 +184,22 @@ impl CompatibilityElaborator {
         Ok(self
             .libraries
             .install_builtin_list_v1(&mut self.core, natural_type, zero, successor)?)
+    }
+
+    /// Install the versioned cardinality-transport package and its generic
+    /// List dependency without adding either package to the legacy surface.
+    pub fn install_builtin_cardinality_v1(
+        &mut self,
+    ) -> Result<InstalledCardinalityLibrary, CompatibilityDeclarationError> {
+        let natural_type = self.prelude.nat_type();
+        let zero = self.prelude.zero();
+        let successor = self.prelude.successor();
+        Ok(self.libraries.install_builtin_cardinality_v1(
+            &mut self.core,
+            natural_type,
+            zero,
+            successor,
+        )?)
     }
 
     pub fn lowering_scope(&self) -> Result<CompatibilityLowerer<'_>, LoweringError> {
@@ -2462,6 +2480,50 @@ mod tests {
             .expect("legacy nil remains the surface meaning");
         assert_eq!(lowered_nil, CoreTerm::Constant(legacy_nil));
         assert_ne!(legacy_nil, installed.lists.nil);
+    }
+
+    #[test]
+    fn registered_cardinality_installs_its_dependency_without_surface_aliases() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let installed = elaborator
+            .install_builtin_cardinality_v1()
+            .expect("install registered cardinality transport");
+        assert_eq!(elaborator.libraries().packages().len(), 2);
+        assert!(elaborator.libraries().list_v1().is_some());
+        assert_eq!(
+            elaborator
+                .libraries()
+                .cardinality_v1()
+                .expect("registered cardinality package"),
+            &installed
+        );
+
+        let names = super::super::CardinalityTransportNames::under_namespace(
+            super::super::BUILTIN_CARDINALITY_V1_NAMESPACE,
+        );
+        assert_eq!(
+            elaborator.core().constants().resolve(&names.map),
+            Some(installed.cardinality.map)
+        );
+        let reserved_error = elaborator
+            .lower_term(&Term::Var(names.map))
+            .expect_err("reserved package names stay outside the legacy scope");
+        assert!(reserved_error.message.contains("unknown compatibility"));
+
+        let legacy_map = elaborator
+            .declare_function("map", &[Type::Nat], &Type::Nat)
+            .expect("a legacy surface symbol can retain the unqualified name");
+        let lowered = elaborator
+            .lower_term(&Term::App("map".to_string(), vec![Term::Zero]))
+            .expect("legacy map application");
+        assert_eq!(
+            lowered,
+            CoreTerm::apply(
+                CoreTerm::Constant(legacy_map),
+                CoreTerm::Constant(elaborator.prelude().zero()),
+            )
+        );
+        assert_ne!(legacy_map, installed.cardinality.map);
     }
 
     #[test]

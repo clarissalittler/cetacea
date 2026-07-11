@@ -45,9 +45,10 @@ pub use inductive::{
 };
 pub use library::{ListLength, ListLibrary, ListLibraryNames};
 pub use library_registry::{
-    HolLibraryRegistry, InstalledLibraryPackage, InstalledListLibrary, LibraryDeclaration,
-    LibraryDeclarationKind, LibraryPackageId, LibraryPackageProvenance, LibraryPackageRecord,
-    LibraryPackageSource, BUILTIN_LIST_V1_MODULE, BUILTIN_LIST_V1_NAMESPACE,
+    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledLibraryPackage, InstalledListLibrary,
+    LibraryDeclaration, LibraryDeclarationKind, LibraryPackageId, LibraryPackageProvenance,
+    LibraryPackageRecord, LibraryPackageSource, BUILTIN_CARDINALITY_V1_MODULE,
+    BUILTIN_CARDINALITY_V1_NAMESPACE, BUILTIN_LIST_V1_MODULE, BUILTIN_LIST_V1_NAMESPACE,
 };
 pub use linked_smoke::{run_linked_hol_smoke, LinkedHolSmokeReport};
 pub use lowering::{CompatibilityLowerer, LoweringError};

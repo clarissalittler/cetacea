@@ -577,7 +577,11 @@ the same typed handles instead of redeclaring variants. Cardinality transport
 is now a public, namespaced, transactional package exposing `map`, all five
 supporting theorem handles, and the final theorem. Its receipt test fixes the
 complete direct dependency set and verifies that every theorem is trust-free
-and classified `hol`. Tests demonstrate the central mode claim directly: the
+and classified `hol`. It is registered as `std/hol/cardinality@1`, with all
+seven declarations, stable receipt names, and an explicit dependency on
+`std/hol/list@1`. The complete dependency closure installs atomically and
+reinstallation validates cross-package receipt bindings. Tests demonstrate the
+central mode claim directly: the
 same unrestricted library has a `fol+induction` Nat
 or graph instance and a `hol` `Prop` instance, while the existing graph and
 finite proof receipts retain their prior least fragments. This package is
@@ -593,15 +597,15 @@ concrete `Vertex` paths remain `fol+induction`, while passing the edge predicate
 as a value—or instantiating paths at `Prop`—is certified `hol`. The graph spike
 uses the extracted package without changing its receipt. See
 [`hol/H6_LIBRARY_MIGRATION.md`](hol/H6_LIBRARY_MIGRATION.md) for the remaining
-surface, compatibility-alias, and curriculum slices. The cardinality-package
-checkpoint artifacts are 3,507,984 bytes natively and 1,353,487 bytes in Wasm,
+surface, compatibility-alias, and curriculum slices. The cardinality-registry
+checkpoint artifacts are 3,511,864 bytes natively and 1,352,784 bytes in Wasm,
 below the 1.5 MB review line.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
-  cardinality-transport package are implemented; package registry exposure,
-  surface imports, and finite enumeration remain.
+  cardinality-transport package and registry record are implemented; surface
+  imports and finite enumeration remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path
