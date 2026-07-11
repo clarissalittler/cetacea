@@ -404,3 +404,12 @@ three-constructor test remains constructive `fol+induction`; an explicit
 without changing theorem state. The Color/Bit spike now references generated
 enumeration theorems instead of constructing two bespoke proofs. The checkpoint
 artifacts are 3,510,136 bytes for the native CLI and 1,349,499 bytes for Wasm.
+
+`std/hol/finite@1` now registers the generic part of that substrate. Its record
+owns only `HasCard`, depends explicitly on `std/hol/list@1`, and validates the
+definition receipt against registered `Member`, `Nodup`, and `length` receipts.
+Datatype-specific facts stay client-owned, so their provenance is not
+misreported as builtin. Dependency installation, collisions, core rebinding,
+and repeated installation all fail closed or remain idempotent as appropriate;
+the reserved name does not capture a legacy `HasCard`. The checkpoint artifacts
+are 3,516,376 bytes for the native CLI and 1,348,356 bytes for Wasm.

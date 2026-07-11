@@ -18,7 +18,7 @@ use crate::{
 
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
 use super::library_registry::{
-    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledListLibrary,
+    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary, InstalledListLibrary,
 };
 use super::lowering::{CompatibilityLowerer, LoweringError};
 use super::prelude::CompatibilityPrelude;
@@ -195,6 +195,22 @@ impl CompatibilityElaborator {
         let zero = self.prelude.zero();
         let successor = self.prelude.successor();
         Ok(self.libraries.install_builtin_cardinality_v1(
+            &mut self.core,
+            natural_type,
+            zero,
+            successor,
+        )?)
+    }
+
+    /// Install the versioned finite-enumeration predicate and its generic List
+    /// dependency without adding `HasCard` to the legacy surface.
+    pub fn install_builtin_finite_v1(
+        &mut self,
+    ) -> Result<InstalledFiniteLibrary, CompatibilityDeclarationError> {
+        let natural_type = self.prelude.nat_type();
+        let zero = self.prelude.zero();
+        let successor = self.prelude.successor();
+        Ok(self.libraries.install_builtin_finite_v1(
             &mut self.core,
             natural_type,
             zero,
@@ -2524,6 +2540,44 @@ mod tests {
             )
         );
         assert_ne!(legacy_map, installed.cardinality.map);
+    }
+
+    #[test]
+    fn registered_finite_package_keeps_has_card_outside_the_legacy_surface() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let installed = elaborator
+            .install_builtin_finite_v1()
+            .expect("install registered finite package");
+        assert_eq!(elaborator.libraries().packages().len(), 2);
+        assert!(elaborator.libraries().list_v1().is_some());
+        assert_eq!(
+            elaborator
+                .libraries()
+                .finite_v1()
+                .expect("registered finite package"),
+            &installed
+        );
+
+        let names = super::super::FiniteEnumerationNames::under_namespace(
+            super::super::BUILTIN_FINITE_V1_NAMESPACE,
+        );
+        assert_eq!(
+            elaborator.core().constants().resolve(&names.has_card),
+            Some(installed.finite.has_card)
+        );
+        let reserved_error = elaborator
+            .lower_term(&Term::Var(names.has_card))
+            .expect_err("reserved HasCard stays outside the legacy scope");
+        assert!(reserved_error.message.contains("unknown compatibility"));
+
+        let legacy_has_card = elaborator
+            .declare_predicate("HasCard", &[])
+            .expect("legacy surface can retain the unqualified name");
+        let lowered = elaborator
+            .lower_formula(&Formula::Atom("HasCard".to_string()))
+            .expect("lower legacy HasCard atom");
+        assert_eq!(lowered, CoreTerm::Constant(legacy_has_card));
+        assert_ne!(legacy_has_card, installed.finite.has_card);
     }
 
     #[test]

@@ -80,12 +80,21 @@ while a `List Prop` use is correctly `hol`. The generator is tested with three
 constructors, rejects constructors with fields without changing the core, and
 the Color/Bit spike now reuses its two stored enumeration receipts.
 
+The generic predicate is registered as `std/hol/finite@1` under
+`@library.finite.v1`, with `HasCard` as its sole owned declaration and
+`std/hol/list@1` as an explicit dependency. Its validator pins the `HasCard`
+receipt to the registered `Member`, `Nodup`, and `length` receipts. Generated
+facts such as `traffic_has_card` deliberately remain client theorem receipts,
+not declarations owned by the generic package. Installing finite enumeration
+can stage List automatically, and a collision rolls the entire closure back.
+
 These are not yet student-visible libraries. The packages target the checked
-core, and `CompatibilityElaborator` exposes explicit list and cardinality
-installers, but the `.ctea` parser, standard-library import resolver, browser,
-and assignment manifests do not yet expose them. Reserved package names are
-not added to the legacy surface: current monomorphic `List`/`nil`/`cons` and
-unqualified `map` declarations can coexist and keep their original meanings.
+core, and `CompatibilityElaborator` exposes explicit list, cardinality, and
+finite installers, but the `.ctea` parser, standard-library import
+resolver, browser, and assignment manifests do not yet expose them. Reserved
+package names are not added to the legacy surface: current monomorphic
+`List`/`nil`/`cons`, unqualified `map`, and unqualified `HasCard` declarations
+can coexist and keep their original meanings.
 
 ## Remaining migration slices
 
@@ -98,11 +107,11 @@ unqualified `map` declarations can coexist and keep their original meanings.
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
-4. Register the finite-enumeration substrate and expose it together with
-   cardinality transport through surface imports, then prove the representative
-   pigeonhole, finite-union-cardinality, and handshake targets through checked
-   library theorems. Extend enumeration generation beyond nullary datatypes only
-   when a course theorem requires it.
+4. Expose registered finite enumeration and cardinality transport through
+   surface imports, then prove the representative pigeonhole,
+   finite-union-cardinality, and handshake targets through checked library
+   theorems. Extend enumeration generation beyond nullary datatypes only when a
+   course theorem requires it.
 5. Add the finite tree edge/vertex theorem and a pilot chapter sequence. Freeze
    each assignment's profile, imports, trusted principles, and theorem
    signatures with manifests.
@@ -119,5 +128,5 @@ unqualified `map` declarations can coexist and keep their original meanings.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the finite-enumeration checkpoint the release CLI is 3,510,136 bytes and the
-raw Wasm module is 1,349,499 bytes, still below the 1.5 MB review line.
+At the finite-registry checkpoint the release CLI is 3,516,376 bytes and the raw
+Wasm module is 1,348,356 bytes, still below the 1.5 MB review line.

@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use super::finite_library::{FiniteEnumerationLibrary, FiniteEnumerationNames};
 use super::fragments::DeclarationId;
 use super::h35_cardinality::{
     install_cardinality_transport_named, CardinalityTransportLibrary, CardinalityTransportNames,
@@ -22,11 +23,14 @@ pub const BUILTIN_LIST_V1_MODULE: &str = "std/hol/list";
 pub const BUILTIN_LIST_V1_NAMESPACE: &str = "@library.list.v1";
 pub const BUILTIN_CARDINALITY_V1_MODULE: &str = "std/hol/cardinality";
 pub const BUILTIN_CARDINALITY_V1_NAMESPACE: &str = "@library.cardinality.v1";
+pub const BUILTIN_FINITE_V1_MODULE: &str = "std/hol/finite";
+pub const BUILTIN_FINITE_V1_NAMESPACE: &str = "@library.finite.v1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LibraryPackageId {
     ListV1,
     CardinalityV1,
+    FiniteV1,
 }
 
 impl fmt::Display for LibraryPackageId {
@@ -34,6 +38,7 @@ impl fmt::Display for LibraryPackageId {
         match self {
             Self::ListV1 => write!(f, "{BUILTIN_LIST_V1_MODULE}@1"),
             Self::CardinalityV1 => write!(f, "{BUILTIN_CARDINALITY_V1_MODULE}@1"),
+            Self::FiniteV1 => write!(f, "{BUILTIN_FINITE_V1_MODULE}@1"),
         }
     }
 }
@@ -89,9 +94,16 @@ pub struct InstalledCardinalityLibrary {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstalledFiniteLibrary {
+    pub record: LibraryPackageRecord,
+    pub finite: FiniteEnumerationLibrary,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum InstalledLibraryPackage {
     ListV1(InstalledListLibrary),
     CardinalityV1(InstalledCardinalityLibrary),
+    FiniteV1(InstalledFiniteLibrary),
 }
 
 impl InstalledLibraryPackage {
@@ -99,6 +111,7 @@ impl InstalledLibraryPackage {
         match self {
             Self::ListV1(installed) => &installed.record,
             Self::CardinalityV1(installed) => &installed.record,
+            Self::FiniteV1(installed) => &installed.record,
         }
     }
 }
@@ -127,6 +140,13 @@ impl HolLibraryRegistry {
     pub fn cardinality_v1(&self) -> Option<&InstalledCardinalityLibrary> {
         match self.get(LibraryPackageId::CardinalityV1) {
             Some(InstalledLibraryPackage::CardinalityV1(installed)) => Some(installed),
+            _ => None,
+        }
+    }
+
+    pub fn finite_v1(&self) -> Option<&InstalledFiniteLibrary> {
+        match self.get(LibraryPackageId::FiniteV1) {
+            Some(InstalledLibraryPackage::FiniteV1(installed)) => Some(installed),
             _ => None,
         }
     }
@@ -394,6 +414,75 @@ impl HolLibraryRegistry {
         *self = staged_registry;
         Ok(installed)
     }
+
+    /// Install the generic finite-enumeration predicate and its List
+    /// dependency as one atomic versioned package closure.
+    pub fn install_builtin_finite_v1(
+        &mut self,
+        core: &mut SpikeElaborator,
+        natural_type: CoreType,
+        zero: ConstantId,
+        successor: ConstantId,
+    ) -> Result<InstalledFiniteLibrary, SpikeError> {
+        let mut staged_core = core.clone();
+        let mut staged_registry = self.clone();
+        let lists = staged_registry.install_builtin_list_v1(
+            &mut staged_core,
+            natural_type,
+            zero,
+            successor,
+        )?;
+
+        if let Some(installed) = staged_registry.finite_v1().cloned() {
+            validate_installed_finite_v1(&staged_core, &installed, &lists)?;
+            *core = staged_core;
+            *self = staged_registry;
+            return Ok(installed);
+        }
+
+        let names = FiniteEnumerationNames::under_namespace(BUILTIN_FINITE_V1_NAMESPACE);
+        let finite = FiniteEnumerationLibrary::install_named(
+            &mut staged_core,
+            &lists.lists,
+            &lists.length,
+            &names,
+        )?;
+        let receipt = staged_core
+            .definition_receipt(finite.has_card)
+            .ok_or_else(|| SpikeError {
+                message: format!(
+                    "checked definition `{}` has no declaration receipt",
+                    names.has_card
+                ),
+            })?
+            .id();
+        let installed = InstalledFiniteLibrary {
+            record: LibraryPackageRecord {
+                id: LibraryPackageId::FiniteV1,
+                provenance: LibraryPackageProvenance {
+                    module: BUILTIN_FINITE_V1_MODULE.to_string(),
+                    version: 1,
+                    source: LibraryPackageSource::Builtin,
+                },
+                core_namespace: BUILTIN_FINITE_V1_NAMESPACE.to_string(),
+                dependencies: vec![LibraryPackageId::ListV1],
+                declarations: vec![LibraryDeclaration {
+                    logical_name: "HasCard".to_string(),
+                    core_name: names.has_card,
+                    kind: LibraryDeclarationKind::Definition,
+                    receipt: Some(receipt),
+                }],
+            },
+            finite,
+        };
+        staged_registry.packages.insert(
+            LibraryPackageId::FiniteV1,
+            InstalledLibraryPackage::FiniteV1(installed.clone()),
+        );
+        *core = staged_core;
+        *self = staged_registry;
+        Ok(installed)
+    }
 }
 
 fn validate_installed_list_v1(
@@ -607,10 +696,75 @@ fn validate_installed_cardinality_v1(
     Ok(())
 }
 
+fn validate_installed_finite_v1(
+    core: &SpikeElaborator,
+    installed: &InstalledFiniteLibrary,
+    lists: &InstalledListLibrary,
+) -> Result<(), SpikeError> {
+    let package = LibraryPackageId::FiniteV1;
+    let names = FiniteEnumerationNames::under_namespace(BUILTIN_FINITE_V1_NAMESPACE);
+    if installed.record.id != package
+        || installed.record.provenance.module != BUILTIN_FINITE_V1_MODULE
+        || installed.record.provenance.version != 1
+        || installed.record.provenance.source != LibraryPackageSource::Builtin
+        || installed.record.core_namespace != BUILTIN_FINITE_V1_NAMESPACE
+        || installed.record.dependencies != [LibraryPackageId::ListV1]
+        || installed.record.declarations.len() != 1
+    {
+        return Err(SpikeError {
+            message: format!("invalid package metadata for `{package}`"),
+        });
+    }
+    let declaration = &installed.record.declarations[0];
+    if declaration.logical_name != "HasCard"
+        || declaration.core_name != names.has_card
+        || declaration.kind != LibraryDeclarationKind::Definition
+        || declaration.receipt.is_none()
+    {
+        return Err(SpikeError {
+            message: format!("invalid declaration catalog for package `{package}`"),
+        });
+    }
+    if core.constants().resolve(&names.has_card) != Some(installed.finite.has_card) {
+        return Err(SpikeError {
+            message: format!("library registry/core mismatch for package `{package}`"),
+        });
+    }
+    let receipt = core
+        .definition_receipt(installed.finite.has_card)
+        .ok_or_else(|| SpikeError {
+            message: format!("library receipt missing for package `{package}`"),
+        })?;
+    if declaration.receipt != Some(receipt.id()) {
+        return Err(SpikeError {
+            message: format!("library receipt mismatch for `HasCard` in package `{package}`"),
+        });
+    }
+    let dependency_receipt = |constant: ConstantId| {
+        core.definition_receipt(constant)
+            .map(|receipt| receipt.id())
+            .ok_or_else(|| SpikeError {
+                message: format!("library dependency receipt missing for package `{package}`"),
+            })
+    };
+    let expected_dependencies = BTreeSet::from([
+        dependency_receipt(lists.lists.member)?,
+        dependency_receipt(lists.lists.nodup)?,
+        dependency_receipt(lists.length.constant)?,
+    ]);
+    if receipt.proof().direct_dependencies() != &expected_dependencies {
+        return Err(SpikeError {
+            message: format!("library dependency mismatch for package `{package}`"),
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::hol::fragments::StatementFragment;
+    use crate::hol::inductive::{InductiveConstructorSpec, InductiveSpec};
     use crate::hol::prelude::CompatibilityPrelude;
     use crate::hol::terms::{infer_type, CoreTerm, TermContext};
 
@@ -886,6 +1040,109 @@ mod tests {
     }
 
     #[test]
+    fn finite_v1_owns_has_card_but_not_client_enumeration_receipts() {
+        let (mut core, prelude) = core_with_prelude();
+        let mut registry = HolLibraryRegistry::default();
+        let installed = registry
+            .install_builtin_finite_v1(
+                &mut core,
+                prelude.nat_type(),
+                prelude.zero(),
+                prelude.successor(),
+            )
+            .expect("install registered finite v1");
+
+        assert_eq!(registry.packages().len(), 2);
+        assert!(registry.list_v1().is_some());
+        assert_eq!(registry.finite_v1(), Some(&installed));
+        assert_eq!(installed.record.id, LibraryPackageId::FiniteV1);
+        assert_eq!(installed.record.id.to_string(), "std/hol/finite@1");
+        assert_eq!(installed.record.provenance.module, BUILTIN_FINITE_V1_MODULE);
+        assert_eq!(installed.record.provenance.version, 1);
+        assert_eq!(
+            installed.record.provenance.source,
+            LibraryPackageSource::Builtin
+        );
+        assert_eq!(installed.record.core_namespace, BUILTIN_FINITE_V1_NAMESPACE);
+        assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
+        assert_eq!(installed.record.declarations.len(), 1);
+        let has_card = &installed.record.declarations[0];
+        assert_eq!(has_card.logical_name, "HasCard");
+        assert_eq!(has_card.kind, LibraryDeclarationKind::Definition);
+        assert_eq!(
+            registry.receipt_name(has_card.receipt.expect("HasCard receipt")),
+            Some("std/hol/finite@1::HasCard".to_string())
+        );
+        let dependency_names = core
+            .definition_receipt(installed.finite.has_card)
+            .expect("registered HasCard receipt")
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .map(|dependency| {
+                registry
+                    .receipt_name(*dependency)
+                    .expect("every HasCard dependency belongs to List v1")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            dependency_names,
+            BTreeSet::from([
+                "std/hol/list@1::Member".to_string(),
+                "std/hol/list@1::Nodup".to_string(),
+                "std/hol/list@1::length".to_string(),
+            ])
+        );
+
+        let traffic = core
+            .declare_inductive(InductiveSpec::new(
+                "Traffic",
+                Vec::new(),
+                vec![
+                    InductiveConstructorSpec::new("stop", Vec::new()),
+                    InductiveConstructorSpec::new("wait", Vec::new()),
+                    InductiveConstructorSpec::new("go", Vec::new()),
+                ],
+            ))
+            .expect("declare Traffic");
+        let evidence = installed
+            .finite
+            .declare_nullary_inductive(&mut core, "traffic_has_card", traffic)
+            .expect("generate client enumeration evidence");
+        assert_eq!(
+            evidence.receipt.proof().required_fragment(),
+            StatementFragment::FirstOrderInductive
+        );
+        assert_eq!(registry.receipt_name(evidence.receipt.id()), None);
+
+        let after_first_install = (core.clone(), registry.clone());
+        let repeated = registry
+            .install_builtin_finite_v1(
+                &mut core,
+                prelude.nat_type(),
+                prelude.zero(),
+                prelude.successor(),
+            )
+            .expect("repeat install is idempotent");
+        assert_eq!(repeated, installed);
+        assert_eq!((core.clone(), registry.clone()), after_first_install);
+
+        let mut detached_registry = registry.clone();
+        let (mut detached_core, detached_prelude) = core_with_prelude();
+        let before_detached = (detached_core.clone(), detached_registry.clone());
+        let detached_error = detached_registry
+            .install_builtin_finite_v1(
+                &mut detached_core,
+                detached_prelude.nat_type(),
+                detached_prelude.zero(),
+                detached_prelude.successor(),
+            )
+            .expect_err("package handles cannot be reused with another core");
+        assert!(detached_error.message.contains("registry/core mismatch"));
+        assert_eq!((detached_core, detached_registry), before_detached);
+    }
+
+    #[test]
     fn list_v1_install_rolls_back_core_and_metadata_after_a_late_collision() {
         let (mut core, prelude) = core_with_prelude();
         let names = ListLibraryNames::under_namespace(BUILTIN_LIST_V1_NAMESPACE);
@@ -929,6 +1186,27 @@ mod tests {
             )
             .expect_err("late cardinality collision must reject the dependency closure");
         assert!(error.message.contains(&names.member_map_reverse));
+        assert_eq!((core, registry), before);
+    }
+
+    #[test]
+    fn finite_v1_rolls_back_its_new_list_dependency_after_a_late_collision() {
+        let (mut core, prelude) = core_with_prelude();
+        let names = FiniteEnumerationNames::under_namespace(BUILTIN_FINITE_V1_NAMESPACE);
+        core.declare_constant(names.has_card.clone(), CoreType::Prop)
+            .expect("reserve HasCard after the staged List dependency");
+        let mut registry = HolLibraryRegistry::default();
+        let before = (core.clone(), registry.clone());
+
+        let error = registry
+            .install_builtin_finite_v1(
+                &mut core,
+                prelude.nat_type(),
+                prelude.zero(),
+                prelude.successor(),
+            )
+            .expect_err("finite collision must reject the dependency closure");
+        assert!(error.message.contains(&names.has_card));
         assert_eq!((core, registry), before);
     }
 }

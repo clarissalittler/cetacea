@@ -601,16 +601,18 @@ surface, compatibility-alias, and curriculum slices. A reusable
 `FiniteEnumerationLibrary` now defines `HasCard` and generates checked
 no-duplicate, length, and coverage evidence for any parameterless nullary
 datatype. The three-constructor test and refactored Color/Bit spike remain
-trust-free and fragment-precise. The finite-enumeration checkpoint artifacts
-are 3,510,136 bytes natively and 1,349,499 bytes in Wasm, below the 1.5 MB
-review line.
+trust-free and fragment-precise. `std/hol/finite@1` now registers `HasCard`,
+records its List dependency, validates the exact three definition receipts,
+and leaves generated datatype evidence correctly client-owned. The
+finite-registry checkpoint artifacts are 3,516,376 bytes natively and
+1,348,356 bytes in Wasm, below the 1.5 MB review line.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
   cardinality-transport package and registry record plus finite-enumeration
-  evidence generation are implemented; finite-package registration and surface
-  imports remain.
+  evidence generation and its registry record are implemented; surface imports
+  remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path
