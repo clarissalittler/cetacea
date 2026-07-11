@@ -103,6 +103,22 @@ Use `m` to open the command menu, `F2` for the theorem outline, `F3` for
 theorem search, `F4` for proof explanations, `F5` for diagnostics, `Ctrl-S` to
 save, `Ctrl-R` to reload from disk, and `Ctrl-Q` to quit.
 
+The native TUI and line shell can opt into HOL-certified editor analysis with
+`--hol-shadow`:
+
+```sh
+cargo run -p cetacea_cli -- --hol-shadow --tui examples/prop.ctea
+```
+
+In this mode each goal or explanation analysis classifies the theorem's full
+signature before stepping its proof, displays the certified `prop`, `fol`,
+`fol+induction`, or `hol` fragment, and offers bounded countermodel hints only
+when that fragment licenses the corresponding search. This is an experimental
+analysis aid, not assignment enforcement: `--hol-profile`, `--assignment`, and
+the policy flags remain check-mode options. Without `--hol-shadow`, native
+editor behavior is unchanged. The browser editor does not yet expose this
+sidecar analysis.
+
 The older line-oriented terminal shell remains available with:
 
 ```sh

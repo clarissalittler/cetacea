@@ -98,9 +98,13 @@ receipt can exist. Countermodel diagnostics are dispatched from that certified
 least fragment: propositional truth tables for `prop`, finite structures for
 `fol`, bounded Nat evaluation for `fol+induction`, and no weaker-fragment
 claim for `hol` or a classification failure. Ordinary checking and editor goal
-hints retain their legacy routing until those surfaces own persistent HOL state.
-`--json` exposes the successful pre-receipt records, including rejected
-theorem signatures, as `hol_shadow.statement_classifications`.
+hints retain their legacy routing by default. Native TUI and line modes can opt
+in with `--hol-shadow`; each goal, tactic-step, or explanation analysis then
+classifies the full theorem signature, displays the certified fragment, and
+gates countermodel hints with it. The browser and virtual-import editor APIs
+remain legacy-only. `--json` exposes the successful file-check pre-receipt
+records, including rejected theorem signatures, as
+`hol_shadow.statement_classifications`.
 
 ## Implementation and artifacts
 

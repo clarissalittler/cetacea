@@ -333,3 +333,12 @@ negative signatures are rejected earlier by legacy statement validation.
 The corresponding release artifacts are 3,495,424 bytes for the native CLI and
 1,351,920 bytes for Wasm. The feature-disabled browser path retains only the
 refactored legacy fallback dispatch, a 68-byte increase.
+
+The native editor path now has an explicit opt-in sidecar seam. Each TUI or
+line-mode goal/explanation analysis created with `--hol-shadow` replays its
+command/import prefix through one compatibility checker, classifies the full
+theorem signature before tactic stepping, carries that fragment through every
+goal snapshot, and suppresses countermodel engines outside the certified
+fragment. The legacy editor APIs are unchanged, and the feature-disabled Wasm
+surface does not expose the new entry points. At this checkpoint the release
+artifacts are 3,500,184 bytes for the native CLI and 1,351,199 bytes for Wasm.

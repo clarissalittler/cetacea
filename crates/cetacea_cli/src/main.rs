@@ -13,11 +13,13 @@ use cetacea_core::hol::{
 };
 use cetacea_core::{
     check_file_at_path, check_file_at_path_with_hol_shadow, check_source_at_path,
-    explain_theorem_at_path, explain_theorem_in_source_at_path, goals_at_path,
-    goals_at_source_path, outline, run_tactic_at_path, CheckResult, CheckedTheorem,
-    DeclarationStatus, Diagnostic, DiagnosticSeverity, ExplanationResult, GoalSnapshot,
-    GoalStepResult, HolShadowMismatch, HolShadowReport, HolShadowStatementClassification,
-    HolShadowTheorem, Position, SourceOutline,
+    explain_theorem_at_path, explain_theorem_at_path_with_hol_shadow,
+    explain_theorem_in_source_at_path, explain_theorem_in_source_at_path_with_hol_shadow,
+    goals_at_path, goals_at_path_with_hol_shadow, goals_at_source_path,
+    goals_at_source_path_with_hol_shadow, outline, run_tactic_at_path,
+    run_tactic_at_path_with_hol_shadow, CheckResult, CheckedTheorem, DeclarationStatus, Diagnostic,
+    DiagnosticSeverity, ExplanationResult, GoalSnapshot, GoalStepResult, HolShadowMismatch,
+    HolShadowReport, HolShadowStatementClassification, HolShadowTheorem, Position, SourceOutline,
 };
 
 use assignment::{parse_manifest, AssignmentManifest};
@@ -66,13 +68,13 @@ fn main() {
             config.assignment_path.as_deref(),
         )),
         RunMode::LineInteractive => {
-            if let Err(err) = run_interactive(config.path) {
+            if let Err(err) = run_interactive(config.path, config.hol_shadow) {
                 eprintln!("error: {err}");
                 process::exit(1);
             }
         }
         RunMode::Tui => {
-            if let Err(err) = run_tui(config.path) {
+            if let Err(err) = run_tui(config.path, config.hol_shadow) {
                 eprintln!("error: {err}");
                 process::exit(1);
             }
@@ -269,7 +271,6 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
     if mode != RunMode::Check
         && (!policy.is_empty()
             || output_format != OutputFormat::Text
-            || hol_shadow
             || hol_policy.is_some()
             || assignment_path.is_some())
     {
@@ -699,8 +700,8 @@ fn print_policy_violations(violations: &[PolicyViolation]) {
     }
 }
 
-fn run_tui(path: PathBuf) -> io::Result<()> {
-    let mut app = TuiApp::open(path)?;
+fn run_tui(path: PathBuf, hol_shadow: bool) -> io::Result<()> {
+    let mut app = TuiApp::open(path, hol_shadow)?;
     let _guard = TerminalGuard::enter()?;
     app.refresh_analysis();
     let mut stdout = io::stdout();
@@ -1011,6 +1012,7 @@ fn char_to_byte_index(text: &str, char_idx: usize) -> usize {
 
 struct TuiApp {
     path: PathBuf,
+    hol_shadow: bool,
     buffer: TextBuffer,
     cursor_line: usize,
     cursor_col: usize,
@@ -1037,7 +1039,7 @@ struct TuiApp {
 }
 
 impl TuiApp {
-    fn open(path: PathBuf) -> io::Result<Self> {
+    fn open(path: PathBuf, hol_shadow: bool) -> io::Result<Self> {
         let source = fs::read_to_string(&path)?;
         let initial_outline = outline(&source);
         let cursor_line = initial_outline
@@ -1049,6 +1051,7 @@ impl TuiApp {
         let saved_lines = Some(buffer.lines.clone());
         Ok(Self {
             path,
+            hol_shadow,
             buffer,
             cursor_line,
             cursor_col: 0,
@@ -1070,7 +1073,11 @@ impl TuiApp {
             check_result: CheckResult::default(),
             goals: GoalStepResult::default(),
             explanation: ExplanationResult::default(),
-            status: "Loaded file. Ctrl-S saves, Ctrl-Q quits, m opens menu.".to_string(),
+            status: if hol_shadow {
+                "Loaded with HOL-certified goal hints. Ctrl-S saves, Ctrl-Q quits.".to_string()
+            } else {
+                "Loaded file. Ctrl-S saves, Ctrl-Q quits, m opens menu.".to_string()
+            },
             should_quit: false,
         })
     }
@@ -1079,18 +1086,27 @@ impl TuiApp {
         self.buffer.to_source()
     }
 
+    fn explain_in_source(&self, source: &str, theorem: &str) -> ExplanationResult {
+        if self.hol_shadow {
+            explain_theorem_in_source_at_path_with_hol_shadow(source, &self.path, theorem)
+        } else {
+            explain_theorem_in_source_at_path(source, &self.path, theorem)
+        }
+    }
+
     fn refresh_analysis(&mut self) {
         let source = self.source();
         self.outline = outline(&source);
         self.check_result = check_source_at_path(&source, &self.path);
-        self.goals = goals_at_source_path(
-            &source,
-            &self.path,
-            Position {
-                line: self.cursor_line + 1,
-                column: self.cursor_col + 1,
-            },
-        );
+        let position = Position {
+            line: self.cursor_line + 1,
+            column: self.cursor_col + 1,
+        };
+        self.goals = if self.hol_shadow {
+            goals_at_source_path_with_hol_shadow(&source, &self.path, position)
+        } else {
+            goals_at_source_path(&source, &self.path, position)
+        };
         if let Some(theorem) = &self.goals.theorem {
             self.selected_theorem = Some(theorem.clone());
             if let Some(index) = self
@@ -1105,7 +1121,7 @@ impl TuiApp {
             self.selected_theorem = self.outline.theorems.first().map(|item| item.name.clone());
         }
         if let Some(theorem) = &self.selected_theorem {
-            self.explanation = explain_theorem_in_source_at_path(&source, &self.path, theorem);
+            self.explanation = self.explain_in_source(&source, theorem);
         } else {
             self.explanation = ExplanationResult::default();
         }
@@ -1316,8 +1332,7 @@ impl TuiApp {
                     .map(|theorem| theorem.name.clone())
                 {
                     self.selected_theorem = Some(name.clone());
-                    self.explanation =
-                        explain_theorem_in_source_at_path(&self.source(), &self.path, &name);
+                    self.explanation = self.explain_in_source(&self.source(), &name);
                     self.panel = TuiPanel::Explain;
                     self.focus = TuiFocus::Panel;
                 }
@@ -1472,8 +1487,7 @@ impl TuiApp {
                     .map(|theorem| theorem.name.clone())
                 {
                     self.selected_theorem = Some(name.clone());
-                    self.explanation =
-                        explain_theorem_in_source_at_path(&self.source(), &self.path, &name);
+                    self.explanation = self.explain_in_source(&self.source(), &name);
                     self.panel = TuiPanel::Explain;
                 }
             }
@@ -1585,7 +1599,8 @@ impl TuiApp {
             TuiFocus::Search => "search",
         };
         let title = format!(
-            " Cetacea TUI{dirty}  {}  [{}]  F1 Help F2 Theorems F3 Search F4 Explain F5 Diagnostics ",
+            " Cetacea TUI{dirty}{}  {}  [{}]  F1 Help F2 Theorems F3 Search F4 Explain F5 Diagnostics ",
+            if self.hol_shadow { " [HOL]" } else { "" },
             self.path.display(),
             focus
         );
@@ -1658,6 +1673,9 @@ impl TuiApp {
                 }
             )),
             None => lines.push("No theorem at cursor.".to_string()),
+        }
+        if let Some(fragment) = self.goals.statement_fragment {
+            lines.push(format!("Certified fragment: {fragment}"));
         }
         if self.goals.goals.is_empty() {
             lines.push(if self.goals.completed {
@@ -1767,6 +1785,9 @@ impl TuiApp {
         }
         if let Some(statement) = &self.explanation.statement {
             push_wrapped(lines, &format!("Statement: {statement}"), width);
+        }
+        if let Some(fragment) = self.explanation.statement_fragment {
+            lines.push(format!("Certified fragment: {fragment}"));
         }
         for step in self.explanation.steps.iter().take(30) {
             lines.push("".to_string());
@@ -2037,6 +2058,7 @@ fn push_wrapped(lines: &mut Vec<String>, text: &str, width: usize) {
 
 struct InteractiveState {
     path: PathBuf,
+    hol_shadow: bool,
     outline: SourceOutline,
     last_check: CheckResult,
     selected_theorem: Option<String>,
@@ -2045,9 +2067,10 @@ struct InteractiveState {
 }
 
 impl InteractiveState {
-    fn new(path: PathBuf) -> Self {
+    fn new(path: PathBuf, hol_shadow: bool) -> Self {
         Self {
             path,
+            hol_shadow,
             outline: SourceOutline::default(),
             last_check: CheckResult::default(),
             selected_theorem: None,
@@ -2083,12 +2106,15 @@ impl InteractiveState {
     }
 }
 
-fn run_interactive(path: PathBuf) -> io::Result<()> {
-    let mut state = InteractiveState::new(path);
+fn run_interactive(path: PathBuf, hol_shadow: bool) -> io::Result<()> {
+    let mut state = InteractiveState::new(path, hol_shadow);
     state.reload();
 
     println!("Cetacea interactive mode");
     println!("File: {}", state.path.display());
+    if state.hol_shadow {
+        println!("HOL-certified goal hints: enabled");
+    }
     println!("Type `help` for commands.");
     if !diagnostics_have_errors(&state.last_check.diagnostics) {
         print_accepted_summary(&state.last_check);
@@ -2316,13 +2342,15 @@ fn reset_selected_theorem(state: &mut InteractiveState) {
         return;
     };
     let theorem = &state.outline.theorems[index];
-    let result = goals_at_path(
-        &state.path,
-        Position {
-            line: theorem.line,
-            column: 1,
-        },
-    );
+    let position = Position {
+        line: theorem.line,
+        column: 1,
+    };
+    let result = if state.hol_shadow {
+        goals_at_path_with_hol_shadow(&state.path, position)
+    } else {
+        goals_at_path(&state.path, position)
+    };
     state.next_tactic_index = result.next_tactic_index;
     state.current_goals = Some(result.clone());
     print_goal_result(&result);
@@ -2347,7 +2375,11 @@ fn step_selected_theorem(state: &mut InteractiveState, rest: &str) {
 
     let mut result = None;
     for _ in 0..count {
-        let step = run_tactic_at_path(&state.path, &theorem, state.next_tactic_index);
+        let step = if state.hol_shadow {
+            run_tactic_at_path_with_hol_shadow(&state.path, &theorem, state.next_tactic_index)
+        } else {
+            run_tactic_at_path(&state.path, &theorem, state.next_tactic_index)
+        };
         state.next_tactic_index = step.next_tactic_index;
         let should_stop = step.completed || diagnostics_have_errors(&step.diagnostics);
         result = Some(step);
@@ -2372,7 +2404,12 @@ fn show_goals_at_position(state: &mut InteractiveState, rest: &str) {
         .next()
         .and_then(|part| part.parse::<usize>().ok())
         .unwrap_or(1);
-    let result = goals_at_path(&state.path, Position { line, column });
+    let position = Position { line, column };
+    let result = if state.hol_shadow {
+        goals_at_path_with_hol_shadow(&state.path, position)
+    } else {
+        goals_at_path(&state.path, position)
+    };
     state.next_tactic_index = result.next_tactic_index;
     if let Some(theorem) = &result.theorem {
         state.selected_theorem = Some(theorem.clone());
@@ -2394,6 +2431,9 @@ fn print_goal_result(result: &GoalStepResult) {
             if result.completed { " (complete)" } else { "" }
         ),
         None => println!("No theorem selected by this proof state."),
+    }
+    if let Some(fragment) = result.statement_fragment {
+        println!("Certified statement fragment: {fragment}");
     }
     if result.goals.is_empty() {
         println!(
@@ -2507,7 +2547,11 @@ fn explain_selected_or_named_theorem(state: &InteractiveState, name: &str) {
     } else {
         name
     };
-    let result = explain_theorem_at_path(&state.path, theorem);
+    let result = if state.hol_shadow {
+        explain_theorem_at_path_with_hol_shadow(&state.path, theorem)
+    } else {
+        explain_theorem_at_path(&state.path, theorem)
+    };
     print_explanation(&result);
 }
 
@@ -2527,6 +2571,9 @@ fn print_explanation(result: &ExplanationResult) {
     );
     if let Some(statement) = &result.statement {
         println!("Statement: {statement}");
+    }
+    if let Some(fragment) = result.statement_fragment {
+        println!("Certified statement fragment: {fragment}");
     }
     for step in &result.steps {
         println!();
@@ -3055,7 +3102,25 @@ mod tests {
     fn parse_args_rejects_check_policy_in_interactive_modes() {
         assert!(parse_args(&args(&["--tui", "--strict", "submission.ctea"])).is_none());
         assert!(parse_args(&args(&["--line", "--json", "submission.ctea"])).is_none());
-        assert!(parse_args(&args(&["--tui", "--hol-shadow", "submission.ctea"])).is_none());
+        assert!(parse_args(&args(
+            &["--tui", "--hol-profile", "fol", "submission.ctea",]
+        ))
+        .is_none());
+        assert!(parse_args(&args(&[
+            "--line",
+            "--hol-shadow",
+            "--json",
+            "submission.ctea",
+        ]))
+        .is_none());
+        let tui = parse_args(&args(&["--tui", "--hol-shadow", "submission.ctea"]))
+            .expect("TUI should accept opt-in HOL-certified editor analysis");
+        assert_eq!(tui.mode, RunMode::Tui);
+        assert!(tui.hol_shadow);
+        let line = parse_args(&args(&["--hol-shadow", "--line", "submission.ctea"]))
+            .expect("line mode should accept opt-in HOL-certified editor analysis");
+        assert_eq!(line.mode, RunMode::LineInteractive);
+        assert!(line.hol_shadow);
     }
 
     #[test]

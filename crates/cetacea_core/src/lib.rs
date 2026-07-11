@@ -1587,6 +1587,9 @@ pub struct GoalHint {
 pub struct GoalStepResult {
     pub theorem: Option<Name>,
     pub mode: Option<LogicMode>,
+    /// Present only when the opt-in HOL editor path classified the full
+    /// theorem signature before stepping its proof.
+    pub statement_fragment: Option<hol::StatementFragment>,
     pub next_tactic_index: usize,
     pub tactic_count: usize,
     pub completed: bool,
@@ -1599,6 +1602,9 @@ pub struct ExplanationResult {
     pub theorem: Option<Name>,
     pub statement: Option<String>,
     pub mode: Option<LogicMode>,
+    /// Present only when the opt-in HOL editor path classified the full
+    /// theorem signature before explaining its proof.
+    pub statement_fragment: Option<hol::StatementFragment>,
     pub completed: bool,
     pub steps: Vec<ExplanationStep>,
     pub diagnostics: Vec<Diagnostic>,
@@ -1816,12 +1822,76 @@ pub fn outline(source: &str) -> SourceOutline {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditorAnalysisMode {
+    Legacy,
+    #[cfg(feature = "hol-shadow")]
+    HolShadow,
+}
+
+fn editor_countermodel_eligibility(
+    checker: &mut FileChecker,
+    analysis_mode: EditorAnalysisMode,
+    name: &str,
+    parameters: &[Param],
+    statement: &Formula,
+    line: usize,
+    source_path: Option<&Path>,
+) -> Result<CountermodelEligibility, Diagnostic> {
+    #[cfg(not(feature = "hol-shadow"))]
+    let _ = (&*checker, name, parameters, statement, line, source_path);
+
+    match analysis_mode {
+        EditorAnalysisMode::Legacy => Ok(CountermodelEligibility::Heuristic),
+        #[cfg(feature = "hol-shadow")]
+        EditorAnalysisMode::HolShadow => {
+            let eligibility = checker.countermodel_eligibility(
+                name,
+                parameters,
+                statement,
+                line,
+                source_path,
+                false,
+            );
+            if eligibility == CountermodelEligibility::Disabled {
+                let detail = checker
+                    .hol_shadow
+                    .as_ref()
+                    .and_then(|shadow| shadow.mismatches.last())
+                    .map(|mismatch| mismatch.message.clone())
+                    .unwrap_or_else(|| "statement classification failed".to_string());
+                Err(diagnostic_at(
+                    source_path,
+                    line,
+                    format!("HOL shadow could not certify goal hints for theorem '{name}'"),
+                )
+                .with_note(detail))
+            } else {
+                Ok(eligibility)
+            }
+        }
+    }
+}
+
 pub fn goals_at(source: &str, position: Position) -> GoalStepResult {
     goals_at_with_imports(source, position, &[])
 }
 
 pub fn goals_at_path(path: impl AsRef<Path>, position: Position) -> GoalStepResult {
-    let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path.as_ref()) {
+    goals_at_path_in_mode(path.as_ref(), position, EditorAnalysisMode::Legacy)
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn goals_at_path_with_hol_shadow(path: impl AsRef<Path>, position: Position) -> GoalStepResult {
+    goals_at_path_in_mode(path.as_ref(), position, EditorAnalysisMode::HolShadow)
+}
+
+fn goals_at_path_in_mode(
+    path: &Path,
+    position: Position,
+    analysis_mode: EditorAnalysisMode,
+) -> GoalStepResult {
+    let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
             return GoalStepResult {
@@ -1858,6 +1928,7 @@ pub fn goals_at_path(path: impl AsRef<Path>, position: Position) -> GoalStepResu
         &[],
         base_dir.as_deref(),
         Some(canonical_path.as_path()),
+        analysis_mode,
     )
 }
 
@@ -1866,7 +1937,30 @@ pub fn goals_at_source_path(
     path: impl AsRef<Path>,
     position: Position,
 ) -> GoalStepResult {
-    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path.as_ref()) {
+    goals_at_source_path_in_mode(source, path.as_ref(), position, EditorAnalysisMode::Legacy)
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn goals_at_source_path_with_hol_shadow(
+    source: &str,
+    path: impl AsRef<Path>,
+    position: Position,
+) -> GoalStepResult {
+    goals_at_source_path_in_mode(
+        source,
+        path.as_ref(),
+        position,
+        EditorAnalysisMode::HolShadow,
+    )
+}
+
+fn goals_at_source_path_in_mode(
+    source: &str,
+    path: &Path,
+    position: Position,
+    analysis_mode: EditorAnalysisMode,
+) -> GoalStepResult {
+    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
             return GoalStepResult {
@@ -1903,6 +1997,7 @@ pub fn goals_at_source_path(
         &[],
         base_dir.as_deref(),
         Some(source_path.as_path()),
+        analysis_mode,
     )
 }
 
@@ -1941,7 +2036,15 @@ pub fn goals_at_with_imports(
         .iter()
         .take_while(|tactic| tactic_is_before_position(&source_lines, tactic, position))
         .count();
-    goals_for_theorem_prefix(file, theorem_index, tactic_count, imports, None, None)
+    goals_for_theorem_prefix(
+        file,
+        theorem_index,
+        tactic_count,
+        imports,
+        None,
+        None,
+        EditorAnalysisMode::Legacy,
+    )
 }
 
 pub fn run_tactic(source: &str, theorem_name: &str, tactic_index: usize) -> GoalStepResult {
@@ -1953,7 +2056,35 @@ pub fn run_tactic_at_path(
     theorem_name: &str,
     tactic_index: usize,
 ) -> GoalStepResult {
-    let (file, _source, canonical_path, base_dir) = match parse_editor_file_at_path(path.as_ref()) {
+    run_tactic_at_path_in_mode(
+        path.as_ref(),
+        theorem_name,
+        tactic_index,
+        EditorAnalysisMode::Legacy,
+    )
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn run_tactic_at_path_with_hol_shadow(
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+    tactic_index: usize,
+) -> GoalStepResult {
+    run_tactic_at_path_in_mode(
+        path.as_ref(),
+        theorem_name,
+        tactic_index,
+        EditorAnalysisMode::HolShadow,
+    )
+}
+
+fn run_tactic_at_path_in_mode(
+    path: &Path,
+    theorem_name: &str,
+    tactic_index: usize,
+    analysis_mode: EditorAnalysisMode,
+) -> GoalStepResult {
+    let (file, _source, canonical_path, base_dir) = match parse_editor_file_at_path(path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
             return GoalStepResult {
@@ -1998,6 +2129,7 @@ pub fn run_tactic_at_path(
         &[],
         base_dir.as_deref(),
         Some(canonical_path.as_path()),
+        analysis_mode,
     )
 }
 
@@ -2007,7 +2139,39 @@ pub fn run_tactic_in_source_at_path(
     theorem_name: &str,
     tactic_index: usize,
 ) -> GoalStepResult {
-    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path.as_ref()) {
+    run_tactic_in_source_at_path_in_mode(
+        source,
+        path.as_ref(),
+        theorem_name,
+        tactic_index,
+        EditorAnalysisMode::Legacy,
+    )
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn run_tactic_in_source_at_path_with_hol_shadow(
+    source: &str,
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+    tactic_index: usize,
+) -> GoalStepResult {
+    run_tactic_in_source_at_path_in_mode(
+        source,
+        path.as_ref(),
+        theorem_name,
+        tactic_index,
+        EditorAnalysisMode::HolShadow,
+    )
+}
+
+fn run_tactic_in_source_at_path_in_mode(
+    source: &str,
+    path: &Path,
+    theorem_name: &str,
+    tactic_index: usize,
+    analysis_mode: EditorAnalysisMode,
+) -> GoalStepResult {
+    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
             return GoalStepResult {
@@ -2052,6 +2216,7 @@ pub fn run_tactic_in_source_at_path(
         &[],
         base_dir.as_deref(),
         Some(source_path.as_path()),
+        analysis_mode,
     )
 }
 
@@ -2099,7 +2264,15 @@ pub fn run_tactic_with_imports(
         };
     }
 
-    goals_for_theorem_prefix(file, theorem_index, tactic_index + 1, imports, None, None)
+    goals_for_theorem_prefix(
+        file,
+        theorem_index,
+        tactic_index + 1,
+        imports,
+        None,
+        None,
+        EditorAnalysisMode::Legacy,
+    )
 }
 
 pub fn explain_theorem(source: &str, theorem_name: &str) -> ExplanationResult {
@@ -2107,7 +2280,23 @@ pub fn explain_theorem(source: &str, theorem_name: &str) -> ExplanationResult {
 }
 
 pub fn explain_theorem_at_path(path: impl AsRef<Path>, theorem_name: &str) -> ExplanationResult {
-    let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path.as_ref()) {
+    explain_theorem_at_path_in_mode(path.as_ref(), theorem_name, EditorAnalysisMode::Legacy)
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn explain_theorem_at_path_with_hol_shadow(
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+) -> ExplanationResult {
+    explain_theorem_at_path_in_mode(path.as_ref(), theorem_name, EditorAnalysisMode::HolShadow)
+}
+
+fn explain_theorem_at_path_in_mode(
+    path: &Path,
+    theorem_name: &str,
+    analysis_mode: EditorAnalysisMode,
+) -> ExplanationResult {
+    let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
             return ExplanationResult {
@@ -2135,6 +2324,7 @@ pub fn explain_theorem_at_path(path: impl AsRef<Path>, theorem_name: &str) -> Ex
         &[],
         base_dir.as_deref(),
         Some(canonical_path.as_path()),
+        analysis_mode,
     )
 }
 
@@ -2143,7 +2333,35 @@ pub fn explain_theorem_in_source_at_path(
     path: impl AsRef<Path>,
     theorem_name: &str,
 ) -> ExplanationResult {
-    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path.as_ref()) {
+    explain_theorem_in_source_at_path_in_mode(
+        source,
+        path.as_ref(),
+        theorem_name,
+        EditorAnalysisMode::Legacy,
+    )
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn explain_theorem_in_source_at_path_with_hol_shadow(
+    source: &str,
+    path: impl AsRef<Path>,
+    theorem_name: &str,
+) -> ExplanationResult {
+    explain_theorem_in_source_at_path_in_mode(
+        source,
+        path.as_ref(),
+        theorem_name,
+        EditorAnalysisMode::HolShadow,
+    )
+}
+
+fn explain_theorem_in_source_at_path_in_mode(
+    source: &str,
+    path: &Path,
+    theorem_name: &str,
+    analysis_mode: EditorAnalysisMode,
+) -> ExplanationResult {
+    let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
             return ExplanationResult {
@@ -2171,6 +2389,7 @@ pub fn explain_theorem_in_source_at_path(
         &[],
         base_dir.as_deref(),
         Some(source_path.as_path()),
+        analysis_mode,
     )
 }
 
@@ -2200,7 +2419,15 @@ pub fn explain_theorem_with_imports(
         };
     };
 
-    explain_theorem_at_index(file, theorem_index, &source_lines, imports, None, None)
+    explain_theorem_at_index(
+        file,
+        theorem_index,
+        &source_lines,
+        imports,
+        None,
+        None,
+        EditorAnalysisMode::Legacy,
+    )
 }
 
 fn parse_editor_file_at_path(
@@ -4083,6 +4310,7 @@ fn goals_for_theorem_prefix(
     imports: &[VirtualFile],
     base_dir: Option<&Path>,
     source_path: Option<&Path>,
+    analysis_mode: EditorAnalysisMode,
 ) -> GoalStepResult {
     let located = file.commands[theorem_index].clone();
     let Command::Theorem(decl) = located.command else {
@@ -4091,7 +4319,29 @@ fn goals_for_theorem_prefix(
     let mode = mode_before_command(&file.commands, theorem_index);
     let tactic_count = tactic_count.min(decl.tactics.len());
 
-    let mut checker = FileChecker::with_virtual_files(imports);
+    let mut checker = match analysis_mode {
+        EditorAnalysisMode::Legacy => FileChecker::with_virtual_files(imports),
+        #[cfg(feature = "hol-shadow")]
+        EditorAnalysisMode::HolShadow => {
+            match FileChecker::with_virtual_files_and_hol_shadow(imports) {
+                Ok(checker) => checker,
+                Err(error) => {
+                    return GoalStepResult {
+                        theorem: Some(decl.name),
+                        mode: Some(mode),
+                        tactic_count: decl.tactics.len(),
+                        diagnostics: vec![diagnostic_at(
+                            source_path,
+                            located.line,
+                            "could not initialize HOL-certified editor analysis",
+                        )
+                        .with_note(error.to_string())],
+                        ..GoalStepResult::default()
+                    };
+                }
+            }
+        }
+    };
     checker.check_commands(
         file.commands[..theorem_index].to_vec(),
         base_dir,
@@ -4110,7 +4360,7 @@ fn goals_for_theorem_prefix(
         };
     }
 
-    let (_params, theorem_ctx) =
+    let (params, theorem_ctx) =
         match canonicalize_params(&checker.env, declaration_context(&decl.name), &decl.params) {
             Ok(canonical) => canonical,
             Err(err) => {
@@ -4161,6 +4411,27 @@ fn goals_for_theorem_prefix(
             ..GoalStepResult::default()
         };
     }
+    let countermodel_eligibility = match editor_countermodel_eligibility(
+        &mut checker,
+        analysis_mode,
+        &decl.name,
+        &params,
+        &statement,
+        located.line,
+        source_path,
+    ) {
+        Ok(eligibility) => eligibility,
+        Err(diagnostic) => {
+            return GoalStepResult {
+                theorem: Some(decl.name),
+                mode: Some(mode),
+                tactic_count: decl.tactics.len(),
+                diagnostics: vec![diagnostic],
+                ..GoalStepResult::default()
+            };
+        }
+    };
+    let statement_fragment = countermodel_eligibility.certified_fragment();
 
     let proof_ctx = theorem_ctx
         .clone()
@@ -4172,13 +4443,21 @@ fn goals_for_theorem_prefix(
             return GoalStepResult {
                 theorem: Some(decl.name.clone()),
                 mode: Some(mode),
+                statement_fragment,
                 next_tactic_index: tactic_count,
                 tactic_count: decl.tactics.len(),
                 completed: session.goals.is_empty(),
                 goals: session
                     .goals
                     .iter()
-                    .map(|goal| snapshot_goal(&checker.env, goal, mode))
+                    .map(|goal| {
+                        snapshot_goal_with_eligibility(
+                            &checker.env,
+                            goal,
+                            mode,
+                            countermodel_eligibility,
+                        )
+                    })
                     .collect(),
                 diagnostics: vec![diagnostic_at(
                     source_path,
@@ -4236,13 +4515,16 @@ fn goals_for_theorem_prefix(
     GoalStepResult {
         theorem: Some(decl.name),
         mode: Some(mode),
+        statement_fragment,
         next_tactic_index: tactic_count,
         tactic_count: decl.tactics.len(),
         completed: session.goals.is_empty() && !diagnostics_have_errors(&diagnostics),
         goals: session
             .goals
             .iter()
-            .map(|goal| snapshot_goal(&checker.env, goal, mode))
+            .map(|goal| {
+                snapshot_goal_with_eligibility(&checker.env, goal, mode, countermodel_eligibility)
+            })
             .collect(),
         diagnostics,
     }
@@ -4255,6 +4537,7 @@ fn explain_theorem_at_index(
     imports: &[VirtualFile],
     base_dir: Option<&Path>,
     source_path: Option<&Path>,
+    analysis_mode: EditorAnalysisMode,
 ) -> ExplanationResult {
     let located = file.commands[theorem_index].clone();
     let Command::Theorem(decl) = located.command else {
@@ -4262,7 +4545,29 @@ fn explain_theorem_at_index(
     };
     let mode = mode_before_command(&file.commands, theorem_index);
 
-    let mut checker = FileChecker::with_virtual_files(imports);
+    let mut checker = match analysis_mode {
+        EditorAnalysisMode::Legacy => FileChecker::with_virtual_files(imports),
+        #[cfg(feature = "hol-shadow")]
+        EditorAnalysisMode::HolShadow => {
+            match FileChecker::with_virtual_files_and_hol_shadow(imports) {
+                Ok(checker) => checker,
+                Err(error) => {
+                    return ExplanationResult {
+                        theorem: Some(decl.name),
+                        statement: Some(decl.statement.to_string()),
+                        mode: Some(mode),
+                        diagnostics: vec![diagnostic_at(
+                            source_path,
+                            located.line,
+                            "could not initialize HOL-certified editor analysis",
+                        )
+                        .with_note(error.to_string())],
+                        ..ExplanationResult::default()
+                    };
+                }
+            }
+        }
+    };
     checker.check_commands(
         file.commands[..theorem_index].to_vec(),
         base_dir,
@@ -4281,7 +4586,7 @@ fn explain_theorem_at_index(
         };
     }
 
-    let (_params, theorem_ctx) =
+    let (params, theorem_ctx) =
         match canonicalize_params(&checker.env, declaration_context(&decl.name), &decl.params) {
             Ok(canonical) => canonical,
             Err(err) => {
@@ -4332,6 +4637,27 @@ fn explain_theorem_at_index(
             ..ExplanationResult::default()
         };
     }
+    let countermodel_eligibility = match editor_countermodel_eligibility(
+        &mut checker,
+        analysis_mode,
+        &decl.name,
+        &params,
+        &statement,
+        located.line,
+        source_path,
+    ) {
+        Ok(eligibility) => eligibility,
+        Err(diagnostic) => {
+            return ExplanationResult {
+                theorem: Some(decl.name),
+                statement: Some(statement.to_string()),
+                mode: Some(mode),
+                diagnostics: vec![diagnostic],
+                ..ExplanationResult::default()
+            };
+        }
+    };
+    let statement_fragment = countermodel_eligibility.certified_fragment();
 
     let proof_ctx = theorem_ctx
         .clone()
@@ -4356,7 +4682,12 @@ fn explain_theorem_at_index(
                 ..ExplanationResult::default()
             };
         };
-        let before_snapshot = snapshot_goal(&checker.env, &before_goal, mode);
+        let before_snapshot = snapshot_goal_with_eligibility(
+            &checker.env,
+            &before_goal,
+            mode,
+            countermodel_eligibility,
+        );
         let explanation = explain_tactic_step(&tactic.tactic, &before_goal);
         if let Err(err) = session.step(&checker.env, tactic, mode) {
             let target = err.target.as_deref().unwrap_or(&statement);
@@ -4364,6 +4695,7 @@ fn explain_theorem_at_index(
                 theorem: Some(decl.name.clone()),
                 statement: Some(statement.to_string()),
                 mode: Some(mode),
+                statement_fragment,
                 steps,
                 diagnostics: vec![diagnostic_at(
                     source_path,
@@ -4386,7 +4718,14 @@ fn explain_theorem_at_index(
             after: session
                 .goals
                 .iter()
-                .map(|goal| snapshot_goal(&checker.env, goal, mode))
+                .map(|goal| {
+                    snapshot_goal_with_eligibility(
+                        &checker.env,
+                        goal,
+                        mode,
+                        countermodel_eligibility,
+                    )
+                })
                 .collect(),
             explanation,
         });
@@ -4446,13 +4785,19 @@ fn explain_theorem_at_index(
         theorem: Some(decl.name),
         statement: Some(statement.to_string()),
         mode: Some(mode),
+        statement_fragment,
         completed: completed && !diagnostics_have_errors(&diagnostics),
         steps,
         diagnostics,
     }
 }
 
-fn snapshot_goal(env: &Env, goal: &Goal, mode: LogicMode) -> GoalSnapshot {
+fn snapshot_goal_with_eligibility(
+    env: &Env,
+    goal: &Goal,
+    mode: LogicMode,
+    countermodel_eligibility: CountermodelEligibility,
+) -> GoalSnapshot {
     let mut context = Vec::new();
     for name in &goal.context.type_vars {
         context.push(format!("{name} : Type"));
@@ -4476,11 +4821,16 @@ fn snapshot_goal(env: &Env, goal: &Goal, mode: LogicMode) -> GoalSnapshot {
         id: goal.id,
         context,
         target: goal.target.to_string(),
-        hints: goal_hints(env, goal, mode),
+        hints: goal_hints_with_eligibility(env, goal, mode, countermodel_eligibility),
     }
 }
 
-fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
+fn goal_hints_with_eligibility(
+    env: &Env,
+    goal: &Goal,
+    mode: LogicMode,
+    countermodel_eligibility: CountermodelEligibility,
+) -> Vec<GoalHint> {
     let mut hints = Vec::new();
 
     let hyp_formulas: Vec<Formula> = goal
@@ -4489,7 +4839,11 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
         .iter()
         .map(|binding| binding.formula.clone())
         .collect();
-    if let Some(model) = propositional_countermodel(&hyp_formulas, &goal.target) {
+    if let Some(model) = countermodel_eligibility
+        .allows_propositional()
+        .then(|| propositional_countermodel(&hyp_formulas, &goal.target))
+        .flatten()
+    {
         push_goal_hint(
             &mut hints,
             "Warning: this goal is not provable",
@@ -4499,8 +4853,10 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
                 countermodel_note(&model)
             ),
         );
-    } else if let Some(model) =
-        arithmetic_countermodel(&hyp_formulas, &goal.target, &goal.context.term_vars)
+    } else if let Some(model) = countermodel_eligibility
+        .allows_arithmetic()
+        .then(|| arithmetic_countermodel(&hyp_formulas, &goal.target, &goal.context.term_vars))
+        .flatten()
     {
         push_goal_hint(
             &mut hints,
@@ -4511,8 +4867,10 @@ fn goal_hints(env: &Env, goal: &Goal, mode: LogicMode) -> Vec<GoalHint> {
                 arithmetic_countermodel_note(&model)
             ),
         );
-    } else if let Some(model) =
-        first_order_countermodel(env, &goal.context, &hyp_formulas, &goal.target)
+    } else if let Some(model) = countermodel_eligibility
+        .allows_first_order()
+        .then(|| first_order_countermodel(env, &goal.context, &hyp_formulas, &goal.target))
+        .flatten()
     {
         push_goal_hint(
             &mut hints,
@@ -5895,6 +6253,16 @@ enum CountermodelEligibility {
 }
 
 impl CountermodelEligibility {
+    fn certified_fragment(self) -> Option<hol::StatementFragment> {
+        #[cfg(feature = "hol-shadow")]
+        {
+            if let Self::Certified(fragment) = self {
+                return Some(fragment);
+            }
+        }
+        None
+    }
+
     fn allows_propositional(self) -> bool {
         #[cfg(feature = "hol-shadow")]
         {
@@ -16600,6 +16968,92 @@ theorem use_id (P : Prop) : P -> P := by
             .theorems
             .iter()
             .any(|theorem| theorem.name == "use_id" && !theorem.is_imported));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn hol_shadow_editor_apis_certify_fragments_and_goal_hints() {
+        let prop_source = r#"
+mode constructive
+theorem bad_prop (P Q : Prop) : P -> Q := by
+  intro hp
+"#;
+        let path = Path::new("scratch/editor.ctea");
+        let legacy = goals_at_source_path(prop_source, path, Position { line: 3, column: 1 });
+        assert_eq!(legacy.statement_fragment, None);
+
+        let initial = goals_at_source_path_with_hol_shadow(
+            prop_source,
+            path,
+            Position { line: 3, column: 1 },
+        );
+        assert_eq!(
+            initial.statement_fragment,
+            Some(hol::StatementFragment::Prop)
+        );
+        assert!(initial.goals[0]
+            .hints
+            .iter()
+            .any(|hint| hint.title.contains("not provable")));
+
+        let stepped =
+            run_tactic_in_source_at_path_with_hol_shadow(prop_source, path, "bad_prop", 0);
+        assert_eq!(
+            stepped.statement_fragment,
+            Some(hol::StatementFragment::Prop)
+        );
+        assert!(stepped.goals[0]
+            .hints
+            .iter()
+            .any(|hint| hint.detail.contains("false when")));
+
+        let explanation =
+            explain_theorem_in_source_at_path_with_hol_shadow(prop_source, path, "bad_prop");
+        assert_eq!(
+            explanation.statement_fragment,
+            Some(hol::StatementFragment::Prop)
+        );
+        assert_eq!(explanation.steps.len(), 1);
+        assert!(explanation.steps[0].after[0]
+            .hints
+            .iter()
+            .any(|hint| hint.detail.contains("false when")));
+
+        let nat = goals_at_source_path_with_hol_shadow(
+            r#"
+theorem bad_nat (n : Nat) : succ(n) = n := by
+  refl
+"#,
+            path,
+            Position { line: 2, column: 1 },
+        );
+        assert_eq!(
+            nat.statement_fragment,
+            Some(hol::StatementFragment::FirstOrderInductive)
+        );
+        assert!(nat.goals[0]
+            .hints
+            .iter()
+            .any(|hint| hint.title.contains("arithmetic")));
+
+        let fol = goals_at_source_path_with_hol_shadow(
+            r#"
+sort Person
+pred Knows(Person, Person)
+theorem bad_fol (x y : Person) : Knows(x, y) -> Knows(y, x) := by
+  intro h
+"#,
+            path,
+            Position { line: 4, column: 1 },
+        );
+        assert_eq!(
+            fol.statement_fragment,
+            Some(hol::StatementFragment::FirstOrder)
+        );
+        assert!(fol.goals[0]
+            .hints
+            .iter()
+            .any(|hint| hint.title.contains("first-order")));
     }
 
     #[test]

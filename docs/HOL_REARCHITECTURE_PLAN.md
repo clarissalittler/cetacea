@@ -505,8 +505,8 @@ checking, `cetacea_wasm` disables the `hol-shadow` Cargo feature and remains
 
 ### Phase H5 — fragment enforcement and assignment manifests
 
-Status: **native CLI policy and assignment-manifest slices implemented.** The
-shadow report now
+Status: **native CLI policy, assignment manifests, and certified native editor
+hints implemented.** The shadow report now
 retains kernel-created declaration receipts and stable names. An opt-in
 `--hol-profile prop|fol|fol+induction|hol` checks root declarations with their
 transitive used dependencies; profiles remain constructive, trust-free, and
@@ -526,9 +526,14 @@ classifications, including rejected theorem names, full
 signatures, fragments, locations, and import provenance, are exposed in shadow
 JSON for audit. The exact corpus gate now checks 600/600 elaborated root theorem
 statements, including 36 proof-level intended rejections; two deliberately
-ill-typed negative signatures are rejected before classification. H5 still owns
-Wasm/TUI/browser policy surfaces, certified editor goal hints, and structural
-signature fingerprints after the syntax stabilizes.
+ill-typed negative signatures are rejected before classification. Native TUI
+and line-mode goal and explanation requests can now opt in with `--hol-shadow`:
+the full theorem signature is classified before tactic stepping, the certified
+fragment is shown in the interface, and countermodel hints are gated by that
+fragment. Legacy editor entry points remain unchanged. H5 still owns
+Wasm/browser result and policy surfaces, interactive assignment-policy
+enforcement, and structural signature fingerprints after the syntax
+stabilizes.
 The first policy checkpoint's native CLI release was 3,396,656 bytes; the
 feature-isolated Wasm module was unchanged at 1,351,837 bytes. The
 manifest checkpoint is 3,482,976 bytes natively and 1,351,852 bytes in Wasm;
@@ -536,15 +541,19 @@ the browser artifact grew by only 15 bytes and remains below the 1.5 MB review
 line. At the auditable pre-receipt/countermodel checkpoint they are 3,495,424
 and 1,351,920 bytes respectively; the no-shadow browser path grows by 68 bytes
 and remains below the review line.
+At the certified native-editor checkpoint they are 3,500,184 and 1,351,199
+bytes respectively; feature isolation still keeps the HOL sidecar out of the
+browser artifact, which remains below the review line.
 
 - Implement least-fragment classification and transitive feature receipts.
 - Native CLI text/JSON and versioned manifests are implemented; extend Wasm
-  JSON, TUI, and browser results after the policy format settles.
+  JSON, browser results, and interactive assignment-policy enforcement after
+  the policy format settles.
 - Native allowed-import, named imported-axiom, and frozen full-signature
   policies are implemented.
-- Native shadow file diagnostics consume the certified fragment; route editor
-  goal hints through the same pre-receipt classifier when that surface adopts
-  HOL state.
+- Native shadow file diagnostics and opt-in native editor goal hints consume
+  the certified fragment. Browser goal hints retain legacy routing until the
+  browser surface adopts HOL state.
 
 Exit gate: adversarial tests demonstrate that a syntactically FOL theorem proved
 through HOL, choice, extensionality, classical reasoning, or an unallowed import
@@ -553,7 +562,9 @@ has executable tests for fragment boundaries, independent classical/trust/draft
 permissions, transitive used axioms, exact resolved imports, named imported
 axioms, missing or changed full signatures, local-axiom impersonation, and
 certified Prop/FOL/inductive/HOL countermodel dispatch. The pre-receipt gate is
-600/600 for all elaborated root theorem statements.
+600/600 for all elaborated root theorem statements. Native editor tests also
+show that legacy entry points remain uncertified while opt-in goal, tactic-step,
+and explanation entry points preserve certified Prop/FOL/inductive dispatch.
 
 ### Phase H6 — library and curriculum migration
 
