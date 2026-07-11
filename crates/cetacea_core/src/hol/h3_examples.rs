@@ -6,8 +6,8 @@
 
 use super::fragments::DeclarationReceipt;
 use super::graph_library::GraphLibrary;
-use super::h35_cardinality::declare_cardinality_transport;
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
+use super::install_cardinality_transport;
 use super::library::ListLibrary;
 use super::proofs::HolDraftProof;
 use super::recursion::{StructuralArmLayout, StructuralArmSpec, StructuralDefinitionSpec};
@@ -333,7 +333,7 @@ pub fn run_finite_h3_spike() -> Result<H3FiniteSpikeReport, SpikeError> {
     let on = elaborator.resolve_constant("on")?;
     let bit_type = CoreType::constructor(bit, Vec::new());
 
-    let transport = declare_cardinality_transport(&mut elaborator, &lists, &list_length)?;
+    let transport = install_cardinality_transport(&mut elaborator, &lists, &list_length)?;
 
     let encode = elaborator.declare_structural_definition(StructuralDefinitionSpec {
         name: "encode".to_string(),

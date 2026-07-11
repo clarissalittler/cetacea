@@ -11,10 +11,7 @@ atomically installs:
 
 The package exposes checked typed handles and term builders rather than asking
 each client to pass unrelated declaration IDs. The list, graph-path, and finite
-cardinality examples now install and use this one package. The multi-lemma
-cardinality-transport package consumes the same handles and is transactional as
-well: a failure after earlier declarations have been staged leaves the caller's
-elaborator unchanged.
+cardinality examples now install and use this one package.
 
 `List` deliberately has an unrestricted HOL element parameter. Fragment
 classification happens at each use: an open `Member` goal over `List Nat` is
@@ -49,6 +46,17 @@ path and concatenation theorem remain constructive, trust-free
 `hol`. The graph spike now consumes this package instead of owning a second
 copy of the definition and proof builder.
 
+Cardinality transport is now a reusable public elaborator-side package too.
+`CardinalityTransportNames` permits canonical or namespaced installation, and
+`CardinalityTransportLibrary` exposes `map`, all five checked supporting
+lemmas, and the final transport theorem. Installation is transactional: a late
+collision cannot leave a partial definition or lemma chain behind. Receipt
+tests pin the final theorem's exact direct dependencies on `Member`, `Nodup`,
+`length`, `map`, `nodup_map_injective`, `map_length`, and
+`map_coverage_surjective`; every theorem is trust-free and honestly classified
+as `hol`. The finite spike now consumes this public package rather than a
+private H3.5 builder.
+
 This is not yet a student-visible library. `ListLibrary` currently targets the
 checked core, and `CompatibilityElaborator` exposes the package registry, but
 the `.ctea` parser, standard-library import resolver, browser, and assignment
@@ -67,9 +75,10 @@ declaration can coexist and keeps its original meaning.
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
-4. Turn finite enumeration and cardinality transport into importable packages,
-   then prove the representative pigeonhole, finite-union-cardinality, and
-   handshake targets through checked library theorems.
+4. Register and expose the checked cardinality-transport package, add a finite
+   enumeration package, then prove the representative pigeonhole,
+   finite-union-cardinality, and handshake targets through checked library
+   theorems.
 5. Add the finite tree edge/vertex theorem and a pilot chapter sequence. Freeze
    each assignment's profile, imports, trusted principles, and theorem
    signatures with manifests.
@@ -86,5 +95,5 @@ declaration can coexist and keeps its original meaning.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the graph-library checkpoint the release CLI is 3,522,040 bytes and the raw
-Wasm module is 1,359,017 bytes, still below the 1.5 MB review line.
+At the cardinality-package checkpoint the release CLI is 3,507,984 bytes and
+the raw Wasm module is 1,353,487 bytes, still below the 1.5 MB review line.

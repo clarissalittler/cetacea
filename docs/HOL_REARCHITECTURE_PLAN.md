@@ -568,14 +568,17 @@ and explanation entry points preserve certified Prop/FOL/inductive dispatch.
 
 ### Phase H6 — library and curriculum migration
 
-Status: **in progress; reusable HOL list/graph substrates and registry
+Status: **in progress; reusable HOL list, graph, and cardinality substrates
 extracted.** A transactional `ListLibrary` now installs parameterized `List A`,
 its constructors, `All`, `Member`, `Nodup`, and `append`, with an optional
 checked Nat `length`
 extension. The list, graph-path, and finite-cardinality examples all consume
-the same typed handles instead of redeclaring variants. The cardinality
-transport lemma package is also transactional. Tests demonstrate the central
-mode claim directly: the same unrestricted library has a `fol+induction` Nat
+the same typed handles instead of redeclaring variants. Cardinality transport
+is now a public, namespaced, transactional package exposing `map`, all five
+supporting theorem handles, and the final theorem. Its receipt test fixes the
+complete direct dependency set and verifies that every theorem is trust-free
+and classified `hol`. Tests demonstrate the central mode claim directly: the
+same unrestricted library has a `fol+induction` Nat
 or graph instance and a `hol` `Prop` instance, while the existing graph and
 finite proof receipts retain their prior least fragments. This package is
 now installable on demand through the compatibility elaborator's versioned
@@ -590,14 +593,15 @@ concrete `Vertex` paths remain `fol+induction`, while passing the edge predicate
 as a value—or instantiating paths at `Prop`—is certified `hol`. The graph spike
 uses the extracted package without changing its receipt. See
 [`hol/H6_LIBRARY_MIGRATION.md`](hol/H6_LIBRARY_MIGRATION.md) for the remaining
-surface, compatibility-alias, and curriculum slices. The graph checkpoint
-artifacts are 3,522,040 bytes natively and 1,359,017 bytes in Wasm, below the
-1.5 MB review line.
+surface, compatibility-alias, and curriculum slices. The cardinality-package
+checkpoint artifacts are 3,507,984 bytes natively and 1,353,487 bytes in Wasm,
+below the 1.5 MB review line.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
-  registry plus a symbol-specialized graph/path substrate are implemented;
-  surface imports and finite enumeration remain.
+  registry, a symbol-specialized graph/path substrate, and the checked
+  cardinality-transport package are implemented; package registry exposure,
+  surface imports, and finite enumeration remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

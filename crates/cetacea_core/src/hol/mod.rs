@@ -31,6 +31,10 @@ pub use fragments::{
     ReceiptPolicy, StatementFragment, TeachingProfile,
 };
 pub use graph_library::{GraphLibrary, GraphLibraryNames, PathConcatenationTheorem};
+pub use h35_cardinality::{
+    install_cardinality_transport, install_cardinality_transport_named,
+    CardinalityTransportLibrary, CardinalityTransportNames,
+};
 pub use h3_examples::{
     run_finite_h3_spike, run_graph_h3_spike, run_list_h3_spike, H3FiniteSpikeReport,
     H3GraphSpikeReport, H3ListSpikeReport,

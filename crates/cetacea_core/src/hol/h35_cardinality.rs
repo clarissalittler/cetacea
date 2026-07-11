@@ -12,27 +12,83 @@ use super::terms::{ConstantId, CoreTerm};
 use super::theorems::TheoremId;
 use super::types::{CoreType, TypeParameter};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardinalityTransportNames {
+    pub map: String,
+    pub map_length: String,
+    pub member_map_forward: String,
+    pub member_map_reverse: String,
+    pub nodup_map_injective: String,
+    pub map_coverage_surjective: String,
+    pub cardinality_transport: String,
+}
+
+impl CardinalityTransportNames {
+    pub fn canonical() -> Self {
+        Self::under_namespace("")
+    }
+
+    pub fn under_namespace(namespace: &str) -> Self {
+        let qualify = |leaf: &str| {
+            if namespace.is_empty() {
+                leaf.to_string()
+            } else {
+                format!("{namespace}.{leaf}")
+            }
+        };
+        Self {
+            map: qualify("map"),
+            map_length: qualify("map_length"),
+            member_map_forward: qualify("member_map_forward"),
+            member_map_reverse: qualify("member_map_reverse"),
+            nodup_map_injective: qualify("nodup_map_injective"),
+            map_coverage_surjective: qualify("map_coverage_surjective"),
+            cardinality_transport: qualify("cardinality_transport"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CardinalityTransportLibrary {
+pub struct CardinalityTransportLibrary {
     pub map: ConstantId,
+    pub map_length: TheoremId,
+    pub member_map_forward: TheoremId,
+    pub member_map_reverse: TheoremId,
+    pub nodup_map_injective: TheoremId,
+    pub map_coverage_surjective: TheoremId,
     pub theorem: TheoremId,
 }
 
-pub(crate) fn declare_cardinality_transport(
+pub fn install_cardinality_transport(
     elaborator: &mut SpikeElaborator,
     lists: &ListLibrary,
     length: &ListLength,
 ) -> Result<CardinalityTransportLibrary, SpikeError> {
+    install_cardinality_transport_named(
+        elaborator,
+        lists,
+        length,
+        &CardinalityTransportNames::canonical(),
+    )
+}
+
+pub fn install_cardinality_transport_named(
+    elaborator: &mut SpikeElaborator,
+    lists: &ListLibrary,
+    length: &ListLength,
+    names: &CardinalityTransportNames,
+) -> Result<CardinalityTransportLibrary, SpikeError> {
     let mut staged = elaborator.clone();
-    let library = declare_cardinality_transport_into(&mut staged, lists, length)?;
+    let library = install_cardinality_transport_into(&mut staged, lists, length, names)?;
     *elaborator = staged;
     Ok(library)
 }
 
-fn declare_cardinality_transport_into(
+fn install_cardinality_transport_into(
     elaborator: &mut SpikeElaborator,
     lists: &ListLibrary,
     list_length: &ListLength,
+    names: &CardinalityTransportNames,
 ) -> Result<CardinalityTransportLibrary, SpikeError> {
     let list = lists.datatype;
     let nil = lists.nil;
@@ -55,7 +111,7 @@ fn declare_cardinality_transport_into(
     let map = stage(
         "map definition",
         elaborator.declare_structural_definition(StructuralDefinitionSpec {
-            name: "map".to_string(),
+            name: names.map.clone(),
             type_parameters: vec![a_parameter, b_parameter],
             datatype: list,
             datatype_arguments: vec![a.clone()],
@@ -184,7 +240,7 @@ fn declare_cardinality_transport_into(
     let (map_length, _) = stage(
         "map_length theorem",
         elaborator.declare_theorem(
-            "map_length",
+            names.map_length.clone(),
             vec![a_parameter, b_parameter],
             length_statement,
             length_proof,
@@ -282,7 +338,7 @@ fn declare_cardinality_transport_into(
     let (member_map_forward, _) = stage(
         "member_map_forward theorem",
         elaborator.declare_theorem(
-            "member_map_forward",
+            names.member_map_forward.clone(),
             vec![a_parameter, b_parameter],
             forward_statement,
             forward_proof,
@@ -451,7 +507,7 @@ fn declare_cardinality_transport_into(
     let (member_map_reverse, _) = stage(
         "member_map_reverse theorem",
         elaborator.declare_theorem(
-            "member_map_reverse",
+            names.member_map_reverse.clone(),
             vec![a_parameter, b_parameter],
             reverse_statement,
             reverse_proof,
@@ -554,7 +610,7 @@ fn declare_cardinality_transport_into(
     let (nodup_map, _) = stage(
         "nodup_map_injective theorem",
         elaborator.declare_theorem(
-            "nodup_map_injective",
+            names.nodup_map_injective.clone(),
             vec![a_parameter, b_parameter],
             nodup_statement,
             nodup_proof,
@@ -631,7 +687,7 @@ fn declare_cardinality_transport_into(
     let (map_coverage, _) = stage(
         "map_coverage_surjective theorem",
         elaborator.declare_theorem(
-            "map_coverage_surjective",
+            names.map_coverage_surjective.clone(),
             vec![a_parameter, b_parameter],
             coverage_statement,
             coverage_proof,
@@ -754,14 +810,22 @@ fn declare_cardinality_transport_into(
     let (theorem, _) = stage(
         "cardinality_transport theorem",
         elaborator.declare_theorem(
-            "cardinality_transport",
+            names.cardinality_transport.clone(),
             vec![a_parameter, b_parameter],
             transport_statement,
             transport_proof,
         ),
     )?;
 
-    Ok(CardinalityTransportLibrary { map, theorem })
+    Ok(CardinalityTransportLibrary {
+        map,
+        map_length,
+        member_map_forward,
+        member_map_reverse,
+        nodup_map_injective: nodup_map,
+        map_coverage_surjective: map_coverage,
+        theorem,
+    })
 }
 
 fn apply2(function: CoreTerm, first: CoreTerm, second: CoreTerm) -> CoreTerm {
@@ -799,9 +863,9 @@ fn stage<T>(label: &str, result: Result<T, SpikeError>) -> Result<T, SpikeError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hol::fragments::{ProofFeature, StatementFragment};
 
-    #[test]
-    fn cardinality_transport_package_is_transactional_on_a_late_collision() {
+    fn elaborator_with_lists() -> (SpikeElaborator, ListLibrary, ListLength) {
         let mut elaborator = SpikeElaborator::new();
         let nat_id = elaborator
             .declare_base_type("Nat", true)
@@ -817,6 +881,95 @@ mod tests {
         let length = lists
             .install_length(&mut elaborator, nat, zero, successor)
             .expect("install length");
+        (elaborator, lists, length)
+    }
+
+    #[test]
+    fn namespaced_cardinality_package_exposes_all_checked_dependencies() {
+        let (mut elaborator, lists, length) = elaborator_with_lists();
+        let names = CardinalityTransportNames::under_namespace("@library.cardinality.v1");
+        let library = install_cardinality_transport_named(&mut elaborator, &lists, &length, &names)
+            .expect("install namespaced cardinality package");
+
+        assert_eq!(
+            elaborator.constants().resolve(&names.map),
+            Some(library.map)
+        );
+        for (name, theorem) in [
+            (&names.map_length, library.map_length),
+            (&names.member_map_forward, library.member_map_forward),
+            (&names.member_map_reverse, library.member_map_reverse),
+            (&names.nodup_map_injective, library.nodup_map_injective),
+            (
+                &names.map_coverage_surjective,
+                library.map_coverage_surjective,
+            ),
+            (&names.cardinality_transport, library.theorem),
+        ] {
+            assert_eq!(elaborator.theorems().resolve(name), Some(theorem));
+            let receipt = elaborator
+                .theorem_receipt(theorem)
+                .expect("package theorem receipt");
+            assert_eq!(
+                receipt.proof().statement_fragment(),
+                StatementFragment::HigherOrder
+            );
+            assert_eq!(
+                receipt.proof().required_fragment(),
+                StatementFragment::HigherOrder
+            );
+            assert!(receipt.proof().axiom_dependencies().is_empty());
+            assert!(receipt.proof().incomplete_dependencies().is_empty());
+        }
+        assert!(elaborator
+            .definition_receipt(library.map)
+            .expect("map definition receipt")
+            .proof()
+            .direct_features()
+            .contains(&ProofFeature::StructuralRecursion));
+
+        let final_receipt = elaborator
+            .theorem_receipt(library.theorem)
+            .expect("transport receipt");
+        let expected_dependencies = std::collections::BTreeSet::from([
+            elaborator
+                .definition_receipt(lists.member)
+                .expect("Member receipt")
+                .id(),
+            elaborator
+                .definition_receipt(lists.nodup)
+                .expect("Nodup receipt")
+                .id(),
+            elaborator
+                .definition_receipt(length.constant)
+                .expect("length receipt")
+                .id(),
+            elaborator
+                .definition_receipt(library.map)
+                .expect("map receipt")
+                .id(),
+            elaborator
+                .theorem_receipt(library.nodup_map_injective)
+                .expect("nodup receipt")
+                .id(),
+            elaborator
+                .theorem_receipt(library.map_length)
+                .expect("length receipt")
+                .id(),
+            elaborator
+                .theorem_receipt(library.map_coverage_surjective)
+                .expect("coverage receipt")
+                .id(),
+        ]);
+        assert_eq!(
+            final_receipt.proof().direct_dependencies(),
+            &expected_dependencies
+        );
+    }
+
+    #[test]
+    fn cardinality_transport_package_is_transactional_on_a_late_collision() {
+        let (mut elaborator, lists, length) = elaborator_with_lists();
 
         elaborator
             .declare_theorem(
@@ -827,7 +980,7 @@ mod tests {
             )
             .expect("reserve a theorem name reached after earlier package declarations");
         let before = elaborator.clone();
-        let error = declare_cardinality_transport(&mut elaborator, &lists, &length)
+        let error = install_cardinality_transport(&mut elaborator, &lists, &length)
             .expect_err("late collision must reject the package");
         assert!(error.message.contains("member_map_reverse"));
         assert_eq!(elaborator, before);

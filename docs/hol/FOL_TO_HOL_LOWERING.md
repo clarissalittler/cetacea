@@ -373,3 +373,13 @@ object-language argument is classified `hol` even on `Vertex`; the `Prop`
 instance is likewise `hol`. Thus library reuse does not relabel predicate
 values as FOL. The checkpoint artifacts are 3,522,040 bytes for the native CLI
 and 1,359,017 bytes for Wasm.
+
+The cardinality-transport extraction turns the former H3.5 helper into a
+public, optionally namespaced package. It returns checked handles for `map`,
+five supporting lemmas, and the final transport theorem, while retaining
+transactional installation. An executable receipt audit pins the final
+theorem's direct dependencies to the shared list definitions, `length`, `map`,
+and the three reused transport lemmas; the entire theorem chain remains
+trust-free and correctly requires `hol`. The finite spike now consumes this
+package. The checkpoint artifacts are 3,507,984 bytes for the native CLI and
+1,353,487 bytes for Wasm.
