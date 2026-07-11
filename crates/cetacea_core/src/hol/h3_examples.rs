@@ -5,6 +5,7 @@
 //! and the diagnostics from deliberate rejection cases.
 
 use super::fragments::DeclarationReceipt;
+use super::graph_library::GraphLibrary;
 use super::h35_cardinality::declare_cardinality_transport;
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
 use super::library::ListLibrary;
@@ -204,249 +205,17 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
             CoreType::arrow(parameter_type.clone(), CoreType::Prop),
         ),
     )?;
+    let graphs = GraphLibrary::install(&mut elaborator, &lists, edge)?;
+    let chain = graphs.valid_path;
 
-    // ValidPath xs start finish means that following every vertex in xs from
-    // `start` ends at `finish`. The recursive result is itself the binary
-    // predicate for the tail, which permits the start vertex to advance.
-    let chain_layout = StructuralArmLayout::new(2, 1, 0);
-    let chain = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-        name: "ValidPath".to_string(),
-        type_parameters: vec![parameter],
-        datatype: list,
-        datatype_arguments: vec![parameter_type.clone()],
-        fixed_parameter_types: Vec::new(),
-        recursive_argument_index: 0,
-        result_type: CoreType::arrow(
-            parameter_type.clone(),
-            CoreType::arrow(parameter_type.clone(), CoreType::Prop),
-        ),
-        arms: vec![
-            StructuralArmSpec::new(
-                nil,
-                CoreTerm::lambda(
-                    parameter_type.clone(),
-                    CoreTerm::lambda(
-                        parameter_type.clone(),
-                        // finish = start
-                        CoreTerm::equality(
-                            parameter_type.clone(),
-                            CoreTerm::Bound(0),
-                            CoreTerm::Bound(1),
-                        ),
-                    ),
-                ),
-            ),
-            StructuralArmSpec::new(
-                cons,
-                CoreTerm::lambda(
-                    parameter_type.clone(),
-                    CoreTerm::lambda(
-                        parameter_type.clone(),
-                        CoreTerm::and(
-                            // Under start and finish: finish 0, start 1,
-                            // head 2, tail 3, recursive result 4.
-                            CoreTerm::apply(
-                                CoreTerm::apply(
-                                    CoreTerm::instantiate_constant(
-                                        edge,
-                                        vec![parameter_type.clone()],
-                                    ),
-                                    CoreTerm::Bound(1),
-                                ),
-                                CoreTerm::Bound(2),
-                            ),
-                            CoreTerm::apply(
-                                CoreTerm::apply(CoreTerm::Bound(4), CoreTerm::Bound(2)),
-                                CoreTerm::Bound(0),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ],
-    })?;
-
-    let append_term =
-        |left: CoreTerm, right: CoreTerm| lists.append_term(vertex.clone(), left, right);
-    let valid_path = |path: CoreTerm, start: CoreTerm, finish: CoreTerm| {
-        CoreTerm::apply(
-            CoreTerm::apply(
-                CoreTerm::apply(
-                    CoreTerm::instantiate_constant(chain, vec![vertex.clone()]),
-                    path,
-                ),
-                start,
-            ),
-            finish,
-        )
-    };
-
-    let list_vertex = lists.list_type(vertex.clone());
-    // Inside the five quantifiers: finish 0, middle 1, start 2,
-    // right path 3, left path 4.
-    let theorem_body = CoreTerm::implies(
-        valid_path(CoreTerm::Bound(4), CoreTerm::Bound(2), CoreTerm::Bound(1)),
-        CoreTerm::implies(
-            valid_path(CoreTerm::Bound(3), CoreTerm::Bound(1), CoreTerm::Bound(0)),
-            valid_path(
-                append_term(CoreTerm::Bound(4), CoreTerm::Bound(3)),
-                CoreTerm::Bound(2),
-                CoreTerm::Bound(0),
-            ),
-        ),
-    );
-    let path_concatenation_statement = CoreTerm::forall(
-        list_vertex.clone(),
-        CoreTerm::forall(
-            list_vertex.clone(),
-            CoreTerm::forall(
-                vertex.clone(),
-                CoreTerm::forall(
-                    vertex.clone(),
-                    CoreTerm::forall(vertex.clone(), theorem_body),
-                ),
-            ),
-        ),
-    );
-
-    // Motive for induction on the left path. Under the motive lambda and four
-    // quantifiers: finish 0, middle 1, start 2, right 3, candidate left 4.
-    let motive_body = CoreTerm::implies(
-        valid_path(CoreTerm::Bound(4), CoreTerm::Bound(2), CoreTerm::Bound(1)),
-        CoreTerm::implies(
-            valid_path(CoreTerm::Bound(3), CoreTerm::Bound(1), CoreTerm::Bound(0)),
-            valid_path(
-                append_term(CoreTerm::Bound(4), CoreTerm::Bound(3)),
-                CoreTerm::Bound(2),
-                CoreTerm::Bound(0),
-            ),
-        ),
-    );
-    let motive = CoreTerm::lambda(
-        list_vertex.clone(),
-        CoreTerm::forall(
-            list_vertex.clone(),
-            CoreTerm::forall(
-                vertex.clone(),
-                CoreTerm::forall(
-                    vertex.clone(),
-                    CoreTerm::forall(vertex.clone(), motive_body),
-                ),
-            ),
-        ),
-    );
-
-    // Nil case after right/start/middle/finish binders: finish 0, middle 1,
-    // start 2, right 3. The normalized first premise is middle = start.
-    let nil_equality = CoreTerm::equality(vertex.clone(), CoreTerm::Bound(1), CoreTerm::Bound(2));
-    let nil_right_path = valid_path(CoreTerm::Bound(3), CoreTerm::Bound(1), CoreTerm::Bound(0));
-    let equality_motive = CoreTerm::lambda(
-        vertex.clone(),
-        // Inside the equality motive: replacement start 0, finish 1,
-        // old middle 2, old start 3, right 4.
-        valid_path(CoreTerm::Bound(4), CoreTerm::Bound(0), CoreTerm::Bound(1)),
-    );
-    let nil_case = HolDraftProof::ForallIntro {
-        domain: list_vertex.clone(),
-        body: Box::new(HolDraftProof::ForallIntro {
-            domain: vertex.clone(),
-            body: Box::new(HolDraftProof::ForallIntro {
-                domain: vertex.clone(),
-                body: Box::new(HolDraftProof::ForallIntro {
-                    domain: vertex.clone(),
-                    body: Box::new(HolDraftProof::ImpIntro {
-                        premise: nil_equality,
-                        body: Box::new(HolDraftProof::ImpIntro {
-                            premise: nil_right_path,
-                            body: Box::new(HolDraftProof::EqualityElim {
-                                proof_equality: Box::new(HolDraftProof::Hypothesis(1)),
-                                motive: equality_motive,
-                                proof_left: Box::new(HolDraftProof::Hypothesis(0)),
-                            }),
-                        }),
-                    }),
-                }),
-            }),
-        }),
-    };
-
-    // Cons case field binders are head 0 and tail 1 before the four forall
-    // binders. Afterwards: finish 0, middle 1, start 2, right 3, head 4,
-    // tail 5. Proof hypotheses after the implications are right-path 0,
-    // decomposed-left-path 1, and induction hypothesis 2.
-    let cons_left_premise = CoreTerm::and(
-        CoreTerm::apply(
-            CoreTerm::apply(
-                CoreTerm::instantiate_constant(edge, vec![vertex.clone()]),
-                CoreTerm::Bound(2),
-            ),
-            CoreTerm::Bound(4),
-        ),
-        valid_path(CoreTerm::Bound(5), CoreTerm::Bound(4), CoreTerm::Bound(1)),
-    );
-    let cons_right_premise = valid_path(CoreTerm::Bound(3), CoreTerm::Bound(1), CoreTerm::Bound(0));
-    let mut induction_hypothesis = HolDraftProof::Hypothesis(2);
-    for argument in [
-        CoreTerm::Bound(3),
-        CoreTerm::Bound(4),
-        CoreTerm::Bound(1),
-        CoreTerm::Bound(0),
-    ] {
-        induction_hypothesis = HolDraftProof::ForallElim {
-            proof_forall: Box::new(induction_hypothesis),
-            argument,
-        };
-    }
-    let tail_concatenation = HolDraftProof::ImpElim {
-        proof_implication: Box::new(HolDraftProof::ImpElim {
-            proof_implication: Box::new(induction_hypothesis),
-            proof_argument: Box::new(HolDraftProof::AndElimRight(Box::new(
-                HolDraftProof::Hypothesis(1),
-            ))),
-        }),
-        proof_argument: Box::new(HolDraftProof::Hypothesis(0)),
-    };
-    let cons_case = HolDraftProof::ForallIntro {
-        domain: list_vertex.clone(),
-        body: Box::new(HolDraftProof::ForallIntro {
-            domain: vertex.clone(),
-            body: Box::new(HolDraftProof::ForallIntro {
-                domain: vertex.clone(),
-                body: Box::new(HolDraftProof::ForallIntro {
-                    domain: vertex.clone(),
-                    body: Box::new(HolDraftProof::ImpIntro {
-                        premise: cons_left_premise,
-                        body: Box::new(HolDraftProof::ImpIntro {
-                            premise: cons_right_premise,
-                            body: Box::new(HolDraftProof::AndIntro(
-                                Box::new(HolDraftProof::AndElimLeft(Box::new(
-                                    HolDraftProof::Hypothesis(1),
-                                ))),
-                                Box::new(tail_concatenation),
-                            )),
-                        }),
-                    }),
-                }),
-            }),
-        }),
-    };
-
-    let proof = HolDraftProof::ForallIntro {
-        domain: list_vertex.clone(),
-        body: Box::new(HolDraftProof::Induction {
-            datatype: list,
-            type_arguments: vec![vertex.clone()],
-            motive,
-            scrutinee: CoreTerm::Bound(0),
-            cases: vec![nil_case, cons_case],
-        }),
-    };
-    let (_, path_concatenation) = elaborator.declare_theorem(
-        "path_concatenation",
-        Vec::new(),
-        path_concatenation_statement,
-        proof,
-    )?;
+    let path_concatenation = graphs
+        .declare_path_concatenation(
+            &mut elaborator,
+            &lists,
+            "path_concatenation",
+            vertex.clone(),
+        )?
+        .receipt;
 
     let malformed_edge = CoreTerm::apply(
         CoreTerm::instantiate_constant(edge, vec![vertex.clone()]),
@@ -461,6 +230,7 @@ pub fn run_graph_h3_spike() -> Result<H3GraphSpikeReport, SpikeError> {
     .expect_err("an edge endpoint cannot be a list")
     .message;
 
+    let chain_layout = StructuralArmLayout::new(2, 1, 0);
     let proposed_bad = elaborator.constants().next_constant_id()?;
     let bad_recursive_call = CoreTerm::apply(
         CoreTerm::instantiate_constant(proposed_bad, vec![parameter_type.clone()]),

@@ -362,3 +362,14 @@ interface mismatches fail closed. The reserved names remain outside the legacy
 surface scope, so current monomorphic `List` declarations still lower exactly
 as before. Surface imports are a later slice. The release artifacts are
 3,516,936 bytes for the native CLI and 1,356,162 bytes for Wasm.
+
+The graph-library extraction makes the FOL/HOL boundary executable rather than
+conventional. `GraphLibrary` builds `ValidPath` against a checked polymorphic
+edge-symbol family and emits a kernel-checked concatenation theorem for each
+concrete element type. The `Vertex` instance remains constructive
+`fol+induction`, and the original graph spike now consumes this shared builder.
+By contrast, a comparison symbol that accepts the edge predicate as an
+object-language argument is classified `hol` even on `Vertex`; the `Prop`
+instance is likewise `hol`. Thus library reuse does not relabel predicate
+values as FOL. The checkpoint artifacts are 3,522,040 bytes for the native CLI
+and 1,359,017 bytes for Wasm.

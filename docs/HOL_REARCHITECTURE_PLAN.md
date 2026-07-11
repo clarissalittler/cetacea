@@ -568,9 +568,10 @@ and explanation entry points preserve certified Prop/FOL/inductive dispatch.
 
 ### Phase H6 — library and curriculum migration
 
-Status: **in progress; reusable HOL list substrate and registry extracted.** A
-transactional `ListLibrary` now installs parameterized `List A`, its
-constructors, `All`, `Member`, `Nodup`, and `append`, with an optional checked Nat `length`
+Status: **in progress; reusable HOL list/graph substrates and registry
+extracted.** A transactional `ListLibrary` now installs parameterized `List A`,
+its constructors, `All`, `Member`, `Nodup`, and `append`, with an optional
+checked Nat `length`
 extension. The list, graph-path, and finite-cardinality examples all consume
 the same typed handles instead of redeclaring variants. The cardinality
 transport lemma package is also transactional. Tests demonstrate the central
@@ -582,16 +583,21 @@ registry as `std/hol/list@1`. Its reserved core namespace, declaration catalog,
 definition-receipt names, builtin provenance, core binding, and Nat binding are
 checked atomically. The registry deliberately does not add legacy surface
 aliases: a current monomorphic `List` can coexist unchanged. It is not yet a
-`.ctea` import. See
+`.ctea` import. A reusable `GraphLibrary` now specializes `ValidPath` to a
+checked edge-symbol family and constructs checked path-concatenation theorems
+over the shared list package. That specialization boundary is deliberate:
+concrete `Vertex` paths remain `fol+induction`, while passing the edge predicate
+as a value—or instantiating paths at `Prop`—is certified `hol`. The graph spike
+uses the extracted package without changing its receipt. See
 [`hol/H6_LIBRARY_MIGRATION.md`](hol/H6_LIBRARY_MIGRATION.md) for the remaining
-surface, compatibility-alias, and curriculum slices. The registry checkpoint
-artifacts are 3,516,936 bytes natively and 1,356,162 bytes in Wasm, below the
+surface, compatibility-alias, and curriculum slices. The graph checkpoint
+artifacts are 3,522,040 bytes natively and 1,359,017 bytes in Wasm, below the
 1.5 MB review line.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
-  registry are implemented; surface imports and the finite/relation/graph
-  packages remain.
+  registry plus a symbol-specialized graph/path substrate are implemented;
+  surface imports and finite enumeration remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

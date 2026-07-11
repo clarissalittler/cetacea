@@ -8,6 +8,7 @@
 
 pub mod declarations;
 pub mod fragments;
+pub mod graph_library;
 mod h35_cardinality;
 pub mod h3_examples;
 pub mod inductive;
@@ -29,6 +30,7 @@ pub use fragments::{
     EvidenceStatus, FragmentError, FragmentMetadata, PolicyViolation, ProofFeature, ProofReceipt,
     ReceiptPolicy, StatementFragment, TeachingProfile,
 };
+pub use graph_library::{GraphLibrary, GraphLibraryNames, PathConcatenationTheorem};
 pub use h3_examples::{
     run_finite_h3_spike, run_graph_h3_spike, run_list_h3_spike, H3FiniteSpikeReport,
     H3GraphSpikeReport, H3ListSpikeReport,

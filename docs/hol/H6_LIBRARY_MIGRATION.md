@@ -36,6 +36,19 @@ idempotent, but a registry cannot be paired with another core or rebound to a
 different Nat interface. Late name collisions roll back both declarations and
 metadata.
 
+The graph-path substrate is now reusable as well. `GraphLibrary` installs an
+endpoint-aware `ValidPath` structural predicate over the shared list handles
+and can check/store path concatenation for any concrete element type. Its edge
+relation is supplied as a checked polymorphic symbol family when the package is
+installed. This choice is semantically important: passing a predicate as an
+ordinary argument is genuinely higher-order, even when the application is
+saturated. Executable tests show that a predicate-valued path over an otherwise
+first-order `Vertex` domain is `hol`, while the symbol-specialized `Vertex`
+path and concatenation theorem remain constructive, trust-free
+`fol+induction`. Instantiating the same package at `Prop` is also correctly
+`hol`. The graph spike now consumes this package instead of owning a second
+copy of the definition and proof builder.
+
 This is not yet a student-visible library. `ListLibrary` currently targets the
 checked core, and `CompatibilityElaborator` exposes the package registry, but
 the `.ctea` parser, standard-library import resolver, browser, and assignment
@@ -50,9 +63,10 @@ declaration can coexist and keeps its original meaning.
    for the current monomorphic list vocabulary for one release cycle.
 2. Route package provenance and receipt names into shadow/JSON results and
    assignment import allowlists when surface imports can request a package.
-3. Extract a generic relation/graph package over the same list handles. Keep
-   path witnesses explicit in restricted FOL exercises; more abstract closure
-   theorems may live in HOL and must remain policy-visible when reused.
+3. Register and expose graph instances once surface imports can bind a checked
+   edge-symbol family. Keep path witnesses explicit in restricted FOL
+   exercises; predicate-valued relations and more abstract closure theorems
+   remain HOL and must stay policy-visible when reused.
 4. Turn finite enumeration and cardinality transport into importable packages,
    then prove the representative pigeonhole, finite-union-cardinality, and
    handshake targets through checked library theorems.
@@ -72,5 +86,5 @@ declaration can coexist and keeps its original meaning.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the registry checkpoint the release CLI is 3,516,936 bytes and the raw Wasm
-module is 1,356,162 bytes, still below the 1.5 MB review line.
+At the graph-library checkpoint the release CLI is 3,522,040 bytes and the raw
+Wasm module is 1,359,017 bytes, still below the 1.5 MB review line.
