@@ -26,20 +26,30 @@ cardinality proof does too. Reusing the genuinely higher-order cardinality
 transport theorem still raises only that proof's required fragment to `hol`,
 as intended.
 
+The package now also has a production-facing, on-demand registry seam. The
+compatibility elaborator owns a `HolLibraryRegistry` and can atomically install
+the package as logical module `std/hol/list@1` under reserved core namespace
+`@library.list.v1`. Registry records retain module, version, source, all eight
+declarations, and stable audit names for the five structural-definition
+receipts (for example `std/hol/list@1::Member`). Repeated installation is
+idempotent, but a registry cannot be paired with another core or rebound to a
+different Nat interface. Late name collisions roll back both declarations and
+metadata.
+
 This is not yet a student-visible library. `ListLibrary` currently targets the
-experimental `SpikeElaborator`; the compatibility elaborator, `.ctea` parser,
-standard-library imports, browser, and assignment manifests do not yet expose
-generic list declarations.
+checked core, and `CompatibilityElaborator` exposes the package registry, but
+the `.ctea` parser, standard-library import resolver, browser, and assignment
+manifests do not yet expose generic list declarations. Reserved package names
+are not added to the legacy surface: a current monomorphic `List`/`nil`/`cons`
+declaration can coexist and keeps its original meaning.
 
 ## Remaining migration slices
 
-1. Move package installation behind a production HOL library registry shared
-   by the compatibility driver and future native HOL syntax. Give installed
-   packages stable qualified names and provenance suitable for receipts and
-   assignment allowlists.
-2. Add student-facing rank-one type application and generic declaration syntax,
+1. Add student-facing rank-one type application and generic declaration syntax,
    then publish the list package through the standard library. Retain aliases
    for the current monomorphic list vocabulary for one release cycle.
+2. Route package provenance and receipt names into shadow/JSON results and
+   assignment import allowlists when surface imports can request a package.
 3. Extract a generic relation/graph package over the same list handles. Keep
    path witnesses explicit in restricted FOL exercises; more abstract closure
    theorems may live in HOL and must remain policy-visible when reused.
@@ -62,5 +72,5 @@ generic list declarations.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At this checkpoint the release CLI is 3,501,856 bytes and the raw Wasm module
-is 1,361,312 bytes, still below the 1.5 MB review line.
+At the registry checkpoint the release CLI is 3,516,936 bytes and the raw Wasm
+module is 1,356,162 bytes, still below the 1.5 MB review line.

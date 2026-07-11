@@ -568,24 +568,30 @@ and explanation entry points preserve certified Prop/FOL/inductive dispatch.
 
 ### Phase H6 — library and curriculum migration
 
-Status: **in progress; reusable HOL list substrate extracted.** A transactional
-`ListLibrary` now installs parameterized `List A`, its constructors, `All`,
-`Member`, `Nodup`, and `append`, with an optional checked Nat `length`
+Status: **in progress; reusable HOL list substrate and registry extracted.** A
+transactional `ListLibrary` now installs parameterized `List A`, its
+constructors, `All`, `Member`, `Nodup`, and `append`, with an optional checked Nat `length`
 extension. The list, graph-path, and finite-cardinality examples all consume
 the same typed handles instead of redeclaring variants. The cardinality
 transport lemma package is also transactional. Tests demonstrate the central
 mode claim directly: the same unrestricted library has a `fol+induction` Nat
 or graph instance and a `hol` `Prop` instance, while the existing graph and
 finite proof receipts retain their prior least fragments. This package is
-still `SpikeElaborator`-side infrastructure, not a `.ctea` import. See
+now installable on demand through the compatibility elaborator's versioned
+registry as `std/hol/list@1`. Its reserved core namespace, declaration catalog,
+definition-receipt names, builtin provenance, core binding, and Nat binding are
+checked atomically. The registry deliberately does not add legacy surface
+aliases: a current monomorphic `List` can coexist unchanged. It is not yet a
+`.ctea` import. See
 [`hol/H6_LIBRARY_MIGRATION.md`](hol/H6_LIBRARY_MIGRATION.md) for the remaining
-surface, registry, compatibility-alias, and curriculum slices. The checkpoint
-artifacts are 3,501,856 bytes natively and 1,361,312 bytes in Wasm, below the
+surface, compatibility-alias, and curriculum slices. The registry checkpoint
+artifacts are 3,516,936 bytes natively and 1,356,162 bytes in Wasm, below the
 1.5 MB review line.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
-  graph libraries. The checked list substrate is implemented; production
-  registration and the finite/relation/graph packages remain.
+  graph libraries. The checked list substrate and versioned production-facing
+  registry are implemented; surface imports and the finite/relation/graph
+  packages remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

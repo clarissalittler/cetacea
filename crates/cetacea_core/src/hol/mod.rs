@@ -12,6 +12,7 @@ mod h35_cardinality;
 pub mod h3_examples;
 pub mod inductive;
 pub mod library;
+pub mod library_registry;
 mod linked_smoke;
 pub mod lowering;
 pub mod prelude;
@@ -36,7 +37,12 @@ pub use inductive::{
     InductiveConstructor, InductiveConstructorSpec, InductiveDeclaration, InductiveError,
     InductiveFieldType, InductiveSignature, InductiveSpec, InstantiatedConstructor,
 };
-pub use library::{ListLength, ListLibrary};
+pub use library::{ListLength, ListLibrary, ListLibraryNames};
+pub use library_registry::{
+    HolLibraryRegistry, InstalledLibraryPackage, InstalledListLibrary, LibraryDeclaration,
+    LibraryDeclarationKind, LibraryPackageId, LibraryPackageProvenance, LibraryPackageRecord,
+    LibraryPackageSource, BUILTIN_LIST_V1_MODULE, BUILTIN_LIST_V1_NAMESPACE,
+};
 pub use linked_smoke::{run_linked_hol_smoke, LinkedHolSmokeReport};
 pub use lowering::{CompatibilityLowerer, LoweringError};
 pub use prelude::CompatibilityPrelude;

@@ -17,6 +17,7 @@ use crate::{
 };
 
 use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
+use super::library_registry::{HolLibraryRegistry, InstalledListLibrary};
 use super::lowering::{CompatibilityLowerer, LoweringError};
 use super::prelude::CompatibilityPrelude;
 use super::proofs::HolDraftProof;
@@ -97,6 +98,7 @@ pub struct CompatibilityElaborator {
     symbols: Vec<SymbolRegistration>,
     data: HashMap<String, DataRegistration>,
     theorems: Vec<TheoremRegistration>,
+    libraries: HolLibraryRegistry,
     next_type_parameter: u32,
 }
 
@@ -151,6 +153,7 @@ impl CompatibilityElaborator {
             symbols: Vec::new(),
             data,
             theorems: Vec::new(),
+            libraries: HolLibraryRegistry::default(),
             next_type_parameter: 0,
         })
     }
@@ -161,6 +164,24 @@ impl CompatibilityElaborator {
 
     pub fn prelude(&self) -> &CompatibilityPrelude {
         &self.prelude
+    }
+
+    pub fn libraries(&self) -> &HolLibraryRegistry {
+        &self.libraries
+    }
+
+    /// Install the versioned built-in generic List package into the same
+    /// persistent core owned by compatibility checking. Its reserved core
+    /// namespace is intentionally not added to the legacy surface scope.
+    pub fn install_builtin_list_v1(
+        &mut self,
+    ) -> Result<InstalledListLibrary, CompatibilityDeclarationError> {
+        let natural_type = self.prelude.nat_type();
+        let zero = self.prelude.zero();
+        let successor = self.prelude.successor();
+        Ok(self
+            .libraries
+            .install_builtin_list_v1(&mut self.core, natural_type, zero, successor)?)
     }
 
     pub fn lowering_scope(&self) -> Result<CompatibilityLowerer<'_>, LoweringError> {
@@ -2405,6 +2426,42 @@ mod tests {
             ),
             Ok(CoreType::Prop)
         );
+    }
+
+    #[test]
+    fn registered_generic_list_coexists_with_the_legacy_monomorphic_surface() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let installed = elaborator
+            .install_builtin_list_v1()
+            .expect("install registered generic List");
+        assert_eq!(
+            elaborator
+                .libraries()
+                .list_v1()
+                .expect("registered package"),
+            &installed
+        );
+
+        let legacy_list = elaborator
+            .declare_data(&list_definition())
+            .expect("legacy monomorphic List remains available");
+        assert_ne!(legacy_list, installed.lists.datatype);
+        assert_eq!(elaborator.core().types().resolve("List"), Some(legacy_list));
+        assert_eq!(
+            elaborator.core().types().resolve("@library.list.v1.List"),
+            Some(installed.lists.datatype)
+        );
+
+        let legacy_nil = elaborator
+            .core()
+            .constants()
+            .resolve("nil")
+            .expect("legacy nil");
+        let lowered_nil = elaborator
+            .lower_term(&Term::Var("nil".to_string()))
+            .expect("legacy nil remains the surface meaning");
+        assert_eq!(lowered_nil, CoreTerm::Constant(legacy_nil));
+        assert_ne!(legacy_nil, installed.lists.nil);
     }
 
     #[test]

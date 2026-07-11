@@ -352,3 +352,13 @@ Graph path concatenation and direct finite cardinality retain their constructive
 transport dependency remains honestly `hol`. The package is not connected to
 surface imports yet. The corresponding release artifacts are 3,501,856 bytes
 for the native CLI and 1,361,312 bytes for Wasm.
+
+The next H6 checkpoint puts that package behind a core-independent versioned
+registry owned by `CompatibilityElaborator`. `std/hol/list@1` installs on
+demand under reserved namespace `@library.list.v1`, records the logical
+provenance and every declaration, and maps its five definition receipts to
+stable audit names. Installation is atomic and idempotent; registry/core or Nat
+interface mismatches fail closed. The reserved names remain outside the legacy
+surface scope, so current monomorphic `List` declarations still lower exactly
+as before. Surface imports are a later slice. The release artifacts are
+3,516,936 bytes for the native CLI and 1,356,162 bytes for Wasm.

@@ -28,6 +28,49 @@ pub struct ListLibrary {
     pub append: ConstantId,
 }
 
+/// Core names used by one installation of the list package.
+///
+/// Spike examples retain the historical unqualified names. Production-facing
+/// registries use a reserved versioned namespace so an installed generic
+/// package can coexist with legacy monomorphic declarations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListLibraryNames {
+    pub datatype: String,
+    pub nil: String,
+    pub cons: String,
+    pub all: String,
+    pub member: String,
+    pub nodup: String,
+    pub append: String,
+    pub length: String,
+}
+
+impl ListLibraryNames {
+    pub fn canonical() -> Self {
+        Self::under_namespace("")
+    }
+
+    pub fn under_namespace(namespace: &str) -> Self {
+        let qualify = |leaf: &str| {
+            if namespace.is_empty() {
+                leaf.to_string()
+            } else {
+                format!("{namespace}.{leaf}")
+            }
+        };
+        Self {
+            datatype: qualify("List"),
+            nil: qualify("nil"),
+            cons: qualify("cons"),
+            all: qualify("All"),
+            member: qualify("Member"),
+            nodup: qualify("Nodup"),
+            append: qualify("append"),
+            length: qualify("length"),
+        }
+    }
+}
+
 /// The Nat-specific extension of the generic list package.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListLength {
@@ -41,22 +84,32 @@ impl ListLibrary {
     /// Install `List`, its constructors, and the `All`, `Member`, `Nodup`, and
     /// `append` structural definitions as one atomic package.
     pub fn install(elaborator: &mut SpikeElaborator) -> Result<Self, SpikeError> {
+        Self::install_named(elaborator, &ListLibraryNames::canonical())
+    }
+
+    pub fn install_named(
+        elaborator: &mut SpikeElaborator,
+        names: &ListLibraryNames,
+    ) -> Result<Self, SpikeError> {
         let mut staged = elaborator.clone();
-        let library = Self::install_into(&mut staged)?;
+        let library = Self::install_into(&mut staged, names)?;
         *elaborator = staged;
         Ok(library)
     }
 
-    fn install_into(elaborator: &mut SpikeElaborator) -> Result<Self, SpikeError> {
+    fn install_into(
+        elaborator: &mut SpikeElaborator,
+        names: &ListLibraryNames,
+    ) -> Result<Self, SpikeError> {
         let element_parameter = TypeParameter::any(0);
         let element_type = CoreType::Parameter(element_parameter);
         let datatype = elaborator.declare_inductive(InductiveSpec::new(
-            "List",
+            names.datatype.clone(),
             vec![element_parameter],
             vec![
-                InductiveConstructorSpec::new("nil", Vec::new()),
+                InductiveConstructorSpec::new(names.nil.clone(), Vec::new()),
                 InductiveConstructorSpec::new(
-                    "cons",
+                    names.cons.clone(),
                     vec![
                         InductiveFieldType::existing(element_type.clone()),
                         InductiveFieldType::Recursive,
@@ -64,14 +117,14 @@ impl ListLibrary {
                 ),
             ],
         ))?;
-        let nil = elaborator.resolve_constant("nil")?;
-        let cons = elaborator.resolve_constant("cons")?;
+        let nil = elaborator.resolve_constant(&names.nil)?;
+        let cons = elaborator.resolve_constant(&names.cons)?;
         let list_type = CoreType::constructor(datatype, vec![element_type.clone()]);
 
         let nil_with_fixed = StructuralArmLayout::new(0, 0, 1);
         let cons_with_fixed = StructuralArmLayout::new(2, 1, 1);
         let all = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-            name: "All".to_string(),
+            name: names.all.clone(),
             type_parameters: vec![element_parameter],
             datatype,
             datatype_arguments: vec![element_type.clone()],
@@ -98,7 +151,7 @@ impl ListLibrary {
         })?;
 
         let member = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-            name: "Member".to_string(),
+            name: names.member.clone(),
             type_parameters: vec![element_parameter],
             datatype,
             datatype_arguments: vec![element_type.clone()],
@@ -134,7 +187,7 @@ impl ListLibrary {
             cons_without_fixed.field(1).expect("Nodup tail binder"),
         );
         let nodup = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-            name: "Nodup".to_string(),
+            name: names.nodup.clone(),
             type_parameters: vec![element_parameter],
             datatype,
             datatype_arguments: vec![element_type.clone()],
@@ -156,7 +209,7 @@ impl ListLibrary {
         })?;
 
         let append = elaborator.declare_structural_definition(StructuralDefinitionSpec {
-            name: "append".to_string(),
+            name: names.append.clone(),
             type_parameters: vec![element_parameter],
             datatype,
             datatype_arguments: vec![element_type],
@@ -210,10 +263,21 @@ impl ListLibrary {
         zero: ConstantId,
         successor: ConstantId,
     ) -> Result<ListLength, SpikeError> {
+        self.install_length_named(elaborator, "length", natural_type, zero, successor)
+    }
+
+    pub fn install_length_named(
+        &self,
+        elaborator: &mut SpikeElaborator,
+        name: impl Into<String>,
+        natural_type: CoreType,
+        zero: ConstantId,
+        successor: ConstantId,
+    ) -> Result<ListLength, SpikeError> {
         let mut staged = elaborator.clone();
         let layout = StructuralArmLayout::new(2, 1, 0);
         let constant = staged.declare_structural_definition(StructuralDefinitionSpec {
-            name: "length".to_string(),
+            name: name.into(),
             type_parameters: vec![self.element_parameter],
             datatype: self.datatype,
             datatype_arguments: vec![CoreType::Parameter(self.element_parameter)],
