@@ -251,6 +251,23 @@ impl<'a> CompatibilityLowerer<'a> {
                     CoreType::constructor(constructor, Vec::new())
                 }
             }
+            Type::App(name, arguments) => {
+                if self.type_parameters.contains_key(name) {
+                    return Err(LoweringError::new(format!(
+                        "rank-one type parameter `{name}` cannot be applied to type arguments"
+                    )));
+                }
+                let constructor = self.types.resolve(name).ok_or_else(|| {
+                    LoweringError::new(format!("unknown compatibility type constructor `{name}`"))
+                })?;
+                CoreType::constructor(
+                    constructor,
+                    arguments
+                        .iter()
+                        .map(|argument| self.lower_type(argument))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            }
             Type::Prod(left, right) => {
                 CoreType::product(self.lower_type(left)?, self.lower_type(right)?)
             }
@@ -1004,6 +1021,7 @@ fn type_mismatch(pattern: &CoreType, actual: &CoreType) -> LoweringError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hol::library::ListLibrary;
     use crate::hol::prelude::CompatibilityPrelude;
     use crate::hol::spike::SpikeElaborator;
 
@@ -1158,6 +1176,33 @@ mod tests {
                 .legacy_set_type(nat)
                 .map_err(Into::into)
         );
+    }
+
+    #[test]
+    fn lowers_explicit_rank_one_type_constructor_applications() {
+        let mut elaborator = SpikeElaborator::new();
+        let prelude = CompatibilityPrelude::install(&mut elaborator).expect("prelude");
+        let lists = ListLibrary::install(&mut elaborator).expect("generic List");
+        let mut lowerer =
+            CompatibilityLowerer::new(elaborator.types(), elaborator.constants(), &prelude)
+                .expect("lowerer");
+        let nat = prelude.nat_type();
+        assert_eq!(
+            lowerer.lower_type(&Type::App("List".to_string(), vec![Type::Nat])),
+            Ok(lists.list_type(nat.clone()))
+        );
+        let parameter = TypeParameter::first_order(701);
+        lowerer
+            .bind_type_parameter("A", parameter)
+            .expect("type parameter");
+        let parameter_error = lowerer
+            .lower_type(&Type::App("A".to_string(), vec![Type::Nat]))
+            .expect_err("rank-one parameters are not higher-kinded");
+        assert!(parameter_error.message.contains("cannot be applied"));
+        let arity_error = lowerer
+            .lower_type(&Type::App("Nat".to_string(), vec![Type::Nat]))
+            .expect_err("monomorphic constructors reject arguments");
+        assert!(arity_error.message.contains("expects 0 argument"));
     }
 
     #[test]

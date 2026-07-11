@@ -13,6 +13,7 @@ pub type Name = String;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Named(Name),
+    App(Name, Vec<Type>),
     Nat,
     Prod(Box<Type>, Box<Type>),
     Set(Box<Type>),
@@ -22,6 +23,18 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Named(name) => write!(f, "{name}"),
+            Type::App(name, arguments) => {
+                write!(f, "{name}")?;
+                for argument in arguments {
+                    match argument {
+                        Type::Named(_) | Type::Nat => write!(f, " {argument}")?,
+                        Type::App(_, _) | Type::Prod(_, _) | Type::Set(_) => {
+                            write!(f, " ({argument})")?
+                        }
+                    }
+                }
+                Ok(())
+            }
             Type::Nat => write!(f, "Nat"),
             Type::Prod(left, right) => write!(f, "Prod {left} {right}"),
             Type::Set(elem) => write!(f, "Set {elem}"),
@@ -5630,6 +5643,32 @@ fn canonicalize_type(env: &Env, ctx: &Context, ty: &Type) -> Result<Type, Valida
             Box::new(canonicalize_type(env, ctx, right)?),
         )),
         Type::Set(elem) => Ok(Type::Set(Box::new(canonicalize_type(env, ctx, elem)?))),
+        Type::App(name, arguments) => {
+            let name = if ctx.has_type_var(name) {
+                name.clone()
+            } else if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.has_sort(candidate))
+            {
+                name
+            } else if let Some(matches) = env.ambiguous_sort_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "type constructor",
+                    name,
+                    &matches,
+                )));
+            } else {
+                return Err(ValidationError::new(format!(
+                    "unknown type constructor `{name}`"
+                )));
+            };
+            Ok(Type::App(
+                name,
+                arguments
+                    .iter()
+                    .map(|argument| canonicalize_type(env, ctx, argument))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ))
+        }
         Type::Named(name) if ctx.has_type_var(name) => Ok(Type::Named(name.clone())),
         Type::Named(name) => {
             if let Some(name) =
@@ -6928,7 +6967,7 @@ fn collect_first_order_term_signature(
 fn first_order_sort_name(ty: &Type) -> Option<Name> {
     match ty {
         Type::Named(name) => Some(name.clone()),
-        Type::Nat | Type::Prod(_, _) | Type::Set(_) => None,
+        Type::Nat | Type::App(_, _) | Type::Prod(_, _) | Type::Set(_) => None,
     }
 }
 
@@ -7934,6 +7973,31 @@ fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationEr
             validate_type(env, ctx, right)
         }
         Type::Set(elem) => validate_type(env, ctx, elem),
+        Type::App(name, arguments) => {
+            for argument in arguments {
+                validate_type(env, ctx, argument)?;
+            }
+            if ctx.has_type_var(name) {
+                return Err(ValidationError::new(format!(
+                    "rank-one type parameter `{name}` cannot take type arguments"
+                )));
+            }
+            if env.has_sort(name) {
+                return Err(ValidationError::new(format!(
+                    "legacy type `{name}` does not take type arguments"
+                )));
+            }
+            if let Some(matches) = env.ambiguous_sort_names(name) {
+                return Err(ValidationError::new(ambiguous_reference_message(
+                    "type constructor",
+                    name,
+                    &matches,
+                )));
+            }
+            Err(ValidationError::new(format!(
+                "unknown type constructor `{name}`"
+            )))
+        }
         Type::Named(name) if env.has_sort(name) || ctx.has_type_var(name) => Ok(()),
         Type::Named(name) => {
             if let Some(matches) = env.ambiguous_sort_names(name) {
@@ -9608,6 +9672,13 @@ fn subst_type_schema(ty: &Type, subst: &SchemaSubst) -> Type {
             Box::new(subst_type_schema(right, subst)),
         ),
         Type::Set(elem) => Type::Set(Box::new(subst_type_schema(elem, subst))),
+        Type::App(name, arguments) => Type::App(
+            name.clone(),
+            arguments
+                .iter()
+                .map(|argument| subst_type_schema(argument, subst))
+                .collect(),
+        ),
         Type::Named(name) => subst
             .type_args
             .get(name)
@@ -11088,6 +11159,39 @@ impl Tokens {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        let head = self.parse_type_atom()?;
+        let mut arguments = Vec::new();
+        while self.type_argument_starts() {
+            arguments.push(self.parse_type_argument()?);
+        }
+        if arguments.is_empty() {
+            return Ok(head);
+        }
+        match head {
+            Type::Named(name) => Ok(Type::App(name, arguments)),
+            other => Err(ParseError::new(format!(
+                "type `{other}` cannot take additional type arguments"
+            ))
+            .with_span(self.current_span())),
+        }
+    }
+
+    fn type_argument_starts(&self) -> bool {
+        matches!(self.peek(), TokenKind::Ident(_))
+            || matches!(self.peek(), TokenKind::Sym(sym) if sym == "(")
+    }
+
+    fn parse_type_argument(&mut self) -> Result<Type, ParseError> {
+        if self.eat_sym("(") {
+            let argument = self.parse_type()?;
+            self.expect_sym(")")?;
+            Ok(argument)
+        } else {
+            self.parse_type_atom()
+        }
+    }
+
+    fn parse_type_atom(&mut self) -> Result<Type, ParseError> {
         let name = self.parse_qualified_ident()?;
         match name.as_str() {
             "Prop" | "Type" => Err(ParseError::new(format!(
@@ -11095,11 +11199,11 @@ impl Tokens {
             ))),
             "Nat" => Ok(Type::Nat),
             "Prod" => {
-                let left = self.parse_type()?;
-                let right = self.parse_type()?;
+                let left = self.parse_type_argument()?;
+                let right = self.parse_type_argument()?;
                 Ok(Type::Prod(Box::new(left), Box::new(right)))
             }
-            "Set" => Ok(Type::Set(Box::new(self.parse_type()?))),
+            "Set" => Ok(Type::Set(Box::new(self.parse_type_argument()?))),
             _ => Ok(Type::Named(name)),
         }
     }
@@ -15375,6 +15479,12 @@ fn type_has_unresolved_schema_param(ty: &Type, params: &[Param], subst: &SchemaS
                 || type_has_unresolved_schema_param(right, params, subst)
         }
         Type::Set(elem) => type_has_unresolved_schema_param(elem, params, subst),
+        Type::App(name, arguments) => {
+            (schema_type_param(params, name) && !subst.type_args.contains_key(name))
+                || arguments
+                    .iter()
+                    .any(|argument| type_has_unresolved_schema_param(argument, params, subst))
+        }
         Type::Nat | Type::Named(_) => false,
     }
 }
@@ -16647,6 +16757,18 @@ fn unify_type(
     schema_subst: &mut SchemaSubst,
 ) -> Result<(), ()> {
     match pattern {
+        Type::App(pattern_name, pattern_arguments) => {
+            let Type::App(target_name, target_arguments) = target else {
+                return Err(());
+            };
+            if pattern_name != target_name || pattern_arguments.len() != target_arguments.len() {
+                return Err(());
+            }
+            for (pattern, target) in pattern_arguments.iter().zip(target_arguments) {
+                unify_type(pattern, target, schema_params, schema_subst)?;
+            }
+            Ok(())
+        }
         Type::Prod(pattern_left, pattern_right) => {
             let Type::Prod(target_left, target_right) = target else {
                 return Err(());
@@ -16757,6 +16879,62 @@ mod tests {
             result.diagnostics
         );
         result
+    }
+
+    #[test]
+    fn rank_one_type_application_parses_and_formats_without_changing_legacy_atoms() {
+        assert_eq!(
+            parse_type_str("List Nat").expect("parse List Nat"),
+            Type::App("List".to_string(), vec![Type::Nat])
+        );
+        let nested = Type::App(
+            "List".to_string(),
+            vec![Type::App("List".to_string(), vec![Type::Nat])],
+        );
+        assert_eq!(nested.to_string(), "List (List Nat)");
+        assert_eq!(
+            parse_type_str(&nested.to_string()).expect("round-trip nested application"),
+            nested
+        );
+        let binary = Type::App(
+            "Either".to_string(),
+            vec![Type::Nat, Type::Set(Box::new(Type::Nat))],
+        );
+        assert_eq!(binary.to_string(), "Either Nat (Set Nat)");
+        assert_eq!(
+            parse_type_str(&binary.to_string()).expect("round-trip binary application"),
+            binary
+        );
+        assert_eq!(
+            parse_type_str("Set Nat"),
+            Ok(Type::Set(Box::new(Type::Nat)))
+        );
+        assert_eq!(
+            parse_type_str("Prod Nat Nat"),
+            Ok(Type::Prod(Box::new(Type::Nat), Box::new(Type::Nat)))
+        );
+
+        let parameters = vec![Param {
+            name: "A".to_string(),
+            kind: ParamKind::Type,
+        }];
+        let mut substitution = SchemaSubst::default();
+        unify_type(
+            &Type::App("List".to_string(), vec![Type::Named("A".to_string())]),
+            &Type::App("List".to_string(), vec![Type::Nat]),
+            &parameters,
+            &mut substitution,
+        )
+        .expect("infer a schema argument inside a type application");
+        assert_eq!(substitution.type_args.get("A"), Some(&Type::Nat));
+    }
+
+    #[test]
+    fn legacy_monomorphic_sorts_reject_type_arguments_explicitly() {
+        check_err_contains(
+            "sort List\nconst xs : List Nat\n",
+            "legacy type `List` does not take type arguments",
+        );
     }
 
     fn check_err_contains(source: &str, needle: &str) {

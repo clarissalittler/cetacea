@@ -605,14 +605,22 @@ trust-free and fragment-precise. `std/hol/finite@1` now registers `HasCard`,
 records its List dependency, validates the exact three definition receipts,
 and leaves generated datatype evidence correctly client-owned. The
 finite-registry checkpoint artifacts are 3,516,376 bytes natively and
-1,348,356 bytes in Wasm, below the 1.5 MB review line.
+1,348,356 bytes in Wasm, below the 1.5 MB review line. The shared surface now
+parses and round-trips prefix rank-one type applications such as `List Nat`;
+substitution, schema inference, and HOL lowering preserve them and validate
+constructor arity. Legacy monomorphic sorts still reject arguments until a
+package alias is explicitly bound. See
+[`hol/H6_SURFACE_IMPORTS.md`](hol/H6_SURFACE_IMPORTS.md) for the logical-import
+authority and atomic-alias design. This checkpoint is 3,510,712 bytes natively
+and 1,344,497 bytes in Wasm.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
   cardinality-transport package and registry record plus finite-enumeration
-  evidence generation and its registry record are implemented; surface imports
-  remain.
+  evidence generation and its registry record are implemented. Rank-one type
+  application syntax and lowering are implemented; atomic package alias binding
+  and end-to-end surface imports remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

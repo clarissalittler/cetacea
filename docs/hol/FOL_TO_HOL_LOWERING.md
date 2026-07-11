@@ -413,3 +413,14 @@ misreported as builtin. Dependency installation, collisions, core rebinding,
 and repeated installation all fail closed or remain idempotent as appropriate;
 the reserved name does not capture a legacy `HasCard`. The checkpoint artifacts
 are 3,516,376 bytes for the native CLI and 1,348,356 bytes for Wasm.
+
+The shared source `Type` now has explicit rank-one constructor application.
+Prefix syntax (`List Nat`, `Either Nat (Set Nat)`) round-trips through display,
+schema substitution and inference recurse through its arguments, and the HOL
+lowerer resolves the checked constructor and validates its arity. Applying a
+rank-one parameter as a higher-kinded constructor is rejected. This does not
+silently reinterpret legacy declarations: `sort List` followed by `List Nat`
+still fails until a versioned logical package import binds the generic List.
+The import/authority seam is specified separately in `H6_SURFACE_IMPORTS.md`.
+The checkpoint artifacts are 3,510,712 bytes for the native CLI and 1,344,497
+bytes for Wasm.

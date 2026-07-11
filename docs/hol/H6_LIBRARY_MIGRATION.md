@@ -88,6 +88,15 @@ facts such as `traffic_has_card` deliberately remain client theorem receipts,
 not declarations owned by the generic package. Installing finite enumeration
 can stage List automatically, and a collision rolls the entire closure back.
 
+The shared surface AST now represents rank-one constructor application and the
+parser accepts prefix forms such as `List Nat` and `List (List Nat)`. Formatting
+round-trips nested and multi-argument applications; theorem-schema substitution
+and inference recurse through them; and compatibility lowering resolves the
+checked constructor and validates arity. Rank-one type parameters cannot be
+misused as higher-kinded constructors. A monomorphic legacy `sort List` still
+rejects `List Nat` with an explicit diagnostic until a logical package import
+binds the generic constructor.
+
 These are not yet student-visible libraries. The packages target the checked
 core, and `CompatibilityElaborator` exposes explicit list, cardinality, and
 finite installers, but the `.ctea` parser, standard-library import
@@ -98,9 +107,11 @@ can coexist and keep their original meanings.
 
 ## Remaining migration slices
 
-1. Add student-facing rank-one type application and generic declaration syntax,
-   then publish the list package through the standard library. Retain aliases
-   for the current monomorphic list vocabulary for one release cycle.
+1. Bind the implemented rank-one type-application syntax to atomic logical
+   package imports, add generic declaration syntax, then publish the list
+   package through the standard library. Retain aliases for the current
+   monomorphic list vocabulary for one release cycle. The import seam is
+   specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Route package provenance and receipt names into shadow/JSON results and
    assignment import allowlists when surface imports can request a package.
 3. Register and expose graph instances once surface imports can bind a checked
@@ -128,5 +139,5 @@ can coexist and keep their original meanings.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the finite-registry checkpoint the release CLI is 3,516,376 bytes and the raw
-Wasm module is 1,348,356 bytes, still below the 1.5 MB review line.
+At the rank-one type-surface checkpoint the release CLI is 3,510,712 bytes and
+the raw Wasm module is 1,344,497 bytes, still below the 1.5 MB review line.

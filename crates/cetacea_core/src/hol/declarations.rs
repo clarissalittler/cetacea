@@ -903,6 +903,9 @@ fn lower_inductive_field(
         Type::Set(_) => Err(CompatibilityDeclarationError::new(format!(
             "data type `{datatype}` uses unsupported nested recursion under `Set`"
         ))),
+        Type::App(constructor, _) => Err(CompatibilityDeclarationError::new(format!(
+            "data type `{datatype}` uses unsupported nested recursion under `{constructor}`"
+        ))),
         Type::Named(_) | Type::Nat => unreachable!("direct recursion handled above"),
     }
 }
@@ -920,6 +923,12 @@ fn type_mentions_name(ty: &Type, name: &str) -> bool {
             type_mentions_name(left, name) || type_mentions_name(right, name)
         }
         Type::Set(element) => type_mentions_name(element, name),
+        Type::App(constructor, arguments) => {
+            constructor == name
+                || arguments
+                    .iter()
+                    .any(|argument| type_mentions_name(argument, name))
+        }
     }
 }
 
