@@ -1568,6 +1568,9 @@ pub struct CheckedTheorem {
 pub struct CheckResult {
     pub theorems: Vec<CheckedTheorem>,
     pub diagnostics: Vec<Diagnostic>,
+    /// The legacy checker encountered an exact logical package import that
+    /// must be retried with the HOL compatibility sidecar enabled.
+    pub requires_hol_shadow: bool,
 }
 
 /// Kind of legacy declaration mirrored by the opt-in HOL shadow checker.
@@ -3417,6 +3420,7 @@ impl FileChecker {
         #[cfg(not(feature = "hol-shadow"))]
         {
             let _ = (package, alias);
+            self.result.requires_hol_shadow = true;
             self.result.diagnostics.push(diagnostic_at(
                 source_path,
                 line,
@@ -3428,6 +3432,7 @@ impl FileChecker {
         #[cfg(feature = "hol-shadow")]
         {
             if self.hol_shadow.is_none() {
+                self.result.requires_hol_shadow = true;
                 self.result.diagnostics.push(diagnostic_at(
                     source_path,
                     line,
@@ -19218,6 +19223,7 @@ theorem list_refl (xs : L.List Nat) : xs = xs := by
   refl
 "#;
         let legacy_only = check_file(source);
+        assert!(legacy_only.requires_hol_shadow);
         assert!(format!("{:#?}", legacy_only.diagnostics).contains("requires HOL shadow checking"));
 
         let report = check_file_with_hol_shadow(source);
@@ -20841,7 +20847,9 @@ theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
 
     #[test]
     fn logical_hol_import_requires_shadow_authority() {
-        check_err_contains("import std/hol/list@1\n", "requires HOL shadow checking");
+        let result = check_file("import std/hol/list@1\n");
+        assert!(result.requires_hol_shadow);
+        assert!(format!("{:#?}", result.diagnostics).contains("requires HOL shadow checking"));
     }
 
     #[test]

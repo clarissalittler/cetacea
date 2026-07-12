@@ -110,8 +110,10 @@ accepts explicit `A`, predicate-lambda `P`, and scrutinee `xs` parameters.
 Applying it to a first-order property keeps the root theorem
 `fol+induction`, records the `Induction` feature, and retains the stable package
 receipt. Direct legacy unfolding and generic-List induction synthesis remain
-unavailable. Default checking rejects the logical import. Repeated imports are
-idempotent. Finite and cardinality package IDs are recognized but reject with
+unavailable. Low-level legacy-only core entry points reject the logical import;
+the native CLI and browser automatically select fail-closed dual checking when
+an exact package import is present. Repeated imports are idempotent. Finite and
+cardinality package IDs are recognized but reject with
 an explicit surface-not-implemented diagnostic. The induction checkpoint
 artifacts are 3,764,424 bytes for the native CLI and 1,368,943 bytes for Wasm.
 
@@ -176,6 +178,14 @@ proofs. The web example menu includes the public-surface `length_append` proof.
 Size-optimized LTO produces a 1,651,664-byte native CLI and a 1,167,950-byte raw
 Wasm module.
 
+Native check mode now makes the same selection automatically. A logical package
+import in the root or any transitive file import reroutes the check through the
+HOL sidecar, fails on any replay mismatch, and reports the exact package and
+receipt data without requiring `--hol-shadow`. TUI and line modes use the same
+detection for package-aware goals; the flag remains useful to force certified
+analysis on package-free files. Low-level legacy-only core APIs are unchanged.
+This checkpoint is 1,656,344 bytes natively and 1,167,984 bytes in Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
 graph packages remain instance-scoped until an import can bind a particular
@@ -203,6 +213,6 @@ Predicate-valued `All` arguments, explicit term ascriptions, all structural
 predicate constructor laws, right identity, associativity, and length over
 append and browser/editor verification are complete as well. The next source
 slices continue with generic declarations, finite and cardinality aliases,
-browser assignment-policy enforcement, and an explicit decision about ordinary
-(non-shadow) native acceptance. The generic induction principle itself is
-exposed through a receipt-backed theorem alias.
+browser assignment-policy enforcement, and an explicit decision about the
+low-level core-API cutover. The generic induction principle itself is exposed
+through a receipt-backed theorem alias.

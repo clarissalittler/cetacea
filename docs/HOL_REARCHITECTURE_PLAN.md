@@ -718,6 +718,14 @@ UI displays the certified fragment and includes a public-surface
 1,651,664 bytes natively and 1,167,950 bytes in raw Wasm, below the 1.5 MB review
 line.
 
+The native CLI now selects that fail-closed path automatically when the legacy
+capability probe encounters an exact logical package import in the root or any
+transitive file. Check mode needs no migration flag and exposes the same JSON
+package and receipt metadata; TUI and line modes select package-aware analysis
+from the same explicit core result flag. Package-free files retain their legacy
+path unless `--hol-shadow` is supplied. This checkpoint measures 1,656,344
+bytes natively and 1,167,984 bytes in raw Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -732,8 +740,9 @@ line.
   List induction is available through `apply`. Checked term ascriptions resolve
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
   constructor laws are source-facing. `All` constructor laws now demonstrate
-  instance-sensitive fragment enforcement. Generic source declarations and
-  ordinary end-to-end acceptance remain; right append identity, append
+  instance-sensitive fragment enforcement. Generic source declarations and a
+  decision about low-level core-API cutover remain; native and browser
+  end-to-end acceptance are automatic. Right append identity, append
   associativity, and length over append now pass through both the package and
   student-facing proof routes.
 - Keep compatibility aliases for current monomorphic course names during one

@@ -201,12 +201,21 @@ HOL-enabled virtual-import path, including certification of completed stepped
 proofs. Size-optimized LTO yields a 1,651,664-byte native CLI and a
 1,167,950-byte raw Wasm module.
 
+The native CLI now makes the same fail-closed choice automatically for a root
+or transitive logical package import. Core `CheckResult` carries an explicit
+capability flag, so check, TUI, and line modes can reroute without recognizing
+diagnostic prose; package-free sources retain the legacy path unless
+`--hol-shadow` is requested. Native check JSON exposes the complete package and
+receipt report without that flag. This checkpoint measures 1,656,344 bytes
+natively and 1,167,984 bytes in raw Wasm.
+
 ## Remaining migration slices
 
-1. Add generic declaration syntax, then publish the signature, equation,
-   induction, and derived-theorem surfaces for ordinary checking. Retain
-   aliases for the current monomorphic list
-   vocabulary for one release cycle. The import seam is
+1. Add generic declaration syntax and extend the source surface beyond the
+   pre-registered package aliases, then decide when low-level legacy core APIs
+   should select the sidecar automatically. Native CLI and browser acceptance
+   are already fail-closed and automatic. Retain aliases for the current
+   monomorphic list vocabulary for one release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser assignment-policy

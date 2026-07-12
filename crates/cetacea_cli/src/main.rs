@@ -13,13 +13,14 @@ use cetacea_core::hol::{
 };
 use cetacea_core::{
     check_file_at_path, check_file_at_path_with_hol_shadow, check_source_at_path,
-    explain_theorem_at_path, explain_theorem_at_path_with_hol_shadow,
-    explain_theorem_in_source_at_path, explain_theorem_in_source_at_path_with_hol_shadow,
-    goals_at_path, goals_at_path_with_hol_shadow, goals_at_source_path,
-    goals_at_source_path_with_hol_shadow, outline, run_tactic_at_path,
-    run_tactic_at_path_with_hol_shadow, CheckResult, CheckedTheorem, DeclarationStatus, Diagnostic,
-    DiagnosticSeverity, ExplanationResult, GoalSnapshot, GoalStepResult, HolShadowMismatch,
-    HolShadowReport, HolShadowStatementClassification, HolShadowTheorem, Position, SourceOutline,
+    check_source_at_path_with_hol_shadow, explain_theorem_at_path,
+    explain_theorem_at_path_with_hol_shadow, explain_theorem_in_source_at_path,
+    explain_theorem_in_source_at_path_with_hol_shadow, goals_at_path,
+    goals_at_path_with_hol_shadow, goals_at_source_path, goals_at_source_path_with_hol_shadow,
+    outline, run_tactic_at_path, run_tactic_at_path_with_hol_shadow, CheckResult, CheckedTheorem,
+    DeclarationStatus, Diagnostic, DiagnosticSeverity, ExplanationResult, GoalSnapshot,
+    GoalStepResult, HolShadowMismatch, HolShadowReport, HolShadowStatementClassification,
+    HolShadowTheorem, Position, SourceLocation, SourceOutline,
 };
 
 use assignment::{parse_manifest, AssignmentManifest};
@@ -376,14 +377,27 @@ fn run_check(
     };
     let hol_policy =
         cli_hol_policy.or_else(|| assignment.as_ref().map(LoadedAssignment::teaching_policy));
-    let shadow =
-        (run_hol_shadow || hol_policy.is_some()).then(|| check_file_at_path_with_hol_shadow(path));
-    let standalone;
+    let requested_hol = run_hol_shadow || hol_policy.is_some();
+    let mut automatic_hol = false;
+    let mut standalone = None;
+    let shadow = if requested_hol {
+        Some(check_file_at_path_with_hol_shadow(path))
+    } else {
+        let checked = check_file_at_path(path);
+        if checked.requires_hol_shadow {
+            automatic_hol = true;
+            Some(check_file_at_path_with_hol_shadow(path))
+        } else {
+            standalone = Some(checked);
+            None
+        }
+    };
     let result = if let Some(shadow) = &shadow {
         &shadow.legacy
     } else {
-        standalone = check_file_at_path(path);
-        &standalone
+        standalone
+            .as_ref()
+            .expect("a non-HOL check retains its standalone result")
     };
     let violations = check_policy_violations(&result, policy);
     let hol_violations = shadow
@@ -399,7 +413,7 @@ fn run_check(
             }
             print_policy_violations(&violations);
             if let Some(shadow) = &shadow {
-                print_hol_shadow(shadow);
+                print_hol_shadow(shadow, automatic_hol);
             }
             print_hol_policy_violations(&hol_violations, hol_policy);
         }
@@ -427,17 +441,22 @@ fn run_check(
     }
 }
 
-fn print_hol_shadow(report: &HolShadowReport) {
+fn print_hol_shadow(report: &HolShadowReport, automatic: bool) {
+    let label = if automatic {
+        "HOL package check"
+    } else {
+        "HOL shadow"
+    };
     if report.is_match() {
         println!(
-            "HOL shadow matched {} accepted declarations ({} theorem receipts).",
+            "{label} matched {} accepted declarations ({} theorem receipts).",
             report.checked_declarations.len(),
             report.theorems.len()
         );
         return;
     }
     eprintln!(
-        "error: HOL shadow disagreed on {} of {} accepted declaration attempts",
+        "error: {label} disagreed on {} of {} accepted declaration attempts",
         report.mismatches.len(),
         report.attempted_declarations
     );
@@ -1031,6 +1050,7 @@ fn char_to_byte_index(text: &str, char_idx: usize) -> usize {
 
 struct TuiApp {
     path: PathBuf,
+    hol_shadow_forced: bool,
     hol_shadow: bool,
     buffer: TextBuffer,
     cursor_line: usize,
@@ -1058,7 +1078,7 @@ struct TuiApp {
 }
 
 impl TuiApp {
-    fn open(path: PathBuf, hol_shadow: bool) -> io::Result<Self> {
+    fn open(path: PathBuf, force_hol_shadow: bool) -> io::Result<Self> {
         let source = fs::read_to_string(&path)?;
         let initial_outline = outline(&source);
         let cursor_line = initial_outline
@@ -1070,7 +1090,8 @@ impl TuiApp {
         let saved_lines = Some(buffer.lines.clone());
         Ok(Self {
             path,
-            hol_shadow,
+            hol_shadow_forced: force_hol_shadow,
+            hol_shadow: force_hol_shadow,
             buffer,
             cursor_line,
             cursor_col: 0,
@@ -1092,7 +1113,7 @@ impl TuiApp {
             check_result: CheckResult::default(),
             goals: GoalStepResult::default(),
             explanation: ExplanationResult::default(),
-            status: if hol_shadow {
+            status: if force_hol_shadow {
                 "Loaded with HOL-certified goal hints. Ctrl-S saves, Ctrl-Q quits.".to_string()
             } else {
                 "Loaded file. Ctrl-S saves, Ctrl-Q quits, m opens menu.".to_string()
@@ -1116,7 +1137,17 @@ impl TuiApp {
     fn refresh_analysis(&mut self) {
         let source = self.source();
         self.outline = outline(&source);
-        self.check_result = check_source_at_path(&source, &self.path);
+        let (check_result, hol_shadow) =
+            check_editor_source(&source, &self.path, self.hol_shadow_forced);
+        if hol_shadow != self.hol_shadow {
+            self.status = if hol_shadow {
+                "Logical package import enabled HOL-certified analysis.".to_string()
+            } else {
+                "No logical package import; using ordinary analysis.".to_string()
+            };
+        }
+        self.hol_shadow = hol_shadow;
+        self.check_result = check_result;
         let position = Position {
             line: self.cursor_line + 1,
             column: self.cursor_col + 1,
@@ -2077,6 +2108,7 @@ fn push_wrapped(lines: &mut Vec<String>, text: &str, width: usize) {
 
 struct InteractiveState {
     path: PathBuf,
+    hol_shadow_forced: bool,
     hol_shadow: bool,
     outline: SourceOutline,
     last_check: CheckResult,
@@ -2086,10 +2118,11 @@ struct InteractiveState {
 }
 
 impl InteractiveState {
-    fn new(path: PathBuf, hol_shadow: bool) -> Self {
+    fn new(path: PathBuf, force_hol_shadow: bool) -> Self {
         Self {
             path,
-            hol_shadow,
+            hol_shadow_forced: force_hol_shadow,
+            hol_shadow: force_hol_shadow,
             outline: SourceOutline::default(),
             last_check: CheckResult::default(),
             selected_theorem: None,
@@ -2100,7 +2133,9 @@ impl InteractiveState {
 
     fn reload(&mut self) {
         self.outline = load_outline(&self.path);
-        self.last_check = check_file_at_path(&self.path);
+        let (last_check, hol_shadow) = check_editor_path(&self.path, self.hol_shadow_forced);
+        self.last_check = last_check;
+        self.hol_shadow = hol_shadow;
         if self
             .selected_theorem
             .as_ref()
@@ -2187,7 +2222,9 @@ fn handle_interactive_command(state: &mut InteractiveState, line: &str) -> bool 
             true
         }
         "c" | "check" => {
-            state.last_check = check_file_at_path(&state.path);
+            let (last_check, hol_shadow) = check_editor_path(&state.path, state.hol_shadow_forced);
+            state.last_check = last_check;
+            state.hol_shadow = hol_shadow;
             if !diagnostics_have_errors(&state.last_check.diagnostics) {
                 print_accepted(&state.last_check);
             }
@@ -3075,6 +3112,81 @@ fn diagnostic_label(diagnostic: &Diagnostic) -> &'static str {
     }
 }
 
+fn fail_closed_hol_result(report: HolShadowReport) -> CheckResult {
+    let matches = report.is_match();
+    let attempted = report.attempted_declarations;
+    let checked = report.checked_declarations.len();
+    let mut result = report.legacy;
+    for mismatch in report.mismatches {
+        result.diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            span: None,
+            location: Some(SourceLocation {
+                path: mismatch
+                    .source_path
+                    .as_ref()
+                    .map(|path| path.display().to_string()),
+                line: mismatch.line,
+            }),
+            message: format!(
+                "HOL replay rejected {} `{}`: {}",
+                mismatch.kind, mismatch.declaration, mismatch.message
+            ),
+            notes: Vec::new(),
+            suggestions: Vec::new(),
+        });
+    }
+    if !matches && result.diagnostics.is_empty() {
+        result.diagnostics.push(Diagnostic {
+            severity: DiagnosticSeverity::Error,
+            span: None,
+            location: None,
+            message: format!(
+                "HOL replay checked {checked} of {attempted} accepted declaration attempts"
+            ),
+            notes: Vec::new(),
+            suggestions: Vec::new(),
+        });
+    }
+    result
+}
+
+fn check_editor_path(path: &Path, force_hol: bool) -> (CheckResult, bool) {
+    if force_hol {
+        return (
+            fail_closed_hol_result(check_file_at_path_with_hol_shadow(path)),
+            true,
+        );
+    }
+    let legacy = check_file_at_path(path);
+    if legacy.requires_hol_shadow {
+        (
+            fail_closed_hol_result(check_file_at_path_with_hol_shadow(path)),
+            true,
+        )
+    } else {
+        (legacy, false)
+    }
+}
+
+fn check_editor_source(source: &str, path: &Path, force_hol: bool) -> (CheckResult, bool) {
+    if force_hol {
+        return (
+            fail_closed_hol_result(check_source_at_path_with_hol_shadow(source, path)),
+            true,
+        );
+    }
+    let legacy = check_source_at_path(source, path);
+    if legacy.requires_hol_shadow {
+        (
+            fail_closed_hol_result(check_source_at_path_with_hol_shadow(source, path)),
+            true,
+        )
+    } else {
+        (legacy, false)
+    }
+}
+
 fn diagnostics_have_errors(diagnostics: &[Diagnostic]) -> bool {
     diagnostics
         .iter()
@@ -3372,6 +3484,75 @@ theorem uses_imported_trust : True := by
     }
 
     #[test]
+    fn check_mode_automatically_certifies_a_transitive_logical_package_import() {
+        let unique = format!(
+            "cetacea-auto-hol-{}-{:?}",
+            process::id(),
+            std::thread::current().id()
+        );
+        let dir = env::temp_dir().join(unique);
+        fs::create_dir_all(&dir).expect("create automatic HOL fixture");
+        let library_path = dir.join("library.ctea");
+        let root_path = dir.join("root.ctea");
+        fs::write(
+            &library_path,
+            r#"import std/hol/list@1 as L
+
+theorem imported_right (A : Type) (xs : L.List A) :
+  L.append(xs, (L.nil : L.List A)) = xs := by
+  exact L.append_nil_right {A := A; xs := xs}
+"#,
+        )
+        .expect("write automatic HOL library");
+        fs::write(
+            &root_path,
+            r#"import library.ctea
+
+theorem root_right (A : Type) (xs : L.List A) :
+  L.append(xs, (L.nil : L.List A)) = xs := by
+  exact imported_right {A := A; xs := xs}
+"#,
+        )
+        .expect("write automatic HOL root");
+
+        let legacy = check_file_at_path(&root_path);
+        assert!(legacy.requires_hol_shadow);
+        let (editor_check, editor_hol) = check_editor_path(&root_path, false);
+        assert!(editor_hol);
+        assert!(editor_check.diagnostics.is_empty());
+
+        let mut line = InteractiveState::new(root_path.clone(), false);
+        line.reload();
+        assert!(line.hol_shadow);
+        assert!(line.last_check.diagnostics.is_empty());
+
+        let mut tui = TuiApp::open(root_path.clone(), false).expect("open automatic HOL TUI");
+        tui.refresh_analysis();
+        assert!(tui.hol_shadow);
+        assert!(tui.check_result.diagnostics.is_empty());
+        tui.buffer = TextBuffer::from_source(
+            "theorem plain (P : Prop) : P -> P := by\n  intro h\n  exact h\n".to_string(),
+        );
+        tui.refresh_analysis();
+        assert!(!tui.hol_shadow);
+        assert!(tui.check_result.diagnostics.is_empty());
+
+        assert_eq!(
+            run_check(
+                &root_path,
+                CheckPolicy::default(),
+                OutputFormat::Text,
+                false,
+                None,
+                None,
+            ),
+            0
+        );
+
+        fs::remove_dir_all(dir).expect("remove automatic HOL fixture");
+    }
+
+    #[test]
     fn assignment_manifest_pins_import_axiom_and_required_signature_independently() {
         let unique = format!(
             "cetacea-assignment-{}-{:?}",
@@ -3628,6 +3809,7 @@ theorem excluded_middle (P : Prop) : P \/ not P := by
                 status: DeclarationStatus::TrustedAxiom,
             }],
             diagnostics: Vec::new(),
+            requires_hol_shadow: false,
         };
         assert!(check_policy_violations(&result, CheckPolicy::strict()).is_empty());
     }

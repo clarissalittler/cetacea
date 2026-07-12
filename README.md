@@ -75,6 +75,12 @@ cargo run -p cetacea_cli -- --strict --json path/to/submission.ctea
 `--deny-sorry`, `--deny-axioms`, and `--deny-classical` policies can be composed
 when a course needs a different trust or logic boundary.
 
+Exact logical imports such as `import std/hol/list@1 as L` automatically select
+fail-closed dual checking in the native CLI. The file is accepted only when the
+teaching checker and HOL replay both succeed, including when the package import
+is reached through another source file. `--hol-shadow` remains available to
+force the same certification for package-free files.
+
 Run the full-screen terminal TUI with:
 
 ```sh

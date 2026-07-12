@@ -88,24 +88,27 @@ The current checkpoint reports:
 | Checked / incomplete / trusted root receipts | 483 / 81 / 24 |
 
 `cetacea --hol-shadow [--json] file.ctea` exposes the same per-file report. A
-shadow mismatch makes that opt-in CLI invocation fail for use in migration CI;
-ordinary native CLI and editor checking remain legacy-authoritative. The
-browser crate now enables `hol-shadow`: its full-file result succeeds only when
-legacy checking and the complete HOL replay both succeed, and it exposes that
-fail-closed result as `hol_certified` with package and receipt metadata.
+shadow mismatch makes that invocation fail for use in migration CI. Native
+check mode automatically selects the same fail-closed report for an exact
+logical package import in the root or any transitive file; package-free checks
+remain legacy-authoritative unless the flag or a HOL policy requests the
+sidecar. The browser crate enables `hol-shadow`: its full-file result succeeds
+only when legacy checking and the complete HOL replay both succeed, and it
+exposes that result as `hol_certified` with package and receipt metadata.
 
-The same opt-in path now classifies a failed theorem signature before any proof
+The same sidecar path now classifies a failed theorem signature before any proof
 receipt can exist. Countermodel diagnostics are dispatched from that certified
 least fragment: propositional truth tables for `prop`, finite structures for
 `fol`, bounded Nat evaluation for `fol+induction`, and no weaker-fragment
-claim for `hol` or a classification failure. Ordinary checking and editor goal
-hints retain their legacy routing by default. Native TUI and line modes can opt
-in with `--hol-shadow`; each goal, tactic-step, or explanation analysis then
-classifies the full theorem signature, displays the certified fragment, and
-gates countermodel hints with it. Browser virtual-import goal, step, and
-explanation APIs now use that same state, reject prefix mismatches, and certify
-completed proofs. Native `--json` exposes the successful file-check pre-receipt
-records, including rejected theorem signatures, as
+claim for `hol` or a classification failure. Package-free checking and editor
+goal hints retain their legacy routing by default. Native TUI and line modes
+select the sidecar automatically for logical imports and can force it with
+`--hol-shadow`; each goal, tactic-step, or explanation analysis then classifies
+the full theorem signature, displays the certified fragment, and gates
+countermodel hints with it. Browser virtual-import goal, step, and explanation
+APIs use that same state, reject prefix mismatches, and certify completed
+proofs. Native `--json` exposes the successful file-check pre-receipt records,
+including rejected theorem signatures, as
 `hol_shadow.statement_classifications`; browser JSON exposes the corresponding
 least fragment and receipt fields directly.
 
@@ -113,10 +116,10 @@ least fragment and receipt fields directly.
 
 | Measurement | Value |
 |---|---:|
-| `cetacea_core/src/lib.rs` | 25,139 lines |
-| Rust unit tests | 440 (21 CLI + 417 core + 2 Wasm) |
-| Native release CLI | 1,651,664 bytes |
-| Wasm release module | 1,167,950 bytes |
+| `cetacea_core/src/lib.rs` | 25,151 lines |
+| Rust unit tests | 441 (22 CLI + 417 core + 2 Wasm) |
+| Native release CLI | 1,656,344 bytes |
+| Wasm release module | 1,167,984 bytes |
 
 Artifact sizes are raw filesystem sizes before transport compression or Wasm
 optimization. They are comparison signals, not release limits.

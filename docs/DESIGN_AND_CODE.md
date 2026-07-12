@@ -1019,6 +1019,16 @@ With `--line`, the CLI starts the older line-oriented terminal shell. It reuses
 the path-backed editor APIs for proof-state display, stepping, theorem search,
 tactic hints, and proof explanations.
 
+Native check mode first uses the legacy checker as a capability probe. If its
+`CheckResult` reports that an exact logical package import requires HOL, the
+CLI reruns the root and its transitive imports through the fail-closed sidecar
+and discards the probe result. TUI buffer refreshes and line reloads use the
+same signal to select package-aware full checks and goal analysis; replay
+mismatches become editor diagnostics. This keeps package-free callers on the
+existing path while avoiding diagnostic-text coupling: the core exposes an
+explicit `requires_hol_shadow` result flag. `--hol-shadow` still forces dual
+checking when no logical import is present.
+
 ## Wasm And Web UI
 
 The wasm crate is intentionally thin, mirroring the CLI. It exports:

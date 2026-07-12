@@ -538,3 +538,11 @@ same compatibility state and certify completed proofs. A bundled
 `length_append` example exercises the public List surface. With size-optimized
 LTO, the complete artifacts are 1,651,664 bytes for the native CLI and
 1,167,950 bytes for raw Wasm.
+
+Native check mode now treats an exact logical package import as a capability
+request rather than a terminal legacy diagnostic. An explicit
+`CheckResult::requires_hol_shadow` flag reroutes the root and all transitive
+imports through fail-closed dual checking without coupling the CLI to rendered
+diagnostic text. TUI and line startup use the same flag; `--hol-shadow` still
+forces certification for package-free sources. This checkpoint is 1,656,344
+bytes natively and 1,167,984 bytes in raw Wasm.
