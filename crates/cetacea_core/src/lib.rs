@@ -588,6 +588,30 @@ pub enum TheoremEvidence {
     Kernel(KernelProof),
     Incomplete(DraftProof),
     TrustedAxiom,
+    HolPackage(HolPackageEvidence),
+}
+
+/// Evidence that a theorem exposed to the transitional proof UI is backed by
+/// a checked theorem receipt from an imported HOL package.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HolPackageEvidence {
+    package: hol::LibraryPackageId,
+    receipt: hol::DeclarationId,
+}
+
+impl HolPackageEvidence {
+    #[cfg(feature = "hol-shadow")]
+    fn new(package: hol::LibraryPackageId, receipt: hol::DeclarationId) -> Self {
+        Self { package, receipt }
+    }
+
+    pub fn package(&self) -> hol::LibraryPackageId {
+        self.package
+    }
+
+    pub fn receipt(&self) -> hol::DeclarationId {
+        self.receipt
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3291,6 +3315,7 @@ impl FileChecker {
             let nodup_name = qualify("Nodup");
             let append_name = qualify("append");
             let length_name = qualify("length");
+            let append_nil_left_name = qualify("append_nil_left");
             let symbol_names = [
                 &nil_name,
                 &cons_name,
@@ -3299,6 +3324,7 @@ impl FileChecker {
                 &nodup_name,
                 &append_name,
                 &length_name,
+                &append_nil_left_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
                 if self.env.has_top_level_name(name) {
@@ -3317,9 +3343,9 @@ impl FileChecker {
             }
             let element_parameter = "A".to_string();
             let element_type = Type::Named(element_parameter.clone());
-            let list_type = Type::App(datatype_name, vec![element_type.clone()]);
+            let list_type = Type::App(datatype_name.clone(), vec![element_type.clone()]);
             let type_params = vec![element_parameter];
-            staged_env.add_rank_one_const(nil_name, type_params.clone(), list_type.clone());
+            staged_env.add_rank_one_const(nil_name.clone(), type_params.clone(), list_type.clone());
             staged_env.add_rank_one_func(
                 cons_name,
                 type_params.clone(),
@@ -3341,12 +3367,17 @@ impl FileChecker {
             );
             staged_env.add_rank_one_pred(nodup_name, type_params.clone(), vec![list_type.clone()]);
             staged_env.add_rank_one_func(
-                append_name,
+                append_name.clone(),
                 type_params.clone(),
                 vec![list_type.clone(), list_type.clone()],
                 list_type.clone(),
             );
-            staged_env.add_rank_one_func(length_name, type_params, vec![list_type], Type::Nat);
+            staged_env.add_rank_one_func(
+                length_name,
+                type_params,
+                vec![list_type.clone()],
+                Type::Nat,
+            );
 
             let shadow = self
                 .hol_shadow
@@ -3377,6 +3408,46 @@ impl FileChecker {
                     .expect("registered package receipts have stable names");
                 shadow.receipt_names.insert(receipt, stable_name);
             }
+            let append_nil_left_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "append_nil_left")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered append_nil_left theorem has a receipt");
+            let theorem_element_parameter = "A".to_string();
+            let theorem_list_type = Type::App(
+                datatype_name,
+                vec![Type::Named(theorem_element_parameter.clone())],
+            );
+            staged_env.add_theorem(Theorem {
+                name: append_nil_left_name,
+                params: vec![
+                    Param {
+                        name: theorem_element_parameter,
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "xs".to_string(),
+                        kind: ParamKind::Term(theorem_list_type),
+                    },
+                ],
+                statement: Formula::eq(
+                    Term::App(
+                        append_name,
+                        vec![Term::Var(nil_name), Term::Var("xs".to_string())],
+                    ),
+                    Term::Var("xs".to_string()),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    append_nil_left_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
             shadow.imported_packages.insert(logical_id.to_string());
             self.env = staged_env;
             self.loaded_library_packages.insert(key);
@@ -18032,6 +18103,64 @@ theorem all_annotated_nil :
             annotated.required_fragment,
             hol::StatementFragment::FirstOrderInductive
         );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_exposes_a_checked_computation_theorem() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as L
+
+theorem append_nil_left_use (A : Type) (xs : L.List A) :
+  L.append(L.nil, xs) = xs := by
+  exact L.append_nil_left {A := A; xs := xs}
+
+theorem append_nil_left_simp (A : Type) (xs : L.List A) :
+  L.append(L.nil, xs) = xs := by
+  simp [L.append_nil_left]
+  refl
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        let theorem = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "append_nil_left_use")
+            .expect("append_nil_left_use receipt");
+        assert_eq!(theorem.hol_status, hol::EvidenceStatus::Checked);
+        assert_eq!(
+            theorem.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(theorem
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/list@1::append_nil_left")
+            }));
+        let simplified = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "append_nil_left_simp")
+            .expect("append_nil_left_simp receipt");
+        assert!(simplified
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/list@1::append_nil_left")
+            }));
     }
 
     #[cfg(feature = "hol-shadow")]

@@ -102,10 +102,13 @@ argument descriptor, so both named predicate parameters and expected-type-
 directed lambdas are accepted. A variable-list `All(P, xs)` remains visibly
 `hol`; a closed nil instance may normalize away the predicate body and retain
 only its `fol+induction` List dependency. No imported List definition is
-available to legacy `simp`, unfolding, or induction yet. Default checking
-rejects the logical import. Repeated imports are idempotent. Finite and
-cardinality package IDs are recognized but reject with an explicit
-surface-not-implemented diagnostic.
+copied into the transitional engine. Instead, the package now publishes the
+checked theorem `append_nil_left`; `exact L.append_nil_left {...}` and
+`simp [L.append_nil_left]` cross both engines and retain the stable package
+receipt as a proof dependency. Direct legacy unfolding and induction remain
+unavailable. Default checking rejects the logical import. Repeated imports are
+idempotent. Finite and cardinality package IDs are recognized but reject with
+an explicit surface-not-implemented diagnostic.
 
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
@@ -131,7 +134,8 @@ import, stable package reporting, JSON, and exact assignment-manifest
 allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments are complete as well. The next source slices
-are computation/induction tactic support, followed by finite and cardinality
-aliases, browser/editor verification, and an explicit decision about ordinary
-(non-shadow) acceptance. This checkpoint produces a 3,711,640-byte native CLI
-and a 1,369,207-byte raw Wasm module.
+expand the checked equation catalog and expose a checked List induction
+principle, followed by finite and cardinality aliases, browser/editor
+verification, and an explicit decision about ordinary (non-shadow) acceptance.
+This checkpoint produces a 3,730,144-byte native CLI and a 1,365,552-byte raw
+Wasm module.

@@ -28,9 +28,9 @@ use super::recursion::{StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
 use super::terms::{
     definitionally_equal, instantiate_binder, instantiate_term_parameters_under_binders, normalize,
-    shift_under_new_binder, ConstantId, CoreTerm,
+    shift_under_new_binder, ConstantId, CoreTerm, TermContext,
 };
-use super::theorems::TheoremId;
+use super::theorems::{HolTheoremStatus, TheoremId};
 use super::types::{CoreType, TypeConstructorId, TypeParameter};
 use super::{DeclarationReceipt, StatementFragment};
 
@@ -237,6 +237,7 @@ impl CompatibilityElaborator {
         let nodup_name = qualify("Nodup");
         let append_name = qualify("append");
         let length_name = qualify("length");
+        let append_nil_left_name = qualify("append_nil_left");
         for name in [
             &datatype_name,
             &nil_name,
@@ -246,6 +247,7 @@ impl CompatibilityElaborator {
             &nodup_name,
             &append_name,
             &length_name,
+            &append_nil_left_name,
         ] {
             self.ensure_name_free(name)?;
         }
@@ -257,12 +259,12 @@ impl CompatibilityElaborator {
         let list_type = installed.lists.list_type(element_type.clone());
         staged.names.insert(datatype_name.clone());
         staged.type_constructors.push(TypeConstructorRegistration {
-            name: datatype_name,
+            name: datatype_name.clone(),
             constructor: installed.lists.datatype,
         });
         for registration in [
             SymbolRegistration {
-                name: nil_name,
+                name: nil_name.clone(),
                 constant: installed.lists.nil,
                 type_parameters: vec![parameter],
                 parameter_types: Vec::new(),
@@ -300,7 +302,7 @@ impl CompatibilityElaborator {
                 result_type: CoreType::Prop,
             },
             SymbolRegistration {
-                name: append_name,
+                name: append_name.clone(),
                 constant: installed.lists.append,
                 type_parameters: vec![parameter],
                 parameter_types: vec![list_type.clone(), list_type.clone()],
@@ -310,12 +312,86 @@ impl CompatibilityElaborator {
                 name: length_name,
                 constant: installed.length.constant,
                 type_parameters: vec![parameter],
-                parameter_types: vec![list_type],
+                parameter_types: vec![list_type.clone()],
                 result_type: installed.length.natural_type.clone(),
             },
         ] {
             staged.finish_symbol(registration)?;
         }
+        let surface_element_parameter = "A".to_string();
+        let append_nil_left_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(Type::App(
+                    datatype_name,
+                    vec![Type::Named(surface_element_parameter.clone())],
+                )),
+            },
+        ];
+        let append_nil_left_statement = Formula::eq(
+            Term::App(
+                append_name.clone(),
+                vec![Term::Var(nil_name.clone()), Term::Var("xs".to_string())],
+            ),
+            Term::Var("xs".to_string()),
+        );
+        let lowered_alias = staged
+            .lower_definition_parameters(&append_nil_left_parameters, |lowerer| {
+                lowerer.lower_formula(&append_nil_left_statement)
+            })?;
+        let core_declaration = staged
+            .core
+            .theorems()
+            .declaration(installed.append_nil_left)
+            .ok_or_else(|| {
+                CompatibilityDeclarationError::new(
+                    "registered append_nil_left theorem handle is missing",
+                )
+            })?;
+        let alias_type_arguments = lowered_alias
+            .type_parameters
+            .iter()
+            .copied()
+            .map(CoreType::Parameter)
+            .collect::<Vec<_>>();
+        let alias_term_arguments = vec![CoreTerm::Bound(0)];
+        let alias_context = lowered_alias
+            .parameter_types
+            .iter()
+            .cloned()
+            .fold(TermContext::new(), TermContext::with_bound);
+        let instantiated_statement = staged
+            .core
+            .theorems()
+            .instantiate_statement(
+                staged.core.types(),
+                staged.core.constants(),
+                &alias_context,
+                installed.append_nil_left,
+                &alias_type_arguments,
+                &alias_term_arguments,
+            )
+            .map_err(|error| CompatibilityDeclarationError::new(error.message))?;
+        if core_declaration.status != HolTheoremStatus::Checked
+            || core_declaration.type_parameters != [parameter]
+            || core_declaration.term_parameters != [list_type.clone()]
+            || instantiated_statement != lowered_alias.body
+        {
+            return Err(CompatibilityDeclarationError::new(
+                "registered append_nil_left surface descriptor does not match its checked theorem",
+            ));
+        }
+        staged.finish_theorem(TheoremRegistration {
+            name: append_nil_left_name,
+            theorem: installed.append_nil_left,
+            parameters: append_nil_left_parameters,
+            type_parameters: vec![parameter],
+            parameter_types: vec![list_type],
+        });
         staged.library_aliases.push(LibraryAliasRegistration {
             package: LibraryPackageId::ListV1,
             namespace,
@@ -2751,13 +2827,13 @@ mod tests {
 
         let mut late_collision = CompatibilityElaborator::new().expect("late collision elaborator");
         late_collision
-            .declare_predicate("L.Member", &[])
+            .declare_predicate("L.append_nil_left", &[])
             .expect("reserve a later qualified alias");
         let before_late_collision = late_collision.clone();
         let error = late_collision
             .import_builtin_list_v1(Some("L"))
             .expect_err("a later alias collision rejects the entire import");
-        assert!(error.message.contains("L.Member"));
+        assert!(error.message.contains("L.append_nil_left"));
         assert_eq!(late_collision, before_late_collision);
     }
 

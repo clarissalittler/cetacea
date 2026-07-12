@@ -448,8 +448,12 @@ the genuinely ambiguous `nil = nil`. This catalog contains signatures only:
 `All` now records its predicate-valued argument separately from ordinary term
 arguments, accepts named predicates and lambdas, and remains classified `hol`
 when that higher-order value survives normalization. Imported computation,
-simplification, and induction remain explicitly unavailable. Default checking
-and finite/cardinality surfaces fail closed. `HolShadowReport`, CLI JSON, and
+simplification, and induction are not copied into the transitional kernel. The
+first checked equation is instead a package theorem: `append_nil_left` is
+proved against the registered transparent `append`, has a stable package
+receipt, and can drive `exact` or an explicit `simp` rule in source. Any root
+proof retains that receipt as a direct dependency. Default checking and
+finite/cardinality surfaces fail closed. `HolShadowReport`, CLI JSON, and
 assignment manifests carry and allowlist the exact versioned package ID. The
-release artifacts at this checkpoint are 3,711,640 bytes for the native CLI and
-1,369,207 bytes for raw Wasm.
+release artifacts at this checkpoint are 3,730,144 bytes for the native CLI and
+1,365,552 bytes for raw Wasm.

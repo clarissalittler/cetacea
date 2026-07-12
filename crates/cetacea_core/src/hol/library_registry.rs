@@ -15,8 +15,10 @@ use super::h35_cardinality::{
     install_cardinality_transport_named, CardinalityTransportLibrary, CardinalityTransportNames,
 };
 use super::library::{ListLength, ListLibrary, ListLibraryNames};
+use super::proofs::HolDraftProof;
 use super::spike::{SpikeElaborator, SpikeError};
-use super::terms::ConstantId;
+use super::terms::{ConstantId, CoreTerm};
+use super::theorems::TheoremId;
 use super::types::CoreType;
 
 pub const BUILTIN_LIST_V1_MODULE: &str = "std/hol/list";
@@ -96,6 +98,7 @@ pub struct InstalledListLibrary {
     pub record: LibraryPackageRecord,
     pub lists: ListLibrary,
     pub length: ListLength,
+    pub append_nil_left: TheoremId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -220,6 +223,25 @@ impl HolLibraryRegistry {
             zero,
             successor,
         )?;
+        let element_type = CoreType::Parameter(lists.element_parameter);
+        let list_type = lists.list_type(element_type.clone());
+        let append_nil_left_statement = CoreTerm::equality(
+            list_type.clone(),
+            lists.append_term(
+                element_type.clone(),
+                lists.nil_term(element_type),
+                CoreTerm::Bound(0),
+            ),
+            CoreTerm::Bound(0),
+        );
+        let (append_nil_left, append_nil_left_receipt) = staged_core
+            .declare_theorem_with_parameters(
+                names.append_nil_left.clone(),
+                vec![lists.element_parameter],
+                vec![list_type],
+                append_nil_left_statement,
+                HolDraftProof::EqualityRefl(CoreTerm::Bound(0)),
+            )?;
         let receipt = |constant| {
             staged_core
                 .definition_receipt(constant)
@@ -289,10 +311,17 @@ impl HolLibraryRegistry {
                         LibraryDeclarationKind::Definition,
                         receipt(length.constant),
                     ),
+                    declaration(
+                        "append_nil_left",
+                        &names.append_nil_left,
+                        LibraryDeclarationKind::Theorem,
+                        Some(append_nil_left_receipt.id()),
+                    ),
                 ],
             },
             lists,
             length,
+            append_nil_left,
         };
 
         let mut staged_registry = self.clone();
@@ -517,7 +546,8 @@ fn validate_installed_list_v1(
         && core.constants().resolve(&names.member) == Some(installed.lists.member)
         && core.constants().resolve(&names.nodup) == Some(installed.lists.nodup)
         && core.constants().resolve(&names.append) == Some(installed.lists.append)
-        && core.constants().resolve(&names.length) == Some(installed.length.constant);
+        && core.constants().resolve(&names.length) == Some(installed.length.constant)
+        && core.theorems().resolve(&names.append_nil_left) == Some(installed.append_nil_left);
     if !matches {
         return Err(SpikeError {
             message: format!(
@@ -527,22 +557,20 @@ fn validate_installed_list_v1(
         });
     }
     for declaration in &installed.record.declarations {
-        let Some(expected_receipt) = declaration.receipt else {
-            continue;
+        let actual_receipt = match declaration.kind {
+            LibraryDeclarationKind::Definition => core
+                .constants()
+                .resolve(&declaration.core_name)
+                .and_then(|constant| core.definition_receipt(constant))
+                .map(|receipt| receipt.id()),
+            LibraryDeclarationKind::Theorem => core
+                .theorems()
+                .resolve(&declaration.core_name)
+                .and_then(|theorem| core.theorem_receipt(theorem))
+                .map(|receipt| receipt.id()),
+            LibraryDeclarationKind::Datatype | LibraryDeclarationKind::Constructor => None,
         };
-        let Some(constant) = core.constants().resolve(&declaration.core_name) else {
-            return Err(SpikeError {
-                message: format!(
-                    "library registry/core mismatch for package `{}`",
-                    LibraryPackageId::ListV1
-                ),
-            });
-        };
-        if core
-            .definition_receipt(constant)
-            .map(|receipt| receipt.id())
-            != Some(expected_receipt)
-        {
+        if actual_receipt != declaration.receipt {
             return Err(SpikeError {
                 message: format!(
                     "library receipt mismatch for `{}` in package `{}`",
@@ -774,7 +802,7 @@ fn validate_installed_finite_v1(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hol::fragments::StatementFragment;
+    use crate::hol::fragments::{EvidenceStatus, StatementFragment};
     use crate::hol::inductive::{InductiveConstructorSpec, InductiveSpec};
     use crate::hol::prelude::CompatibilityPrelude;
     use crate::hol::terms::{infer_type, CoreTerm, TermContext};
@@ -807,7 +835,7 @@ mod tests {
             LibraryPackageSource::Builtin
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_LIST_V1_NAMESPACE);
-        assert_eq!(installed.record.declarations.len(), 8);
+        assert_eq!(installed.record.declarations.len(), 9);
         assert_eq!(
             installed
                 .record
@@ -815,7 +843,7 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.receipt.is_some())
                 .count(),
-            5
+            6
         );
         let member_receipt = installed
             .record
@@ -828,6 +856,23 @@ mod tests {
             registry.receipt_name(member_receipt).as_deref(),
             Some("std/hol/list@1::Member")
         );
+        let append_nil_left_receipt = core
+            .theorem_receipt(installed.append_nil_left)
+            .expect("append_nil_left theorem receipt");
+        assert_eq!(
+            registry
+                .receipt_name(append_nil_left_receipt.id())
+                .as_deref(),
+            Some("std/hol/list@1::append_nil_left")
+        );
+        assert_eq!(append_nil_left_receipt.status(), EvidenceStatus::Checked);
+        let append_receipt = core
+            .definition_receipt(installed.lists.append)
+            .expect("append definition receipt");
+        assert!(append_nil_left_receipt
+            .proof()
+            .direct_dependencies()
+            .contains(&append_receipt.id()));
         assert!(installed
             .record
             .declarations
@@ -1157,8 +1202,13 @@ mod tests {
     fn list_v1_install_rolls_back_core_and_metadata_after_a_late_collision() {
         let (mut core, prelude) = core_with_prelude();
         let names = ListLibraryNames::under_namespace(BUILTIN_LIST_V1_NAMESPACE);
-        core.declare_constant(names.nodup.clone(), CoreType::Prop)
-            .expect("reserve a name reached after earlier List declarations");
+        core.declare_theorem(
+            names.append_nil_left.clone(),
+            Vec::new(),
+            CoreTerm::Truth,
+            HolDraftProof::TruthIntro,
+        )
+        .expect("reserve the final package theorem name");
         let mut registry = HolLibraryRegistry::default();
         let before = (core.clone(), registry.clone());
 
@@ -1170,7 +1220,7 @@ mod tests {
                 prelude.successor(),
             )
             .expect_err("late collision must reject the package");
-        assert!(error.message.contains(&names.nodup));
+        assert!(error.message.contains(&names.append_nil_left));
         assert_eq!((core, registry), before);
     }
 

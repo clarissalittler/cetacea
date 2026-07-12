@@ -43,6 +43,7 @@ pub struct ListLibraryNames {
     pub nodup: String,
     pub append: String,
     pub length: String,
+    pub append_nil_left: String,
 }
 
 impl ListLibraryNames {
@@ -67,6 +68,7 @@ impl ListLibraryNames {
             nodup: qualify("Nodup"),
             append: qualify("append"),
             length: qualify("length"),
+            append_nil_left: qualify("append_nil_left"),
         }
     }
 }
