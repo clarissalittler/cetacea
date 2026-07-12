@@ -688,4 +688,27 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
             "{rejected_json}"
         );
     }
+
+    #[test]
+    fn browser_check_certifies_the_finite_package_and_its_dependency() {
+        let source = include_str!("../../../docs/hol/examples/finite_one.ctea");
+        let report = check_file_with_imports_and_hol_shadow(source, &standard_imports());
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        let json = hol_shadow_result_json(&report);
+        for expected in [
+            r#""ok":true"#,
+            r#""hol_certified":true"#,
+            r#""imported_packages":["std/hol/finite@1","std/hol/list@1"]"#,
+            r#""required_fragment":"fol+induction""#,
+            r#""features":["induction","structural-recursion"]"#,
+            r#"std/hol/finite@1::has_card_intro"#,
+        ] {
+            assert!(json.contains(expected), "missing {expected} in {json}");
+        }
+    }
 }

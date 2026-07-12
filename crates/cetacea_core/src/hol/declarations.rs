@@ -909,6 +909,109 @@ impl CompatibilityElaborator {
         )?)
     }
 
+    /// Atomically install and bind finite enumeration together with its List
+    /// dependency. The dependency uses the same optional namespace, so
+    /// `import std/hol/finite@1 as F` exposes `F.List` and `F.HasCard` while
+    /// their receipts retain their original package identities.
+    pub fn import_builtin_finite_v1(
+        &mut self,
+        namespace: Option<&str>,
+    ) -> Result<InstalledFiniteLibrary, CompatibilityDeclarationError> {
+        if namespace.is_some_and(|namespace| {
+            namespace.is_empty() || namespace.split('.').any(str::is_empty)
+        }) {
+            return Err(CompatibilityDeclarationError::new(
+                "library import namespace must contain nonempty qualified name segments",
+            ));
+        }
+        let namespace = namespace.map(str::to_string);
+        if self.library_aliases.iter().any(|registration| {
+            registration.package == LibraryPackageId::FiniteV1
+                && registration.namespace == namespace
+        }) {
+            return self.install_builtin_finite_v1();
+        }
+        let qualify = |leaf: &str| match &namespace {
+            Some(namespace) => format!("{namespace}.{leaf}"),
+            None => leaf.to_string(),
+        };
+        let has_card_name = qualify("HasCard");
+        let has_card_intro_name = qualify("has_card_intro");
+        self.ensure_name_free(&has_card_name)?;
+        self.ensure_name_free(&has_card_intro_name)?;
+
+        let mut staged = self.clone();
+        let lists = staged.import_builtin_list_v1(namespace.as_deref())?;
+        let installed = staged.install_builtin_finite_v1()?;
+        let parameter = installed.finite.element_parameter;
+        let element_type = CoreType::Parameter(parameter);
+        let list_type = lists.lists.list_type(element_type);
+        staged.finish_symbol(SymbolRegistration {
+            name: has_card_name.clone(),
+            constant: installed.finite.has_card,
+            type_parameters: vec![parameter],
+            parameter_types: vec![
+                list_type.clone(),
+                installed.finite.length.natural_type.clone(),
+            ],
+            result_type: CoreType::Prop,
+        })?;
+        let surface_parameter = "A".to_string();
+        let surface_element_type = Type::Named(surface_parameter.clone());
+        let surface_list_type = Type::App(qualify("List"), vec![surface_element_type.clone()]);
+        let parameters = vec![
+            Param {
+                name: surface_parameter,
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(surface_list_type),
+            },
+            Param {
+                name: "n".to_string(),
+                kind: ParamKind::Term(Type::Nat),
+            },
+        ];
+        let statement = Formula::implies(
+            Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+            Formula::implies(
+                Formula::eq(
+                    Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
+                    Term::Var("n".to_string()),
+                ),
+                Formula::implies(
+                    Formula::forall(
+                        "x".to_string(),
+                        surface_element_type,
+                        Formula::PredApp(
+                            qualify("Member"),
+                            vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+                        ),
+                    ),
+                    Formula::PredApp(
+                        has_card_name,
+                        vec![Term::Var("xs".to_string()), Term::Var("n".to_string())],
+                    ),
+                ),
+            ),
+        );
+        staged.bind_checked_theorem_alias(
+            has_card_intro_name,
+            installed.finite.has_card_intro,
+            parameters,
+            &statement,
+            vec![parameter],
+            vec![list_type, installed.finite.length.natural_type.clone()],
+        )?;
+        staged.library_aliases.push(LibraryAliasRegistration {
+            package: LibraryPackageId::FiniteV1,
+            namespace,
+        });
+        *self = staged;
+        Ok(installed)
+    }
+
     pub fn lowering_scope(&self) -> Result<CompatibilityLowerer<'_>, LoweringError> {
         let mut lowerer =
             CompatibilityLowerer::new(self.core.types(), self.core.constants(), &self.prelude)?;
@@ -3465,6 +3568,77 @@ mod tests {
             .expect("lower legacy HasCard atom");
         assert_eq!(lowered, CoreTerm::Constant(legacy_has_card));
         assert_ne!(legacy_has_card, installed.finite.has_card);
+    }
+
+    #[test]
+    fn finite_package_aliases_bind_surface_and_list_dependency_atomically() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let installed = elaborator
+            .import_builtin_finite_v1(Some("F"))
+            .expect("import finite package");
+        assert_eq!(elaborator.libraries().packages().len(), 2);
+        assert!(elaborator
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "F.has_card_intro"));
+        let lists = elaborator
+            .libraries()
+            .list_v1()
+            .expect("registered List dependency");
+        let natural_type = elaborator.prelude().nat_type();
+        assert_eq!(
+            elaborator
+                .lower_type(&Type::App("F.List".to_string(), vec![Type::Nat]))
+                .expect("lower dependency List type"),
+            lists.lists.list_type(natural_type.clone())
+        );
+
+        let enumeration = Term::App(
+            "F.cons".to_string(),
+            vec![Term::Zero, Term::Var("F.nil".to_string())],
+        );
+        let statement = Formula::PredApp(
+            "F.HasCard".to_string(),
+            vec![enumeration, Term::Succ(Box::new(Term::Zero))],
+        );
+        let expected_enumeration = lists.lists.cons_term(
+            natural_type.clone(),
+            CoreTerm::Constant(elaborator.prelude().zero()),
+            lists.lists.nil_term(natural_type.clone()),
+        );
+        assert_eq!(
+            elaborator
+                .lower_formula(&statement)
+                .expect("lower qualified HasCard"),
+            installed.finite.has_card_term(
+                natural_type,
+                expected_enumeration,
+                CoreTerm::apply(
+                    CoreTerm::Constant(elaborator.prelude().successor()),
+                    CoreTerm::Constant(elaborator.prelude().zero()),
+                ),
+            )
+        );
+
+        let after_import = elaborator.clone();
+        assert_eq!(
+            elaborator
+                .import_builtin_finite_v1(Some("F"))
+                .expect("repeated finite alias import"),
+            installed
+        );
+        assert_eq!(elaborator, after_import);
+
+        let mut collision = CompatibilityElaborator::new().expect("finite collision elaborator");
+        collision
+            .declare_sort("F.List")
+            .expect("reserve dependency alias");
+        let before_collision = collision.clone();
+        let error = collision
+            .import_builtin_finite_v1(Some("F"))
+            .expect_err("dependency collision rejects the complete finite import");
+        assert!(error.message.contains("F.List"));
+        assert_eq!(collision, before_collision);
     }
 
     #[test]

@@ -112,8 +112,9 @@ Applying it to a first-order property keeps the root theorem
 receipt. Direct legacy unfolding and generic-List induction synthesis remain
 unavailable. Low-level legacy-only core entry points reject the logical import;
 the native CLI and browser automatically select fail-closed dual checking when
-an exact package import is present. Repeated imports are idempotent. Finite and
-cardinality package IDs are recognized but reject with
+an exact package import is present. Repeated imports are idempotent. At this
+List-only checkpoint, finite and cardinality package IDs were recognized but
+rejected with
 an explicit surface-not-implemented diagnostic. The induction checkpoint
 artifacts are 3,764,424 bytes for the native CLI and 1,368,943 bytes for Wasm.
 
@@ -186,10 +187,28 @@ detection for package-aware goals; the flag remains useful to force certified
 analysis on package-free files. Low-level legacy-only core APIs are unchanged.
 This checkpoint is 1,656,344 bytes natively and 1,167,984 bytes in Wasm.
 
+The finite package now crosses that same source boundary. Importing
+`std/hol/finite@1 as F` atomically binds the checked List dependency as
+`F.List`, `F.nil`, and the rest of its public catalog, followed by
+`F.HasCard` and the kernel-checked `F.has_card_intro`. The shared namespace is a
+source convenience only: reports list both package IDs, and stable receipts
+remain `std/hol/list@1::*` or `std/hol/finite@1::*` according to ownership.
+Collisions in either dependency or finite-owned names roll back the complete
+import. The stored introduction theorem is conservatively `hol` because its
+type parameter is unrestricted; each application is classified again, so the
+concrete `One` instance remains `fol+induction` while a genuinely higher-order
+instance cannot be laundered. The bundled `finite_one.ctea` proof constructs
+`HasCard` for a one-constructor datatype from public Nodup, length, membership,
+and induction rules. Its root receipt is constructive, trust-free
+`fol+induction`, carries the induction feature, and directly depends on
+`has_card_intro`. This checkpoint is 1,675,000 bytes natively and 1,182,740
+bytes in raw Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
-the importing file even though its statement uses builtin `HasCard`. Likewise,
-graph packages remain instance-scoped until an import can bind a particular
-checked edge-symbol family.
+the importing file even though its statement uses builtin `HasCard`; the new
+`one_has_card` example follows that ownership rule. Likewise, graph packages
+remain instance-scoped until an import can bind a particular checked
+edge-symbol family.
 
 ## Driver and policy gates
 
@@ -212,7 +231,7 @@ package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments, explicit term ascriptions, all structural
 predicate constructor laws, right identity, associativity, and length over
 append and browser/editor verification are complete as well. The next source
-slices continue with generic declarations, finite and cardinality aliases,
-browser assignment-policy enforcement, and an explicit decision about the
-low-level core-API cutover. The generic induction principle itself is exposed
-through a receipt-backed theorem alias.
+slices continue with generic declarations, cardinality aliases, richer finite
+enumeration exercises, browser assignment-policy enforcement, and an explicit
+decision about the low-level core-API cutover. The generic induction principle
+itself is exposed through a receipt-backed theorem alias.

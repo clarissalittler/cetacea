@@ -96,6 +96,11 @@ mutually exclusive with `--hol-profile` and the `--allow-*` flags. See
 [Assignment manifests](hol/ASSIGNMENT_MANIFESTS.md) for the version 1 grammar,
 security model, and result fields.
 
+Package dependency closures are allowlisted explicitly. For example, a
+submission importing `std/hol/finite@1` reports both that package and its
+`std/hol/list@1` dependency, so an assignment using finite enumeration lists
+both exact IDs in `allowed_imports`.
+
 Start the full-screen terminal TUI with:
 
 ```sh
@@ -165,11 +170,13 @@ The browser build embeds the standard library for virtual imports, so tutorial
 sources can still use imports such as `import std/prelude.ctea`,
 `import std/qualified_prelude.ctea`, or `import ../../../std/prelude.ctea`.
 It also accepts exact versioned logical imports such as
-`import std/hol/list@1 as L`. A browser check is successful only when both the
-legacy teaching UI and the HOL replay accept every declaration; the status bar
+`import std/hol/list@1 as L` and `import std/hol/finite@1 as F`. A browser check
+succeeds only when both the legacy teaching UI and the HOL replay accept every
+declaration; the status bar
 shows the exact imported package and theorem entries display their certified
 least fragment. Load “HOL List: length of append” for a complete generic List
-induction example.
+induction example, or “HOL Finite: cardinality of One” for a trust-free
+`fol+induction` proof using `HasCard` and its checked introduction theorem.
 
 The browser UI also shows the current proof goals, rule-based tactic hints for
 each open goal, diagnostic repair suggestions, a searchable theorem-library

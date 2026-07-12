@@ -3694,6 +3694,36 @@ theorem list_refl (xs : L.List Nat) : xs = xs := by
         let json = hol_shadow_json(&report);
         assert!(json.contains(r#""imported_packages":["std/hol/list@1"]"#));
 
+        let finite_report = cetacea_core::check_file_with_hol_shadow(
+            r#"
+import std/hol/finite@1 as F
+theorem finite_refl (xs : F.List Nat) (n : Nat) :
+  F.HasCard(xs, n) -> F.HasCard(xs, n) := by
+  intro h
+  exact h
+"#,
+        );
+        assert!(finite_report.is_match());
+        assert_eq!(
+            finite_report.imported_packages,
+            ["std/hol/finite@1", "std/hol/list@1"]
+        );
+        let mut finite_assignment = assignment.clone();
+        finite_assignment.allowed_package_imports =
+            BTreeSet::from(["std/hol/finite@1".to_string()]);
+        let violations =
+            check_hol_policy_violations(&finite_report, policy, Some(&finite_assignment));
+        assert!(violations.iter().any(|violation| {
+            violation.kind == "import" && violation.message.contains("std/hol/list@1")
+        }));
+        finite_assignment
+            .allowed_package_imports
+            .insert("std/hol/list@1".to_string());
+        assert!(
+            check_hol_policy_violations(&finite_report, policy, Some(&finite_assignment))
+                .is_empty()
+        );
+
         fs::remove_dir_all(&dir).expect("remove package assignment fixture");
     }
 

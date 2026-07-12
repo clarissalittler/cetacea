@@ -81,12 +81,14 @@ constructors, rejects constructors with fields without changing the core, and
 the Color/Bit spike now reuses its two stored enumeration receipts.
 
 The generic predicate is registered as `std/hol/finite@1` under
-`@library.finite.v1`, with `HasCard` as its sole owned declaration and
-`std/hol/list@1` as an explicit dependency. Its validator pins the `HasCard`
-receipt to the registered `Member`, `Nodup`, and `length` receipts. Generated
-facts such as `traffic_has_card` deliberately remain client theorem receipts,
-not declarations owned by the generic package. Installing finite enumeration
-can stage List automatically, and a collision rolls the entire closure back.
+`@library.finite.v1`, with the `HasCard` definition and checked
+`has_card_intro` theorem as its owned declarations and `std/hol/list@1` as an
+explicit dependency. Its validator pins the definition to registered
+`Member`, `Nodup`, and `length` receipts and the introduction theorem to that
+complete dependency set. Generated facts such as `traffic_has_card`
+deliberately remain client theorem receipts, not declarations owned by the
+generic package. Installing finite enumeration can stage List automatically,
+and a collision rolls the entire closure back.
 
 The shared surface AST now represents rank-one constructor application and the
 parser accepts prefix forms such as `List Nat` and `List (List Nat)`. Formatting
@@ -124,11 +126,11 @@ dependency. No List computation, simplification, or induction has been copied
 into the legacy engine. The first computation-facing surface is instead the
 checked theorem `append_nil_left`: its package receipt depends on the checked
 `append` definition, its alias descriptor is compared against the stored core
-statement, and source `exact`/`simp` proofs retain that dependency. Default
-legacy checking rejects logical HOL imports, while finite/cardinality imports
-reject explicitly until their end-to-end surfaces are implemented. Reports and
-JSON carry the exact package ID, and assignment manifests allowlist that ID
-without filesystem canonicalization.
+statement, and source `exact`/`simp` proofs retain that dependency. At this
+List-only checkpoint, default legacy checking rejected logical HOL imports and
+finite/cardinality imports rejected explicitly. Reports and JSON carried the
+exact package ID, and assignment manifests allowlisted that ID without
+filesystem canonicalization.
 
 The same alias mechanism now exposes `list_induction`. Its core theorem is
 checked with explicit `Induction` evidence; its source schema takes `A`, a
@@ -209,6 +211,20 @@ diagnostic prose; package-free sources retain the legacy path unless
 receipt report without that flag. This checkpoint measures 1,656,344 bytes
 natively and 1,167,984 bytes in raw Wasm.
 
+Finite enumeration now has an end-to-end source import as well.
+`import std/hol/finite@1 as F` transactionally exposes the package's checked
+List dependency under `F`, followed by `F.HasCard` and the receipt-backed
+`F.has_card_intro`. Registry and result metadata still report the two owning
+packages separately. The generic theorem receipt is conservatively `hol`, but
+concrete applications are reclassified; this lets an ordinary finite type stay
+`fol+induction` without weakening the boundary for higher-order instances. A
+public source proof derives `one_has_card` for a
+one-constructor datatype using List constructor laws and structural induction;
+its receipt is constructive, trust-free `fol+induction`, carries `Induction`,
+and names the finite introduction theorem directly. The same example runs in
+the browser. This checkpoint measures 1,675,000 bytes natively and 1,182,740
+bytes in raw Wasm.
+
 ## Remaining migration slices
 
 1. Add generic declaration syntax and extend the source surface beyond the
@@ -224,8 +240,8 @@ natively and 1,167,984 bytes in raw Wasm.
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
-4. Expose registered finite enumeration and cardinality transport through
-   surface imports, then prove the representative pigeonhole,
+4. Extend the implemented finite surface to representative multi-constructor
+   exercises and expose cardinality transport, then prove pigeonhole,
    finite-union-cardinality, and handshake targets through checked library
    theorems. Extend enumeration generation beyond nullary datatypes only when a
    course theorem requires it.

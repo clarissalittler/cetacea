@@ -18,6 +18,7 @@ use super::types::{CoreType, TypeConstructorId, TypeParameter};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FiniteEnumerationNames {
     pub has_card: String,
+    pub has_card_intro: String,
 }
 
 impl FiniteEnumerationNames {
@@ -26,12 +27,16 @@ impl FiniteEnumerationNames {
     }
 
     pub fn under_namespace(namespace: &str) -> Self {
-        Self {
-            has_card: if namespace.is_empty() {
-                "HasCard".to_string()
+        let qualify = |leaf: &str| {
+            if namespace.is_empty() {
+                leaf.to_string()
             } else {
-                format!("{namespace}.HasCard")
-            },
+                format!("{namespace}.{leaf}")
+            }
+        };
+        Self {
+            has_card: qualify("HasCard"),
+            has_card_intro: qualify("has_card_intro"),
         }
     }
 }
@@ -39,6 +44,8 @@ impl FiniteEnumerationNames {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FiniteEnumerationLibrary {
     pub has_card: ConstantId,
+    pub has_card_intro: TheoremId,
+    pub element_parameter: TypeParameter,
     pub lists: ListLibrary,
     pub length: ListLength,
 }
@@ -120,8 +127,59 @@ impl FiniteEnumerationLibrary {
             CoreType::arrow(list_type, CoreType::arrow(natural_type, CoreType::Prop)),
             body,
         )?;
+        let list_type = lists.list_type(element_type.clone());
+        let values = CoreTerm::Bound(1);
+        let cardinal = CoreTerm::Bound(0);
+        let nodup = lists.nodup_term(element_type.clone(), values.clone());
+        let length_equals = CoreTerm::equality(
+            length.natural_type.clone(),
+            length.apply(element_type.clone(), values.clone()),
+            cardinal.clone(),
+        );
+        let coverage = CoreTerm::forall(
+            element_type.clone(),
+            lists.member_term(element_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(2)),
+        );
+        let has_card_statement = CoreTerm::apply(
+            CoreTerm::apply(
+                CoreTerm::instantiate_constant(has_card, vec![element_type.clone()]),
+                values,
+            ),
+            cardinal,
+        );
+        let intro_statement = CoreTerm::implies(
+            nodup.clone(),
+            CoreTerm::implies(
+                length_equals.clone(),
+                CoreTerm::implies(coverage.clone(), has_card_statement),
+            ),
+        );
+        let (has_card_intro, _) = elaborator.declare_theorem_with_parameters(
+            names.has_card_intro.clone(),
+            vec![element_parameter],
+            vec![list_type, length.natural_type.clone()],
+            intro_statement,
+            HolDraftProof::ImpIntro {
+                premise: nodup,
+                body: Box::new(HolDraftProof::ImpIntro {
+                    premise: length_equals,
+                    body: Box::new(HolDraftProof::ImpIntro {
+                        premise: coverage,
+                        body: Box::new(HolDraftProof::AndIntro(
+                            Box::new(HolDraftProof::Hypothesis(2)),
+                            Box::new(HolDraftProof::AndIntro(
+                                Box::new(HolDraftProof::Hypothesis(1)),
+                                Box::new(HolDraftProof::Hypothesis(0)),
+                            )),
+                        )),
+                    }),
+                }),
+            },
+        )?;
         Ok(Self {
             has_card,
+            has_card_intro,
+            element_parameter,
             lists: *lists,
             length: length.clone(),
         })

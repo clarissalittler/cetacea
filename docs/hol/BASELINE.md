@@ -116,10 +116,10 @@ least fragment and receipt fields directly.
 
 | Measurement | Value |
 |---|---:|
-| `cetacea_core/src/lib.rs` | 25,151 lines |
-| Rust unit tests | 441 (22 CLI + 417 core + 2 Wasm) |
-| Native release CLI | 1,656,344 bytes |
-| Wasm release module | 1,167,984 bytes |
+| `cetacea_core/src/lib.rs` | 25,437 lines |
+| Rust unit tests | 445 (22 CLI + 420 core + 3 Wasm) |
+| Native release CLI | 1,675,000 bytes |
+| Wasm release module | 1,182,740 bytes |
 
 Artifact sizes are raw filesystem sizes before transport compression or Wasm
 optimization. They are comparison signals, not release limits.

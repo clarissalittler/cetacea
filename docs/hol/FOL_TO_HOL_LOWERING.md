@@ -405,9 +405,10 @@ without changing theorem state. The Color/Bit spike now references generated
 enumeration theorems instead of constructing two bespoke proofs. The checkpoint
 artifacts are 3,510,136 bytes for the native CLI and 1,349,499 bytes for Wasm.
 
-`std/hol/finite@1` now registers the generic part of that substrate. Its record
-owns only `HasCard`, depends explicitly on `std/hol/list@1`, and validates the
-definition receipt against registered `Member`, `Nodup`, and `length` receipts.
+At the registry checkpoint, `std/hol/finite@1` registered the generic part of
+that substrate. Its record owned `HasCard`, depended explicitly on
+`std/hol/list@1`, and validated the definition receipt against registered
+`Member`, `Nodup`, and `length` receipts.
 Datatype-specific facts stay client-owned, so their provenance is not
 misreported as builtin. Dependency installation, collisions, core rebinding,
 and repeated installation all fail closed or remain idempotent as appropriate;
@@ -452,8 +453,9 @@ simplification, and induction are not copied into the transitional kernel. The
 first checked equation is instead a package theorem: `append_nil_left` is
 proved against the registered transparent `append`, has a stable package
 receipt, and can drive `exact` or an explicit `simp` rule in source. Any root
-proof retains that receipt as a direct dependency. Default checking and
-finite/cardinality surfaces fail closed. `HolShadowReport`, CLI JSON, and
+proof retains that receipt as a direct dependency. At that checkpoint, default
+checking and the then-unimplemented finite/cardinality surfaces failed closed.
+`HolShadowReport`, CLI JSON, and
 assignment manifests carry and allowlist the exact versioned package ID.
 
 Generic List induction follows the same certificate route. The package stores
@@ -543,6 +545,19 @@ Native check mode now treats an exact logical package import as a capability
 request rather than a terminal legacy diagnostic. An explicit
 `CheckResult::requires_hol_shadow` flag reroutes the root and all transitive
 imports through fail-closed dual checking without coupling the CLI to rendered
-diagnostic text. TUI and line startup use the same flag; `--hol-shadow` still
-forces certification for package-free sources. This checkpoint is 1,656,344
-bytes natively and 1,167,984 bytes in raw Wasm.
+diagnostic text. TUI buffer refreshes and line reloads use the same flag;
+`--hol-shadow` still forces certification for package-free sources. This
+checkpoint is 1,656,344 bytes natively and 1,167,984 bytes in raw Wasm.
+
+The finite package now uses the lowering path end to end. Its
+parser-independent import first binds the checked List dependency under the
+requested namespace, then adds the polymorphic `HasCard` descriptor and a
+checked `has_card_intro` theorem descriptor; source-driver staging mirrors the
+same transaction. Type arguments are inferred from the enumeration List, while
+the stored theorem descriptor is compared exactly with the checked core
+template. Its unrestricted generic receipt is `hol`; application-specific
+classification recovers `fol+induction` only for the concrete first-order
+instance. A source proof of `one_has_card` exercises the dependency aliases and
+retains the finite theorem receipt without copying the `HasCard` definition
+into the legacy engine. The result is constructive `fol+induction`. This
+checkpoint is 1,675,000 bytes natively and 1,182,740 bytes in raw Wasm.

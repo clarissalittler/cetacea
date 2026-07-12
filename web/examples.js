@@ -6,6 +6,55 @@
 
 window.CETACEA_EXAMPLES = [
   {
+    id: "hol-finite",
+    label: "HOL Finite: cardinality of One",
+    path: "docs/hol/examples/finite_one.ctea",
+    source: `import std/hol/finite@1 as F
+
+mode constructive
+
+data One
+| only
+
+theorem one_has_card :
+  F.HasCard(F.cons(only, F.nil), succ(0)) := by
+  apply F.has_card_intro {
+    A := One;
+    xs := F.cons(only, F.nil);
+    n := succ(0)
+  }
+  apply (F.nodup_cons {
+    A := One;
+    h := only;
+    t := (F.nil : F.List One)
+  }).right
+  split
+  intro member
+  exact F.member_nil {A := One; x := only} member
+  exact F.nodup_nil {A := One}
+  rewrite -> F.length_cons {
+    A := One;
+    h := only;
+    t := (F.nil : F.List One)
+  }
+  rewrite -> F.length_nil {A := One}
+  refl
+  intro x
+  induction x with
+  | only =>
+      have heq : only = only := by
+        refl
+      apply (F.member_cons {
+        A := One;
+        x := only;
+        h := only;
+        t := (F.nil : F.List One)
+      }).right
+      left
+      exact heq
+`,
+  },
+  {
     id: "hol-list",
     label: "HOL List: length of append",
     path: "docs/hol/examples/list_length_append.ctea",

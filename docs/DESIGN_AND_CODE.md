@@ -1029,6 +1029,14 @@ existing path while avoiding diagnostic-text coupling: the core exposes an
 explicit `requires_hol_shadow` result flag. `--hol-shadow` still forces dual
 checking when no logical import is present.
 
+Logical package dependencies are surface-aware. Importing
+`std/hol/finite@1 as F` transactionally installs and exposes its List dependency
+as `F.List`, `F.cons`, and the remaining List catalog, then adds `F.HasCard` and
+the checked `F.has_card_intro` theorem. Source aliases share a namespace for
+ergonomics, but registry records and receipt names continue to identify List
+and finite declarations separately. Any dependency or owned-name collision
+rolls the whole import back.
+
 ## Wasm And Web UI
 
 The wasm crate is intentionally thin, mirroring the CLI. It exports:

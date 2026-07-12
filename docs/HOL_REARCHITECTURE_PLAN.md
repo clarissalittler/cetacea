@@ -726,6 +726,15 @@ from the same explicit core result flag. Package-free files retain their legacy
 path unless `--hol-shadow` is supplied. This checkpoint measures 1,656,344
 bytes natively and 1,167,984 bytes in raw Wasm.
 
+`std/hol/finite@1` now has its first complete source surface. Importing it under
+a namespace transactionally exposes the checked List dependency under that
+same namespace, plus `HasCard` and a kernel-checked `has_card_intro` theorem;
+stable receipts still name their owning packages separately. A bundled source
+proof establishes the cardinality of a one-constructor datatype from public
+Nodup, length, membership, and induction rules. It is constructive,
+trust-free, and certified `fol+induction`. This checkpoint measures 1,675,000
+bytes natively and 1,182,740 bytes in raw Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -742,9 +751,10 @@ bytes natively and 1,167,984 bytes in raw Wasm.
   constructor laws are source-facing. `All` constructor laws now demonstrate
   instance-sensitive fragment enforcement. Generic source declarations and a
   decision about low-level core-API cutover remain; native and browser
-  end-to-end acceptance are automatic. Right append identity, append
-  associativity, and length over append now pass through both the package and
-  student-facing proof routes.
+  end-to-end acceptance are automatic. The finite package now exposes
+  `HasCard`, its List dependency, and checked introduction through a real
+  finite-datatype proof. Right append identity, append associativity, and
+  length over append pass through both the package and student-facing routes.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

@@ -75,11 +75,13 @@ cargo run -p cetacea_cli -- --strict --json path/to/submission.ctea
 `--deny-sorry`, `--deny-axioms`, and `--deny-classical` policies can be composed
 when a course needs a different trust or logic boundary.
 
-Exact logical imports such as `import std/hol/list@1 as L` automatically select
-fail-closed dual checking in the native CLI. The file is accepted only when the
-teaching checker and HOL replay both succeed, including when the package import
-is reached through another source file. `--hol-shadow` remains available to
-force the same certification for package-free files.
+Exact logical imports such as `import std/hol/list@1 as L` and
+`import std/hol/finite@1 as F` automatically select fail-closed dual checking
+in the native CLI. The file is accepted only when the teaching checker and HOL
+replay both succeed, including when the package import is reached through
+another source file. The finite package exposes its checked List dependency
+under the same alias. `--hol-shadow` remains available to force the same
+certification for package-free files.
 
 Run the full-screen terminal TUI with:
 
@@ -114,10 +116,11 @@ The browser UI is also deployed automatically to GitHub Pages by
 publishes the contents of `web/` on every push to `main`.
 
 Browser checks are dual-certified: the teaching UI and the HOL replay must both
-accept the file. Exact logical imports such as `import std/hol/list@1 as L`
-work in checking, goal stepping, and proof explanations; the status and theorem
-library show the imported package and certified least fragment. The bundled
-“HOL List: length of append” example demonstrates the generic List surface.
+accept the file. Exact logical imports work in checking, goal stepping, and
+proof explanations; the status and theorem library show the imported packages
+and certified least fragment. The bundled HOL examples derive length over List
+append and the cardinality of a one-constructor datatype through the public
+package surfaces.
 
 The CLI prints each root declaration as `accepted theorem`, `incomplete
 theorem`, or `trusted axiom`, together with the strongest mode used by a proof.

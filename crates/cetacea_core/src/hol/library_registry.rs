@@ -1044,12 +1044,21 @@ impl HolLibraryRegistry {
             &lists.length,
             &names,
         )?;
-        let receipt = staged_core
+        let has_card_receipt = staged_core
             .definition_receipt(finite.has_card)
             .ok_or_else(|| SpikeError {
                 message: format!(
                     "checked definition `{}` has no declaration receipt",
                     names.has_card
+                ),
+            })?
+            .id();
+        let has_card_intro_receipt = staged_core
+            .theorem_receipt(finite.has_card_intro)
+            .ok_or_else(|| SpikeError {
+                message: format!(
+                    "checked theorem `{}` has no declaration receipt",
+                    names.has_card_intro
                 ),
             })?
             .id();
@@ -1063,12 +1072,20 @@ impl HolLibraryRegistry {
                 },
                 core_namespace: BUILTIN_FINITE_V1_NAMESPACE.to_string(),
                 dependencies: vec![LibraryPackageId::ListV1],
-                declarations: vec![LibraryDeclaration {
-                    logical_name: "HasCard".to_string(),
-                    core_name: names.has_card,
-                    kind: LibraryDeclarationKind::Definition,
-                    receipt: Some(receipt),
-                }],
+                declarations: vec![
+                    LibraryDeclaration {
+                        logical_name: "HasCard".to_string(),
+                        core_name: names.has_card,
+                        kind: LibraryDeclarationKind::Definition,
+                        receipt: Some(has_card_receipt),
+                    },
+                    LibraryDeclaration {
+                        logical_name: "has_card_intro".to_string(),
+                        core_name: names.has_card_intro,
+                        kind: LibraryDeclarationKind::Theorem,
+                        receipt: Some(has_card_intro_receipt),
+                    },
+                ],
             },
             finite,
         };
@@ -1449,33 +1466,53 @@ fn validate_installed_finite_v1(
         || installed.record.provenance.source != LibraryPackageSource::Builtin
         || installed.record.core_namespace != BUILTIN_FINITE_V1_NAMESPACE
         || installed.record.dependencies != [LibraryPackageId::ListV1]
-        || installed.record.declarations.len() != 1
+        || installed.record.declarations.len() != 2
     {
         return Err(SpikeError {
             message: format!("invalid package metadata for `{package}`"),
         });
     }
-    let declaration = &installed.record.declarations[0];
-    if declaration.logical_name != "HasCard"
-        || declaration.core_name != names.has_card
-        || declaration.kind != LibraryDeclarationKind::Definition
-        || declaration.receipt.is_none()
+    let expected_declarations = [
+        (
+            "HasCard",
+            names.has_card.as_str(),
+            LibraryDeclarationKind::Definition,
+        ),
+        (
+            "has_card_intro",
+            names.has_card_intro.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+    ];
+    if !installed
+        .record
+        .declarations
+        .iter()
+        .zip(expected_declarations)
+        .all(|(declaration, (logical_name, core_name, kind))| {
+            declaration.logical_name == logical_name
+                && declaration.core_name == core_name
+                && declaration.kind == kind
+                && declaration.receipt.is_some()
+        })
     {
         return Err(SpikeError {
             message: format!("invalid declaration catalog for package `{package}`"),
         });
     }
-    if core.constants().resolve(&names.has_card) != Some(installed.finite.has_card) {
+    if core.constants().resolve(&names.has_card) != Some(installed.finite.has_card)
+        || core.theorems().resolve(&names.has_card_intro) != Some(installed.finite.has_card_intro)
+    {
         return Err(SpikeError {
             message: format!("library registry/core mismatch for package `{package}`"),
         });
     }
-    let receipt = core
+    let has_card_receipt = core
         .definition_receipt(installed.finite.has_card)
         .ok_or_else(|| SpikeError {
             message: format!("library receipt missing for package `{package}`"),
         })?;
-    if declaration.receipt != Some(receipt.id()) {
+    if installed.record.declarations[0].receipt != Some(has_card_receipt.id()) {
         return Err(SpikeError {
             message: format!("library receipt mismatch for `HasCard` in package `{package}`"),
         });
@@ -1492,9 +1529,25 @@ fn validate_installed_finite_v1(
         dependency_receipt(lists.lists.nodup)?,
         dependency_receipt(lists.length.constant)?,
     ]);
-    if receipt.proof().direct_dependencies() != &expected_dependencies {
+    if has_card_receipt.proof().direct_dependencies() != &expected_dependencies {
         return Err(SpikeError {
             message: format!("library dependency mismatch for package `{package}`"),
+        });
+    }
+    let has_card_intro_receipt = core
+        .theorem_receipt(installed.finite.has_card_intro)
+        .ok_or_else(|| SpikeError {
+            message: format!("library theorem receipt missing for package `{package}`"),
+        })?;
+    let mut expected_intro_dependencies = expected_dependencies;
+    expected_intro_dependencies.insert(has_card_receipt.id());
+    if installed.record.declarations[1].receipt != Some(has_card_intro_receipt.id())
+        || has_card_intro_receipt.proof().direct_dependencies() != &expected_intro_dependencies
+    {
+        return Err(SpikeError {
+            message: format!(
+                "library receipt mismatch for `has_card_intro` in package `{package}`"
+            ),
         });
     }
     Ok(())
@@ -1931,7 +1984,7 @@ mod tests {
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_FINITE_V1_NAMESPACE);
         assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
-        assert_eq!(installed.record.declarations.len(), 1);
+        assert_eq!(installed.record.declarations.len(), 2);
         let has_card = &installed.record.declarations[0];
         assert_eq!(has_card.logical_name, "HasCard");
         assert_eq!(has_card.kind, LibraryDeclarationKind::Definition);
@@ -1954,6 +2007,48 @@ mod tests {
         assert_eq!(
             dependency_names,
             BTreeSet::from([
+                "std/hol/list@1::Member".to_string(),
+                "std/hol/list@1::Nodup".to_string(),
+                "std/hol/list@1::length".to_string(),
+            ])
+        );
+        let has_card_intro = &installed.record.declarations[1];
+        assert_eq!(has_card_intro.logical_name, "has_card_intro");
+        assert_eq!(has_card_intro.kind, LibraryDeclarationKind::Theorem);
+        assert_eq!(
+            registry.receipt_name(
+                has_card_intro
+                    .receipt
+                    .expect("has_card_intro theorem receipt")
+            ),
+            Some("std/hol/finite@1::has_card_intro".to_string())
+        );
+        let intro_receipt = core
+            .theorem_receipt(installed.finite.has_card_intro)
+            .expect("registered has_card_intro receipt");
+        assert_eq!(intro_receipt.status(), EvidenceStatus::Checked);
+        // The stored theorem is generic over an unrestricted HOL type. A
+        // concrete first-order source application is classified again at its
+        // instance and can remain `fol+induction`.
+        assert_eq!(
+            intro_receipt.proof().required_fragment(),
+            StatementFragment::HigherOrder
+        );
+        assert!(intro_receipt.proof().axiom_dependencies().is_empty());
+        let intro_dependency_names = intro_receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .map(|dependency| {
+                registry
+                    .receipt_name(*dependency)
+                    .expect("every has_card_intro dependency belongs to a package")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            intro_dependency_names,
+            BTreeSet::from([
+                "std/hol/finite@1::HasCard".to_string(),
                 "std/hol/list@1::Member".to_string(),
                 "std/hol/list@1::Nodup".to_string(),
                 "std/hol/list@1::length".to_string(),
@@ -2068,8 +2163,13 @@ mod tests {
     fn finite_v1_rolls_back_its_new_list_dependency_after_a_late_collision() {
         let (mut core, prelude) = core_with_prelude();
         let names = FiniteEnumerationNames::under_namespace(BUILTIN_FINITE_V1_NAMESPACE);
-        core.declare_constant(names.has_card.clone(), CoreType::Prop)
-            .expect("reserve HasCard after the staged List dependency");
+        core.declare_theorem(
+            names.has_card_intro.clone(),
+            Vec::new(),
+            CoreTerm::Truth,
+            HolDraftProof::TruthIntro,
+        )
+        .expect("reserve has_card_intro after the staged definition and List dependency");
         let mut registry = HolLibraryRegistry::default();
         let before = (core.clone(), registry.clone());
 
@@ -2082,7 +2182,7 @@ mod tests {
                 prelude.addition(),
             )
             .expect_err("finite collision must reject the dependency closure");
-        assert!(error.message.contains(&names.has_card));
+        assert!(error.message.contains(&names.has_card_intro));
         assert_eq!((core, registry), before);
     }
 }

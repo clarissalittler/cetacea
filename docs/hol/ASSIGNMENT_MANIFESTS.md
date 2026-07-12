@@ -36,6 +36,7 @@ allow_incomplete = false
 allowed_imports = [
   "../../std/prop.ctea",
   "../../std/nat.ctea",
+  "std/hol/list@1",
 ]
 allowed_axioms = []
 
@@ -78,6 +79,13 @@ canonicalized. Every filesystem import loaded transitively must appear in the
 list; listing only the submission's direct imports is insufficient. Canonical
 identity also prevents a different relative spelling or symlink from creating a
 second capability.
+
+Exact registered logical package IDs are retained as package identities rather
+than filesystem paths. Their complete dependency closure is explicit too:
+allowing `std/hol/finite@1` also requires `std/hol/list@1`, because the finite
+surface exposes that checked dependency under the same source alias. The JSON
+`hol_shadow.imported_packages` field supplies the exact set a manifest must
+authorize.
 
 `allowed_axioms` contains checked, possibly alias-qualified declaration names.
 An entry must resolve to a trusted axiom from an imported file. A source-local
@@ -136,6 +144,7 @@ Exit status is 0 only when ordinary checking, exact HOL shadow replay, the
 teaching profile, and all manifest constraints succeed. A source or policy
 failure exits 1. A missing or malformed manifest exits 2.
 
-This layer still consumes the non-authoritative HOL shadow path while the legacy
-checker remains the production authority. It is suitable for migration testing
-and native grading experiments, not yet the browser/TUI assignment surface.
+This layer consumes the fail-closed compatibility path: ordinary checking and
+complete HOL replay must both succeed. It is suitable for native grading
+experiments, but assignment enforcement is not yet exposed in the browser or
+TUI.

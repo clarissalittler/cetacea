@@ -2795,6 +2795,7 @@ struct FileChecker {
 }
 
 #[cfg(feature = "hol-shadow")]
+#[derive(Clone)]
 struct HolShadowState {
     elaborator: hol::CompatibilityElaborator,
     attempted_declarations: usize,
@@ -3444,6 +3445,10 @@ impl FileChecker {
             }
             let key = (package, alias.clone());
             if self.loaded_library_packages.contains(&key) {
+                return;
+            }
+            if package == hol::LibraryPackageId::FiniteV1 {
+                self.check_logical_finite_import(logical_id, alias, line, source_path, key);
                 return;
             }
             if package != hol::LibraryPackageId::ListV1 {
@@ -4264,6 +4269,163 @@ impl FileChecker {
             self.env = staged_env;
             self.loaded_library_packages.insert(key);
         }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn check_logical_finite_import(
+        &mut self,
+        logical_id: &str,
+        alias: Option<Name>,
+        line: usize,
+        source_path: Option<&Path>,
+        key: (hol::LibraryPackageId, Option<Name>),
+    ) {
+        let qualify = |leaf: &str| match &alias {
+            Some(alias) => format!("{alias}.{leaf}"),
+            None => leaf.to_string(),
+        };
+        let has_card_name = qualify("HasCard");
+        let has_card_intro_name = qualify("has_card_intro");
+        for name in [&has_card_name, &has_card_intro_name] {
+            if self.env.has_top_level_name(name) {
+                self.result.diagnostics.push(diagnostic_at(
+                    source_path,
+                    line,
+                    format!("logical package alias `{name}` is already declared"),
+                ));
+                return;
+            }
+        }
+
+        let env_before = self.env.clone();
+        let shadow_before = self.hol_shadow.clone();
+        let loaded_packages_before = self.loaded_library_packages.clone();
+        let diagnostic_count = self.result.diagnostics.len();
+        self.check_logical_library_import(
+            hol::LibraryPackageId::ListV1,
+            "std/hol/list@1",
+            alias.clone(),
+            line,
+            source_path,
+        );
+        if self.result.diagnostics.len() != diagnostic_count {
+            self.env = env_before;
+            self.hol_shadow = shadow_before;
+            self.loaded_library_packages = loaded_packages_before;
+            return;
+        }
+
+        let element_parameter = "A".to_string();
+        let list_type = Type::App(
+            qualify("List"),
+            vec![Type::Named(element_parameter.clone())],
+        );
+        let mut staged_env = self.env.clone();
+        staged_env.reserve_package_name(has_card_name.clone());
+        staged_env.reserve_package_name(has_card_intro_name.clone());
+        staged_env.add_rank_one_pred(
+            has_card_name.clone(),
+            vec![element_parameter],
+            vec![list_type.clone(), Type::Nat],
+        );
+
+        let installed = match self
+            .hol_shadow
+            .as_mut()
+            .expect("HOL package imports require an initialized sidecar")
+            .elaborator
+            .import_builtin_finite_v1(alias.as_deref())
+        {
+            Ok(installed) => installed,
+            Err(error) => {
+                self.env = env_before;
+                self.hol_shadow = shadow_before;
+                self.loaded_library_packages = loaded_packages_before;
+                self.result.diagnostics.push(
+                    diagnostic_at(
+                        source_path,
+                        line,
+                        format!("could not import logical HOL package `{logical_id}`"),
+                    )
+                    .with_note(error.message),
+                );
+                return;
+            }
+        };
+        let has_card_intro_receipt = installed
+            .record
+            .declarations
+            .iter()
+            .find(|declaration| declaration.logical_name == "has_card_intro")
+            .and_then(|declaration| declaration.receipt)
+            .expect("registered has_card_intro theorem has a receipt");
+        let coverage = Formula::forall(
+            "x".to_string(),
+            Type::Named("A".to_string()),
+            Formula::PredApp(
+                qualify("Member"),
+                vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+            ),
+        );
+        staged_env.add_theorem(Theorem {
+            name: has_card_intro_name,
+            params: vec![
+                Param {
+                    name: "A".to_string(),
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: "xs".to_string(),
+                    kind: ParamKind::Term(list_type),
+                },
+                Param {
+                    name: "n".to_string(),
+                    kind: ParamKind::Term(Type::Nat),
+                },
+            ],
+            statement: Formula::implies(
+                Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+                Formula::implies(
+                    Formula::eq(
+                        Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
+                        Term::Var("n".to_string()),
+                    ),
+                    Formula::implies(
+                        coverage,
+                        Formula::PredApp(
+                            has_card_name,
+                            vec![Term::Var("xs".to_string()), Term::Var("n".to_string())],
+                        ),
+                    ),
+                ),
+            ),
+            evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                hol::LibraryPackageId::FiniteV1,
+                has_card_intro_receipt,
+            )),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+        let shadow = self
+            .hol_shadow
+            .as_mut()
+            .expect("HOL package imports require an initialized sidecar");
+        for declaration in &installed.record.declarations {
+            let Some(receipt) = declaration.receipt else {
+                continue;
+            };
+            let stable_name = shadow
+                .elaborator
+                .libraries()
+                .receipt_name(receipt)
+                .expect("registered package receipts have stable names");
+            shadow.receipt_names.insert(receipt, stable_name);
+        }
+        shadow.imported_packages.insert(logical_id.to_string());
+        self.env = staged_env;
+        self.loaded_library_packages.insert(key);
     }
 
     fn check_commands(
@@ -19873,11 +20035,135 @@ theorem ambiguous_all :
 
     #[cfg(feature = "hol-shadow")]
     #[test]
-    fn logical_package_imports_fail_closed_before_their_surface_is_ready() {
-        let report = check_file_with_hol_shadow("import std/hol/finite@1\n");
+    fn logical_finite_import_exposes_has_card_and_its_list_dependency() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/finite@1 as F
+
+theorem has_card_id (A : Type) (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) -> F.HasCard(xs, n) := by
+  intro h
+  exact h
+
+theorem singleton_has_card_id :
+  F.HasCard(F.cons(0, F.nil), succ(0)) ->
+  F.HasCard(F.cons(0, F.nil), succ(0)) := by
+  intro h
+  exact h
+
+data One
+| only
+
+theorem one_has_card :
+  F.HasCard(F.cons(only, F.nil), succ(0)) := by
+  apply F.has_card_intro {
+    A := One;
+    xs := F.cons(only, F.nil);
+    n := succ(0)
+  }
+  apply (F.nodup_cons {
+    A := One;
+    h := only;
+    t := (F.nil : F.List One)
+  }).right
+  split
+  intro member
+  exact F.member_nil {A := One; x := only} member
+  exact F.nodup_nil {A := One}
+  rewrite -> F.length_cons {
+    A := One;
+    h := only;
+    t := (F.nil : F.List One)
+  }
+  rewrite -> F.length_nil {A := One}
+  refl
+  intro x
+  induction x with
+  | only =>
+      have heq : only = only := by
+        refl
+      apply (F.member_cons {
+        A := One;
+        x := only;
+        h := only;
+        t := (F.nil : F.List One)
+      }).right
+      left
+      exact heq
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(
+            report.imported_packages,
+            ["std/hol/finite@1", "std/hol/list@1"]
+        );
+        assert!(report
+            .receipt_names
+            .values()
+            .any(|name| name == "std/hol/finite@1::HasCard"));
+        for name in ["has_card_id", "singleton_has_card_id", "one_has_card"] {
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|theorem| theorem.name == name)
+                .expect("finite surface theorem receipt");
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+        }
+        let one_has_card = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "one_has_card")
+            .expect("one_has_card receipt");
+        assert!(one_has_card
+            .features
+            .contains(&hol::ProofFeature::Induction));
+        assert!(one_has_card
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/finite@1::has_card_intro")
+            }));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_cardinality_import_fails_closed_before_its_surface_is_ready() {
+        let report = check_file_with_hol_shadow("import std/hol/cardinality@1\n");
         assert!(format!("{:#?}", report.legacy.diagnostics)
             .contains("surface aliases are not implemented yet"));
         assert!(report.imported_packages.is_empty());
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_finite_import_rolls_back_after_a_surface_collision() {
+        let report = check_file_with_hol_shadow(
+            r#"
+pred F.HasCard(Nat, Nat)
+import std/hol/finite@1 as F
+"#,
+        );
+        let rendered = format!("{:#?}", report.legacy.diagnostics);
+        assert!(
+            rendered.contains("logical package alias `F.HasCard` is already declared"),
+            "unexpected diagnostics: {rendered}"
+        );
+        assert!(report.imported_packages.is_empty());
+        assert!(report
+            .receipt_names
+            .values()
+            .all(|name| !name.starts_with("std/hol/finite@1::")));
     }
 
     #[cfg(feature = "hol-shadow")]
