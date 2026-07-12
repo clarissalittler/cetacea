@@ -646,12 +646,13 @@ in Wasm, still below the 1.5 MB review line.
 The checked constructor-equation catalog now also contains `append_cons`,
 `length_nil`, and `length_cons`. Each is a conversion proof whose receipt
 depends on the corresponding registered structural definition. Source imports
-expose `append_cons` and `length_cons`, and combined `simp` use preserves both
-stable dependencies. `length_nil` remains core-only for now: in
-`length(nil) = 0`, neither the result nor another term fixes the element type
-of polymorphic `nil`, so exposing it requires the planned explicit term type
-syntax rather than an arbitrary inference default. This checkpoint is
-3,778,176 bytes natively and 1,364,950 bytes in Wasm.
+expose all three, and combined `simp` use preserves stable dependencies.
+`length_nil` uses the new checked term ascription
+`(L.nil : L.List A)`: the annotation selects the otherwise unconstrained
+rank-one instance and is erased by both elaborators rather than represented in
+the kernel. Mismatched ascriptions fail before proof checking, while ordinary
+parenthesized formulas retain their grammar. This checkpoint is 3,794,240
+bytes natively and 1,369,623 bytes in Wasm.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
@@ -664,8 +665,9 @@ syntax rather than an arbitrary inference default. This checkpoint is
   contextual `nil` inference and predicate-valued `All` arguments are
   implemented as well. Three checked computation theorems now drive `exact` or
   explicit `simp` without adding legacy reduction rules, and checked generic
-  List induction is available through `apply`. Explicit term type syntax,
-  further equation families, and ordinary end-to-end acceptance remain.
+  List induction is available through `apply`. Checked term ascriptions resolve
+  intentionally ambiguous rank-one instances. Further equation families and
+  ordinary end-to-end acceptance remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

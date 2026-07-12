@@ -46,6 +46,10 @@ impl fmt::Display for Type {
 pub enum Term {
     Var(Name),
     App(Name, Vec<Term>),
+    Ascribed {
+        term: Box<Term>,
+        ty: Type,
+    },
     PredLambda {
         params: Vec<LambdaParam>,
         body: Box<Formula>,
@@ -94,6 +98,7 @@ impl fmt::Display for Term {
                 }
                 write!(f, ")")
             }
+            Term::Ascribed { term, ty } => write!(f, "({term} : {ty})"),
             Term::PredLambda { params, body } => {
                 write!(f, "fun ")?;
                 fmt_lambda_params(f, params)?;
@@ -3317,6 +3322,7 @@ impl FileChecker {
             let length_name = qualify("length");
             let append_nil_left_name = qualify("append_nil_left");
             let append_cons_name = qualify("append_cons");
+            let length_nil_name = qualify("length_nil");
             let length_cons_name = qualify("length_cons");
             let list_induction_name = qualify("list_induction");
             let symbol_names = [
@@ -3329,6 +3335,7 @@ impl FileChecker {
                 &length_name,
                 &append_nil_left_name,
                 &append_cons_name,
+                &length_nil_name,
                 &length_cons_name,
                 &list_induction_name,
             ];
@@ -3508,6 +3515,38 @@ impl FileChecker {
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     append_cons_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let length_nil_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "length_nil")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered length_nil theorem has a receipt");
+            staged_env.add_theorem(Theorem {
+                name: length_nil_name,
+                params: vec![Param {
+                    name: equation_element_parameter.clone(),
+                    kind: ParamKind::Type,
+                }],
+                statement: Formula::eq(
+                    Term::App(
+                        length_name.clone(),
+                        vec![Term::Ascribed {
+                            term: Box::new(Term::Var(nil_name.clone())),
+                            ty: equation_list_type.clone(),
+                        }],
+                    ),
+                    Term::Zero,
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    length_nil_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -6290,6 +6329,10 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
             }
             Err(ValidationError::new(format!("unknown function `{name}`")))
         }
+        Term::Ascribed { term, ty } => Ok(Term::Ascribed {
+            term: Box::new(canonicalize_term(env, ctx, term)?),
+            ty: canonicalize_type(env, ctx, ty)?,
+        }),
         Term::PredLambda { params, body } => {
             let params = params
                 .iter()
@@ -7151,6 +7194,7 @@ fn collect_arithmetic_term_vars(
     vars: &mut BTreeSet<Name>,
 ) -> Result<(), ()> {
     match term {
+        Term::Ascribed { term, .. } => collect_arithmetic_term_vars(term, terms, vars),
         Term::Var(name) => {
             if terms
                 .iter()
@@ -7222,6 +7266,7 @@ fn eval_arithmetic_formula(formula: &Formula, assignment: &HashMap<Name, usize>)
 
 fn eval_arithmetic_term(term: &Term, assignment: &HashMap<Name, usize>) -> Option<usize> {
     match term {
+        Term::Ascribed { term, .. } => eval_arithmetic_term(term, assignment),
         Term::Var(name) => assignment.get(name).copied(),
         Term::Zero => Some(0),
         Term::Succ(term) => eval_arithmetic_term(term, assignment)?.checked_add(1),
@@ -7528,6 +7573,9 @@ fn collect_first_order_term_signature(
     sig: &mut FirstOrderSignature,
 ) -> Result<Type, ()> {
     match term {
+        Term::Ascribed { term, .. } => {
+            collect_first_order_term_signature(env, ctx, term, bound, sig)
+        }
         Term::Var(name) => {
             if let Some(binding) = bound.iter().rev().find(|binding| binding.name == *name) {
                 sig.sorts
@@ -7656,6 +7704,7 @@ fn restore_first_order_assignment(
 
 fn eval_first_order_term(term: &Term, assignment: &HashMap<Name, usize>) -> Option<usize> {
     match term {
+        Term::Ascribed { term, .. } => eval_first_order_term(term, assignment),
         Term::Var(name) => assignment.get(name).copied(),
         Term::App(_, _)
         | Term::PredLambda { .. }
@@ -8795,6 +8844,15 @@ fn validate_term_using_expected_type(
     term: &Term,
     expected: &Type,
 ) -> Result<Type, ValidationError> {
+    if let Term::Ascribed { .. } = term {
+        let actual = validate_term(env, ctx, term)?;
+        if &actual != expected {
+            return Err(ValidationError::new(format!(
+                "term ascription has type `{actual}`, but the context expects `{expected}`"
+            )));
+        }
+        return Ok(actual);
+    }
     if let Term::Var(name) = term {
         if let Some(constant) = env.rank_one_consts.get(name) {
             return infer_rank_one_type_arguments(
@@ -8927,6 +8985,16 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             };
             let (_, ty) = instantiate_term_def(env, ctx, def, args)?;
             Ok(ty)
+        }
+        Term::Ascribed { term, ty } => {
+            validate_type(env, ctx, ty)?;
+            let actual = validate_term_using_expected_type(env, ctx, term, ty)?;
+            if actual != *ty {
+                return Err(ValidationError::new(format!(
+                    "term ascription declares type `{ty}`, but its term has type `{actual}`"
+                )));
+            }
+            Ok(ty.clone())
         }
         Term::PredLambda { .. } => Err(ValidationError::new(
             "predicate lambda cannot be used as a first-order term",
@@ -9911,6 +9979,16 @@ fn alpha_eq_terms(left: &[Term], right: &[Term], env: &mut AlphaEnv) -> bool {
 
 fn alpha_eq_term(left: &Term, right: &Term, env: &mut AlphaEnv) -> bool {
     match (left, right) {
+        (
+            Term::Ascribed {
+                term: left_term,
+                ty: left_ty,
+            },
+            Term::Ascribed {
+                term: right_term,
+                ty: right_ty,
+            },
+        ) => left_ty == right_ty && alpha_eq_term(left_term, right_term, env),
         (Term::Var(left), Term::Var(right)) => alpha_eq_var(left, right, env),
         (Term::App(left_name, left_args), Term::App(right_name, right_args)) => {
             left_name == right_name && alpha_eq_terms(left_args, right_args, env)
@@ -10324,6 +10402,7 @@ fn is_data_constructor_name(env: &Env, name: &str) -> bool {
 
 fn normalize_term_compute(term: &Term) -> Term {
     match term {
+        Term::Ascribed { term, .. } => normalize_term_compute(term),
         Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => term.clone(),
         Term::App(name, args) => Term::App(
             name.clone(),
@@ -10425,6 +10504,7 @@ fn normalize_term_compute(term: &Term) -> Term {
 
 fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, ValidationError> {
     match term {
+        Term::Ascribed { term, .. } => normalize_term(env, ctx, term),
         Term::Var(name) => {
             if let Some(def) = env.term_def(name) {
                 let (body, _) = instantiate_term_def(env, ctx, def, &[])?;
@@ -10656,6 +10736,10 @@ fn subst_type_schema(ty: &Type, subst: &SchemaSubst) -> Type {
 
 fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
     match term {
+        Term::Ascribed { term, ty } => Term::Ascribed {
+            term: Box::new(subst_term_schema(term, subst)),
+            ty: subst_type_schema(ty, subst),
+        },
         Term::Var(name) => subst
             .term_args
             .get(name)
@@ -10810,6 +10894,7 @@ fn formula_mentions_schema_name(formula: &Formula, name: &str, kind: SchemaNameK
 
 fn term_mentions_schema_name(term: &Term, name: &str, kind: SchemaNameKind) -> bool {
     match term {
+        Term::Ascribed { term, .. } => term_mentions_schema_name(term, name, kind),
         Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => false,
         Term::App(_, args) => args
             .iter()
@@ -10997,6 +11082,7 @@ fn subst_formula_term(formula: &Formula, var: &str, replacement: &Term) -> Formu
 
 fn term_has_free_var(term: &Term, name: &str) -> bool {
     match term {
+        Term::Ascribed { term, .. } => term_has_free_var(term, name),
         Term::Var(var) => var == name,
         Term::App(_, args) => args.iter().any(|arg| term_has_free_var(arg, name)),
         Term::PredLambda { params, body } => {
@@ -11048,6 +11134,7 @@ fn term_contains_subterm(term: &Term, needle: &Term) -> bool {
         return true;
     }
     match term {
+        Term::Ascribed { term, .. } => term_contains_subterm(term, needle),
         Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => false,
         Term::App(_, args) => args.iter().any(|arg| term_contains_subterm(arg, needle)),
         Term::PredLambda { body, .. } | Term::SetBuilder { body, .. } => {
@@ -11105,6 +11192,14 @@ fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
     }
 
     match term {
+        Term::Ascribed { term, ty } => {
+            for replaced in replace_term_once(term, from, to) {
+                results.push(Term::Ascribed {
+                    term: Box::new(replaced),
+                    ty: ty.clone(),
+                });
+            }
+        }
         Term::Succ(inner) => {
             for replaced in replace_term_once(inner, from, to) {
                 results.push(Term::Succ(Box::new(replaced)));
@@ -11367,6 +11462,7 @@ fn formula_size(formula: &Formula) -> usize {
 
 fn term_size(term: &Term) -> usize {
     match term {
+        Term::Ascribed { term, .. } => 1 + term_size(term),
         Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => 1,
         Term::App(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
         Term::PredLambda { body, .. } => 1 + formula_size(body),
@@ -12220,6 +12316,16 @@ impl Tokens {
     }
 
     fn parse_term(&mut self) -> Result<Term, ParseError> {
+        if self.eat_sym("(") {
+            let term = self.parse_term()?;
+            self.expect_sym(":")?;
+            let ty = self.parse_type()?;
+            self.expect_sym(")")?;
+            return Ok(Term::Ascribed {
+                term: Box::new(term),
+                ty,
+            });
+        }
         if let Some(value) = self.eat_number() {
             return Ok(nat_literal_term(value));
         }
@@ -12398,7 +12504,7 @@ impl Tokens {
         if self.eat_ident("False") {
             return Ok(Formula::False);
         }
-        if self.eat_sym("(") {
+        if !self.starts_parenthesized_term_ascription() && self.eat_sym("(") {
             let formula = self.parse_formula()?;
             self.expect_sym(")")?;
             return Ok(formula);
@@ -12419,7 +12525,8 @@ impl Tokens {
         match term {
             Term::Var(name) => Ok(Formula::Atom(name)),
             Term::App(name, args) => Ok(Formula::PredApp(name, args)),
-            Term::Zero
+            Term::Ascribed { .. }
+            | Term::Zero
             | Term::Succ(_)
             | Term::Add(_, _)
             | Term::Mul(_, _)
@@ -12452,6 +12559,16 @@ impl Tokens {
             }
         }
         Ok(vars)
+    }
+
+    fn starts_parenthesized_term_ascription(&mut self) -> bool {
+        if !matches!(self.peek(), TokenKind::Sym(sym) if sym == "(") {
+            return false;
+        }
+        let checkpoint = self.pos;
+        let is_ascription = self.parse_term().is_ok();
+        self.pos = checkpoint;
+        is_ascription
     }
 
     fn parse_predicate_lambda(&mut self) -> Result<Term, ParseError> {
@@ -16088,6 +16205,19 @@ fn rewrite_term_with_simp_rules_once(
     }
 
     match term {
+        Term::Ascribed { term, ty } => {
+            if let Some((term, proof)) = rewrite_term_with_simp_rules_once(env, ctx, term, rules)? {
+                Ok(Some((
+                    Term::Ascribed {
+                        term: Box::new(term),
+                        ty: ty.clone(),
+                    },
+                    proof,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
         Term::App(name, args) => {
             for (idx, arg) in args.iter().enumerate() {
                 if let Some((rewritten, proof)) =
@@ -17053,6 +17183,10 @@ fn subst_term_terms_with(
     replacement_free_vars: &HashSet<Name>,
 ) -> Term {
     match term {
+        Term::Ascribed { term, ty } => Term::Ascribed {
+            term: Box::new(subst_term_terms_with(term, subst, replacement_free_vars)),
+            ty: ty.clone(),
+        },
         Term::Var(name) => subst
             .get(name)
             .cloned()
@@ -17265,6 +17399,7 @@ fn collect_free_formula_vars(formula: &Formula, bound: &mut Vec<Name>, vars: &mu
 
 fn collect_free_term_vars(term: &Term, bound: &mut Vec<Name>, vars: &mut HashSet<Name>) {
     match term {
+        Term::Ascribed { term, .. } => collect_free_term_vars(term, bound, vars),
         Term::Var(name) => {
             if !bound.contains(name) {
                 vars.insert(name.clone());
@@ -17420,6 +17555,25 @@ fn unify_formula(
 
 fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Result<(), ()> {
     match pattern {
+        Term::Ascribed {
+            term: pattern,
+            ty: pattern_ty,
+        } => {
+            let Term::Ascribed {
+                term: target,
+                ty: target_ty,
+            } = target
+            else {
+                return Err(());
+            };
+            unify_type(
+                pattern_ty,
+                target_ty,
+                unify.schema_params,
+                unify.schema_subst,
+            )?;
+            unify_term(pattern, target, unify)
+        }
         Term::Var(name) if unify.term_metas.contains(name) => {
             if let Some(existing) = unify.term_subst.get(name) {
                 if existing == target {
@@ -17897,6 +18051,36 @@ mod tests {
     }
 
     #[test]
+    fn term_type_ascriptions_parse_round_trip_and_remain_annotation_only() {
+        let ascribed = Term::Ascribed {
+            term: Box::new(Term::Var("nil".to_string())),
+            ty: Type::App("List".to_string(), vec![Type::Nat]),
+        };
+        assert_eq!(ascribed.to_string(), "(nil : List Nat)");
+        assert_eq!(parse_term_str(&ascribed.to_string()), Ok(ascribed));
+        assert!(parse_formula_str("(P -> P)").is_ok());
+        assert!(parse_formula_str("(forall x : Nat, x = x)").is_ok());
+        assert!(parse_formula_str("(P -> forall x : Nat, x = x)").is_ok());
+
+        let result = check_file(
+            r#"
+const n : Nat
+theorem ascription_refl : (n : Nat) = n := by
+  refl
+"#,
+        );
+        assert!(
+            result.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            result.diagnostics
+        );
+        check_err_contains(
+            "const n : Nat\ntheorem bad : (n : Set Nat) = (n : Set Nat) := by\n  refl\n",
+            "term ascription declares type `Set Nat`, but its term has type `Nat`",
+        );
+    }
+
+    #[test]
     fn legacy_monomorphic_sorts_reject_type_arguments_explicitly() {
         check_err_contains(
             "sort List\nconst xs : List Nat\n",
@@ -18346,6 +18530,10 @@ theorem append_cons_exact
   L.append(L.cons(h, t), ys) = L.cons(h, L.append(t, ys)) := by
   exact L.append_cons {A := A; h := h; t := t; ys := ys}
 
+theorem length_nil_exact (A : Type) :
+  L.length((L.nil : L.List A)) = 0 := by
+  exact L.length_nil {A := A}
+
 theorem constructor_equations_simp
   (A : Type) (h : A) (t ys : L.List A) :
   L.length(L.append(L.cons(h, t), ys)) =
@@ -18362,6 +18550,7 @@ theorem constructor_equations_simp
         assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
         for (theorem_name, dependency_names) in [
             ("append_cons_exact", &["append_cons"][..]),
+            ("length_nil_exact", &["length_nil"][..]),
             (
                 "constructor_equations_simp",
                 &["append_cons", "length_cons"][..],

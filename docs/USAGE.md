@@ -337,6 +337,12 @@ Term constants:
 const alice : Person
 ```
 
+A term type ascription has the form `(term : T)`. Cetacea checks the
+annotation, uses it to resolve otherwise ambiguous rank-one polymorphism, and
+then erases it during elaboration. For example, a generic List import can make
+the element type of `nil` explicit as `(L.nil : L.List Nat)`. A false
+ascription is rejected; it is never a cast.
+
 Functions:
 
 ```text

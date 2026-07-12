@@ -441,6 +441,17 @@ impl<'a> CompatibilityLowerer<'a> {
             Term::App(name, arguments) => {
                 self.lower_named_application(name, arguments, expected)?
             }
+            Term::Ascribed { term, ty } => {
+                let ascribed_type = self.lower_type(ty)?;
+                if let Some(expected) = expected {
+                    if *expected != ascribed_type {
+                        return Err(LoweringError::new(format!(
+                            "term ascription has core type `{ascribed_type:?}`, but the context expects `{expected:?}`"
+                        )));
+                    }
+                }
+                self.lower_term_raw(term, Some(&ascribed_type))?
+            }
             Term::PredLambda { params, body } => {
                 let expected = expected.ok_or_else(|| {
                     LoweringError::new(

@@ -141,19 +141,18 @@ bytes for Wasm.
 The package now checks and receipts the constructor equations `append_cons`,
 `length_nil`, and `length_cons` as well. Source aliases for `append_cons` and
 `length_cons` cross both engines through `exact` and `simp`; their concrete
-constructor arguments determine the List instance. The core-only `length_nil`
-theorem exposes the remaining surface-inference requirement: `length(nil)`
-cannot determine the element type from its Nat result. It must wait for explicit
-term type application/ascription instead of guessing. This checkpoint measures
-3,778,176 bytes natively and 1,364,950 bytes in Wasm.
+constructor arguments determine the List instance. `length_nil` now uses the
+checked source ascription `(L.nil : L.List A)` to select the instance that its
+Nat result cannot determine. The annotation is substituted, validated, and
+erased by both elaborators; it adds no kernel term form. This checkpoint
+measures 3,794,240 bytes natively and 1,369,623 bytes in Wasm.
 
 ## Remaining migration slices
 
-1. Add explicit term type syntax and use it to expose `length_nil`; expand the
-   checked predicate-equation aliases, add generic declaration syntax, then
-   publish the signature, equation, and induction surfaces for ordinary
-   checking. Retain aliases for the current monomorphic list vocabulary for one
-   release cycle. The import seam is
+1. Expand the checked predicate-equation aliases, add generic declaration
+   syntax, then publish the signature, equation, and induction surfaces for
+   ordinary checking. Retain aliases for the current monomorphic list
+   vocabulary for one release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser/editor results.

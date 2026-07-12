@@ -470,8 +470,9 @@ The next constructor equations use the same path. `append_cons`, `length_nil`,
 and `length_cons` are checked by conversion and retain direct dependencies on
 `append` or `length`. The first and third have source aliases because their
 constructor arguments determine the rank-one instance; an end-to-end `simp`
-proof uses both aliases and retains both receipts. `length_nil` is registered
-but deliberately not source-bound: `length(nil)` has Nat result type regardless
-of the unconstrained element type, and the current surface has no term-level
-type application or ascription with which to choose `A`. The measured artifacts
-are 3,778,176 bytes for the native CLI and 1,364,950 bytes for Wasm.
+proof uses both aliases and retains both receipts. `length_nil` is now
+source-bound using `(L.nil : L.List A)`. A term ascription supplies the expected
+type to rank-one inference, is checked against any surrounding expected type,
+and lowers to the annotated term with no new core constructor. Substitution
+updates types inside annotations before they are erased. The measured artifacts
+are 3,794,240 bytes for the native CLI and 1,369,623 bytes for Wasm.

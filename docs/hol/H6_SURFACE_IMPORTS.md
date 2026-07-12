@@ -118,12 +118,11 @@ artifacts are 3,764,424 bytes for the native CLI and 1,368,943 bytes for Wasm.
 `append_cons` and `length_cons` are now source-bound through the same validated
 alias mechanism. Constructor arguments determine their rank-one instance, and
 a combined explicit `simp` invocation retains both stable theorem receipts.
-The package also owns checked `length_nil`, but it is not yet an alias:
-`length(nil)` returns Nat for every element type and is therefore genuinely
-ambiguous without term-level type application or ascription. The source driver
-continues to fail closed instead of selecting an arbitrary type. This equation
-checkpoint produces a 3,778,176-byte native CLI and a 1,364,950-byte raw Wasm
-module.
+The checked `length_nil` theorem is source-bound as well. Because `length(nil)`
+returns Nat for every element type, its descriptor and uses write
+`(L.nil : L.List A)`. Both engines validate and erase the annotation; a wrong
+type is rejected rather than cast. This ascription checkpoint produces a
+3,794,240-byte native CLI and a 1,369,623-byte raw Wasm module.
 
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
@@ -148,9 +147,8 @@ The alias catalog, parser-independent lowering, signature-only shadow-driver
 import, stable package reporting, JSON, and exact assignment-manifest
 allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
-Predicate-valued `All` arguments are complete as well. The next source slice
-adds explicit term type syntax so the checked `length_nil` theorem can be
-source-bound, then continues with predicate equations, finite and cardinality
-aliases, browser/editor verification, and an explicit decision about ordinary
-(non-shadow) acceptance. The generic induction principle itself is now exposed
-through a receipt-backed theorem alias.
+Predicate-valued `All` arguments and explicit term ascriptions are complete as
+well. The next source slices continue with predicate equations, finite and
+cardinality aliases, browser/editor verification, and an explicit decision
+about ordinary (non-shadow) acceptance. The generic induction principle itself
+is now exposed through a receipt-backed theorem alias.

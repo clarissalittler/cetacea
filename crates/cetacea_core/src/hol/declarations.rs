@@ -239,6 +239,7 @@ impl CompatibilityElaborator {
         let length_name = qualify("length");
         let append_nil_left_name = qualify("append_nil_left");
         let append_cons_name = qualify("append_cons");
+        let length_nil_name = qualify("length_nil");
         let length_cons_name = qualify("length_cons");
         let list_induction_name = qualify("list_induction");
         for name in [
@@ -252,6 +253,7 @@ impl CompatibilityElaborator {
             &length_name,
             &append_nil_left_name,
             &append_cons_name,
+            &length_nil_name,
             &length_cons_name,
             &list_induction_name,
         ] {
@@ -399,6 +401,28 @@ impl CompatibilityElaborator {
             &append_cons_statement,
             vec![parameter],
             vec![element_type.clone(), list_type.clone(), list_type.clone()],
+        )?;
+        let length_nil_parameters = vec![Param {
+            name: surface_element_parameter.clone(),
+            kind: ParamKind::Type,
+        }];
+        let length_nil_statement = Formula::eq(
+            Term::App(
+                length_name.clone(),
+                vec![Term::Ascribed {
+                    term: Box::new(Term::Var(nil_name.clone())),
+                    ty: surface_list_type.clone(),
+                }],
+            ),
+            Term::Zero,
+        );
+        staged.bind_checked_theorem_alias(
+            length_nil_name,
+            installed.length_nil,
+            length_nil_parameters,
+            &length_nil_statement,
+            vec![parameter],
+            Vec::new(),
         )?;
         let length_cons_parameters = vec![
             Param {
