@@ -454,6 +454,14 @@ proved against the registered transparent `append`, has a stable package
 receipt, and can drive `exact` or an explicit `simp` rule in source. Any root
 proof retains that receipt as a direct dependency. Default checking and
 finite/cardinality surfaces fail closed. `HolShadowReport`, CLI JSON, and
-assignment manifests carry and allowlist the exact versioned package ID. The
-release artifacts at this checkpoint are 3,730,144 bytes for the native CLI and
-1,365,552 bytes for raw Wasm.
+assignment manifests carry and allowlist the exact versioned package ID.
+
+Generic List induction follows the same certificate route. The package stores
+`list_induction` with explicit type, predicate, and scrutinee template
+parameters and kernel `Induction` evidence. Its source descriptor is checked
+against the stored theorem before alias commit. Applying it with a concrete
+first-order predicate produces a `fol+induction` root receipt, carries the
+`Induction` feature, and names the package theorem as a direct dependency;
+there is no generic List case splitter in the legacy tactic engine. The
+checkpoint artifacts are 3,764,424 bytes for the native CLI and 1,368,943
+bytes for Wasm.

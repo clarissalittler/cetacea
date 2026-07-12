@@ -99,6 +99,7 @@ pub struct InstalledListLibrary {
     pub lists: ListLibrary,
     pub length: ListLength,
     pub append_nil_left: TheoremId,
+    pub list_induction: TheoremId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,7 +230,7 @@ impl HolLibraryRegistry {
             list_type.clone(),
             lists.append_term(
                 element_type.clone(),
-                lists.nil_term(element_type),
+                lists.nil_term(element_type.clone()),
                 CoreTerm::Bound(0),
             ),
             CoreTerm::Bound(0),
@@ -238,9 +239,60 @@ impl HolLibraryRegistry {
             .declare_theorem_with_parameters(
                 names.append_nil_left.clone(),
                 vec![lists.element_parameter],
-                vec![list_type],
+                vec![list_type.clone()],
                 append_nil_left_statement,
                 HolDraftProof::EqualityRefl(CoreTerm::Bound(0)),
+            )?;
+        let property_type = CoreType::arrow(list_type.clone(), CoreType::Prop);
+        let induction_base =
+            CoreTerm::apply(CoreTerm::Bound(1), lists.nil_term(element_type.clone()));
+        let induction_cons =
+            lists.cons_term(element_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0));
+        let induction_step = CoreTerm::forall(
+            element_type.clone(),
+            CoreTerm::forall(
+                list_type.clone(),
+                CoreTerm::implies(
+                    CoreTerm::apply(CoreTerm::Bound(3), CoreTerm::Bound(0)),
+                    CoreTerm::apply(CoreTerm::Bound(3), induction_cons),
+                ),
+            ),
+        );
+        let induction_conclusion = CoreTerm::apply(CoreTerm::Bound(1), CoreTerm::Bound(0));
+        let list_induction_statement = CoreTerm::implies(
+            induction_base.clone(),
+            CoreTerm::implies(induction_step.clone(), induction_conclusion),
+        );
+        let induction_cons_case = HolDraftProof::ImpElim {
+            proof_implication: Box::new(HolDraftProof::ForallElim {
+                proof_forall: Box::new(HolDraftProof::ForallElim {
+                    proof_forall: Box::new(HolDraftProof::Hypothesis(1)),
+                    argument: CoreTerm::Bound(0),
+                }),
+                argument: CoreTerm::Bound(1),
+            }),
+            proof_argument: Box::new(HolDraftProof::Hypothesis(0)),
+        };
+        let list_induction_proof = HolDraftProof::ImpIntro {
+            premise: induction_base,
+            body: Box::new(HolDraftProof::ImpIntro {
+                premise: induction_step,
+                body: Box::new(HolDraftProof::Induction {
+                    datatype: lists.datatype,
+                    type_arguments: vec![element_type.clone()],
+                    motive: CoreTerm::Bound(1),
+                    scrutinee: CoreTerm::Bound(0),
+                    cases: vec![HolDraftProof::Hypothesis(1), induction_cons_case],
+                }),
+            }),
+        };
+        let (list_induction, list_induction_receipt) = staged_core
+            .declare_theorem_with_parameters(
+                names.list_induction.clone(),
+                vec![lists.element_parameter],
+                vec![property_type, list_type.clone()],
+                list_induction_statement,
+                list_induction_proof,
             )?;
         let receipt = |constant| {
             staged_core
@@ -317,11 +369,18 @@ impl HolLibraryRegistry {
                         LibraryDeclarationKind::Theorem,
                         Some(append_nil_left_receipt.id()),
                     ),
+                    declaration(
+                        "list_induction",
+                        &names.list_induction,
+                        LibraryDeclarationKind::Theorem,
+                        Some(list_induction_receipt.id()),
+                    ),
                 ],
             },
             lists,
             length,
             append_nil_left,
+            list_induction,
         };
 
         let mut staged_registry = self.clone();
@@ -539,6 +598,77 @@ fn validate_installed_list_v1(
         });
     }
     let names = ListLibraryNames::under_namespace(BUILTIN_LIST_V1_NAMESPACE);
+    let expected_catalog = [
+        (
+            "List",
+            names.datatype.as_str(),
+            LibraryDeclarationKind::Datatype,
+        ),
+        (
+            "nil",
+            names.nil.as_str(),
+            LibraryDeclarationKind::Constructor,
+        ),
+        (
+            "cons",
+            names.cons.as_str(),
+            LibraryDeclarationKind::Constructor,
+        ),
+        (
+            "All",
+            names.all.as_str(),
+            LibraryDeclarationKind::Definition,
+        ),
+        (
+            "Member",
+            names.member.as_str(),
+            LibraryDeclarationKind::Definition,
+        ),
+        (
+            "Nodup",
+            names.nodup.as_str(),
+            LibraryDeclarationKind::Definition,
+        ),
+        (
+            "append",
+            names.append.as_str(),
+            LibraryDeclarationKind::Definition,
+        ),
+        (
+            "length",
+            names.length.as_str(),
+            LibraryDeclarationKind::Definition,
+        ),
+        (
+            "append_nil_left",
+            names.append_nil_left.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "list_induction",
+            names.list_induction.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+    ];
+    if installed.record.declarations.len() != expected_catalog.len()
+        || !installed
+            .record
+            .declarations
+            .iter()
+            .zip(expected_catalog)
+            .all(|(declaration, (logical_name, core_name, kind))| {
+                declaration.logical_name == logical_name
+                    && declaration.core_name == core_name
+                    && declaration.kind == kind
+            })
+    {
+        return Err(SpikeError {
+            message: format!(
+                "invalid declaration catalog for package `{}`",
+                LibraryPackageId::ListV1
+            ),
+        });
+    }
     let matches = core.types().resolve(&names.datatype) == Some(installed.lists.datatype)
         && core.constants().resolve(&names.nil) == Some(installed.lists.nil)
         && core.constants().resolve(&names.cons) == Some(installed.lists.cons)
@@ -547,7 +677,8 @@ fn validate_installed_list_v1(
         && core.constants().resolve(&names.nodup) == Some(installed.lists.nodup)
         && core.constants().resolve(&names.append) == Some(installed.lists.append)
         && core.constants().resolve(&names.length) == Some(installed.length.constant)
-        && core.theorems().resolve(&names.append_nil_left) == Some(installed.append_nil_left);
+        && core.theorems().resolve(&names.append_nil_left) == Some(installed.append_nil_left)
+        && core.theorems().resolve(&names.list_induction) == Some(installed.list_induction);
     if !matches {
         return Err(SpikeError {
             message: format!(
@@ -802,7 +933,7 @@ fn validate_installed_finite_v1(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hol::fragments::{EvidenceStatus, StatementFragment};
+    use crate::hol::fragments::{EvidenceStatus, ProofFeature, StatementFragment};
     use crate::hol::inductive::{InductiveConstructorSpec, InductiveSpec};
     use crate::hol::prelude::CompatibilityPrelude;
     use crate::hol::terms::{infer_type, CoreTerm, TermContext};
@@ -835,7 +966,7 @@ mod tests {
             LibraryPackageSource::Builtin
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_LIST_V1_NAMESPACE);
-        assert_eq!(installed.record.declarations.len(), 9);
+        assert_eq!(installed.record.declarations.len(), 10);
         assert_eq!(
             installed
                 .record
@@ -843,7 +974,7 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.receipt.is_some())
                 .count(),
-            6
+            7
         );
         let member_receipt = installed
             .record
@@ -873,6 +1004,19 @@ mod tests {
             .proof()
             .direct_dependencies()
             .contains(&append_receipt.id()));
+        let list_induction_receipt = core
+            .theorem_receipt(installed.list_induction)
+            .expect("list_induction theorem receipt");
+        assert_eq!(
+            registry
+                .receipt_name(list_induction_receipt.id())
+                .as_deref(),
+            Some("std/hol/list@1::list_induction")
+        );
+        assert!(list_induction_receipt
+            .proof()
+            .transitive_features()
+            .contains(&ProofFeature::Induction));
         assert!(installed
             .record
             .declarations
@@ -1203,7 +1347,7 @@ mod tests {
         let (mut core, prelude) = core_with_prelude();
         let names = ListLibraryNames::under_namespace(BUILTIN_LIST_V1_NAMESPACE);
         core.declare_theorem(
-            names.append_nil_left.clone(),
+            names.list_induction.clone(),
             Vec::new(),
             CoreTerm::Truth,
             HolDraftProof::TruthIntro,
@@ -1220,7 +1364,7 @@ mod tests {
                 prelude.successor(),
             )
             .expect_err("late collision must reject the package");
-        assert!(error.message.contains(&names.append_nil_left));
+        assert!(error.message.contains(&names.list_induction));
         assert_eq!((core, registry), before);
     }
 

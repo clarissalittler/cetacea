@@ -634,8 +634,14 @@ instance, preventing a variable higher-order use from masquerading as FOL.
 No computation was copied into the legacy kernel: the first source-facing
 equation, `append_nil_left`, is a checked package theorem whose receipt depends
 on the registered `append` definition and remains visible through `exact` and
-`simp` uses. Direct unfolding and induction remain fail-closed. The checkpoint
-artifacts are 3,730,144 bytes natively and 1,365,552 bytes in Wasm.
+`simp` uses. Direct unfolding and legacy generic-induction synthesis remain
+fail-closed.
+The package now also owns a checked `list_induction` theorem. Its source alias
+takes an explicit property and scrutinee; concrete applications retain the
+least `fol+induction` fragment, the `Induction` feature, and a stable package
+dependency without teaching the legacy tactic engine generic List cases. The
+completed induction checkpoint is 3,764,424 bytes natively and 1,368,943 bytes
+in Wasm, still below the 1.5 MB review line.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
@@ -647,9 +653,9 @@ artifacts are 3,730,144 bytes natively and 1,365,552 bytes in Wasm.
   Five bottom-up-inferable List operations now cross the dual-checking boundary;
   contextual `nil` inference and predicate-valued `All` arguments are
   implemented as well. One checked computation theorem now drives `exact` and
-  explicit `simp` without adding a legacy reduction rule. The broader equation
-  catalog, induction/tactic integration, and ordinary end-to-end acceptance
-  remain.
+  explicit `simp` without adding a legacy reduction rule, and checked generic
+  List induction is available through `apply`. The broader equation catalog and
+  ordinary end-to-end acceptance remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

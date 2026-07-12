@@ -3316,6 +3316,7 @@ impl FileChecker {
             let append_name = qualify("append");
             let length_name = qualify("length");
             let append_nil_left_name = qualify("append_nil_left");
+            let list_induction_name = qualify("list_induction");
             let symbol_names = [
                 &nil_name,
                 &cons_name,
@@ -3325,6 +3326,7 @@ impl FileChecker {
                 &append_name,
                 &length_name,
                 &append_nil_left_name,
+                &list_induction_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
                 if self.env.has_top_level_name(name) {
@@ -3347,7 +3349,7 @@ impl FileChecker {
             let type_params = vec![element_parameter];
             staged_env.add_rank_one_const(nil_name.clone(), type_params.clone(), list_type.clone());
             staged_env.add_rank_one_func(
-                cons_name,
+                cons_name.clone(),
                 type_params.clone(),
                 vec![element_type.clone(), list_type.clone()],
                 list_type.clone(),
@@ -3417,7 +3419,7 @@ impl FileChecker {
                 .expect("registered append_nil_left theorem has a receipt");
             let theorem_element_parameter = "A".to_string();
             let theorem_list_type = Type::App(
-                datatype_name,
+                datatype_name.clone(),
                 vec![Type::Named(theorem_element_parameter.clone())],
             );
             staged_env.add_theorem(Theorem {
@@ -3435,13 +3437,75 @@ impl FileChecker {
                 statement: Formula::eq(
                     Term::App(
                         append_name,
-                        vec![Term::Var(nil_name), Term::Var("xs".to_string())],
+                        vec![Term::Var(nil_name.clone()), Term::Var("xs".to_string())],
                     ),
                     Term::Var("xs".to_string()),
                 ),
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     append_nil_left_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let list_induction_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "list_induction")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered list_induction theorem has a receipt");
+            let induction_element_parameter = "A".to_string();
+            let induction_list_type = Type::App(
+                datatype_name,
+                vec![Type::Named(induction_element_parameter.clone())],
+            );
+            let property = |term| Formula::PredApp("P".to_string(), vec![term]);
+            staged_env.add_theorem(Theorem {
+                name: list_induction_name,
+                params: vec![
+                    Param {
+                        name: induction_element_parameter.clone(),
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "P".to_string(),
+                        kind: ParamKind::Predicate(vec![induction_list_type.clone()]),
+                    },
+                    Param {
+                        name: "xs".to_string(),
+                        kind: ParamKind::Term(induction_list_type.clone()),
+                    },
+                ],
+                statement: Formula::implies(
+                    property(Term::Var(nil_name)),
+                    Formula::implies(
+                        Formula::forall(
+                            "h".to_string(),
+                            Type::Named(induction_element_parameter),
+                            Formula::forall(
+                                "t".to_string(),
+                                induction_list_type.clone(),
+                                Formula::implies(
+                                    property(Term::Var("t".to_string())),
+                                    property(Term::App(
+                                        cons_name,
+                                        vec![
+                                            Term::Var("h".to_string()),
+                                            Term::Var("t".to_string()),
+                                        ],
+                                    )),
+                                ),
+                            ),
+                        ),
+                        property(Term::Var("xs".to_string())),
+                    ),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    list_induction_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -18160,6 +18224,60 @@ theorem append_nil_left_simp (A : Type) (xs : L.List A) :
             .any(|dependency| {
                 report.receipt_names.get(dependency).map(String::as_str)
                     == Some("std/hol/list@1::append_nil_left")
+            }));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_exposes_checked_generic_induction() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as L
+
+theorem list_induction_smoke (A : Type) (x : A) (xs : L.List A) :
+  L.Member(x, xs) -> L.Member(x, xs) := by
+  apply L.list_induction {
+    A := A;
+    P := fun ys : L.List A => L.Member(x, ys) -> L.Member(x, ys);
+    xs := xs
+  }
+  intro member
+  exact member
+  intro h
+  intro t
+  intro ih
+  intro member
+  exact member
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        let theorem = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "list_induction_smoke")
+            .expect("list_induction_smoke receipt");
+        assert_eq!(
+            theorem.statement_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert_eq!(
+            theorem.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(theorem.features.contains(&hol::ProofFeature::Induction));
+        assert!(theorem
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/list@1::list_induction")
             }));
     }
 

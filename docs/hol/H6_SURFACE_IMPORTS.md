@@ -105,10 +105,15 @@ only its `fol+induction` List dependency. No imported List definition is
 copied into the transitional engine. Instead, the package now publishes the
 checked theorem `append_nil_left`; `exact L.append_nil_left {...}` and
 `simp [L.append_nil_left]` cross both engines and retain the stable package
-receipt as a proof dependency. Direct legacy unfolding and induction remain
+receipt as a proof dependency. The checked theorem `list_induction` likewise
+accepts explicit `A`, predicate-lambda `P`, and scrutinee `xs` parameters.
+Applying it to a first-order property keeps the root theorem
+`fol+induction`, records the `Induction` feature, and retains the stable package
+receipt. Direct legacy unfolding and generic-List induction synthesis remain
 unavailable. Default checking rejects the logical import. Repeated imports are
 idempotent. Finite and cardinality package IDs are recognized but reject with
-an explicit surface-not-implemented diagnostic.
+an explicit surface-not-implemented diagnostic. The induction checkpoint
+artifacts are 3,764,424 bytes for the native CLI and 1,368,943 bytes for Wasm.
 
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
@@ -134,8 +139,7 @@ import, stable package reporting, JSON, and exact assignment-manifest
 allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments are complete as well. The next source slices
-expand the checked equation catalog and expose a checked List induction
-principle, followed by finite and cardinality aliases, browser/editor
-verification, and an explicit decision about ordinary (non-shadow) acceptance.
-This checkpoint produces a 3,730,144-byte native CLI and a 1,365,552-byte raw
-Wasm module.
+expand the checked equation catalog, followed by finite and cardinality aliases,
+browser/editor verification, and an explicit decision about ordinary
+(non-shadow) acceptance. The generic induction principle itself is now exposed
+through a receipt-backed theorem alias.

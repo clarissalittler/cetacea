@@ -44,6 +44,7 @@ pub struct ListLibraryNames {
     pub append: String,
     pub length: String,
     pub append_nil_left: String,
+    pub list_induction: String,
 }
 
 impl ListLibraryNames {
@@ -69,6 +70,7 @@ impl ListLibraryNames {
             append: qualify("append"),
             length: qualify("length"),
             append_nil_left: qualify("append_nil_left"),
+            list_induction: qualify("list_induction"),
         }
     }
 }

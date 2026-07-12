@@ -238,6 +238,7 @@ impl CompatibilityElaborator {
         let append_name = qualify("append");
         let length_name = qualify("length");
         let append_nil_left_name = qualify("append_nil_left");
+        let list_induction_name = qualify("list_induction");
         for name in [
             &datatype_name,
             &nil_name,
@@ -248,6 +249,7 @@ impl CompatibilityElaborator {
             &append_name,
             &length_name,
             &append_nil_left_name,
+            &list_induction_name,
         ] {
             self.ensure_name_free(name)?;
         }
@@ -271,7 +273,7 @@ impl CompatibilityElaborator {
                 result_type: list_type.clone(),
             },
             SymbolRegistration {
-                name: cons_name,
+                name: cons_name.clone(),
                 constant: installed.lists.cons,
                 type_parameters: vec![parameter],
                 parameter_types: vec![element_type.clone(), list_type.clone()],
@@ -327,7 +329,7 @@ impl CompatibilityElaborator {
             Param {
                 name: "xs".to_string(),
                 kind: ParamKind::Term(Type::App(
-                    datatype_name,
+                    datatype_name.clone(),
                     vec![Type::Named(surface_element_parameter.clone())],
                 )),
             },
@@ -339,59 +341,65 @@ impl CompatibilityElaborator {
             ),
             Term::Var("xs".to_string()),
         );
-        let lowered_alias = staged
-            .lower_definition_parameters(&append_nil_left_parameters, |lowerer| {
-                lowerer.lower_formula(&append_nil_left_statement)
-            })?;
-        let core_declaration = staged
-            .core
-            .theorems()
-            .declaration(installed.append_nil_left)
-            .ok_or_else(|| {
-                CompatibilityDeclarationError::new(
-                    "registered append_nil_left theorem handle is missing",
-                )
-            })?;
-        let alias_type_arguments = lowered_alias
-            .type_parameters
-            .iter()
-            .copied()
-            .map(CoreType::Parameter)
-            .collect::<Vec<_>>();
-        let alias_term_arguments = vec![CoreTerm::Bound(0)];
-        let alias_context = lowered_alias
-            .parameter_types
-            .iter()
-            .cloned()
-            .fold(TermContext::new(), TermContext::with_bound);
-        let instantiated_statement = staged
-            .core
-            .theorems()
-            .instantiate_statement(
-                staged.core.types(),
-                staged.core.constants(),
-                &alias_context,
-                installed.append_nil_left,
-                &alias_type_arguments,
-                &alias_term_arguments,
-            )
-            .map_err(|error| CompatibilityDeclarationError::new(error.message))?;
-        if core_declaration.status != HolTheoremStatus::Checked
-            || core_declaration.type_parameters != [parameter]
-            || core_declaration.term_parameters != [list_type.clone()]
-            || instantiated_statement != lowered_alias.body
-        {
-            return Err(CompatibilityDeclarationError::new(
-                "registered append_nil_left surface descriptor does not match its checked theorem",
-            ));
-        }
-        staged.finish_theorem(TheoremRegistration {
-            name: append_nil_left_name,
-            theorem: installed.append_nil_left,
-            parameters: append_nil_left_parameters,
-            type_parameters: vec![parameter],
-            parameter_types: vec![list_type],
-        });
+        staged.bind_checked_theorem_alias(
+            append_nil_left_name,
+            installed.append_nil_left,
+            append_nil_left_parameters,
+            &append_nil_left_statement,
+            vec![parameter],
+            vec![list_type.clone()],
+        )?;
+        let induction_list_type = Type::App(
+            datatype_name,
+            vec![Type::Named(surface_element_parameter.clone())],
+        );
+        let induction_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "P".to_string(),
+                kind: ParamKind::Predicate(vec![induction_list_type.clone()]),
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(induction_list_type.clone()),
+            },
+        ];
+        let property = |term| Formula::PredApp("P".to_string(), vec![term]);
+        let induction_statement = Formula::implies(
+            property(Term::Var(nil_name)),
+            Formula::implies(
+                Formula::forall(
+                    "h".to_string(),
+                    Type::Named(surface_element_parameter),
+                    Formula::forall(
+                        "t".to_string(),
+                        induction_list_type.clone(),
+                        Formula::implies(
+                            property(Term::Var("t".to_string())),
+                            property(Term::App(
+                                cons_name,
+                                vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                            )),
+                        ),
+                    ),
+                ),
+                property(Term::Var("xs".to_string())),
+            ),
+        );
+        staged.bind_checked_theorem_alias(
+            list_induction_name,
+            installed.list_induction,
+            induction_parameters,
+            &induction_statement,
+            vec![parameter],
+            vec![
+                CoreType::arrow(list_type.clone(), CoreType::Prop),
+                list_type,
+            ],
+        )?;
         staged.library_aliases.push(LibraryAliasRegistration {
             package: LibraryPackageId::ListV1,
             namespace,
@@ -1091,6 +1099,77 @@ impl CompatibilityElaborator {
     fn finish_theorem(&mut self, registration: TheoremRegistration) {
         self.names.insert(registration.name.clone());
         self.theorems.push(registration);
+    }
+
+    fn bind_checked_theorem_alias(
+        &mut self,
+        name: String,
+        theorem: TheoremId,
+        parameters: Vec<Param>,
+        statement: &Formula,
+        type_parameters: Vec<TypeParameter>,
+        parameter_types: Vec<CoreType>,
+    ) -> Result<(), CompatibilityDeclarationError> {
+        self.ensure_name_free(&name)?;
+        let lowered_alias = self
+            .lower_definition_parameters(&parameters, |lowerer| lowerer.lower_formula(statement))?;
+        let alias_type_arguments = lowered_alias
+            .type_parameters
+            .iter()
+            .copied()
+            .map(CoreType::Parameter)
+            .collect::<Vec<_>>();
+        let parameter_count = lowered_alias.parameter_types.len();
+        let alias_term_arguments = (0..parameter_count)
+            .map(|index| {
+                u32::try_from(parameter_count - index - 1)
+                    .map(CoreTerm::Bound)
+                    .map_err(|_| {
+                        CompatibilityDeclarationError::new(
+                            "too many parameters in checked theorem alias",
+                        )
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let alias_context = lowered_alias
+            .parameter_types
+            .iter()
+            .cloned()
+            .fold(TermContext::new(), TermContext::with_bound);
+        let instantiated_statement = self
+            .core
+            .theorems()
+            .instantiate_statement(
+                self.core.types(),
+                self.core.constants(),
+                &alias_context,
+                theorem,
+                &alias_type_arguments,
+                &alias_term_arguments,
+            )
+            .map_err(|error| CompatibilityDeclarationError::new(error.message))?;
+        let core_declaration = self.core.theorems().declaration(theorem).ok_or_else(|| {
+            CompatibilityDeclarationError::new(format!(
+                "registered theorem handle for `{name}` is missing"
+            ))
+        })?;
+        if core_declaration.status != HolTheoremStatus::Checked
+            || core_declaration.type_parameters != type_parameters
+            || core_declaration.term_parameters != parameter_types
+            || instantiated_statement != lowered_alias.body
+        {
+            return Err(CompatibilityDeclarationError::new(format!(
+                "surface descriptor for `{name}` does not match its checked theorem"
+            )));
+        }
+        self.finish_theorem(TheoremRegistration {
+            name,
+            theorem,
+            parameters,
+            type_parameters,
+            parameter_types,
+        });
+        Ok(())
     }
 }
 
@@ -2827,13 +2906,13 @@ mod tests {
 
         let mut late_collision = CompatibilityElaborator::new().expect("late collision elaborator");
         late_collision
-            .declare_predicate("L.append_nil_left", &[])
+            .declare_predicate("L.list_induction", &[])
             .expect("reserve a later qualified alias");
         let before_late_collision = late_collision.clone();
         let error = late_collision
             .import_builtin_list_v1(Some("L"))
             .expect_err("a later alias collision rejects the entire import");
-        assert!(error.message.contains("L.append_nil_left"));
+        assert!(error.message.contains("L.list_induction"));
         assert_eq!(late_collision, before_late_collision);
     }
 

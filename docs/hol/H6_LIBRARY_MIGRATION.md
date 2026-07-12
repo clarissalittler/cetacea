@@ -130,12 +130,20 @@ reject explicitly until their end-to-end surfaces are implemented. Reports and
 JSON carry the exact package ID, and assignment manifests allowlist that ID
 without filesystem canonicalization.
 
+The same alias mechanism now exposes `list_induction`. Its core theorem is
+checked with explicit `Induction` evidence; its source schema takes `A`, a
+predicate over `List A`, and the scrutinee. A concrete source application stays
+`fol+induction` rather than inheriting a generic `hol` classification, while
+the package receipt and induction feature remain transitive and visible. The
+checkpoint artifacts are 3,764,424 bytes for the native CLI and 1,368,943
+bytes for Wasm.
+
 ## Remaining migration slices
 
-1. Expand the checked List equation aliases and expose a checked induction
-   principle through tactics; add generic declaration syntax, then publish it
-   for ordinary checking. Retain aliases for the current monomorphic list
-   vocabulary for one release cycle. The import seam is
+1. Expand the checked List equation aliases; add generic declaration syntax,
+   then publish the signature, equation, and induction surfaces for ordinary
+   checking. Retain aliases for the current monomorphic list vocabulary for one
+   release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser/editor results.
@@ -164,5 +172,5 @@ without filesystem canonicalization.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the first checked-equation checkpoint the release CLI is 3,730,144 bytes and
-the raw Wasm module is 1,365,552 bytes, still below the 1.5 MB review line.
+Release artifacts are measured at each completed source slice; raw Wasm remains
+below the 1.5 MB review line at the induction checkpoint.
