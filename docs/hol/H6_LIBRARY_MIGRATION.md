@@ -163,12 +163,22 @@ visible in both cases. The package validator now pins 19 exact declarations and
 16 receipts. This checkpoint measures 3,851,304 bytes natively and 1,373,491
 bytes in Wasm.
 
+The package now owns derived theorem `append_nil_right`. Its checked induction
+proof carries the `Induction` feature and an `append` dependency; exact source
+reuse remains `fol+induction`. A representative source proof also derives it
+solely from `list_induction`, `append_nil_left`, and `append_cons`, and the root
+receipt records exactly that public theorem set plus the transparent `append`
+definition used by conversion. Ascriptions remain present long enough to guide
+generic proof replay but are transparent to conversion and rewriting. The
+validator now pins 20 declarations and 17 receipts. This
+checkpoint measures 3,870,472 bytes natively and 1,374,035 bytes in Wasm.
+
 ## Remaining migration slices
 
-1. Add generic declaration syntax and derived List theorem families, then
-   publish the signature, equation, and induction surfaces for ordinary
-   checking. Retain aliases for the current monomorphic list vocabulary for one
-   release cycle. The import seam is
+1. Add generic declaration syntax and continue with `append_assoc` and
+   `length_append`, then publish the signature, equation, and induction surfaces
+   for ordinary checking. Retain aliases for the current monomorphic list
+   vocabulary for one release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser/editor results.

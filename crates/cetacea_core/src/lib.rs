@@ -3330,6 +3330,7 @@ impl FileChecker {
             let nodup_cons_name = qualify("nodup_cons");
             let all_nil_name = qualify("all_nil");
             let all_cons_name = qualify("all_cons");
+            let append_nil_right_name = qualify("append_nil_right");
             let list_induction_name = qualify("list_induction");
             let symbol_names = [
                 &nil_name,
@@ -3349,6 +3350,7 @@ impl FileChecker {
                 &nodup_cons_name,
                 &all_nil_name,
                 &all_cons_name,
+                &append_nil_right_name,
                 &list_induction_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
@@ -3882,6 +3884,52 @@ impl FileChecker {
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     all_cons_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let append_right_element_parameter = "A".to_string();
+            let append_right_list_type = Type::App(
+                datatype_name.clone(),
+                vec![Type::Named(append_right_element_parameter.clone())],
+            );
+            let append_nil_right_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "append_nil_right")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered append_nil_right theorem has a receipt");
+            staged_env.add_theorem(Theorem {
+                name: append_nil_right_name,
+                params: vec![
+                    Param {
+                        name: append_right_element_parameter,
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "xs".to_string(),
+                        kind: ParamKind::Term(append_right_list_type.clone()),
+                    },
+                ],
+                statement: Formula::eq(
+                    Term::App(
+                        append_name,
+                        vec![
+                            Term::Var("xs".to_string()),
+                            Term::Ascribed {
+                                term: Box::new(Term::Var(nil_name.clone())),
+                                ty: append_right_list_type,
+                            },
+                        ],
+                    ),
+                    Term::Var("xs".to_string()),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    append_nil_right_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -7211,9 +7259,19 @@ pub(crate) fn check_kernel_proof_node(
     expected: &Formula,
     allowed_mode: LogicMode,
 ) -> Result<LogicMode, KernelError> {
-    validate_formula(env, ctx, expected)?;
+    validate_formula(env, ctx, expected).map_err(|error| {
+        KernelError::new(format!(
+            "invalid expected proof formula `{expected}`: {}",
+            error.message
+        ))
+    })?;
     let checked = infer_kernel_proof_node(env, ctx, proof, allowed_mode)?;
-    validate_formula(env, ctx, &checked.formula)?;
+    validate_formula(env, ctx, &checked.formula).map_err(|error| {
+        KernelError::new(format!(
+            "proof produced invalid formula `{}`: {}",
+            checked.formula, error.message
+        ))
+    })?;
     if formulas_def_eq(env, ctx, &checked.formula, expected)? {
         Ok(checked.mode_used)
     } else {
@@ -8490,7 +8548,12 @@ fn infer_kernel_proof_node(
             })
         }
         DraftProof::EqRefl(term) => {
-            term_type(env, ctx, term)?;
+            term_type(env, ctx, term).map_err(|error| {
+                KernelError::new(format!(
+                    "invalid reflexivity term `{term}`: {}",
+                    error.message
+                ))
+            })?;
             Ok(CheckedProof {
                 formula: Formula::eq(term.clone(), term.clone()),
                 mode_used: LogicMode::Constructive,
@@ -8501,7 +8564,12 @@ fn infer_kernel_proof_node(
             proof_body,
             target,
         } => {
-            validate_formula(env, ctx, target)?;
+            validate_formula(env, ctx, target).map_err(|error| {
+                KernelError::new(format!(
+                    "invalid equality-substitution target `{target}`: {}",
+                    error.message
+                ))
+            })?;
             let checked_eq = infer_kernel_proof_node(env, ctx, eq_proof, allowed_mode)?;
             let formula = normalize_formula_defs(env, ctx, &checked_eq.formula)?;
             let Formula::Eq(left, right) = formula else {
@@ -8522,7 +8590,12 @@ fn infer_kernel_proof_node(
             })
         }
         DraftProof::Convert { proof_body, target } => {
-            validate_formula(env, ctx, target)?;
+            validate_formula(env, ctx, target).map_err(|error| {
+                KernelError::new(format!(
+                    "invalid conversion target `{target}`: {}",
+                    error.message
+                ))
+            })?;
             let checked_body = infer_kernel_proof_node(env, ctx, proof_body, allowed_mode)?;
             if !formulas_def_eq(env, ctx, &checked_body.formula, target)? {
                 return Err(KernelError::new(format!(
@@ -9672,8 +9745,17 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
             }
         }
         Formula::Eq(left, right) => {
-            let left_type = validate_term(env, ctx, left)?;
-            let right_type = validate_term(env, ctx, right)?;
+            let (left_type, right_type) = if matches!(right, Term::Ascribed { .. })
+                && !matches!(left, Term::Ascribed { .. })
+            {
+                let right_type = validate_term(env, ctx, right)?;
+                let left_type = validate_term_using_expected_type(env, ctx, left, &right_type)?;
+                (left_type, right_type)
+            } else {
+                let left_type = validate_term(env, ctx, left)?;
+                let right_type = validate_term_using_expected_type(env, ctx, right, &left_type)?;
+                (left_type, right_type)
+            };
             if left_type == right_type {
                 Ok(())
             } else {
@@ -10271,16 +10353,8 @@ fn alpha_eq_terms(left: &[Term], right: &[Term], env: &mut AlphaEnv) -> bool {
 
 fn alpha_eq_term(left: &Term, right: &Term, env: &mut AlphaEnv) -> bool {
     match (left, right) {
-        (
-            Term::Ascribed {
-                term: left_term,
-                ty: left_ty,
-            },
-            Term::Ascribed {
-                term: right_term,
-                ty: right_ty,
-            },
-        ) => left_ty == right_ty && alpha_eq_term(left_term, right_term, env),
+        (Term::Ascribed { term, .. }, right) => alpha_eq_term(term, right, env),
+        (left, Term::Ascribed { term, .. }) => alpha_eq_term(left, term, env),
         (Term::Var(left), Term::Var(right)) => alpha_eq_var(left, right, env),
         (Term::App(left_name, left_args), Term::App(right_name, right_args)) => {
             left_name == right_name && alpha_eq_terms(left_args, right_args, env)
@@ -10796,7 +10870,10 @@ fn normalize_term_compute(term: &Term) -> Term {
 
 fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, ValidationError> {
     match term {
-        Term::Ascribed { term, .. } => normalize_term(env, ctx, term),
+        Term::Ascribed { term, ty } => Ok(Term::Ascribed {
+            term: Box::new(normalize_term(env, ctx, term)?),
+            ty: ty.clone(),
+        }),
         Term::Var(name) => {
             if let Some(def) = env.term_def(name) {
                 let (body, _) = instantiate_term_def(env, ctx, def, &[])?;
@@ -11422,7 +11499,7 @@ fn formula_has_free_term(formula: &Formula, name: &str) -> bool {
 }
 
 fn term_contains_subterm(term: &Term, needle: &Term) -> bool {
-    if term == needle {
+    if terms_equal_ignoring_ascriptions(term, needle) {
         return true;
     }
     match term {
@@ -11467,9 +11544,133 @@ fn formula_contains_subterm(formula: &Formula, needle: &Term) -> bool {
     }
 }
 
+fn terms_equal_ignoring_ascriptions(left: &Term, right: &Term) -> bool {
+    match (left, right) {
+        (Term::Ascribed { term, .. }, right) => terms_equal_ignoring_ascriptions(term, right),
+        (left, Term::Ascribed { term, .. }) => terms_equal_ignoring_ascriptions(left, term),
+        (Term::Var(left), Term::Var(right)) => left == right,
+        (Term::App(left_name, left_args), Term::App(right_name, right_args)) => {
+            left_name == right_name
+                && left_args.len() == right_args.len()
+                && left_args
+                    .iter()
+                    .zip(right_args)
+                    .all(|(left, right)| terms_equal_ignoring_ascriptions(left, right))
+        }
+        (
+            Term::PredLambda {
+                params: left_params,
+                body: left_body,
+            },
+            Term::PredLambda {
+                params: right_params,
+                body: right_body,
+            },
+        ) => {
+            left_params == right_params
+                && formulas_equal_ignoring_ascriptions(left_body, right_body)
+        }
+        (Term::Zero, Term::Zero) => true,
+        (Term::Succ(left), Term::Succ(right))
+        | (Term::Fst(left), Term::Fst(right))
+        | (Term::Snd(left), Term::Snd(right))
+        | (Term::Singleton(left), Term::Singleton(right))
+        | (Term::Complement(left), Term::Complement(right))
+        | (Term::Powerset(left), Term::Powerset(right)) => {
+            terms_equal_ignoring_ascriptions(left, right)
+        }
+        (Term::Add(left_a, left_b), Term::Add(right_a, right_b))
+        | (Term::Mul(left_a, left_b), Term::Mul(right_a, right_b))
+        | (Term::Sub(left_a, left_b), Term::Sub(right_a, right_b))
+        | (Term::Pair(left_a, left_b), Term::Pair(right_a, right_b))
+        | (Term::Union(left_a, left_b), Term::Union(right_a, right_b))
+        | (Term::Inter(left_a, left_b), Term::Inter(right_a, right_b))
+        | (Term::Diff(left_a, left_b), Term::Diff(right_a, right_b))
+        | (Term::CartProd(left_a, left_b), Term::CartProd(right_a, right_b)) => {
+            terms_equal_ignoring_ascriptions(left_a, right_a)
+                && terms_equal_ignoring_ascriptions(left_b, right_b)
+        }
+        (Term::EmptySet(left), Term::EmptySet(right))
+        | (Term::Universe(left), Term::Universe(right)) => left == right,
+        (
+            Term::SetBuilder {
+                var: left_var,
+                var_type: left_type,
+                body: left_body,
+            },
+            Term::SetBuilder {
+                var: right_var,
+                var_type: right_type,
+                body: right_body,
+            },
+        ) => {
+            left_var == right_var
+                && left_type == right_type
+                && formulas_equal_ignoring_ascriptions(left_body, right_body)
+        }
+        _ => false,
+    }
+}
+
+fn formulas_equal_ignoring_ascriptions(left: &Formula, right: &Formula) -> bool {
+    match (left, right) {
+        (Formula::True, Formula::True) | (Formula::False, Formula::False) => true,
+        (Formula::Atom(left), Formula::Atom(right)) => left == right,
+        (Formula::PredApp(left_name, left_args), Formula::PredApp(right_name, right_args)) => {
+            left_name == right_name
+                && left_args.len() == right_args.len()
+                && left_args
+                    .iter()
+                    .zip(right_args)
+                    .all(|(left, right)| terms_equal_ignoring_ascriptions(left, right))
+        }
+        (Formula::Eq(left_a, left_b), Formula::Eq(right_a, right_b))
+        | (Formula::In(left_a, left_b), Formula::In(right_a, right_b))
+        | (Formula::Subset(left_a, left_b), Formula::Subset(right_a, right_b)) => {
+            terms_equal_ignoring_ascriptions(left_a, right_a)
+                && terms_equal_ignoring_ascriptions(left_b, right_b)
+        }
+        (Formula::And(left_a, left_b), Formula::And(right_a, right_b))
+        | (Formula::Or(left_a, left_b), Formula::Or(right_a, right_b))
+        | (Formula::Implies(left_a, left_b), Formula::Implies(right_a, right_b)) => {
+            formulas_equal_ignoring_ascriptions(left_a, right_a)
+                && formulas_equal_ignoring_ascriptions(left_b, right_b)
+        }
+        (
+            Formula::Forall {
+                var: left_var,
+                var_type: left_type,
+                body: left_body,
+            },
+            Formula::Forall {
+                var: right_var,
+                var_type: right_type,
+                body: right_body,
+            },
+        )
+        | (
+            Formula::Exists {
+                var: left_var,
+                var_type: left_type,
+                body: left_body,
+            },
+            Formula::Exists {
+                var: right_var,
+                var_type: right_type,
+                body: right_body,
+            },
+        ) => {
+            left_var == right_var
+                && left_type == right_type
+                && formulas_equal_ignoring_ascriptions(left_body, right_body)
+        }
+        _ => false,
+    }
+}
+
 fn replace_term_once(term: &Term, from: &Term, to: &Term) -> Vec<Term> {
     let mut results = Vec::new();
-    if term == from {
+    if terms_equal_ignoring_ascriptions(term, from) {
         results.push(to.clone());
     }
 
@@ -11722,7 +11923,7 @@ fn replace_binary_formula(
 fn formula_rewrite_matches(source: &Formula, target: &Formula, from: &Term, to: &Term) -> bool {
     replace_formula_once(source, from, to)
         .into_iter()
-        .any(|rewritten| &rewritten == target)
+        .any(|rewritten| formulas_equal_ignoring_ascriptions(&rewritten, target))
 }
 
 fn formula_rewrite_sources(target: &Formula, needle: &Term, replacement: &Term) -> Vec<Formula> {
@@ -15440,10 +15641,17 @@ fn run_tactic_step_inner(
                     .map_err(|err| TacticError::new(err.message))?;
                 let norm_right = normalize_term(env, &goal.context, right)
                     .map_err(|err| TacticError::new(err.message))?;
-                if norm_left == norm_right {
+                if terms_equal_ignoring_ascriptions(&norm_left, &norm_right) {
+                    let refl_term = if matches!(left, Term::Ascribed { .. }) {
+                        left.clone()
+                    } else if matches!(right, Term::Ascribed { .. }) {
+                        right.clone()
+                    } else {
+                        norm_left
+                    };
                     return Ok(StepResult {
                         replacement: PartialProof::Done(DraftProof::Convert {
-                            proof_body: Box::new(DraftProof::EqRefl(norm_left)),
+                            proof_body: Box::new(DraftProof::EqRefl(refl_term)),
                             target: goal.target.clone(),
                         }),
                         new_goals: Vec::new(),
@@ -18898,6 +19106,35 @@ theorem nodup_cons_exact (A : Type) (h : A) (t : L.List A) :
   L.Nodup(L.cons(h, t)) <->
     (L.Member(h, t) -> False) /\ L.Nodup(t) := by
   exact L.nodup_cons {A := A; h := h; t := t}
+
+theorem append_nil_right_exact (A : Type) (xs : L.List A) :
+  L.append(xs, (L.nil : L.List A)) = xs := by
+  exact L.append_nil_right {A := A; xs := xs}
+
+theorem append_nil_right_from_surface (A : Type) (xs : L.List A) :
+  L.append(xs, (L.nil : L.List A)) = xs := by
+  apply L.list_induction {
+    A := A;
+    P := fun ys : L.List A =>
+      L.append(ys, (L.nil : L.List A)) = ys;
+    xs := xs
+  }
+  rewrite -> L.append_nil_left {
+    A := A;
+    xs := (L.nil : L.List A)
+  }
+  refl
+  intro h
+  intro t
+  intro ih
+  rewrite -> L.append_cons {
+    A := A;
+    h := h;
+    t := t;
+    ys := (L.nil : L.List A)
+  }
+  rewrite -> ih
+  refl
 "#,
         );
         assert!(
@@ -18917,6 +19154,7 @@ theorem nodup_cons_exact (A : Type) (h : A) (t : L.List A) :
             ("member_cons_exact", &["member_cons"][..]),
             ("nodup_nil_exact", &["nodup_nil"][..]),
             ("nodup_cons_exact", &["nodup_cons"][..]),
+            ("append_nil_right_exact", &["append_nil_right"][..]),
         ] {
             let theorem = report
                 .theorems
@@ -18938,6 +19176,46 @@ theorem nodup_cons_exact (A : Type) (h : A) (t : L.List A) :
                     .any(|dependency| report.receipt_names.get(dependency) == Some(&stable_name)));
             }
         }
+        let append_nil_right = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "append_nil_right_exact")
+            .expect("append_nil_right_exact receipt");
+        assert!(append_nil_right
+            .features
+            .contains(&hol::ProofFeature::Induction));
+        let derived_from_surface = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "append_nil_right_from_surface")
+            .expect("append_nil_right_from_surface receipt");
+        assert_eq!(
+            derived_from_surface.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(derived_from_surface
+            .features
+            .contains(&hol::ProofFeature::Induction));
+        let package_dependencies = derived_from_surface
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .filter_map(|dependency| report.receipt_names.get(dependency))
+            .filter(|name| name.starts_with("std/hol/list@1::"))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            package_dependencies,
+            [
+                "std/hol/list@1::append".to_string(),
+                "std/hol/list@1::append_cons".to_string(),
+                "std/hol/list@1::append_nil_left".to_string(),
+                "std/hol/list@1::list_induction".to_string(),
+            ]
+            .into_iter()
+            .collect()
+        );
     }
 
     #[cfg(feature = "hol-shadow")]

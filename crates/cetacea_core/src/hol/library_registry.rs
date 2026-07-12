@@ -17,7 +17,7 @@ use super::h35_cardinality::{
 use super::library::{ListLength, ListLibrary, ListLibraryNames};
 use super::proofs::HolDraftProof;
 use super::spike::{SpikeElaborator, SpikeError};
-use super::terms::{ConstantId, CoreTerm};
+use super::terms::{shift_under_new_binder, ConstantId, CoreTerm};
 use super::theorems::TheoremId;
 use super::types::CoreType;
 
@@ -39,6 +39,35 @@ fn definitional_iff_proof(left: CoreTerm, right: CoreTerm) -> HolDraftProof {
             body: Box::new(HolDraftProof::Hypothesis(0)),
         }),
     )
+}
+
+fn list_cons_tail_congruence(
+    lists: &ListLibrary,
+    element_type: &CoreType,
+    head: CoreTerm,
+    left_tail: CoreTerm,
+    proof_equality: HolDraftProof,
+) -> Result<HolDraftProof, SpikeError> {
+    let shifted_head = shift_under_new_binder(&head)?;
+    let shifted_left_tail = shift_under_new_binder(&left_tail)?;
+    let list_type = lists.list_type(element_type.clone());
+    let applied_left = lists.cons_term(element_type.clone(), head, left_tail);
+    Ok(HolDraftProof::EqualityElim {
+        proof_equality: Box::new(proof_equality),
+        motive: CoreTerm::lambda(
+            list_type.clone(),
+            CoreTerm::equality(
+                list_type,
+                lists.cons_term(
+                    element_type.clone(),
+                    shifted_head.clone(),
+                    shifted_left_tail,
+                ),
+                lists.cons_term(element_type.clone(), shifted_head, CoreTerm::Bound(0)),
+            ),
+        ),
+        proof_left: Box::new(HolDraftProof::EqualityRefl(applied_left)),
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -121,6 +150,7 @@ pub struct InstalledListLibrary {
     pub nodup_cons: TheoremId,
     pub all_nil: TheoremId,
     pub all_cons: TheoremId,
+    pub append_nil_right: TheoremId,
     pub list_induction: TheoremId,
 }
 
@@ -426,6 +456,57 @@ impl HolLibraryRegistry {
             all_cons_statement,
             definitional_iff_proof(all_cons_left, all_cons_right),
         )?;
+        let append_nil_right_nil = lists.nil_term(element_type.clone());
+        let append_nil_right_statement = CoreTerm::equality(
+            list_type.clone(),
+            lists.append_term(
+                element_type.clone(),
+                CoreTerm::Bound(0),
+                append_nil_right_nil.clone(),
+            ),
+            CoreTerm::Bound(0),
+        );
+        let append_nil_right_motive = CoreTerm::lambda(
+            list_type.clone(),
+            CoreTerm::equality(
+                list_type.clone(),
+                lists.append_term(
+                    element_type.clone(),
+                    CoreTerm::Bound(0),
+                    append_nil_right_nil.clone(),
+                ),
+                CoreTerm::Bound(0),
+            ),
+        );
+        let append_nil_right_step_left = lists.append_term(
+            element_type.clone(),
+            CoreTerm::Bound(1),
+            append_nil_right_nil.clone(),
+        );
+        let append_nil_right_proof = HolDraftProof::Induction {
+            datatype: lists.datatype,
+            type_arguments: vec![element_type.clone()],
+            motive: append_nil_right_motive,
+            scrutinee: CoreTerm::Bound(0),
+            cases: vec![
+                HolDraftProof::EqualityRefl(append_nil_right_nil),
+                list_cons_tail_congruence(
+                    &lists,
+                    &element_type,
+                    CoreTerm::Bound(0),
+                    append_nil_right_step_left,
+                    HolDraftProof::Hypothesis(0),
+                )?,
+            ],
+        };
+        let (append_nil_right, append_nil_right_receipt) = staged_core
+            .declare_theorem_with_parameters(
+                names.append_nil_right.clone(),
+                vec![lists.element_parameter],
+                vec![list_type.clone()],
+                append_nil_right_statement,
+                append_nil_right_proof,
+            )?;
         let property_type = CoreType::arrow(list_type.clone(), CoreType::Prop);
         let induction_base =
             CoreTerm::apply(CoreTerm::Bound(1), lists.nil_term(element_type.clone()));
@@ -607,6 +688,12 @@ impl HolLibraryRegistry {
                         Some(all_cons_receipt.id()),
                     ),
                     declaration(
+                        "append_nil_right",
+                        &names.append_nil_right,
+                        LibraryDeclarationKind::Theorem,
+                        Some(append_nil_right_receipt.id()),
+                    ),
+                    declaration(
                         "list_induction",
                         &names.list_induction,
                         LibraryDeclarationKind::Theorem,
@@ -626,6 +713,7 @@ impl HolLibraryRegistry {
             nodup_cons,
             all_nil,
             all_cons,
+            append_nil_right,
             list_induction,
         };
 
@@ -936,6 +1024,11 @@ fn validate_installed_list_v1(
             LibraryDeclarationKind::Theorem,
         ),
         (
+            "append_nil_right",
+            names.append_nil_right.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
             "list_induction",
             names.list_induction.as_str(),
             LibraryDeclarationKind::Theorem,
@@ -978,6 +1071,7 @@ fn validate_installed_list_v1(
         && core.theorems().resolve(&names.nodup_cons) == Some(installed.nodup_cons)
         && core.theorems().resolve(&names.all_nil) == Some(installed.all_nil)
         && core.theorems().resolve(&names.all_cons) == Some(installed.all_cons)
+        && core.theorems().resolve(&names.append_nil_right) == Some(installed.append_nil_right)
         && core.theorems().resolve(&names.list_induction) == Some(installed.list_induction);
     if !matches {
         return Err(SpikeError {
@@ -1266,7 +1360,7 @@ mod tests {
             LibraryPackageSource::Builtin
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_LIST_V1_NAMESPACE);
-        assert_eq!(installed.record.declarations.len(), 19);
+        assert_eq!(installed.record.declarations.len(), 20);
         assert_eq!(
             installed
                 .record
@@ -1274,7 +1368,7 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.receipt.is_some())
                 .count(),
-            16
+            17
         );
         let member_receipt = installed
             .record
@@ -1322,6 +1416,11 @@ mod tests {
             (installed.nodup_cons, "nodup_cons", installed.lists.nodup),
             (installed.all_nil, "all_nil", installed.lists.all),
             (installed.all_cons, "all_cons", installed.lists.all),
+            (
+                installed.append_nil_right,
+                "append_nil_right",
+                installed.lists.append,
+            ),
         ] {
             let theorem_receipt = core
                 .theorem_receipt(theorem)
@@ -1338,6 +1437,12 @@ mod tests {
                 .direct_dependencies()
                 .contains(&definition_receipt.id()));
         }
+        assert!(core
+            .theorem_receipt(installed.append_nil_right)
+            .expect("append_nil_right theorem receipt")
+            .proof()
+            .transitive_features()
+            .contains(&ProofFeature::Induction));
         let list_induction_receipt = core
             .theorem_receipt(installed.list_induction)
             .expect("list_induction theorem receipt");

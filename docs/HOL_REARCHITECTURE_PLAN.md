@@ -673,6 +673,20 @@ higher-order value. The exact List catalog now has 19 declarations and 16
 receipts. This checkpoint is 3,851,304 bytes natively and 1,373,491 bytes in
 Wasm.
 
+The first derived generic theorem is now part of the package.
+`append_nil_right` is proved by checked List induction rather than conversion;
+its receipt carries `Induction` and a stable dependency on `append`. The source
+alias can be reused directly at `fol+induction`. Separately, an end-to-end
+teaching proof reconstructs the theorem from public `list_induction`,
+`append_nil_left`, and `append_cons`; its root receipt names exactly those three
+theorem dependencies plus the transparent `append` definition used by
+conversion. Supporting that proof made term ascriptions persistent through
+legacy normalization but transparent to equality and rewrite matching, and
+allowed only already legacy-validated proof intermediates to cross the old FOL
+term gate before HOL rechecking. The List catalog now has 20 declarations and
+17 receipts. This checkpoint is 3,870,472 bytes natively and 1,374,035 bytes in
+Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -688,7 +702,9 @@ Wasm.
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
   constructor laws are source-facing. `All` constructor laws now demonstrate
   instance-sensitive fragment enforcement. Derived theorem families, generic
-  source declarations, and ordinary end-to-end acceptance remain.
+  source declarations, and ordinary end-to-end acceptance remain; right append
+  identity is the first derived theorem completed through both the package and
+  student-facing proof routes.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

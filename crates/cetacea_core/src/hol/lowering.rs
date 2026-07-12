@@ -320,6 +320,22 @@ impl<'a> CompatibilityLowerer<'a> {
         Ok(lowered)
     }
 
+    /// Lower a term already accepted by the legacy proof checker without
+    /// imposing the compatibility facade's declaration-wide FOL restriction.
+    ///
+    /// This is used only for proof evidence such as reflexivity over an
+    /// imported rank-one HOL instance. The HOL kernel still checks the term,
+    /// and receipt classification remains responsible for exposing a
+    /// higher-order instance.
+    pub(crate) fn lower_proof_term(&mut self, term: &Term) -> Result<CoreTerm, LoweringError> {
+        self.lower_term_raw(term, None).map_err(|error| {
+            LoweringError::new(format!(
+                "{} while lowering proof term `{term}`",
+                error.message
+            ))
+        })
+    }
+
     /// Lower a term in a schema position with an explicit expected type.
     /// This is the entry point used for proposition arguments, named predicate
     /// arguments, and predicate lambdas.
@@ -333,6 +349,25 @@ impl<'a> CompatibilityLowerer<'a> {
     }
 
     pub fn lower_formula(&mut self, formula: &Formula) -> Result<CoreTerm, LoweringError> {
+        self.lower_formula_with_term_policy(formula, true)
+    }
+
+    /// Lower a formula already accepted as proof evidence. Imported generic
+    /// HOL theorems may introduce intermediate equalities over an unrestricted
+    /// rank-one parameter even when the surrounding source declaration uses
+    /// the compatibility facade.
+    pub(crate) fn lower_proof_formula(
+        &mut self,
+        formula: &Formula,
+    ) -> Result<CoreTerm, LoweringError> {
+        self.lower_formula_with_term_policy(formula, false)
+    }
+
+    fn lower_formula_with_term_policy(
+        &mut self,
+        formula: &Formula,
+        require_first_order_terms: bool,
+    ) -> Result<CoreTerm, LoweringError> {
         let lowered = match formula {
             Formula::True => CoreTerm::Truth,
             Formula::False => CoreTerm::Falsity,
@@ -343,8 +378,27 @@ impl<'a> CompatibilityLowerer<'a> {
                 self.lower_named_application(name, arguments, Some(&CoreType::Prop))?
             }
             Formula::Eq(left, right) => {
-                let left = self.lower_term(left)?;
-                let right = self.lower_term(right)?;
+                let (left, right) = if matches!(right, Term::Ascribed { .. })
+                    && !matches!(left, Term::Ascribed { .. })
+                {
+                    let right = self.lower_formula_term(right, None, require_first_order_terms)?;
+                    let right_type = self.infer(&right)?;
+                    let left = self.lower_formula_term(
+                        left,
+                        Some(&right_type),
+                        require_first_order_terms,
+                    )?;
+                    (left, right)
+                } else {
+                    let left = self.lower_formula_term(left, None, require_first_order_terms)?;
+                    let left_type = self.infer(&left)?;
+                    let right = self.lower_formula_term(
+                        right,
+                        Some(&left_type),
+                        require_first_order_terms,
+                    )?;
+                    (left, right)
+                };
                 let left_type = self.infer(&left)?;
                 let right_type = self.infer(&right)?;
                 if left_type != right_type {
@@ -355,8 +409,16 @@ impl<'a> CompatibilityLowerer<'a> {
                 CoreTerm::equality(left_type, left, right)
             }
             Formula::In(element, set) => {
-                let element = self.lower_term(element)?;
-                let set = self.lower_term(set)?;
+                let element = if require_first_order_terms {
+                    self.lower_term(element)?
+                } else {
+                    self.lower_proof_term(element)?
+                };
+                let set = if require_first_order_terms {
+                    self.lower_term(set)?
+                } else {
+                    self.lower_proof_term(set)?
+                };
                 let element_type = self.infer(&element)?;
                 let set_type = self.infer(&set)?;
                 let expected = self
@@ -376,8 +438,16 @@ impl<'a> CompatibilityLowerer<'a> {
                 CoreTerm::membership(element_type, element, set)
             }
             Formula::Subset(left, right) => {
-                let left = self.lower_term(left)?;
-                let right = self.lower_term(right)?;
+                let left = if require_first_order_terms {
+                    self.lower_term(left)?
+                } else {
+                    self.lower_proof_term(left)?
+                };
+                let right = if require_first_order_terms {
+                    self.lower_term(right)?
+                } else {
+                    self.lower_proof_term(right)?
+                };
                 let left_element = self.set_element_type(&left, "left subset argument")?;
                 let right_element = self.set_element_type(&right, "right subset argument")?;
                 if left_element != right_element {
@@ -387,15 +457,17 @@ impl<'a> CompatibilityLowerer<'a> {
                 }
                 CoreTerm::subset(left_element, left, right)
             }
-            Formula::And(left, right) => {
-                CoreTerm::and(self.lower_formula(left)?, self.lower_formula(right)?)
-            }
-            Formula::Or(left, right) => {
-                CoreTerm::or(self.lower_formula(left)?, self.lower_formula(right)?)
-            }
+            Formula::And(left, right) => CoreTerm::and(
+                self.lower_formula_with_term_policy(left, require_first_order_terms)?,
+                self.lower_formula_with_term_policy(right, require_first_order_terms)?,
+            ),
+            Formula::Or(left, right) => CoreTerm::or(
+                self.lower_formula_with_term_policy(left, require_first_order_terms)?,
+                self.lower_formula_with_term_policy(right, require_first_order_terms)?,
+            ),
             Formula::Implies(premise, conclusion) => CoreTerm::implies(
-                self.lower_formula(premise)?,
-                self.lower_formula(conclusion)?,
+                self.lower_formula_with_term_policy(premise, require_first_order_terms)?,
+                self.lower_formula_with_term_policy(conclusion, require_first_order_terms)?,
             ),
             Formula::Forall {
                 var,
@@ -403,9 +475,11 @@ impl<'a> CompatibilityLowerer<'a> {
                 body,
             } => {
                 let domain = self.lower_type(var_type)?;
-                self.require_first_order_type(&domain, "legacy universal domain")?;
+                if require_first_order_terms {
+                    self.require_first_order_type(&domain, "legacy universal domain")?;
+                }
                 let body = self.lower_under_term_binder(var, domain.clone(), |lowerer| {
-                    lowerer.lower_formula(body)
+                    lowerer.lower_formula_with_term_policy(body, require_first_order_terms)
                 })?;
                 CoreTerm::forall(domain, body)
             }
@@ -415,9 +489,11 @@ impl<'a> CompatibilityLowerer<'a> {
                 body,
             } => {
                 let domain = self.lower_type(var_type)?;
-                self.require_first_order_type(&domain, "legacy existential domain")?;
+                if require_first_order_terms {
+                    self.require_first_order_type(&domain, "legacy existential domain")?;
+                }
                 let body = self.lower_under_term_binder(var, domain.clone(), |lowerer| {
-                    lowerer.lower_formula(body)
+                    lowerer.lower_formula_with_term_policy(body, require_first_order_terms)
                 })?;
                 CoreTerm::exists(domain, body)
             }
@@ -427,6 +503,25 @@ impl<'a> CompatibilityLowerer<'a> {
             return Err(LoweringError::new(format!(
                 "lowered legacy formula has core type `{actual:?}`, not `Prop`"
             )));
+        }
+        Ok(lowered)
+    }
+
+    fn lower_formula_term(
+        &mut self,
+        term: &Term,
+        expected: Option<&CoreType>,
+        require_first_order: bool,
+    ) -> Result<CoreTerm, LoweringError> {
+        let lowered = self.lower_term_raw(term, expected).map_err(|error| {
+            LoweringError::new(format!(
+                "{} while lowering formula term `{term}`",
+                error.message
+            ))
+        })?;
+        if require_first_order {
+            let ty = self.infer(&lowered)?;
+            self.require_first_order_type(&ty, "legacy term")?;
         }
         Ok(lowered)
     }

@@ -139,6 +139,16 @@ value and is reported as `hol`. Both source proofs retain stable package
 receipts, so neither result is a frontend guess. This checkpoint produces a
 3,851,304-byte native CLI and a 1,373,491-byte raw Wasm module.
 
+`append_nil_right` is now the first derived package theorem on this surface. Its
+checked proof is inductive, and direct reuse retains the stable theorem receipt
+and `Induction` feature. The same theorem is also proved in source from only
+`list_induction`, `append_nil_left`, and `append_cons`; that root receipt names
+exactly those theorem dependencies plus the transparent `append` definition
+used by conversion, and remains `fol+induction`. Ascriptions persist through
+the transitional proof replay only as checked typing evidence and are ignored
+by rewrite matching. This checkpoint produces a 3,870,472-byte native CLI and
+a 1,374,035-byte raw Wasm module.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
 graph packages remain instance-scoped until an import can bind a particular
@@ -164,7 +174,7 @@ allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments, explicit term ascriptions, and all structural
 predicate constructor laws are complete as well. The next source slices
-continue with generic declarations and derived theorems, finite and cardinality
-aliases, browser/editor verification, and an explicit decision about ordinary
-(non-shadow) acceptance. The generic induction principle itself is now exposed
-through a receipt-backed theorem alias.
+continue with generic declarations, associativity and length/append theorems,
+finite and cardinality aliases, browser/editor verification, and an explicit
+decision about ordinary (non-shadow) acceptance. The generic induction
+principle itself is now exposed through a receipt-backed theorem alias.

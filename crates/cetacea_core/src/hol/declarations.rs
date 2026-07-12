@@ -247,6 +247,7 @@ impl CompatibilityElaborator {
         let nodup_cons_name = qualify("nodup_cons");
         let all_nil_name = qualify("all_nil");
         let all_cons_name = qualify("all_cons");
+        let append_nil_right_name = qualify("append_nil_right");
         let list_induction_name = qualify("list_induction");
         for name in [
             &datatype_name,
@@ -267,6 +268,7 @@ impl CompatibilityElaborator {
             &nodup_cons_name,
             &all_nil_name,
             &all_cons_name,
+            &append_nil_right_name,
             &list_induction_name,
         ] {
             self.ensure_name_free(name)?;
@@ -685,6 +687,37 @@ impl CompatibilityElaborator {
                 element_type.clone(),
                 list_type.clone(),
             ],
+        )?;
+        let append_nil_right_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let append_nil_right_statement = Formula::eq(
+            Term::App(
+                append_name,
+                vec![
+                    Term::Var("xs".to_string()),
+                    Term::Ascribed {
+                        term: Box::new(Term::Var(nil_name.clone())),
+                        ty: surface_list_type.clone(),
+                    },
+                ],
+            ),
+            Term::Var("xs".to_string()),
+        );
+        staged.bind_checked_theorem_alias(
+            append_nil_right_name,
+            installed.append_nil_right,
+            append_nil_right_parameters,
+            &append_nil_right_statement,
+            vec![parameter],
+            vec![list_type.clone()],
         )?;
         let induction_list_type = surface_list_type;
         let induction_parameters = vec![
@@ -1653,7 +1686,7 @@ impl LegacyProofLowerer<'_> {
                     |term| matches!(term, CoreTerm::Falsity),
                     "false elimination needs a proof of falsity",
                 )?;
-                let target = self.lowerer.lower_formula(target)?;
+                let target = self.lowerer.lower_proof_formula(target)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::FalseElim {
                         proof_false: Box::new(proof_false.proof),
@@ -1694,7 +1727,7 @@ impl LegacyProofLowerer<'_> {
                 right_formula,
             } => {
                 let left = self.lower(proof_left)?;
-                let right = self.lowerer.lower_formula(right_formula)?;
+                let right = self.lowerer.lower_proof_formula(right_formula)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::OrIntroLeft {
                         proof_left: Box::new(left.proof),
@@ -1707,7 +1740,7 @@ impl LegacyProofLowerer<'_> {
                 left_formula,
                 proof_right,
             } => {
-                let left = self.lowerer.lower_formula(left_formula)?;
+                let left = self.lowerer.lower_proof_formula(left_formula)?;
                 let right = self.lower(proof_right)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::OrIntroRight {
@@ -1732,7 +1765,7 @@ impl LegacyProofLowerer<'_> {
                         "disjunction elimination needs a proof of a disjunction",
                     ));
                 };
-                let target = self.lowerer.lower_formula(target)?;
+                let target = self.lowerer.lower_proof_formula(target)?;
                 let mut left_scope = self.clone();
                 left_scope
                     .hypotheses
@@ -1770,7 +1803,7 @@ impl LegacyProofLowerer<'_> {
                 hyp_formula,
                 body,
             } => {
-                let premise = self.lowerer.lower_formula(hyp_formula)?;
+                let premise = self.lowerer.lower_proof_formula(hyp_formula)?;
                 let mut body_scope = self.clone();
                 body_scope
                     .hypotheses
@@ -1811,7 +1844,7 @@ impl LegacyProofLowerer<'_> {
                 })
             }
             LegacyDraftProof::EqRefl(term) => {
-                let term = self.lowerer.lower_term(term)?;
+                let term = self.lowerer.lower_proof_term(term)?;
                 let ty = self.lowerer.infer_core(&term)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::EqualityRefl(term.clone()),
@@ -1831,7 +1864,7 @@ impl LegacyProofLowerer<'_> {
                     ));
                 };
                 let proof_body = self.lower(proof_body)?;
-                let target = self.lowerer.lower_formula(target)?;
+                let target = self.lowerer.lower_proof_formula(target)?;
                 if let Some(motive) =
                     self.find_rewrite_motive(&proof_body.proposition, &left, &right, &ty, &target)?
                 {
@@ -1895,7 +1928,7 @@ impl LegacyProofLowerer<'_> {
             }
             LegacyDraftProof::Convert { proof_body, target } => {
                 let proof_body = self.lower(proof_body)?;
-                let target = self.lowerer.lower_formula(target)?;
+                let target = self.lowerer.lower_proof_formula(target)?;
                 self.lower_compatibility_conversion(proof_body, target)
             }
             LegacyDraftProof::ForallIntro {
@@ -1944,7 +1977,7 @@ impl LegacyProofLowerer<'_> {
                 proof_body,
                 exists_formula,
             } => {
-                let existential = self.lowerer.lower_formula(exists_formula)?;
+                let existential = self.lowerer.lower_proof_formula(exists_formula)?;
                 let normalized = self.normalize(&existential)?;
                 let CoreTerm::Exists { domain, body } = normalized else {
                     return Err(LoweringError::new(
@@ -1995,7 +2028,7 @@ impl LegacyProofLowerer<'_> {
                         "existential elimination needs an existential proof",
                     ));
                 };
-                let target = self.lowerer.lower_formula(target)?;
+                let target = self.lowerer.lower_proof_formula(target)?;
                 let shifted_target = shift_under_new_binder(&target)?;
                 let mut body_scope = self.under_term_binder(witness_name, domain)?;
                 body_scope
@@ -2029,7 +2062,7 @@ impl LegacyProofLowerer<'_> {
                         "legacy `sorry` cannot be lowered as checked HOL evidence",
                     ));
                 }
-                let target = self.lowerer.lower_formula(target)?;
+                let target = self.lowerer.lower_proof_formula(target)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::Sorry {
                         target: target.clone(),
@@ -2077,7 +2110,7 @@ impl LegacyProofLowerer<'_> {
                 "legacy induction variable `{var_name}` has core type `{scrutinee_type:?}`, not Nat"
             )));
         }
-        let target = self.lowerer.lower_formula(target)?;
+        let target = self.lowerer.lower_proof_formula(target)?;
         let motive_body = abstract_local_term(&self.lowerer, &target, scrutinee_index)?;
         let motive = CoreTerm::lambda(nat.clone(), motive_body);
         let scrutinee = CoreTerm::Bound(scrutinee_index);
@@ -2159,7 +2192,7 @@ impl LegacyProofLowerer<'_> {
                 "legacy induction variable `{var_name}` has core type `{scrutinee_type:?}`, not `{datatype_type:?}`"
             )));
         }
-        let target = self.lowerer.lower_formula(target)?;
+        let target = self.lowerer.lower_proof_formula(target)?;
         let motive_body = abstract_local_term(&self.lowerer, &target, scrutinee_index)?;
         let motive = CoreTerm::lambda(datatype_type, motive_body);
         let scrutinee = CoreTerm::Bound(scrutinee_index);
@@ -2305,7 +2338,7 @@ impl LegacyProofLowerer<'_> {
                                     parameter.name
                                 ))
                             })?;
-                    let argument = self.lowerer.lower_formula(argument)?;
+                    let argument = self.lowerer.lower_proof_formula(argument)?;
                     self.expect_type(&argument, &expected, &parameter.name)?;
                     argument
                 }
@@ -2664,7 +2697,7 @@ impl LegacyProofLowerer<'_> {
         args: &[LegacyDraftProof],
         target: &Formula,
     ) -> Result<LoweredLegacyProof, LoweringError> {
-        let target = self.lowerer.lower_formula(target)?;
+        let target = self.lowerer.lower_proof_formula(target)?;
         match rule {
             ClassicalRule::ExcludedMiddle => {
                 if !args.is_empty() {

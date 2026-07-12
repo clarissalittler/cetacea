@@ -53,6 +53,7 @@ pub struct ListLibraryNames {
     pub nodup_cons: String,
     pub all_nil: String,
     pub all_cons: String,
+    pub append_nil_right: String,
     pub list_induction: String,
 }
 
@@ -88,6 +89,7 @@ impl ListLibraryNames {
             nodup_cons: qualify("nodup_cons"),
             all_nil: qualify("all_nil"),
             all_cons: qualify("all_cons"),
+            append_nil_right: qualify("append_nil_right"),
             list_induction: qualify("list_induction"),
         }
     }

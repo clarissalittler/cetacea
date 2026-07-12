@@ -494,3 +494,16 @@ predicate value, and is therefore `hol`. Both proofs and aliases use the same
 checked package mechanism; the difference comes only from normalized evidence,
 not a declaration-wide label. The measured artifacts are 3,851,304 bytes for
 the native CLI and 1,373,491 bytes for Wasm.
+
+`append_nil_right` is the first non-conversion List theorem exposed through the
+same route. Its stored proof uses kernel induction and its source alias retains
+that feature. A second source theorem proves the result from public
+`list_induction`, `append_nil_left`, and `append_cons`, yielding exactly those
+three public theorem dependencies, the transparent `append` definition used by
+conversion, and the same `fol+induction` classification. To make generic proof
+replay faithful, ascriptions now survive legacy normalization
+until elaboration while remaining transparent to equality and rewrite matching.
+Proof formulas already validated by the legacy kernel may lower across an
+unrestricted imported type parameter; the HOL kernel and receipt classifier
+still check and expose the resulting instance. The measured artifacts are
+3,870,472 bytes for the native CLI and 1,374,035 bytes for Wasm.
