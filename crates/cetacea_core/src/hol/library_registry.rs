@@ -119,6 +119,8 @@ pub struct InstalledListLibrary {
     pub member_cons: TheoremId,
     pub nodup_nil: TheoremId,
     pub nodup_cons: TheoremId,
+    pub all_nil: TheoremId,
+    pub all_cons: TheoremId,
     pub list_induction: TheoremId,
 }
 
@@ -387,6 +389,43 @@ impl HolLibraryRegistry {
             nodup_cons_statement,
             definitional_iff_proof(nodup_cons_left, nodup_cons_right),
         )?;
+        let element_predicate_type = CoreType::arrow(element_type.clone(), CoreType::Prop);
+        let all_nil_statement = lists.all_term(
+            element_type.clone(),
+            CoreTerm::Bound(0),
+            lists.nil_term(element_type.clone()),
+        );
+        let (all_nil, all_nil_receipt) = staged_core.declare_theorem_with_parameters(
+            names.all_nil.clone(),
+            vec![lists.element_parameter],
+            vec![element_predicate_type.clone()],
+            all_nil_statement,
+            HolDraftProof::TruthIntro,
+        )?;
+        let all_cons_left = lists.all_term(
+            element_type.clone(),
+            CoreTerm::Bound(2),
+            lists.cons_term(element_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0)),
+        );
+        let all_cons_right = CoreTerm::and(
+            CoreTerm::apply(CoreTerm::Bound(2), CoreTerm::Bound(1)),
+            lists.all_term(element_type.clone(), CoreTerm::Bound(2), CoreTerm::Bound(0)),
+        );
+        let all_cons_statement = CoreTerm::and(
+            CoreTerm::implies(all_cons_left.clone(), all_cons_right.clone()),
+            CoreTerm::implies(all_cons_right.clone(), all_cons_left.clone()),
+        );
+        let (all_cons, all_cons_receipt) = staged_core.declare_theorem_with_parameters(
+            names.all_cons.clone(),
+            vec![lists.element_parameter],
+            vec![
+                element_predicate_type,
+                element_type.clone(),
+                list_type.clone(),
+            ],
+            all_cons_statement,
+            definitional_iff_proof(all_cons_left, all_cons_right),
+        )?;
         let property_type = CoreType::arrow(list_type.clone(), CoreType::Prop);
         let induction_base =
             CoreTerm::apply(CoreTerm::Bound(1), lists.nil_term(element_type.clone()));
@@ -556,6 +595,18 @@ impl HolLibraryRegistry {
                         Some(nodup_cons_receipt.id()),
                     ),
                     declaration(
+                        "all_nil",
+                        &names.all_nil,
+                        LibraryDeclarationKind::Theorem,
+                        Some(all_nil_receipt.id()),
+                    ),
+                    declaration(
+                        "all_cons",
+                        &names.all_cons,
+                        LibraryDeclarationKind::Theorem,
+                        Some(all_cons_receipt.id()),
+                    ),
+                    declaration(
                         "list_induction",
                         &names.list_induction,
                         LibraryDeclarationKind::Theorem,
@@ -573,6 +624,8 @@ impl HolLibraryRegistry {
             member_cons,
             nodup_nil,
             nodup_cons,
+            all_nil,
+            all_cons,
             list_induction,
         };
 
@@ -873,6 +926,16 @@ fn validate_installed_list_v1(
             LibraryDeclarationKind::Theorem,
         ),
         (
+            "all_nil",
+            names.all_nil.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "all_cons",
+            names.all_cons.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
             "list_induction",
             names.list_induction.as_str(),
             LibraryDeclarationKind::Theorem,
@@ -913,6 +976,8 @@ fn validate_installed_list_v1(
         && core.theorems().resolve(&names.member_cons) == Some(installed.member_cons)
         && core.theorems().resolve(&names.nodup_nil) == Some(installed.nodup_nil)
         && core.theorems().resolve(&names.nodup_cons) == Some(installed.nodup_cons)
+        && core.theorems().resolve(&names.all_nil) == Some(installed.all_nil)
+        && core.theorems().resolve(&names.all_cons) == Some(installed.all_cons)
         && core.theorems().resolve(&names.list_induction) == Some(installed.list_induction);
     if !matches {
         return Err(SpikeError {
@@ -1201,7 +1266,7 @@ mod tests {
             LibraryPackageSource::Builtin
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_LIST_V1_NAMESPACE);
-        assert_eq!(installed.record.declarations.len(), 17);
+        assert_eq!(installed.record.declarations.len(), 19);
         assert_eq!(
             installed
                 .record
@@ -1209,7 +1274,7 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.receipt.is_some())
                 .count(),
-            14
+            16
         );
         let member_receipt = installed
             .record
@@ -1255,6 +1320,8 @@ mod tests {
             (installed.member_cons, "member_cons", installed.lists.member),
             (installed.nodup_nil, "nodup_nil", installed.lists.nodup),
             (installed.nodup_cons, "nodup_cons", installed.lists.nodup),
+            (installed.all_nil, "all_nil", installed.lists.all),
+            (installed.all_cons, "all_cons", installed.lists.all),
         ] {
             let theorem_receipt = core
                 .theorem_receipt(theorem)

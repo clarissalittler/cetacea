@@ -245,6 +245,8 @@ impl CompatibilityElaborator {
         let member_cons_name = qualify("member_cons");
         let nodup_nil_name = qualify("nodup_nil");
         let nodup_cons_name = qualify("nodup_cons");
+        let all_nil_name = qualify("all_nil");
+        let all_cons_name = qualify("all_cons");
         let list_induction_name = qualify("list_induction");
         for name in [
             &datatype_name,
@@ -263,6 +265,8 @@ impl CompatibilityElaborator {
             &member_cons_name,
             &nodup_nil_name,
             &nodup_cons_name,
+            &all_nil_name,
+            &all_cons_name,
             &list_induction_name,
         ] {
             self.ensure_name_free(name)?;
@@ -294,7 +298,7 @@ impl CompatibilityElaborator {
                 result_type: list_type.clone(),
             },
             SymbolRegistration {
-                name: all_name,
+                name: all_name.clone(),
                 constant: installed.lists.all,
                 type_parameters: vec![parameter],
                 parameter_types: vec![
@@ -602,6 +606,85 @@ impl CompatibilityElaborator {
             &nodup_cons_statement,
             vec![parameter],
             vec![element_type.clone(), list_type.clone()],
+        )?;
+        let all_nil_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "P".to_string(),
+                kind: ParamKind::Predicate(vec![Type::Named(surface_element_parameter.clone())]),
+            },
+        ];
+        let all_nil_statement = Formula::PredApp(
+            all_name.clone(),
+            vec![
+                Term::Var("P".to_string()),
+                Term::Ascribed {
+                    term: Box::new(Term::Var(nil_name.clone())),
+                    ty: surface_list_type.clone(),
+                },
+            ],
+        );
+        staged.bind_checked_theorem_alias(
+            all_nil_name,
+            installed.all_nil,
+            all_nil_parameters,
+            &all_nil_statement,
+            vec![parameter],
+            vec![CoreType::arrow(element_type.clone(), CoreType::Prop)],
+        )?;
+        let all_cons_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "P".to_string(),
+                kind: ParamKind::Predicate(vec![Type::Named(surface_element_parameter.clone())]),
+            },
+            Param {
+                name: "h".to_string(),
+                kind: ParamKind::Term(Type::Named(surface_element_parameter.clone())),
+            },
+            Param {
+                name: "t".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let all_cons_left = Formula::PredApp(
+            all_name.clone(),
+            vec![
+                Term::Var("P".to_string()),
+                Term::App(
+                    cons_name.clone(),
+                    vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                ),
+            ],
+        );
+        let all_cons_right = Formula::and(
+            Formula::PredApp("P".to_string(), vec![Term::Var("h".to_string())]),
+            Formula::PredApp(
+                all_name,
+                vec![Term::Var("P".to_string()), Term::Var("t".to_string())],
+            ),
+        );
+        let all_cons_statement = Formula::and(
+            Formula::implies(all_cons_left.clone(), all_cons_right.clone()),
+            Formula::implies(all_cons_right, all_cons_left),
+        );
+        staged.bind_checked_theorem_alias(
+            all_cons_name,
+            installed.all_cons,
+            all_cons_parameters,
+            &all_cons_statement,
+            vec![parameter],
+            vec![
+                CoreType::arrow(element_type.clone(), CoreType::Prop),
+                element_type.clone(),
+                list_type.clone(),
+            ],
         )?;
         let induction_list_type = surface_list_type;
         let induction_parameters = vec![

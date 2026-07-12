@@ -155,10 +155,18 @@ proofs depend on the registered `Member` or `Nodup` definition, and source uses
 retain the individual stable theorem receipt. This checkpoint measures
 3,828,728 bytes natively and 1,373,157 bytes in Wasm.
 
+`all_nil` and `all_cons` complete the structural predicate constructor laws.
+Both are checked conversion theorems, but their concrete classifications differ
+after normalization: nil eliminates the predicate and remains
+`fol+induction`, while cons retains `P(h)` and is `hol`. Stable receipts remain
+visible in both cases. The package validator now pins 19 exact declarations and
+16 receipts. This checkpoint measures 3,851,304 bytes natively and 1,373,491
+bytes in Wasm.
+
 ## Remaining migration slices
 
-1. Add the higher-order `All` constructor laws and generic declaration syntax,
-   then publish the signature, equation, and induction surfaces for ordinary
+1. Add generic declaration syntax and derived List theorem families, then
+   publish the signature, equation, and induction surfaces for ordinary
    checking. Retain aliases for the current monomorphic list vocabulary for one
    release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).

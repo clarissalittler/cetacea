@@ -3328,6 +3328,8 @@ impl FileChecker {
             let member_cons_name = qualify("member_cons");
             let nodup_nil_name = qualify("nodup_nil");
             let nodup_cons_name = qualify("nodup_cons");
+            let all_nil_name = qualify("all_nil");
+            let all_cons_name = qualify("all_cons");
             let list_induction_name = qualify("list_induction");
             let symbol_names = [
                 &nil_name,
@@ -3345,6 +3347,8 @@ impl FileChecker {
                 &member_cons_name,
                 &nodup_nil_name,
                 &nodup_cons_name,
+                &all_nil_name,
+                &all_cons_name,
                 &list_induction_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
@@ -3374,7 +3378,7 @@ impl FileChecker {
                 list_type.clone(),
             );
             staged_env.add_rank_one_mixed_pred(
-                all_name,
+                all_name.clone(),
                 type_params.clone(),
                 vec![
                     RankOnePredicateArgument::Predicate(vec![element_type.clone()]),
@@ -3780,6 +3784,104 @@ impl FileChecker {
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     nodup_cons_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let all_element_parameter = "A".to_string();
+            let all_element_type = Type::Named(all_element_parameter.clone());
+            let all_list_type = Type::App(datatype_name.clone(), vec![all_element_type.clone()]);
+            let all_nil_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "all_nil")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered all_nil theorem has a receipt");
+            staged_env.add_theorem(Theorem {
+                name: all_nil_name,
+                params: vec![
+                    Param {
+                        name: all_element_parameter.clone(),
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "P".to_string(),
+                        kind: ParamKind::Predicate(vec![all_element_type.clone()]),
+                    },
+                ],
+                statement: Formula::PredApp(
+                    all_name.clone(),
+                    vec![
+                        Term::Var("P".to_string()),
+                        Term::Ascribed {
+                            term: Box::new(Term::Var(nil_name.clone())),
+                            ty: all_list_type.clone(),
+                        },
+                    ],
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    all_nil_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let all_cons_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "all_cons")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered all_cons theorem has a receipt");
+            let all_cons_left = Formula::PredApp(
+                all_name.clone(),
+                vec![
+                    Term::Var("P".to_string()),
+                    Term::App(
+                        cons_name.clone(),
+                        vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                    ),
+                ],
+            );
+            let all_cons_right = Formula::and(
+                Formula::PredApp("P".to_string(), vec![Term::Var("h".to_string())]),
+                Formula::PredApp(
+                    all_name,
+                    vec![Term::Var("P".to_string()), Term::Var("t".to_string())],
+                ),
+            );
+            staged_env.add_theorem(Theorem {
+                name: all_cons_name,
+                params: vec![
+                    Param {
+                        name: all_element_parameter,
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "P".to_string(),
+                        kind: ParamKind::Predicate(vec![all_element_type.clone()]),
+                    },
+                    Param {
+                        name: "h".to_string(),
+                        kind: ParamKind::Term(all_element_type),
+                    },
+                    Param {
+                        name: "t".to_string(),
+                        kind: ParamKind::Term(all_list_type),
+                    },
+                ],
+                statement: Formula::and(
+                    Formula::implies(all_cons_left.clone(), all_cons_right.clone()),
+                    Formula::implies(all_cons_right, all_cons_left),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    all_cons_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -18615,6 +18717,15 @@ theorem all_annotated_nil :
   L.All(fun x : Nat => x = x, L.nil) := by
   intro h
   exact h
+
+theorem all_nil_exact (A : Type) (P : A -> Prop) :
+  L.All(P, (L.nil : L.List A)) := by
+  exact L.all_nil {A := A; P := P}
+
+theorem all_cons_exact
+  (A : Type) (P : A -> Prop) (h : A) (t : L.List A) :
+  L.All(P, L.cons(h, t)) <-> P(h) /\ L.All(P, t) := by
+  exact L.all_cons {A := A; P := P; h := h; t := t}
 "#,
         );
         assert!(
@@ -18648,6 +18759,46 @@ theorem all_annotated_nil :
             annotated.required_fragment,
             hol::StatementFragment::FirstOrderInductive
         );
+        let all_nil = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "all_nil_exact")
+            .expect("all_nil_exact receipt");
+        assert_eq!(
+            all_nil.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(all_nil
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/list@1::all_nil")
+            }));
+        let all_cons = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "all_cons_exact")
+            .expect("all_cons_exact receipt");
+        assert_eq!(
+            all_cons.statement_fragment,
+            hol::StatementFragment::HigherOrder
+        );
+        assert_eq!(
+            all_cons.required_fragment,
+            hol::StatementFragment::HigherOrder
+        );
+        assert!(all_cons
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/list@1::all_cons")
+            }));
     }
 
     #[cfg(feature = "hol-shadow")]

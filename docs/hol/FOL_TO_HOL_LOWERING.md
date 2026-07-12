@@ -485,3 +485,12 @@ for first-order instances. Source descriptors and core theorem templates are
 compared before alias commit, while every concrete `exact` use records the
 stable package theorem dependency. The measured artifacts are 3,828,728 bytes
 for the native CLI and 1,373,157 bytes for Wasm.
+
+`all_nil` and `all_cons` complete the constructor-law catalog while exercising
+instance-sensitive classification. The nil theorem reduces to truth, so its
+predicate parameter disappears and a concrete source use is
+`fol+induction`. The cons theorem reduces to `P(h) /\ All(P,t)`, retains a
+predicate value, and is therefore `hol`. Both proofs and aliases use the same
+checked package mechanism; the difference comes only from normalized evidence,
+not a declaration-wide label. The measured artifacts are 3,851,304 bytes for
+the native CLI and 1,373,491 bytes for Wasm.

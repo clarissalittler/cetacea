@@ -663,6 +663,16 @@ specific stable theorem receipt. The List package catalog now has 17 exact
 declarations and 14 receipts. This checkpoint is 3,828,728 bytes natively and
 1,373,157 bytes in Wasm.
 
+The constructor interface is now complete for predicate-valued `All` as well.
+`all_nil` normalizes away its predicate argument and concrete reuse remains
+`fol+induction`; `all_cons` retains the predicate value and is therefore
+correctly certified `hol`. Both are constructive conversion theorems with
+stable `All` dependencies, demonstrating that the package does not impose its
+generic theorem's maximum fragment on every instance or launder a surviving
+higher-order value. The exact List catalog now has 19 declarations and 16
+receipts. This checkpoint is 3,851,304 bytes natively and 1,373,491 bytes in
+Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -676,8 +686,9 @@ declarations and 14 receipts. This checkpoint is 3,828,728 bytes natively and
   explicit `simp` without adding legacy reduction rules, and checked generic
   List induction is available through `apply`. Checked term ascriptions resolve
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
-  constructor laws are source-facing. Higher-order `All` laws, derived theorem
-  families, and ordinary end-to-end acceptance remain.
+  constructor laws are source-facing. `All` constructor laws now demonstrate
+  instance-sensitive fragment enforcement. Derived theorem families, generic
+  source declarations, and ordinary end-to-end acceptance remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path
