@@ -507,3 +507,11 @@ Proof formulas already validated by the legacy kernel may lower across an
 unrestricted imported type parameter; the HOL kernel and receipt classifier
 still check and expose the resulting instance. The measured artifacts are
 3,870,472 bytes for the native CLI and 1,374,035 bytes for Wasm.
+
+The next derived theorem, `append_assoc`, uses the same evidence path with
+three List parameters. The package stores a direct checked induction proof; an
+independent source proof uses only `list_induction`, `append_nil_left`, and
+`append_cons`. Both are classified `fol+induction`, and the source receipt pins
+those three public theorems plus the transparent `append` definition used by
+conversion. The measured artifacts are 3,885,320 bytes for the native CLI and
+1,374,139 bytes for Wasm.

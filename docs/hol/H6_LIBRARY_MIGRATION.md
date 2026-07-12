@@ -173,10 +173,19 @@ generic proof replay but are transparent to conversion and rewriting. The
 validator now pins 20 declarations and 17 receipts. This
 checkpoint measures 3,870,472 bytes natively and 1,374,035 bytes in Wasm.
 
+Derived theorem `append_assoc` is now installed and exposed as well. Its
+three-list statement is proved by direct checked induction in the package, and
+a separate source proof reconstructs it from `list_induction`,
+`append_nil_left`, and `append_cons`. Both receipts carry `Induction` and remain
+constructive `fol+induction`; the source receipt's package dependencies are
+exactly those three theorems and the transparent `append` definition. The
+validator now pins 21 declarations and 18 receipts. This checkpoint measures
+3,885,320 bytes natively and 1,374,139 bytes in Wasm.
+
 ## Remaining migration slices
 
-1. Add generic declaration syntax and continue with `append_assoc` and
-   `length_append`, then publish the signature, equation, and induction surfaces
+1. Add generic declaration syntax and continue with `length_append`, then
+   publish the signature, equation, and induction surfaces
    for ordinary checking. Retain aliases for the current monomorphic list
    vocabulary for one release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).

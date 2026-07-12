@@ -248,6 +248,7 @@ impl CompatibilityElaborator {
         let all_nil_name = qualify("all_nil");
         let all_cons_name = qualify("all_cons");
         let append_nil_right_name = qualify("append_nil_right");
+        let append_assoc_name = qualify("append_assoc");
         let list_induction_name = qualify("list_induction");
         for name in [
             &datatype_name,
@@ -269,6 +270,7 @@ impl CompatibilityElaborator {
             &all_nil_name,
             &all_cons_name,
             &append_nil_right_name,
+            &append_assoc_name,
             &list_induction_name,
         ] {
             self.ensure_name_free(name)?;
@@ -700,7 +702,7 @@ impl CompatibilityElaborator {
         ];
         let append_nil_right_statement = Formula::eq(
             Term::App(
-                append_name,
+                append_name.clone(),
                 vec![
                     Term::Var("xs".to_string()),
                     Term::Ascribed {
@@ -718,6 +720,54 @@ impl CompatibilityElaborator {
             &append_nil_right_statement,
             vec![parameter],
             vec![list_type.clone()],
+        )?;
+        let append_assoc_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+            Param {
+                name: "ys".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+            Param {
+                name: "zs".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let append_assoc_statement = Formula::eq(
+            Term::App(
+                append_name.clone(),
+                vec![
+                    Term::App(
+                        append_name.clone(),
+                        vec![Term::Var("xs".to_string()), Term::Var("ys".to_string())],
+                    ),
+                    Term::Var("zs".to_string()),
+                ],
+            ),
+            Term::App(
+                append_name.clone(),
+                vec![
+                    Term::Var("xs".to_string()),
+                    Term::App(
+                        append_name,
+                        vec![Term::Var("ys".to_string()), Term::Var("zs".to_string())],
+                    ),
+                ],
+            ),
+        );
+        staged.bind_checked_theorem_alias(
+            append_assoc_name,
+            installed.append_assoc,
+            append_assoc_parameters,
+            &append_assoc_statement,
+            vec![parameter],
+            vec![list_type.clone(), list_type.clone(), list_type.clone()],
         )?;
         let induction_list_type = surface_list_type;
         let induction_parameters = vec![

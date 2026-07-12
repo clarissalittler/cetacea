@@ -151,6 +151,7 @@ pub struct InstalledListLibrary {
     pub all_nil: TheoremId,
     pub all_cons: TheoremId,
     pub append_nil_right: TheoremId,
+    pub append_assoc: TheoremId,
     pub list_induction: TheoremId,
 }
 
@@ -507,6 +508,64 @@ impl HolLibraryRegistry {
                 append_nil_right_statement,
                 append_nil_right_proof,
             )?;
+        let append_assoc_left = lists.append_term(
+            element_type.clone(),
+            lists.append_term(element_type.clone(), CoreTerm::Bound(2), CoreTerm::Bound(1)),
+            CoreTerm::Bound(0),
+        );
+        let append_assoc_right = lists.append_term(
+            element_type.clone(),
+            CoreTerm::Bound(2),
+            lists.append_term(element_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0)),
+        );
+        let append_assoc_statement =
+            CoreTerm::equality(list_type.clone(), append_assoc_left, append_assoc_right);
+        let append_assoc_motive = CoreTerm::lambda(
+            list_type.clone(),
+            CoreTerm::equality(
+                list_type.clone(),
+                lists.append_term(
+                    element_type.clone(),
+                    lists.append_term(element_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(2)),
+                    CoreTerm::Bound(1),
+                ),
+                lists.append_term(
+                    element_type.clone(),
+                    CoreTerm::Bound(0),
+                    lists.append_term(element_type.clone(), CoreTerm::Bound(2), CoreTerm::Bound(1)),
+                ),
+            ),
+        );
+        let append_assoc_base =
+            lists.append_term(element_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0));
+        let append_assoc_step_left = lists.append_term(
+            element_type.clone(),
+            lists.append_term(element_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(3)),
+            CoreTerm::Bound(2),
+        );
+        let append_assoc_proof = HolDraftProof::Induction {
+            datatype: lists.datatype,
+            type_arguments: vec![element_type.clone()],
+            motive: append_assoc_motive,
+            scrutinee: CoreTerm::Bound(2),
+            cases: vec![
+                HolDraftProof::EqualityRefl(append_assoc_base),
+                list_cons_tail_congruence(
+                    &lists,
+                    &element_type,
+                    CoreTerm::Bound(0),
+                    append_assoc_step_left,
+                    HolDraftProof::Hypothesis(0),
+                )?,
+            ],
+        };
+        let (append_assoc, append_assoc_receipt) = staged_core.declare_theorem_with_parameters(
+            names.append_assoc.clone(),
+            vec![lists.element_parameter],
+            vec![list_type.clone(), list_type.clone(), list_type.clone()],
+            append_assoc_statement,
+            append_assoc_proof,
+        )?;
         let property_type = CoreType::arrow(list_type.clone(), CoreType::Prop);
         let induction_base =
             CoreTerm::apply(CoreTerm::Bound(1), lists.nil_term(element_type.clone()));
@@ -694,6 +753,12 @@ impl HolLibraryRegistry {
                         Some(append_nil_right_receipt.id()),
                     ),
                     declaration(
+                        "append_assoc",
+                        &names.append_assoc,
+                        LibraryDeclarationKind::Theorem,
+                        Some(append_assoc_receipt.id()),
+                    ),
+                    declaration(
                         "list_induction",
                         &names.list_induction,
                         LibraryDeclarationKind::Theorem,
@@ -714,6 +779,7 @@ impl HolLibraryRegistry {
             all_nil,
             all_cons,
             append_nil_right,
+            append_assoc,
             list_induction,
         };
 
@@ -1029,6 +1095,11 @@ fn validate_installed_list_v1(
             LibraryDeclarationKind::Theorem,
         ),
         (
+            "append_assoc",
+            names.append_assoc.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
             "list_induction",
             names.list_induction.as_str(),
             LibraryDeclarationKind::Theorem,
@@ -1072,6 +1143,7 @@ fn validate_installed_list_v1(
         && core.theorems().resolve(&names.all_nil) == Some(installed.all_nil)
         && core.theorems().resolve(&names.all_cons) == Some(installed.all_cons)
         && core.theorems().resolve(&names.append_nil_right) == Some(installed.append_nil_right)
+        && core.theorems().resolve(&names.append_assoc) == Some(installed.append_assoc)
         && core.theorems().resolve(&names.list_induction) == Some(installed.list_induction);
     if !matches {
         return Err(SpikeError {
@@ -1360,7 +1432,7 @@ mod tests {
             LibraryPackageSource::Builtin
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_LIST_V1_NAMESPACE);
-        assert_eq!(installed.record.declarations.len(), 20);
+        assert_eq!(installed.record.declarations.len(), 21);
         assert_eq!(
             installed
                 .record
@@ -1368,7 +1440,7 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.receipt.is_some())
                 .count(),
-            17
+            18
         );
         let member_receipt = installed
             .record
@@ -1421,6 +1493,11 @@ mod tests {
                 "append_nil_right",
                 installed.lists.append,
             ),
+            (
+                installed.append_assoc,
+                "append_assoc",
+                installed.lists.append,
+            ),
         ] {
             let theorem_receipt = core
                 .theorem_receipt(theorem)
@@ -1440,6 +1517,12 @@ mod tests {
         assert!(core
             .theorem_receipt(installed.append_nil_right)
             .expect("append_nil_right theorem receipt")
+            .proof()
+            .transitive_features()
+            .contains(&ProofFeature::Induction));
+        assert!(core
+            .theorem_receipt(installed.append_assoc)
+            .expect("append_assoc theorem receipt")
             .proof()
             .transitive_features()
             .contains(&ProofFeature::Induction));

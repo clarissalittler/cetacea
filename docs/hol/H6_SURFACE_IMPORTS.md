@@ -149,6 +149,13 @@ the transitional proof replay only as checked typing evidence and are ignored
 by rewrite matching. This checkpoint produces a 3,870,472-byte native CLI and
 a 1,374,035-byte raw Wasm module.
 
+`append_assoc` now exercises the same surface with three generic List values.
+Direct alias reuse and a proof written from `list_induction`,
+`append_nil_left`, and `append_cons` both check as constructive
+`fol+induction`. The latter receipt pins exactly those three public theorems
+plus the transparent `append` definition used by conversion. This checkpoint
+produces a 3,885,320-byte native CLI and a 1,374,139-byte raw Wasm module.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
 graph packages remain instance-scoped until an import can bind a particular
@@ -172,9 +179,10 @@ The alias catalog, parser-independent lowering, signature-only shadow-driver
 import, stable package reporting, JSON, and exact assignment-manifest
 allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
-Predicate-valued `All` arguments, explicit term ascriptions, and all structural
-predicate constructor laws are complete as well. The next source slices
-continue with generic declarations, associativity and length/append theorems,
-finite and cardinality aliases, browser/editor verification, and an explicit
-decision about ordinary (non-shadow) acceptance. The generic induction
-principle itself is now exposed through a receipt-backed theorem alias.
+Predicate-valued `All` arguments, explicit term ascriptions, all structural
+predicate constructor laws, right identity, and associativity are complete as
+well. The next source slices continue with generic declarations,
+`length_append`, finite and cardinality aliases, browser/editor verification,
+and an explicit decision about ordinary (non-shadow) acceptance. The generic
+induction principle itself is now exposed through a receipt-backed theorem
+alias.

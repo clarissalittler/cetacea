@@ -687,6 +687,15 @@ term gate before HOL rechecking. The List catalog now has 20 declarations and
 17 receipts. This checkpoint is 3,870,472 bytes natively and 1,374,035 bytes in
 Wasm.
 
+`append_assoc` extends the derived family with a three-list theorem. Its package
+proof is another checked structural induction, and both direct source reuse and
+a reconstruction from `list_induction`, `append_nil_left`, and `append_cons`
+remain constructive `fol+induction`. The reconstruction receipt pins those
+three public theorem dependencies plus the transparent `append` definition;
+the package theorem itself carries `Induction` without relying on any trusted
+law. The List catalog now has 21 declarations and 18 receipts. This checkpoint
+is 3,885,320 bytes natively and 1,374,139 bytes in Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -701,10 +710,10 @@ Wasm.
   List induction is available through `apply`. Checked term ascriptions resolve
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
   constructor laws are source-facing. `All` constructor laws now demonstrate
-  instance-sensitive fragment enforcement. Derived theorem families, generic
-  source declarations, and ordinary end-to-end acceptance remain; right append
-  identity is the first derived theorem completed through both the package and
-  student-facing proof routes.
+  instance-sensitive fragment enforcement. Generic source declarations and
+  ordinary end-to-end acceptance remain; right append identity and append
+  associativity now pass through both the package and student-facing proof
+  routes, with `length_append` the next derived List theorem.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

@@ -3331,6 +3331,7 @@ impl FileChecker {
             let all_nil_name = qualify("all_nil");
             let all_cons_name = qualify("all_cons");
             let append_nil_right_name = qualify("append_nil_right");
+            let append_assoc_name = qualify("append_assoc");
             let list_induction_name = qualify("list_induction");
             let symbol_names = [
                 &nil_name,
@@ -3351,6 +3352,7 @@ impl FileChecker {
                 &all_nil_name,
                 &all_cons_name,
                 &append_nil_right_name,
+                &append_assoc_name,
                 &list_induction_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
@@ -3916,12 +3918,12 @@ impl FileChecker {
                 ],
                 statement: Formula::eq(
                     Term::App(
-                        append_name,
+                        append_name.clone(),
                         vec![
                             Term::Var("xs".to_string()),
                             Term::Ascribed {
                                 term: Box::new(Term::Var(nil_name.clone())),
-                                ty: append_right_list_type,
+                                ty: append_right_list_type.clone(),
                             },
                         ],
                     ),
@@ -3930,6 +3932,64 @@ impl FileChecker {
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     append_nil_right_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let append_assoc_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "append_assoc")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered append_assoc theorem has a receipt");
+            staged_env.add_theorem(Theorem {
+                name: append_assoc_name,
+                params: vec![
+                    Param {
+                        name: "A".to_string(),
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "xs".to_string(),
+                        kind: ParamKind::Term(append_right_list_type.clone()),
+                    },
+                    Param {
+                        name: "ys".to_string(),
+                        kind: ParamKind::Term(append_right_list_type.clone()),
+                    },
+                    Param {
+                        name: "zs".to_string(),
+                        kind: ParamKind::Term(append_right_list_type),
+                    },
+                ],
+                statement: Formula::eq(
+                    Term::App(
+                        append_name.clone(),
+                        vec![
+                            Term::App(
+                                append_name.clone(),
+                                vec![Term::Var("xs".to_string()), Term::Var("ys".to_string())],
+                            ),
+                            Term::Var("zs".to_string()),
+                        ],
+                    ),
+                    Term::App(
+                        append_name.clone(),
+                        vec![
+                            Term::Var("xs".to_string()),
+                            Term::App(
+                                append_name,
+                                vec![Term::Var("ys".to_string()), Term::Var("zs".to_string())],
+                            ),
+                        ],
+                    ),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    append_assoc_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -19135,6 +19195,45 @@ theorem append_nil_right_from_surface (A : Type) (xs : L.List A) :
   }
   rewrite -> ih
   refl
+
+theorem append_assoc_exact
+  (A : Type) (xs ys zs : L.List A) :
+  L.append(L.append(xs, ys), zs) = L.append(xs, L.append(ys, zs)) := by
+  exact L.append_assoc {A := A; xs := xs; ys := ys; zs := zs}
+
+theorem append_assoc_from_surface
+  (A : Type) (xs ys zs : L.List A) :
+  L.append(L.append(xs, ys), zs) = L.append(xs, L.append(ys, zs)) := by
+  apply L.list_induction {
+    A := A;
+    P := fun ws : L.List A =>
+      L.append(L.append(ws, ys), zs) = L.append(ws, L.append(ys, zs));
+    xs := xs
+  }
+  rewrite -> L.append_nil_left {A := A; xs := ys}
+  rewrite -> L.append_nil_left {
+    A := A;
+    xs := L.append(ys, zs)
+  }
+  refl
+  intro h
+  intro t
+  intro ih
+  rewrite -> L.append_cons {A := A; h := h; t := t; ys := ys}
+  rewrite -> L.append_cons {
+    A := A;
+    h := h;
+    t := L.append(t, ys);
+    ys := zs
+  }
+  rewrite -> L.append_cons {
+    A := A;
+    h := h;
+    t := t;
+    ys := L.append(ys, zs)
+  }
+  rewrite -> ih
+  refl
 "#,
         );
         assert!(
@@ -19155,6 +19254,7 @@ theorem append_nil_right_from_surface (A : Type) (xs : L.List A) :
             ("nodup_nil_exact", &["nodup_nil"][..]),
             ("nodup_cons_exact", &["nodup_cons"][..]),
             ("append_nil_right_exact", &["append_nil_right"][..]),
+            ("append_assoc_exact", &["append_assoc"][..]),
         ] {
             let theorem = report
                 .theorems
@@ -19184,6 +19284,14 @@ theorem append_nil_right_from_surface (A : Type) (xs : L.List A) :
         assert!(append_nil_right
             .features
             .contains(&hol::ProofFeature::Induction));
+        let append_assoc = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "append_assoc_exact")
+            .expect("append_assoc_exact receipt");
+        assert!(append_assoc
+            .features
+            .contains(&hol::ProofFeature::Induction));
         let derived_from_surface = report
             .theorems
             .iter()
@@ -19197,6 +19305,38 @@ theorem append_nil_right_from_surface (A : Type) (xs : L.List A) :
             .features
             .contains(&hol::ProofFeature::Induction));
         let package_dependencies = derived_from_surface
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .filter_map(|dependency| report.receipt_names.get(dependency))
+            .filter(|name| name.starts_with("std/hol/list@1::"))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            package_dependencies,
+            [
+                "std/hol/list@1::append".to_string(),
+                "std/hol/list@1::append_cons".to_string(),
+                "std/hol/list@1::append_nil_left".to_string(),
+                "std/hol/list@1::list_induction".to_string(),
+            ]
+            .into_iter()
+            .collect()
+        );
+        let assoc_from_surface = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "append_assoc_from_surface")
+            .expect("append_assoc_from_surface receipt");
+        assert_eq!(
+            assoc_from_surface.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(assoc_from_surface
+            .features
+            .contains(&hol::ProofFeature::Induction));
+        let package_dependencies = assoc_from_surface
             .receipt
             .proof()
             .direct_dependencies()
