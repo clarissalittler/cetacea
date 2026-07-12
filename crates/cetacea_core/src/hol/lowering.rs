@@ -815,7 +815,22 @@ impl<'a> CompatibilityLowerer<'a> {
                 }
             }
             _ => {
-                let lowered = self.lower_term_raw(argument, None)?;
+                // A nested polymorphic application can be ambiguous in
+                // isolation while an enclosing symbol still determines its
+                // expected type. Defer only that inference failure; the
+                // application is lowered again at the instantiated parameter
+                // type once the enclosing symbol has been resolved.
+                let lowered = match self.lower_term_raw(argument, None) {
+                    Ok(lowered) => lowered,
+                    Err(error)
+                        if error
+                            .message
+                            .contains("cannot infer compatibility type argument") =>
+                    {
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                };
                 Ok(Some(self.infer(&lowered)?))
             }
         }

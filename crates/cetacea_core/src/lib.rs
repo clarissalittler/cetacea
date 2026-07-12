@@ -624,6 +624,12 @@ struct RankOneFuncDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct RankOneConstDecl {
+    type_params: Vec<Name>,
+    result: Type,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RankOnePredDecl {
     type_params: Vec<Name>,
     args: Vec<Type>,
@@ -896,6 +902,7 @@ pub struct Env {
     type_constructor_arities: HashMap<Name, usize>,
     package_names: HashSet<Name>,
     consts: HashMap<Name, Type>,
+    rank_one_consts: HashMap<Name, RankOneConstDecl>,
     funcs: HashMap<Name, FuncDecl>,
     rank_one_funcs: HashMap<Name, RankOneFuncDecl>,
     preds: HashMap<Name, Vec<Type>>,
@@ -949,6 +956,17 @@ impl Env {
 
     pub fn add_const(&mut self, name: Name, ty: Type) {
         self.consts.insert(name, ty);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn add_rank_one_const(&mut self, name: Name, type_params: Vec<Name>, result: Type) {
+        self.rank_one_consts.insert(
+            name,
+            RankOneConstDecl {
+                type_params,
+                result,
+            },
+        );
     }
 
     pub fn add_func(&mut self, name: Name, args: Vec<Type>, result: Type) {
@@ -1049,12 +1067,12 @@ impl Env {
     }
 
     fn has_const(&self, name: &str) -> bool {
-        self.consts.contains_key(name)
+        self.consts.contains_key(name) || self.rank_one_consts.contains_key(name)
     }
 
     fn ambiguous_term_names(&self, name: &str) -> Option<Vec<Name>> {
         ambiguous_leaf_names(
-            self.consts.keys().chain(
+            self.consts.keys().chain(self.rank_one_consts.keys()).chain(
                 self.term_defs
                     .iter()
                     .filter_map(|(name, def)| (term_def_expected_args(def) == 0).then_some(name)),
@@ -3278,6 +3296,7 @@ impl FileChecker {
             let element_type = Type::Named(element_parameter.clone());
             let list_type = Type::App(datatype_name, vec![element_type.clone()]);
             let type_params = vec![element_parameter];
+            staged_env.add_rank_one_const(nil_name, type_params.clone(), list_type.clone());
             staged_env.add_rank_one_func(
                 cons_name,
                 type_params.clone(),
@@ -5925,9 +5944,9 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
             if ctx.lookup_term(name).is_some() {
                 return Ok(term.clone());
             }
-            if let Some(name) =
-                resolve_top_level_name(ctx, name, |candidate| env.consts.contains_key(candidate))
-            {
+            if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
+                env.consts.contains_key(candidate) || env.rank_one_consts.contains_key(candidate)
+            }) {
                 return Ok(Term::Var(name));
             }
             if let Some(name) =
@@ -8318,6 +8337,28 @@ fn infer_rank_one_term_arguments(
     parameter_types: &[Type],
     args: &[Term],
 ) -> Result<SchemaSubst, ValidationError> {
+    infer_rank_one_term_arguments_with_subst(
+        env,
+        ctx,
+        name,
+        symbol_kind,
+        type_params,
+        parameter_types,
+        args,
+        SchemaSubst::default(),
+    )
+}
+
+fn infer_rank_one_term_arguments_with_subst(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    symbol_kind: &str,
+    type_params: &[Name],
+    parameter_types: &[Type],
+    args: &[Term],
+    mut subst: SchemaSubst,
+) -> Result<SchemaSubst, ValidationError> {
     if parameter_types.len() != args.len() {
         return Err(ValidationError::new(format!(
             "{symbol_kind} `{name}` expects {} argument(s), but got {}",
@@ -8325,17 +8366,141 @@ fn infer_rank_one_term_arguments(
             args.len()
         )));
     }
-    let actual_types = args
+
+    let schema_params = type_params
         .iter()
-        .map(|arg| validate_term(env, ctx, arg))
-        .collect::<Result<Vec<_>, _>>()?;
-    infer_rank_one_type_arguments(
+        .map(|name| Param {
+            name: name.clone(),
+            kind: ParamKind::Type,
+        })
+        .collect::<Vec<_>>();
+    let mut pending = (0..args.len()).collect::<Vec<_>>();
+    let mut errors = vec![None; args.len()];
+    while !pending.is_empty() {
+        let mut deferred = Vec::new();
+        let mut progress = false;
+        for idx in pending {
+            let pattern = &parameter_types[idx];
+            let expected = subst_type_schema(pattern, &subst);
+            let actual = if type_has_unresolved_schema_param(pattern, &schema_params, &subst) {
+                validate_term(env, ctx, &args[idx])
+            } else {
+                validate_term_using_expected_type(env, ctx, &args[idx], &expected)
+            };
+            let actual = match actual {
+                Ok(actual) => actual,
+                Err(error) => {
+                    errors[idx] = Some(error);
+                    deferred.push(idx);
+                    continue;
+                }
+            };
+            if unify_type(pattern, &actual, &schema_params, &mut subst).is_err() {
+                return Err(ValidationError::new(format!(
+                    "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
+                    idx + 1
+                )));
+            }
+            progress = true;
+        }
+        if deferred.is_empty() {
+            break;
+        }
+        if !progress {
+            let idx = deferred[0];
+            return Err(errors[idx].take().unwrap_or_else(|| {
+                ValidationError::new(format!(
+                    "cannot infer argument {} of {symbol_kind} `{name}`",
+                    idx + 1
+                ))
+            }));
+        }
+        pending = deferred;
+    }
+    for type_param in type_params {
+        if !subst.type_args.contains_key(type_param) {
+            return Err(ValidationError::new(format!(
+                "cannot infer type argument `{type_param}` for {symbol_kind} `{name}`"
+            )));
+        }
+    }
+    Ok(subst)
+}
+
+fn validate_rank_one_function_application(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    func: &RankOneFuncDecl,
+    args: &[Term],
+    expected_result: Option<&Type>,
+) -> Result<Type, ValidationError> {
+    let mut subst = SchemaSubst::default();
+    if let Some(expected_result) = expected_result {
+        let schema_params = func
+            .type_params
+            .iter()
+            .map(|name| Param {
+                name: name.clone(),
+                kind: ParamKind::Type,
+            })
+            .collect::<Vec<_>>();
+        if unify_type(&func.result, expected_result, &schema_params, &mut subst).is_err() {
+            return Err(ValidationError::new(format!(
+                "function `{name}` cannot have expected type `{expected_result}`"
+            )));
+        }
+    }
+    let subst = infer_rank_one_term_arguments_with_subst(
+        env,
+        ctx,
         name,
-        symbol_kind,
-        type_params,
-        parameter_types,
-        &actual_types,
-    )
+        "function",
+        &func.type_params,
+        &func.args,
+        args,
+        subst,
+    )?;
+    Ok(subst_type_schema(&func.result, &subst))
+}
+
+fn validate_term_using_expected_type(
+    env: &Env,
+    ctx: &Context,
+    term: &Term,
+    expected: &Type,
+) -> Result<Type, ValidationError> {
+    if let Term::Var(name) = term {
+        if let Some(constant) = env.rank_one_consts.get(name) {
+            return infer_rank_one_type_arguments(
+                name,
+                "constant",
+                &constant.type_params,
+                std::slice::from_ref(&constant.result),
+                std::slice::from_ref(expected),
+            )
+            .map(|subst| subst_type_schema(&constant.result, &subst))
+            .map_err(|error| {
+                ValidationError::new(format!(
+                    "constant `{name}` cannot be used at expected type `{expected}`: {}",
+                    error.message
+                ))
+            });
+        }
+    }
+    if let Term::App(name, args) = term {
+        if let Some(func) = env.rank_one_funcs.get(name) {
+            return validate_rank_one_function_application(
+                env,
+                ctx,
+                name,
+                func,
+                args,
+                Some(expected),
+            );
+        }
+    }
+    validate_term(env, ctx, term)
 }
 
 fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, ValidationError> {
@@ -8343,6 +8508,16 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
         Term::Var(name) => {
             if let Some(ty) = ctx.lookup_term(name).or_else(|| env.consts.get(name)) {
                 return Ok(ty.clone());
+            }
+            if let Some(constant) = env.rank_one_consts.get(name) {
+                let type_param = constant
+                    .type_params
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("_");
+                return Err(ValidationError::new(format!(
+                    "cannot infer type argument `{type_param}` for constant `{name}` without an expected type"
+                )));
             }
             if let Some(def) = env.term_def(name) {
                 let expected = term_def_expected_args(def);
@@ -8368,16 +8543,7 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
         }
         Term::App(name, args) => {
             if let Some(func) = env.rank_one_funcs.get(name) {
-                let subst = infer_rank_one_term_arguments(
-                    env,
-                    ctx,
-                    name,
-                    "function",
-                    &func.type_params,
-                    &func.args,
-                    args,
-                )?;
-                return Ok(subst_type_schema(&func.result, &subst));
+                return validate_rank_one_function_application(env, ctx, name, func, args, None);
             }
             if let Some(func) = env.funcs.get(name) {
                 if func.args.len() != args.len() {
@@ -17557,9 +17723,9 @@ import std/hol/list@1 as L
 
 mode constructive
 theorem list_operation_types (A : Type) (x : A) (xs : L.List A) :
-  L.Member(x, L.cons(x, xs)) ->
-  L.Nodup(L.append(xs, L.cons(x, xs))) ->
-  L.length(L.append(xs, xs)) = L.length(L.append(xs, xs)) := by
+  L.Member(x, L.append(L.nil, L.nil)) ->
+  L.Nodup(L.append(L.nil, L.cons(x, L.nil))) ->
+  L.length(L.append(xs, L.nil)) = L.length(L.append(xs, L.nil)) := by
   intro member
   intro nodup
   refl
@@ -17607,7 +17773,7 @@ theorem bad_member (x : Nat) (xs : L.List Color) : L.Member(x, xs) := by
 
     #[cfg(feature = "hol-shadow")]
     #[test]
-    fn logical_list_import_keeps_contextual_operations_fail_closed() {
+    fn logical_list_import_keeps_ambiguous_nil_and_all_fail_closed() {
         let report = check_file_with_hol_shadow(
             r#"
 import std/hol/list@1 as L
@@ -17624,7 +17790,7 @@ theorem all_id (P : Nat -> Prop) (xs : L.List Nat) :
         let rendered = format!("{:#?}", report.legacy.diagnostics);
         assert!(
             rendered.contains(
-                "logical package term `L.nil` needs contextual source inference, which is not implemented yet"
+                "cannot infer type argument `A` for constant `L.nil` without an expected type"
             ),
             "unexpected diagnostics: {rendered}"
         );

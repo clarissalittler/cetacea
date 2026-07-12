@@ -2688,6 +2688,18 @@ mod tests {
                 expected_list,
             )
         );
+        elaborator
+            .lower_formula(&Formula::PredApp(
+                "Member".to_string(),
+                vec![
+                    Term::Zero,
+                    Term::App(
+                        "append".to_string(),
+                        vec![Term::Var("nil".to_string()), Term::Var("nil".to_string())],
+                    ),
+                ],
+            ))
+            .expect("outer Member instance flows into nested append and nil");
 
         let after_import = elaborator.clone();
         let repeated = elaborator

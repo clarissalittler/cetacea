@@ -93,13 +93,16 @@ theorem member_id (x : Nat) (xs : L.List Nat) :
 
 These are checked by the legacy proof UI and independently lowered, checked,
 and classified `fol+induction` by HOL. Rank-one unification rejects mixed
-instances such as a `Nat` member paired with a `List Color`. Polymorphic `nil`
-still needs expected-type propagation, and `All` needs a predicate-argument
-signature, so both produce explicit fail-closed diagnostics. No imported List
-definition is available to legacy `simp`, unfolding, or induction yet. Default
-checking rejects the logical import. Repeated imports are idempotent. Finite
-and cardinality package IDs are recognized but reject with an explicit
-surface-not-implemented diagnostic.
+instances such as a `Nat` member paired with a `List Color`. Expected types now
+flow through nested package applications, so `cons(x, nil)`, `append(nil, xs)`,
+and even `Member(x, append(nil, nil))` infer one consistent element type in
+both engines. A bare `nil = nil` remains ambiguous and fails explicitly; no
+arbitrary element type is guessed. `All` still needs a predicate-argument
+signature and remains fail-closed. No imported List definition is available to
+legacy `simp`, unfolding, or induction yet. Default checking rejects the
+logical import. Repeated imports are idempotent. Finite and cardinality package
+IDs are recognized but reject with an explicit surface-not-implemented
+diagnostic.
 
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
@@ -122,9 +125,10 @@ end-to-end slice is complete only when:
 
 The alias catalog, parser-independent lowering, signature-only shadow-driver
 import, stable package reporting, JSON, and exact assignment-manifest
-allowlisting are complete. The next source slices are expected-type inference
-for `nil`, predicate arguments for `All`, then computation/induction tactic
-support. Finite and cardinality aliases, browser/editor verification, and an
-explicit decision about ordinary (non-shadow) acceptance follow. This
-checkpoint produces a 3,670,144-byte native CLI and a 1,351,124-byte raw Wasm
-module.
+allowlisting are complete. Contextual `nil` inference is also complete for
+package applications; intentionally ambiguous standalone uses remain rejected.
+The next source slices are predicate arguments for `All`, then
+computation/induction tactic support. Finite and cardinality aliases,
+browser/editor verification, and an explicit decision about ordinary
+(non-shadow) acceptance follow. This checkpoint produces a 3,689,792-byte
+native CLI and a 1,358,055-byte raw Wasm module.

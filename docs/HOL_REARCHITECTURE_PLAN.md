@@ -626,9 +626,11 @@ closed. Reports, JSON, and assignment manifests use the exact package ID. The
 checkpoint artifacts are 3,632,264 bytes natively and 1,349,516 bytes in Wasm.
 The same seam now carries rank-one source signatures for `cons`, `Member`,
 `Nodup`, `append`, and `length`. Both engines accept propositional theorems over
-those operations and reject inconsistent type instances; `nil`, `All`, and all
+those operations and reject inconsistent type instances. Expected types now
+flow through nested applications, making contextual `nil` usable without
+guessing a type for ambiguous standalone occurrences. `All` and all
 computation/induction behavior remain fail-closed. The checkpoint artifacts are
-3,670,144 bytes natively and 1,351,124 bytes in Wasm.
+3,689,792 bytes natively and 1,358,055 bytes in Wasm.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
@@ -638,8 +640,9 @@ computation/induction behavior remain fail-closed. The checkpoint artifacts are
   application syntax, lowering, and parser-independent List alias binding are
   implemented, together with a signature-only logical import under HOL shadow.
   Five bottom-up-inferable List operations now cross the dual-checking boundary;
-  contextual operations, computation, induction/tactic integration, and
-  ordinary end-to-end acceptance remain.
+  contextual `nil` inference is implemented as well. Predicate-valued `All`,
+  computation, induction/tactic integration, and ordinary end-to-end acceptance
+  remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path
