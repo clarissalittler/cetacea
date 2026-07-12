@@ -654,6 +654,15 @@ the kernel. Mismatched ascriptions fail before proof checking, while ordinary
 parenthesized formulas retain their grammar. This checkpoint is 3,794,240
 bytes natively and 1,369,623 bytes in Wasm.
 
+The first-order predicate interface now exposes `member_nil`, `member_cons`,
+`nodup_nil`, and `nodup_cons`. Constructor laws with two directions are encoded
+as a conjunction of constructive implications, not equality at `Prop`, so
+concrete clients remain `fol+induction`. Each alias is checked against its
+stored theorem descriptor before import commit, and root proofs retain the
+specific stable theorem receipt. The List package catalog now has 17 exact
+declarations and 14 receipts. This checkpoint is 3,828,728 bytes natively and
+1,373,157 bytes in Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -666,8 +675,9 @@ bytes natively and 1,369,623 bytes in Wasm.
   implemented as well. Three checked computation theorems now drive `exact` or
   explicit `simp` without adding legacy reduction rules, and checked generic
   List induction is available through `apply`. Checked term ascriptions resolve
-  intentionally ambiguous rank-one instances. Further equation families and
-  ordinary end-to-end acceptance remain.
+  intentionally ambiguous rank-one instances, and the first-order Member/Nodup
+  constructor laws are source-facing. Higher-order `All` laws, derived theorem
+  families, and ordinary end-to-end acceptance remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

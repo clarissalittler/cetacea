@@ -476,3 +476,12 @@ type to rank-one inference, is checked against any surrounding expected type,
 and lowers to the annotated term with no new core constructor. Substitution
 updates types inside annotations before they are erased. The measured artifacts
 are 3,794,240 bytes for the native CLI and 1,369,623 bytes for Wasm.
+
+Structural predicate facts now follow the same receipt path. `member_nil` is a
+checked contradiction; `nodup_nil` is checked truth; and `member_cons` plus
+`nodup_cons` are represented as two constructive implications conjoined.
+Avoiding equality at `Prop` preserves the least `fol+induction` classification
+for first-order instances. Source descriptors and core theorem templates are
+compared before alias commit, while every concrete `exact` use records the
+stable package theorem dependency. The measured artifacts are 3,828,728 bytes
+for the native CLI and 1,373,157 bytes for Wasm.

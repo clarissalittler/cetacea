@@ -3324,6 +3324,10 @@ impl FileChecker {
             let append_cons_name = qualify("append_cons");
             let length_nil_name = qualify("length_nil");
             let length_cons_name = qualify("length_cons");
+            let member_nil_name = qualify("member_nil");
+            let member_cons_name = qualify("member_cons");
+            let nodup_nil_name = qualify("nodup_nil");
+            let nodup_cons_name = qualify("nodup_cons");
             let list_induction_name = qualify("list_induction");
             let symbol_names = [
                 &nil_name,
@@ -3337,6 +3341,10 @@ impl FileChecker {
                 &append_cons_name,
                 &length_nil_name,
                 &length_cons_name,
+                &member_nil_name,
+                &member_cons_name,
+                &nodup_nil_name,
+                &nodup_cons_name,
                 &list_induction_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
@@ -3374,11 +3382,15 @@ impl FileChecker {
                 ],
             );
             staged_env.add_rank_one_pred(
-                member_name,
+                member_name.clone(),
                 type_params.clone(),
                 vec![element_type, list_type.clone()],
             );
-            staged_env.add_rank_one_pred(nodup_name, type_params.clone(), vec![list_type.clone()]);
+            staged_env.add_rank_one_pred(
+                nodup_name.clone(),
+                type_params.clone(),
+                vec![list_type.clone()],
+            );
             staged_env.add_rank_one_func(
                 append_name.clone(),
                 type_params.clone(),
@@ -3590,6 +3602,184 @@ impl FileChecker {
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     length_cons_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let predicate_element_parameter = "A".to_string();
+            let predicate_element_type = Type::Named(predicate_element_parameter.clone());
+            let predicate_list_type =
+                Type::App(datatype_name.clone(), vec![predicate_element_type.clone()]);
+            let member_nil_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "member_nil")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered member_nil theorem has a receipt");
+            staged_env.add_theorem(Theorem {
+                name: member_nil_name,
+                params: vec![
+                    Param {
+                        name: predicate_element_parameter.clone(),
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "x".to_string(),
+                        kind: ParamKind::Term(predicate_element_type.clone()),
+                    },
+                ],
+                statement: Formula::implies(
+                    Formula::PredApp(
+                        member_name.clone(),
+                        vec![Term::Var("x".to_string()), Term::Var(nil_name.clone())],
+                    ),
+                    Formula::False,
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    member_nil_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let member_cons_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "member_cons")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered member_cons theorem has a receipt");
+            let member_cons_left = Formula::PredApp(
+                member_name.clone(),
+                vec![
+                    Term::Var("x".to_string()),
+                    Term::App(
+                        cons_name.clone(),
+                        vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                    ),
+                ],
+            );
+            let member_cons_right = Formula::or(
+                Formula::eq(Term::Var("x".to_string()), Term::Var("h".to_string())),
+                Formula::PredApp(
+                    member_name.clone(),
+                    vec![Term::Var("x".to_string()), Term::Var("t".to_string())],
+                ),
+            );
+            staged_env.add_theorem(Theorem {
+                name: member_cons_name,
+                params: vec![
+                    Param {
+                        name: predicate_element_parameter.clone(),
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "x".to_string(),
+                        kind: ParamKind::Term(predicate_element_type.clone()),
+                    },
+                    Param {
+                        name: "h".to_string(),
+                        kind: ParamKind::Term(predicate_element_type.clone()),
+                    },
+                    Param {
+                        name: "t".to_string(),
+                        kind: ParamKind::Term(predicate_list_type.clone()),
+                    },
+                ],
+                statement: Formula::and(
+                    Formula::implies(member_cons_left.clone(), member_cons_right.clone()),
+                    Formula::implies(member_cons_right, member_cons_left),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    member_cons_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let nodup_nil_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "nodup_nil")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered nodup_nil theorem has a receipt");
+            staged_env.add_theorem(Theorem {
+                name: nodup_nil_name,
+                params: vec![Param {
+                    name: predicate_element_parameter.clone(),
+                    kind: ParamKind::Type,
+                }],
+                statement: Formula::PredApp(
+                    nodup_name.clone(),
+                    vec![Term::Ascribed {
+                        term: Box::new(Term::Var(nil_name.clone())),
+                        ty: predicate_list_type.clone(),
+                    }],
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    nodup_nil_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let nodup_cons_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "nodup_cons")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered nodup_cons theorem has a receipt");
+            let nodup_cons_left = Formula::PredApp(
+                nodup_name.clone(),
+                vec![Term::App(
+                    cons_name.clone(),
+                    vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                )],
+            );
+            let nodup_cons_right = Formula::and(
+                Formula::implies(
+                    Formula::PredApp(
+                        member_name,
+                        vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                    ),
+                    Formula::False,
+                ),
+                Formula::PredApp(nodup_name, vec![Term::Var("t".to_string())]),
+            );
+            staged_env.add_theorem(Theorem {
+                name: nodup_cons_name,
+                params: vec![
+                    Param {
+                        name: predicate_element_parameter,
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "h".to_string(),
+                        kind: ParamKind::Term(predicate_element_type),
+                    },
+                    Param {
+                        name: "t".to_string(),
+                        kind: ParamKind::Term(predicate_list_type),
+                    },
+                ],
+                statement: Formula::and(
+                    Formula::implies(nodup_cons_left.clone(), nodup_cons_right.clone()),
+                    Formula::implies(nodup_cons_right, nodup_cons_left),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    nodup_cons_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -18540,6 +18730,23 @@ theorem constructor_equations_simp
     succ(L.length(L.append(t, ys))) := by
   simp [L.append_cons, L.length_cons]
   refl
+
+theorem member_nil_exact (A : Type) (x : A) :
+  L.Member(x, L.nil) -> False := by
+  exact L.member_nil {A := A; x := x}
+
+theorem member_cons_exact (A : Type) (x h : A) (t : L.List A) :
+  L.Member(x, L.cons(h, t)) <-> x = h \/ L.Member(x, t) := by
+  exact L.member_cons {A := A; x := x; h := h; t := t}
+
+theorem nodup_nil_exact (A : Type) :
+  L.Nodup((L.nil : L.List A)) := by
+  exact L.nodup_nil {A := A}
+
+theorem nodup_cons_exact (A : Type) (h : A) (t : L.List A) :
+  L.Nodup(L.cons(h, t)) <->
+    (L.Member(h, t) -> False) /\ L.Nodup(t) := by
+  exact L.nodup_cons {A := A; h := h; t := t}
 "#,
         );
         assert!(
@@ -18555,6 +18762,10 @@ theorem constructor_equations_simp
                 "constructor_equations_simp",
                 &["append_cons", "length_cons"][..],
             ),
+            ("member_nil_exact", &["member_nil"][..]),
+            ("member_cons_exact", &["member_cons"][..]),
+            ("nodup_nil_exact", &["nodup_nil"][..]),
+            ("nodup_cons_exact", &["nodup_cons"][..]),
         ] {
             let theorem = report
                 .theorems

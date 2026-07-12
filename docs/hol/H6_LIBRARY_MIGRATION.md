@@ -147,12 +147,20 @@ Nat result cannot determine. The annotation is substituted, validated, and
 erased by both elaborators; it adds no kernel term form. This checkpoint
 measures 3,794,240 bytes natively and 1,369,623 bytes in Wasm.
 
+The source package also exports the first-order predicate constructor laws
+`member_nil`, `member_cons`, `nodup_nil`, and `nodup_cons`. The cons laws are
+constructive bi-implications encoded as conjunctions, avoiding proposition
+equality and retaining `fol+induction` for concrete instances. Their conversion
+proofs depend on the registered `Member` or `Nodup` definition, and source uses
+retain the individual stable theorem receipt. This checkpoint measures
+3,828,728 bytes natively and 1,373,157 bytes in Wasm.
+
 ## Remaining migration slices
 
-1. Expand the checked predicate-equation aliases, add generic declaration
-   syntax, then publish the signature, equation, and induction surfaces for
-   ordinary checking. Retain aliases for the current monomorphic list
-   vocabulary for one release cycle. The import seam is
+1. Add the higher-order `All` constructor laws and generic declaration syntax,
+   then publish the signature, equation, and induction surfaces for ordinary
+   checking. Retain aliases for the current monomorphic list vocabulary for one
+   release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser/editor results.

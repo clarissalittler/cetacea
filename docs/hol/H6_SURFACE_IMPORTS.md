@@ -124,6 +124,14 @@ returns Nat for every element type, its descriptor and uses write
 type is rejected rather than cast. This ascription checkpoint produces a
 3,794,240-byte native CLI and a 1,369,623-byte raw Wasm module.
 
+The source alias catalog now includes `member_nil`, `member_cons`, `nodup_nil`,
+and `nodup_cons`. The cons theorems use constructive bi-implications rather
+than proposition equality, so concrete theorem applications stay
+`fol+induction`. End-to-end `exact` clients retain each stable theorem receipt;
+the transitional engine receives no predicate reduction rule. This predicate
+checkpoint produces a 3,828,728-byte native CLI and a 1,373,157-byte raw Wasm
+module.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
 graph packages remain instance-scoped until an import can bind a particular
@@ -147,8 +155,9 @@ The alias catalog, parser-independent lowering, signature-only shadow-driver
 import, stable package reporting, JSON, and exact assignment-manifest
 allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
-Predicate-valued `All` arguments and explicit term ascriptions are complete as
-well. The next source slices continue with predicate equations, finite and
-cardinality aliases, browser/editor verification, and an explicit decision
-about ordinary (non-shadow) acceptance. The generic induction principle itself
-is now exposed through a receipt-backed theorem alias.
+Predicate-valued `All` arguments, explicit term ascriptions, and first-order
+Member/Nodup equations are complete as well. The next source slices continue
+with the higher-order `All` laws, finite and cardinality aliases, browser/editor
+verification, and an explicit decision about ordinary (non-shadow) acceptance.
+The generic induction principle itself is now exposed through a receipt-backed
+theorem alias.

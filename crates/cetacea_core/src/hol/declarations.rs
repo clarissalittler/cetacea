@@ -241,6 +241,10 @@ impl CompatibilityElaborator {
         let append_cons_name = qualify("append_cons");
         let length_nil_name = qualify("length_nil");
         let length_cons_name = qualify("length_cons");
+        let member_nil_name = qualify("member_nil");
+        let member_cons_name = qualify("member_cons");
+        let nodup_nil_name = qualify("nodup_nil");
+        let nodup_cons_name = qualify("nodup_cons");
         let list_induction_name = qualify("list_induction");
         for name in [
             &datatype_name,
@@ -255,6 +259,10 @@ impl CompatibilityElaborator {
             &append_cons_name,
             &length_nil_name,
             &length_cons_name,
+            &member_nil_name,
+            &member_cons_name,
+            &nodup_nil_name,
+            &nodup_cons_name,
             &list_induction_name,
         ] {
             self.ensure_name_free(name)?;
@@ -296,14 +304,14 @@ impl CompatibilityElaborator {
                 result_type: CoreType::Prop,
             },
             SymbolRegistration {
-                name: member_name,
+                name: member_name.clone(),
                 constant: installed.lists.member,
                 type_parameters: vec![parameter],
                 parameter_types: vec![element_type.clone(), list_type.clone()],
                 result_type: CoreType::Prop,
             },
             SymbolRegistration {
-                name: nodup_name,
+                name: nodup_name.clone(),
                 constant: installed.lists.nodup,
                 type_parameters: vec![parameter],
                 parameter_types: vec![list_type.clone()],
@@ -454,6 +462,144 @@ impl CompatibilityElaborator {
             installed.length_cons,
             length_cons_parameters,
             &length_cons_statement,
+            vec![parameter],
+            vec![element_type.clone(), list_type.clone()],
+        )?;
+        let member_nil_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "x".to_string(),
+                kind: ParamKind::Term(Type::Named(surface_element_parameter.clone())),
+            },
+        ];
+        let member_nil_statement = Formula::implies(
+            Formula::PredApp(
+                member_name.clone(),
+                vec![Term::Var("x".to_string()), Term::Var(nil_name.clone())],
+            ),
+            Formula::False,
+        );
+        staged.bind_checked_theorem_alias(
+            member_nil_name,
+            installed.member_nil,
+            member_nil_parameters,
+            &member_nil_statement,
+            vec![parameter],
+            vec![element_type.clone()],
+        )?;
+        let member_cons_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "x".to_string(),
+                kind: ParamKind::Term(Type::Named(surface_element_parameter.clone())),
+            },
+            Param {
+                name: "h".to_string(),
+                kind: ParamKind::Term(Type::Named(surface_element_parameter.clone())),
+            },
+            Param {
+                name: "t".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let member_cons_left = Formula::PredApp(
+            member_name.clone(),
+            vec![
+                Term::Var("x".to_string()),
+                Term::App(
+                    cons_name.clone(),
+                    vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                ),
+            ],
+        );
+        let member_cons_right = Formula::or(
+            Formula::eq(Term::Var("x".to_string()), Term::Var("h".to_string())),
+            Formula::PredApp(
+                member_name.clone(),
+                vec![Term::Var("x".to_string()), Term::Var("t".to_string())],
+            ),
+        );
+        let member_cons_statement = Formula::and(
+            Formula::implies(member_cons_left.clone(), member_cons_right.clone()),
+            Formula::implies(member_cons_right, member_cons_left),
+        );
+        staged.bind_checked_theorem_alias(
+            member_cons_name,
+            installed.member_cons,
+            member_cons_parameters,
+            &member_cons_statement,
+            vec![parameter],
+            vec![
+                element_type.clone(),
+                element_type.clone(),
+                list_type.clone(),
+            ],
+        )?;
+        let nodup_nil_parameters = vec![Param {
+            name: surface_element_parameter.clone(),
+            kind: ParamKind::Type,
+        }];
+        let nodup_nil_statement = Formula::PredApp(
+            nodup_name.clone(),
+            vec![Term::Ascribed {
+                term: Box::new(Term::Var(nil_name.clone())),
+                ty: surface_list_type.clone(),
+            }],
+        );
+        staged.bind_checked_theorem_alias(
+            nodup_nil_name,
+            installed.nodup_nil,
+            nodup_nil_parameters,
+            &nodup_nil_statement,
+            vec![parameter],
+            Vec::new(),
+        )?;
+        let nodup_cons_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "h".to_string(),
+                kind: ParamKind::Term(Type::Named(surface_element_parameter.clone())),
+            },
+            Param {
+                name: "t".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let nodup_cons_left = Formula::PredApp(
+            nodup_name.clone(),
+            vec![Term::App(
+                cons_name.clone(),
+                vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+            )],
+        );
+        let nodup_cons_right = Formula::and(
+            Formula::implies(
+                Formula::PredApp(
+                    member_name,
+                    vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                ),
+                Formula::False,
+            ),
+            Formula::PredApp(nodup_name, vec![Term::Var("t".to_string())]),
+        );
+        let nodup_cons_statement = Formula::and(
+            Formula::implies(nodup_cons_left.clone(), nodup_cons_right.clone()),
+            Formula::implies(nodup_cons_right, nodup_cons_left),
+        );
+        staged.bind_checked_theorem_alias(
+            nodup_cons_name,
+            installed.nodup_cons,
+            nodup_cons_parameters,
+            &nodup_cons_statement,
             vec![parameter],
             vec![element_type.clone(), list_type.clone()],
         )?;
