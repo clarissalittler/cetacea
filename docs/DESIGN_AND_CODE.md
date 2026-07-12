@@ -1039,6 +1039,15 @@ browser sources can use paths such as `import std/prelude.ctea`,
 `import std/qualified_prelude.ctea`, or the CS250-style
 `import ../../../std/prelude.ctea` without filesystem access.
 
+The Wasm dependency also enables the HOL compatibility sidecar. Full checks
+are fail-closed dual checks: JSON reports `ok` only when legacy checking and a
+complete mismatch-free HOL replay both succeed, and includes
+`hol_certified`, exact logical package IDs, receipt IDs, least fragments, and
+proof features. The virtual-import goal, step, and explanation exports use the
+same package-aware state and certify a proof when stepping reaches its end.
+Release builds use size-oriented LTO so this complete path remains below the
+raw-Wasm review threshold.
+
 The static UI in `web/` loads `cetacea_wasm.wasm`, renders diagnostics and
 accepted declarations, and uses the goal-stepping APIs to show the current proof
 state. Goal snapshots include rule-based tactic hints, and check results include

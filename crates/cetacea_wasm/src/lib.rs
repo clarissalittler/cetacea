@@ -1,8 +1,10 @@
-use cetacea_core::hol::run_linked_hol_smoke;
+use cetacea_core::hol::{run_linked_hol_smoke, EvidenceStatus};
 use cetacea_core::{
-    check_file_with_imports, explain_theorem_with_imports, goals_at_with_imports, outline,
-    run_tactic_with_imports, CheckResult, Diagnostic, DiagnosticSeverity, ExplanationResult,
-    GoalSnapshot, GoalStepResult, LogicMode, Position, SourceOutline, VirtualFile,
+    check_file_with_imports_and_hol_shadow, explain_theorem_with_imports_and_hol_shadow,
+    goals_at_with_imports_and_hol_shadow, outline, run_tactic_with_imports_and_hol_shadow,
+    Diagnostic, DiagnosticSeverity, ExplanationResult, GoalSnapshot, GoalStepResult,
+    HolShadowMismatch, HolShadowReport, HolShadowTheorem, LogicMode, Position, SourceOutline,
+    VirtualFile,
 };
 
 #[no_mangle]
@@ -66,10 +68,9 @@ pub extern "C" fn cetacea_hol_spike_smoke() -> *mut u8 {
 #[no_mangle]
 pub unsafe extern "C" fn cetacea_check(source_ptr: *const u8, source_len: usize) -> *mut u8 {
     match read_input(source_ptr, source_len) {
-        Ok(source) => response_json(check_result_json(&check_file_with_imports(
-            &source,
-            &standard_imports(),
-        ))),
+        Ok(source) => response_json(hol_shadow_result_json(
+            &check_file_with_imports_and_hol_shadow(&source, &standard_imports()),
+        )),
         Err(err) => response_json(error_json(&err)),
     }
 }
@@ -102,7 +103,7 @@ pub unsafe extern "C" fn cetacea_goals_at(
     column: usize,
 ) -> *mut u8 {
     match read_input(source_ptr, source_len) {
-        Ok(source) => response_json(goal_result_json(&goals_at_with_imports(
+        Ok(source) => response_json(goal_result_json(&goals_at_with_imports_and_hol_shadow(
             &source,
             Position { line, column },
             &standard_imports(),
@@ -133,7 +134,7 @@ pub unsafe extern "C" fn cetacea_run_tactic(
         Ok(theorem) => theorem,
         Err(err) => return response_json(error_json(&err)),
     };
-    response_json(goal_result_json(&run_tactic_with_imports(
+    response_json(goal_result_json(&run_tactic_with_imports_and_hol_shadow(
         &source,
         &theorem,
         tactic_index,
@@ -162,11 +163,9 @@ pub unsafe extern "C" fn cetacea_explain_theorem(
         Ok(theorem) => theorem,
         Err(err) => return response_json(error_json(&err)),
     };
-    response_json(explanation_result_json(&explain_theorem_with_imports(
-        &source,
-        &theorem,
-        &standard_imports(),
-    )))
+    response_json(explanation_result_json(
+        &explain_theorem_with_imports_and_hol_shadow(&source, &theorem, &standard_imports()),
+    ))
 }
 
 fn standard_imports() -> Vec<VirtualFile> {
@@ -225,8 +224,9 @@ fn error_json(message: &str) -> String {
     )
 }
 
-fn check_result_json(result: &CheckResult) -> String {
-    let theorems = result
+fn hol_shadow_result_json(report: &HolShadowReport) -> String {
+    let theorems = report
+        .legacy
         .theorems
         .iter()
         .map(|theorem| {
@@ -236,8 +236,17 @@ fn check_result_json(result: &CheckResult) -> String {
                 .map(|name| json_string(name))
                 .collect::<Vec<_>>()
                 .join(",");
+            let hol = report
+                .theorems
+                .iter()
+                .find(|candidate| candidate.name == theorem.name);
+            let hol_fields = hol
+                .map(|theorem| hol_theorem_fields_json(theorem, report))
+                .unwrap_or_else(|| {
+                    r#""hol_status":null,"signature":null,"statement_fragment":null,"required_fragment":null,"features":[],"dependencies":[],"hol_axiom_deps":[],"incomplete_deps":[],"receipt_id":null"#.to_string()
+                });
             format!(
-                r#"{{"name":{},"statement":{},"mode":{},"status":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}]}}"#,
+                r#"{{"name":{},"statement":{},"mode":{},"status":{},"is_axiom":{},"is_imported":{},"uses_sorry":{},"axiom_deps":[{}],{}}}"#,
                 json_string(&theorem.name),
                 json_string(&theorem.statement),
                 json_string(&theorem.mode_used.to_string()),
@@ -245,17 +254,109 @@ fn check_result_json(result: &CheckResult) -> String {
                 theorem.is_axiom,
                 theorem.is_imported,
                 theorem.uses_sorry,
-                axiom_deps
+                axiom_deps,
+                hol_fields,
             )
         })
         .collect::<Vec<_>>()
         .join(",");
+    let diagnostics = diagnostics_json(&report.legacy.diagnostics);
+    let mismatches = report
+        .mismatches
+        .iter()
+        .map(hol_mismatch_diagnostic_json)
+        .collect::<Vec<_>>()
+        .join(",");
+    let diagnostics = match (diagnostics.is_empty(), mismatches.is_empty()) {
+        (true, _) => mismatches,
+        (_, true) => diagnostics,
+        (false, false) => format!("{diagnostics},{mismatches}"),
+    };
+    let imported_packages = report
+        .imported_packages
+        .iter()
+        .map(|package| json_string(package))
+        .collect::<Vec<_>>()
+        .join(",");
+    let certified = !diagnostics_have_errors(&report.legacy.diagnostics) && report.is_match();
     format!(
-        r#"{{"ok":{},"theorems":[{}],"diagnostics":[{}]}}"#,
-        !diagnostics_have_errors(&result.diagnostics),
-        theorems,
-        diagnostics_json(&result.diagnostics)
+        r#"{{"ok":{},"hol_certified":{},"imported_packages":[{}],"theorems":[{}],"diagnostics":[{}]}}"#,
+        certified, certified, imported_packages, theorems, diagnostics,
     )
+}
+
+fn hol_theorem_fields_json(theorem: &HolShadowTheorem, report: &HolShadowReport) -> String {
+    let features = theorem
+        .features
+        .iter()
+        .map(|feature| json_string(&feature.to_string()))
+        .collect::<Vec<_>>()
+        .join(",");
+    let axiom_deps = theorem
+        .axiom_deps
+        .iter()
+        .map(|name| json_string(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    let dependencies = theorem
+        .receipt
+        .proof()
+        .direct_dependencies()
+        .iter()
+        .map(|dependency| {
+            report
+                .receipt_names
+                .get(dependency)
+                .cloned()
+                .unwrap_or_else(|| format!("<declaration:{}>", dependency.0))
+        })
+        .map(|dependency| json_string(&dependency))
+        .collect::<Vec<_>>()
+        .join(",");
+    let incomplete_deps = theorem
+        .incomplete_deps
+        .iter()
+        .map(|name| json_string(name))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        r#""hol_status":{},"signature":{},"statement_fragment":{},"required_fragment":{},"features":[{}],"dependencies":[{}],"hol_axiom_deps":[{}],"incomplete_deps":[{}],"receipt_id":{}"#,
+        json_string(evidence_status_label(theorem.hol_status)),
+        json_string(&theorem.signature),
+        json_string(&theorem.statement_fragment.to_string()),
+        json_string(&theorem.required_fragment.to_string()),
+        features,
+        dependencies,
+        axiom_deps,
+        incomplete_deps,
+        theorem.receipt.id().0,
+    )
+}
+
+fn hol_mismatch_diagnostic_json(mismatch: &HolShadowMismatch) -> String {
+    let path = mismatch
+        .source_path
+        .as_ref()
+        .map(|path| json_string(&path.to_string_lossy()))
+        .unwrap_or_else(|| "null".to_string());
+    let location = format!(r#"{{"path":{},"line":{}}}"#, path, mismatch.line,);
+    format!(
+        r#"{{"severity":"error","message":{},"location":{},"span":null,"notes":[{}],"suggestions":[]}}"#,
+        json_string(&format!(
+            "HOL certification failed for {} `{}`",
+            mismatch.kind, mismatch.declaration
+        )),
+        location,
+        json_string(&mismatch.message),
+    )
+}
+
+fn evidence_status_label(status: EvidenceStatus) -> &'static str {
+    match status {
+        EvidenceStatus::Checked => "checked",
+        EvidenceStatus::Incomplete => "incomplete",
+        EvidenceStatus::TrustedAxiom => "trusted_axiom",
+    }
 }
 
 fn outline_json(outline: &SourceOutline) -> String {
@@ -297,10 +398,11 @@ fn outline_json(outline: &SourceOutline) -> String {
 fn goal_result_json(result: &GoalStepResult) -> String {
     let goals = goals_json(&result.goals);
     format!(
-        r#"{{"ok":{},"theorem":{},"mode":{},"next_tactic_index":{},"tactic_count":{},"completed":{},"goals":[{}],"diagnostics":[{}]}}"#,
+        r#"{{"ok":{},"theorem":{},"mode":{},"statement_fragment":{},"next_tactic_index":{},"tactic_count":{},"completed":{},"goals":[{}],"diagnostics":[{}]}}"#,
         !diagnostics_have_errors(&result.diagnostics),
         option_string_json(result.theorem.as_deref()),
         mode_json(result.mode),
+        fragment_json(result.statement_fragment),
         result.next_tactic_index,
         result.tactic_count,
         result.completed,
@@ -333,11 +435,12 @@ fn explanation_result_json(result: &ExplanationResult) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"ok":{},"theorem":{},"statement":{},"mode":{},"completed":{},"steps":[{}],"diagnostics":[{}]}}"#,
+        r#"{{"ok":{},"theorem":{},"statement":{},"mode":{},"statement_fragment":{},"completed":{},"steps":[{}],"diagnostics":[{}]}}"#,
         !diagnostics_have_errors(&result.diagnostics),
         option_string_json(result.theorem.as_deref()),
         option_string_json(result.statement.as_deref()),
         mode_json(result.mode),
+        fragment_json(result.statement_fragment),
         result.completed,
         steps,
         diagnostics_json(&result.diagnostics)
@@ -450,6 +553,12 @@ fn mode_json(mode: Option<LogicMode>) -> String {
         .unwrap_or_else(|| "null".to_string())
 }
 
+fn fragment_json(fragment: Option<cetacea_core::hol::StatementFragment>) -> String {
+    fragment
+        .map(|fragment| json_string(&fragment.to_string()))
+        .unwrap_or_else(|| "null".to_string())
+}
+
 fn option_string_json(value: Option<&str>) -> String {
     value.map(json_string).unwrap_or_else(|| "null".to_string())
 }
@@ -515,5 +624,68 @@ mod tests {
         assert!(json.contains(r#""trusted_deps":1"#), "{json}");
         assert!(json.contains(r#""incomplete_user_deps":1"#), "{json}");
         assert!(json.contains(r#""classical_features":1"#), "{json}");
+    }
+
+    #[test]
+    fn browser_endpoints_accept_and_certify_a_logical_list_import() {
+        let source = r#"import std/hol/list@1 as L
+
+theorem length_append_use (A : Type) (xs ys : L.List A) :
+  L.length(L.append(xs, ys)) = add(L.length(xs), L.length(ys)) := by
+  exact L.length_append {A := A; xs := xs; ys := ys}
+"#;
+        let imports = standard_imports();
+        let report = check_file_with_imports_and_hol_shadow(source, &imports);
+        assert!(report.legacy.diagnostics.is_empty());
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        let json = hol_shadow_result_json(&report);
+        for expected in [
+            r#""ok":true"#,
+            r#""hol_certified":true"#,
+            r#""imported_packages":["std/hol/list@1"]"#,
+            r#""hol_status":"checked""#,
+            r#""required_fragment":"fol+induction""#,
+            r#"std/hol/list@1::length_append"#,
+        ] {
+            assert!(json.contains(expected), "missing {expected} in {json}");
+        }
+
+        let goals =
+            goals_at_with_imports_and_hol_shadow(source, Position { line: 5, column: 1 }, &imports);
+        assert!(goals.diagnostics.is_empty(), "{:#?}", goals.diagnostics);
+        assert_eq!(goals.goals.len(), 1);
+        assert_eq!(
+            goals.statement_fragment,
+            Some(cetacea_core::hol::StatementFragment::FirstOrderInductive)
+        );
+        assert!(goal_result_json(&goals).contains(r#""statement_fragment":"fol+induction""#));
+
+        let stepped =
+            run_tactic_with_imports_and_hol_shadow(source, "length_append_use", 0, &imports);
+        assert!(stepped.diagnostics.is_empty(), "{:#?}", stepped.diagnostics);
+        assert!(stepped.completed);
+
+        let explanation =
+            explain_theorem_with_imports_and_hol_shadow(source, "length_append_use", &imports);
+        assert!(
+            explanation.diagnostics.is_empty(),
+            "{:#?}",
+            explanation.diagnostics
+        );
+        assert!(explanation.completed);
+        assert_eq!(explanation.steps.len(), 1);
+        assert!(explanation_result_json(&explanation)
+            .contains(r#""statement_fragment":"fol+induction""#));
+
+        let rejected = check_file_with_imports_and_hol_shadow(
+            "theorem bad : True := by\n  exact missing\n",
+            &imports,
+        );
+        let rejected_json = hol_shadow_result_json(&rejected);
+        assert!(rejected_json.contains(r#""ok":false"#), "{rejected_json}");
+        assert!(
+            rejected_json.contains(r#""hol_certified":false"#),
+            "{rejected_json}"
+        );
     }
 }

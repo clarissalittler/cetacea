@@ -528,3 +528,13 @@ and legacy normalization now preserves annotations inside stuck arithmetic and
 projections; unification ignores them only after checking their types. The
 measured artifacts are 3,907,064 bytes for the native CLI and 1,379,905 bytes
 for Wasm.
+
+The browser boundary now consumes this lowering path rather than the
+feature-disabled legacy fallback. `cetacea_check` accepts a result only when
+legacy checking succeeds and every declaration has a mismatch-free HOL replay;
+its JSON exposes certification, package IDs, theorem fragments, features, and
+receipt IDs. Virtual-import goal, tactic-step, and explanation calls use the
+same compatibility state and certify completed proofs. A bundled
+`length_append` example exercises the public List surface. With size-optimized
+LTO, the complete artifacts are 1,651,664 bytes for the native CLI and
+1,167,950 bytes for raw Wasm.

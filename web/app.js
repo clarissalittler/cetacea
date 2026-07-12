@@ -53,6 +53,7 @@ let editDebounceTimer = 0;
 let theoremLibraryItems = [];
 let lastEditorSelection = { start: 0, end: 0 };
 let diagnosticLineMarks = new Map();
+let lastCheckResult = null;
 
 editor.value = loadSavedSource() ?? sampleSource;
 rememberEditorSelection();
@@ -369,7 +370,18 @@ function scheduleCursorSync(options = {}) {
 }
 
 function renderCheck(result) {
+  lastCheckResult = result;
   renderDiagnostics(result.diagnostics ?? []);
+  const packages = result.imported_packages ?? [];
+  if (result.hol_certified) {
+    statusEl.textContent = packages.length
+      ? `HOL certified · ${packages.join(", ")}`
+      : "HOL certified";
+    statusEl.classList.remove("error");
+  } else if (!result.ok) {
+    statusEl.textContent = "Check failed";
+    statusEl.classList.add("error");
+  }
   const theorems = result.theorems ?? [];
   theoremLibraryItems = theorems;
   renderTheoremLibrary();
@@ -418,8 +430,9 @@ function renderGoals(result, options = {}) {
   renderTactics(result);
   renderSourceHighlights(result);
   goalsEl.replaceChildren();
+  const fragment = result.statement_fragment ? ` · ${result.statement_fragment}` : "";
   if (result.theorem) {
-    goalMetaEl.textContent = `${result.theorem} - ${result.next_tactic_index}/${result.tactic_count}`;
+    goalMetaEl.textContent = `${result.theorem} - ${result.next_tactic_index}/${result.tactic_count}${fragment}`;
   } else if (options.position) {
     goalMetaEl.textContent = `Cursor line ${options.position.line}, column ${options.position.column}`;
   } else {
@@ -431,9 +444,9 @@ function renderGoals(result, options = {}) {
       : "the selected cursor position";
     const goalCount = (result.goals ?? []).length;
     if (result.theorem && result.completed) {
-      statusEl.textContent = `${result.theorem}: proof complete at ${cursorText}`;
+      statusEl.textContent = `${result.theorem}: proof complete at ${cursorText}${certificationSuffix()}`;
     } else if (result.theorem) {
-      statusEl.textContent = `${result.theorem}: ${goalCount} goal${goalCount === 1 ? "" : "s"} at ${cursorText}`;
+      statusEl.textContent = `${result.theorem}: ${goalCount} goal${goalCount === 1 ? "" : "s"} at ${cursorText}${certificationSuffix()}`;
     } else {
       statusEl.textContent = `No theorem at ${cursorText}`;
     }
@@ -464,6 +477,10 @@ function renderGoals(result, options = {}) {
     goalsEl.append(item);
   }
   renderTheoremLibrary();
+}
+
+function certificationSuffix() {
+  return lastCheckResult?.hol_certified ? " · HOL certified" : "";
 }
 
 function renderGoalHints(hints) {
@@ -554,9 +571,10 @@ function renderExplanation(result) {
 
   const meta = document.createElement("div");
   meta.className = "explain-meta";
+  const fragment = result.statement_fragment ? ` · ${result.statement_fragment}` : "";
   meta.textContent = result.completed
-    ? `${result.theorem} (${result.mode})`
-    : `${result.theorem} (incomplete)`;
+    ? `${result.theorem} (${result.mode})${fragment}`
+    : `${result.theorem} (incomplete)${fragment}`;
   proofExplanationEl.append(meta);
 
   for (const step of result.steps ?? []) {
@@ -810,6 +828,7 @@ function renderTheoremLibrary() {
       badge(theoremDisplayLabel(theorem)),
       badge(theorem.is_imported ? "imported" : "local"),
     );
+    if (theorem.hol_status) badges.append(badge(theorem.hol_status));
     if (theoremUsesSorry(theorem)) badges.append(badge("incomplete", "badge-warn"));
     if (suggested.has(theorem.name)) badges.append(badge("suggested"));
     head.append(name, badges);
@@ -847,7 +866,7 @@ function badge(text, extraClass) {
 }
 
 function theoremDisplayLabel(theorem) {
-  return theorem.is_axiom ? "trusted" : theorem.mode;
+  return theorem.is_axiom ? "trusted" : (theorem.required_fragment ?? theorem.mode);
 }
 
 // The wasm may serialize these per-theorem fields as snake_case (Rust side)

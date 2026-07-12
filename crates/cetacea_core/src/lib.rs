@@ -1664,8 +1664,12 @@ pub struct HolShadowMismatch {
     pub message: String,
 }
 
-/// Non-authoritative result of checking a source with the legacy engine and
-/// replaying every accepted declaration through the HOL compatibility path.
+/// Result of checking a source with the legacy engine and replaying every
+/// accepted declaration through the HOL compatibility path.
+///
+/// The report itself does not change the legacy result. A fail-closed caller,
+/// such as the browser boundary, can require both an error-free legacy result
+/// and [`HolShadowReport::is_match`] before treating the file as certified.
 #[cfg(feature = "hol-shadow")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HolShadowReport {
@@ -2031,6 +2035,73 @@ fn editor_countermodel_eligibility(
     }
 }
 
+#[cfg(feature = "hol-shadow")]
+fn hol_shadow_mismatch_diagnostics_since(checker: &FileChecker, start: usize) -> Vec<Diagnostic> {
+    checker
+        .hol_shadow
+        .as_ref()
+        .into_iter()
+        .flat_map(|shadow| shadow.mismatches.iter().skip(start))
+        .map(|mismatch| {
+            diagnostic_at(
+                mismatch.source_path.as_deref(),
+                mismatch.line,
+                format!(
+                    "HOL certification failed for {} `{}`",
+                    mismatch.kind, mismatch.declaration
+                ),
+            )
+            .with_note(mismatch.message.clone())
+        })
+        .collect()
+}
+
+#[cfg(feature = "hol-shadow")]
+fn certify_editor_proof(
+    checker: &mut FileChecker,
+    analysis_mode: EditorAnalysisMode,
+    name: &str,
+    parameters: &[Param],
+    statement: &Formula,
+    proof: &DraftProof,
+    mode_used: LogicMode,
+    line: usize,
+    source_path: Option<&Path>,
+) -> Vec<Diagnostic> {
+    if analysis_mode != EditorAnalysisMode::HolShadow {
+        return Vec::new();
+    }
+    let mismatch_start = checker
+        .hol_shadow
+        .as_ref()
+        .map(|shadow| shadow.mismatches.len())
+        .unwrap_or_default();
+    let uses_sorry = proof_uses_sorry(&checker.env, proof);
+    let checked = CheckedTheorem {
+        name: name.to_string(),
+        statement: statement.to_string(),
+        mode_used,
+        is_axiom: false,
+        is_imported: false,
+        uses_sorry,
+        axiom_deps: proof_axiom_deps(&checker.env, proof),
+        status: if uses_sorry {
+            DeclarationStatus::Incomplete
+        } else {
+            DeclarationStatus::Accepted
+        },
+    };
+    let signature = canonical_theorem_signature(parameters, statement);
+    checker.shadow_theorem(&checked, &signature, line, source_path, |shadow| {
+        if uses_sorry {
+            shadow.declare_legacy_incomplete_theorem(name, parameters, statement, proof)
+        } else {
+            shadow.declare_legacy_checked_theorem(name, parameters, statement, proof)
+        }
+    });
+    hol_shadow_mismatch_diagnostics_since(checker, mismatch_start)
+}
+
 pub fn goals_at(source: &str, position: Position) -> GoalStepResult {
     goals_at_with_imports(source, position, &[])
 }
@@ -2164,6 +2235,24 @@ pub fn goals_at_with_imports(
     position: Position,
     imports: &[VirtualFile],
 ) -> GoalStepResult {
+    goals_at_with_imports_in_mode(source, position, imports, EditorAnalysisMode::Legacy)
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn goals_at_with_imports_and_hol_shadow(
+    source: &str,
+    position: Position,
+    imports: &[VirtualFile],
+) -> GoalStepResult {
+    goals_at_with_imports_in_mode(source, position, imports, EditorAnalysisMode::HolShadow)
+}
+
+fn goals_at_with_imports_in_mode(
+    source: &str,
+    position: Position,
+    imports: &[VirtualFile],
+    analysis_mode: EditorAnalysisMode,
+) -> GoalStepResult {
     let source_lines: Vec<_> = source.lines().collect();
     let file = match parse_file(source) {
         Ok(file) => file,
@@ -2201,7 +2290,7 @@ pub fn goals_at_with_imports(
         imports,
         None,
         None,
-        EditorAnalysisMode::Legacy,
+        analysis_mode,
     )
 }
 
@@ -2384,6 +2473,38 @@ pub fn run_tactic_with_imports(
     tactic_index: usize,
     imports: &[VirtualFile],
 ) -> GoalStepResult {
+    run_tactic_with_imports_in_mode(
+        source,
+        theorem_name,
+        tactic_index,
+        imports,
+        EditorAnalysisMode::Legacy,
+    )
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn run_tactic_with_imports_and_hol_shadow(
+    source: &str,
+    theorem_name: &str,
+    tactic_index: usize,
+    imports: &[VirtualFile],
+) -> GoalStepResult {
+    run_tactic_with_imports_in_mode(
+        source,
+        theorem_name,
+        tactic_index,
+        imports,
+        EditorAnalysisMode::HolShadow,
+    )
+}
+
+fn run_tactic_with_imports_in_mode(
+    source: &str,
+    theorem_name: &str,
+    tactic_index: usize,
+    imports: &[VirtualFile],
+    analysis_mode: EditorAnalysisMode,
+) -> GoalStepResult {
     let file = match parse_file(source) {
         Ok(file) => file,
         Err(err) => {
@@ -2429,7 +2550,7 @@ pub fn run_tactic_with_imports(
         imports,
         None,
         None,
-        EditorAnalysisMode::Legacy,
+        analysis_mode,
     )
 }
 
@@ -2556,6 +2677,29 @@ pub fn explain_theorem_with_imports(
     theorem_name: &str,
     imports: &[VirtualFile],
 ) -> ExplanationResult {
+    explain_theorem_with_imports_in_mode(source, theorem_name, imports, EditorAnalysisMode::Legacy)
+}
+
+#[cfg(feature = "hol-shadow")]
+pub fn explain_theorem_with_imports_and_hol_shadow(
+    source: &str,
+    theorem_name: &str,
+    imports: &[VirtualFile],
+) -> ExplanationResult {
+    explain_theorem_with_imports_in_mode(
+        source,
+        theorem_name,
+        imports,
+        EditorAnalysisMode::HolShadow,
+    )
+}
+
+fn explain_theorem_with_imports_in_mode(
+    source: &str,
+    theorem_name: &str,
+    imports: &[VirtualFile],
+    analysis_mode: EditorAnalysisMode,
+) -> ExplanationResult {
     let source_lines: Vec<_> = source.lines().collect();
     let file = match parse_file(source) {
         Ok(file) => file,
@@ -2584,7 +2728,7 @@ pub fn explain_theorem_with_imports(
         imports,
         None,
         None,
-        EditorAnalysisMode::Legacy,
+        analysis_mode,
     )
 }
 
@@ -5389,6 +5533,19 @@ fn goals_for_theorem_prefix(
             ..GoalStepResult::default()
         };
     }
+    #[cfg(feature = "hol-shadow")]
+    if analysis_mode == EditorAnalysisMode::HolShadow {
+        let diagnostics = hol_shadow_mismatch_diagnostics_since(&checker, 0);
+        if !diagnostics.is_empty() {
+            return GoalStepResult {
+                theorem: Some(decl.name),
+                mode: Some(mode),
+                tactic_count: decl.tactics.len(),
+                diagnostics,
+                ..GoalStepResult::default()
+            };
+        }
+    }
 
     let (params, theorem_ctx) =
         match canonicalize_params(&checker.env, declaration_context(&decl.name), &decl.params) {
@@ -5500,7 +5657,7 @@ fn goals_for_theorem_prefix(
         }
     }
 
-    let mut diagnostics = checker.result.diagnostics;
+    let mut diagnostics = std::mem::take(&mut checker.result.diagnostics);
     diagnostics.extend(
         session
             .notes
@@ -5511,10 +5668,29 @@ fn goals_for_theorem_prefix(
     if session.goals.is_empty() && tactic_count == decl.tactics.len() {
         match session.root.clone().complete() {
             Ok(proof) => {
-                if !draft_proof_has_holes(&proof) {
-                    if let Err(err) =
-                        check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
-                    {
+                let mode_used = if draft_proof_has_holes(&proof) {
+                    Ok(draft_proof_mode(&checker.env, &proof))
+                } else {
+                    check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
+                };
+                match mode_used {
+                    Ok(mode_used) => {
+                        #[cfg(not(feature = "hol-shadow"))]
+                        let _ = mode_used;
+                        #[cfg(feature = "hol-shadow")]
+                        diagnostics.extend(certify_editor_proof(
+                            &mut checker,
+                            analysis_mode,
+                            &decl.name,
+                            &params,
+                            &statement,
+                            &proof,
+                            mode_used,
+                            located.line,
+                            source_path,
+                        ));
+                    }
+                    Err(err) => {
                         diagnostics.push(
                             diagnostic_at(
                                 source_path,
@@ -5614,6 +5790,19 @@ fn explain_theorem_at_index(
             diagnostics: checker.result.diagnostics,
             ..ExplanationResult::default()
         };
+    }
+    #[cfg(feature = "hol-shadow")]
+    if analysis_mode == EditorAnalysisMode::HolShadow {
+        let diagnostics = hol_shadow_mismatch_diagnostics_since(&checker, 0);
+        if !diagnostics.is_empty() {
+            return ExplanationResult {
+                theorem: Some(decl.name),
+                statement: Some(decl.statement.to_string()),
+                mode: Some(mode),
+                diagnostics,
+                ..ExplanationResult::default()
+            };
+        }
     }
 
     let (params, theorem_ctx) =
@@ -5761,7 +5950,7 @@ fn explain_theorem_at_index(
         });
     }
 
-    let mut diagnostics = checker.result.diagnostics;
+    let mut diagnostics = std::mem::take(&mut checker.result.diagnostics);
     diagnostics.extend(
         session
             .notes
@@ -5773,10 +5962,29 @@ fn explain_theorem_at_index(
     if completed {
         match session.root.clone().complete() {
             Ok(proof) => {
-                if !draft_proof_has_holes(&proof) {
-                    if let Err(err) =
-                        check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
-                    {
+                let mode_used = if draft_proof_has_holes(&proof) {
+                    Ok(draft_proof_mode(&checker.env, &proof))
+                } else {
+                    check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
+                };
+                match mode_used {
+                    Ok(mode_used) => {
+                        #[cfg(not(feature = "hol-shadow"))]
+                        let _ = mode_used;
+                        #[cfg(feature = "hol-shadow")]
+                        diagnostics.extend(certify_editor_proof(
+                            &mut checker,
+                            analysis_mode,
+                            &decl.name,
+                            &params,
+                            &statement,
+                            &proof,
+                            mode_used,
+                            located.line,
+                            source_path,
+                        ));
+                    }
+                    Err(err) => {
                         diagnostics.push(
                             diagnostic_at(
                                 source_path,

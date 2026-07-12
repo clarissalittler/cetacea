@@ -499,14 +499,14 @@ occurrences, and zero mismatches. Required-fragment distribution is 108 `prop`,
 incomplete, and 24 trusted axioms. Surface statement identity is shared at the
 canonical AST seam rather than compared through a lossy text round-trip; the
 HOL kernel independently checks the lowered statement and evidence. The native
-CLI release is 3,346,328 bytes. Because the browser API does not expose shadow
-checking, `cetacea_wasm` disables the `hol-shadow` Cargo feature and remains
-1,351,837 bytes, below the 1.5 MB review line.
+CLI release is 3,346,328 bytes. At that checkpoint the browser API did not
+expose shadow checking, so `cetacea_wasm` disabled the `hol-shadow` Cargo
+feature and remained 1,351,837 bytes, below the 1.5 MB review line.
 
 ### Phase H5 — fragment enforcement and assignment manifests
 
-Status: **native CLI policy, assignment manifests, and certified native editor
-hints implemented.** The shadow report now
+Status: **native CLI policy, assignment manifests, certified native editor
+hints, and dual-certified browser analysis implemented.** The shadow report now
 retains kernel-created declaration receipts and stable names. An opt-in
 `--hol-profile prop|fol|fol+induction|hol` checks root declarations with their
 transitive used dependencies; profiles remain constructive, trust-free, and
@@ -530,10 +530,10 @@ ill-typed negative signatures are rejected before classification. Native TUI
 and line-mode goal and explanation requests can now opt in with `--hol-shadow`:
 the full theorem signature is classified before tactic stepping, the certified
 fragment is shown in the interface, and countermodel hints are gated by that
-fragment. Legacy editor entry points remain unchanged. H5 still owns
-Wasm/browser result and policy surfaces, interactive assignment-policy
-enforcement, and structural signature fingerprints after the syntax
-stabilizes.
+fragment. Legacy native editor entry points remain unchanged. Wasm/browser
+package checking and editor result surfaces are now implemented; H5 still owns
+browser assignment-policy enforcement, interactive assignment-policy
+enforcement, and structural signature fingerprints after the syntax stabilizes.
 The first policy checkpoint's native CLI release was 3,396,656 bytes; the
 feature-isolated Wasm module was unchanged at 1,351,837 bytes. The
 manifest checkpoint is 3,482,976 bytes natively and 1,351,852 bytes in Wasm;
@@ -546,14 +546,14 @@ bytes respectively; feature isolation still keeps the HOL sidecar out of the
 browser artifact, which remains below the review line.
 
 - Implement least-fragment classification and transitive feature receipts.
-- Native CLI text/JSON and versioned manifests are implemented; extend Wasm
-  JSON, browser results, and interactive assignment-policy enforcement after
-  the policy format settles.
+- Native CLI text/JSON and versioned manifests are implemented. Wasm JSON and
+  browser receipt/fragment results are implemented; interactive and browser
+  assignment-policy enforcement remain.
 - Native allowed-import, named imported-axiom, and frozen full-signature
   policies are implemented.
-- Native shadow file diagnostics and opt-in native editor goal hints consume
-  the certified fragment. Browser goal hints retain legacy routing until the
-  browser surface adopts HOL state.
+- Native shadow file diagnostics, opt-in native editor goal hints, and browser
+  goal/step/explanation requests consume the certified fragment. Browser
+  full-file checks fail closed on any HOL replay mismatch.
 
 Exit gate: adversarial tests demonstrate that a syntactically FOL theorem proved
 through HOL, choice, extensionality, classical reasoning, or an unallowed import
@@ -706,6 +706,17 @@ now retains `nil : List A`, and stuck arithmetic or projection normalization
 preserves annotations while unification treats them transparently after type
 validation. The List catalog now has 22 declarations and 19 receipts. This
 checkpoint is 3,907,064 bytes natively and 1,379,905 bytes in Wasm.
+
+The browser surface now adopts the same compatibility/HOL state. The Wasm
+crate enables `hol-shadow`; full-file checks require both legacy acceptance and
+a complete mismatch-free HOL replay, and return `hol_certified`, exact imported
+package IDs, theorem receipt IDs, fragments, features, and dependency status.
+Virtual-import goal, step, and explanation APIs initialize the same sidecar,
+fail closed on prefix mismatches, and recheck completed stepped proofs. The web
+UI displays the certified fragment and includes a public-surface
+`length_append` example. Size-optimized LTO keeps the complete release at
+1,651,664 bytes natively and 1,167,950 bytes in raw Wasm, below the 1.5 MB review
+line.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing

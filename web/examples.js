@@ -6,6 +6,41 @@
 
 window.CETACEA_EXAMPLES = [
   {
+    id: "hol-list",
+    label: "HOL List: length of append",
+    path: "docs/hol/examples/list_length_append.ctea",
+    source: `import std/hol/list@1 as L
+
+mode constructive
+
+theorem length_append_from_surface
+  (A : Type) (xs ys : L.List A) :
+  L.length(L.append(xs, ys)) = add(L.length(xs), L.length(ys)) := by
+  apply L.list_induction {
+    A := A;
+    P := fun ws : L.List A =>
+      L.length(L.append(ws, ys)) =
+        add(L.length((ws : L.List A)), L.length(ys));
+    xs := xs
+  }
+  rewrite -> L.append_nil_left {A := A; xs := ys}
+  rewrite -> L.length_nil {A := A}
+  refl
+  intro h
+  intro t
+  intro ih
+  rewrite -> L.append_cons {A := A; h := h; t := t; ys := ys}
+  rewrite -> L.length_cons {
+    A := A;
+    h := h;
+    t := L.append(t, ys)
+  }
+  rewrite -> L.length_cons {A := A; h := h; t := t}
+  rewrite -> ih
+  refl
+`,
+  },
+  {
     id: "prop",
     label: "Propositional logic",
     path: "examples/prop.ctea",

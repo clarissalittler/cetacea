@@ -116,8 +116,9 @@ signature before stepping its proof, displays the certified `prop`, `fol`,
 when that fragment licenses the corresponding search. This is an experimental
 analysis aid, not assignment enforcement: `--hol-profile`, `--assignment`, and
 the policy flags remain check-mode options. Without `--hol-shadow`, native
-editor behavior is unchanged. The browser editor does not yet expose this
-sidecar analysis.
+editor behavior is unchanged. The browser editor always uses the fail-closed
+dual-checking sidecar for full-file checks and package-aware goal analysis;
+browser assignment-manifest enforcement remains separate work.
 
 The older line-oriented terminal shell remains available with:
 
@@ -152,6 +153,12 @@ http://localhost:8000/web/
 The browser build embeds the standard library for virtual imports, so tutorial
 sources can still use imports such as `import std/prelude.ctea`,
 `import std/qualified_prelude.ctea`, or `import ../../../std/prelude.ctea`.
+It also accepts exact versioned logical imports such as
+`import std/hol/list@1 as L`. A browser check is successful only when both the
+legacy teaching UI and the HOL replay accept every declaration; the status bar
+shows the exact imported package and theorem entries display their certified
+least fragment. Load “HOL List: length of append” for a complete generic List
+induction example.
 
 The browser UI also shows the current proof goals, rule-based tactic hints for
 each open goal, diagnostic repair suggestions, a searchable theorem-library

@@ -89,9 +89,10 @@ The current checkpoint reports:
 
 `cetacea --hol-shadow [--json] file.ctea` exposes the same per-file report. A
 shadow mismatch makes that opt-in CLI invocation fail for use in migration CI;
-ordinary CLI and editor checking remain legacy-authoritative. The browser crate
-does not expose this migration tool and disables the `hol-shadow` Cargo feature,
-so command integration does not pull the sidecar into the Wasm artifact.
+ordinary native CLI and editor checking remain legacy-authoritative. The
+browser crate now enables `hol-shadow`: its full-file result succeeds only when
+legacy checking and the complete HOL replay both succeed, and it exposes that
+fail-closed result as `hol_certified` with package and receipt metadata.
 
 The same opt-in path now classifies a failed theorem signature before any proof
 receipt can exist. Countermodel diagnostics are dispatched from that certified
@@ -101,19 +102,21 @@ claim for `hol` or a classification failure. Ordinary checking and editor goal
 hints retain their legacy routing by default. Native TUI and line modes can opt
 in with `--hol-shadow`; each goal, tactic-step, or explanation analysis then
 classifies the full theorem signature, displays the certified fragment, and
-gates countermodel hints with it. The browser and virtual-import editor APIs
-remain legacy-only. `--json` exposes the successful file-check pre-receipt
+gates countermodel hints with it. Browser virtual-import goal, step, and
+explanation APIs now use that same state, reject prefix mismatches, and certify
+completed proofs. Native `--json` exposes the successful file-check pre-receipt
 records, including rejected theorem signatures, as
-`hol_shadow.statement_classifications`.
+`hol_shadow.statement_classifications`; browser JSON exposes the corresponding
+least fragment and receipt fields directly.
 
 ## Implementation and artifacts
 
 | Measurement | Value |
 |---|---:|
-| `cetacea_core/src/lib.rs` | 20,710 lines |
-| Rust unit tests | 252 (7 CLI + 245 core) |
-| Native release CLI | 2,162,328 bytes |
-| Wasm release module | 979,741 bytes |
+| `cetacea_core/src/lib.rs` | 25,139 lines |
+| Rust unit tests | 440 (21 CLI + 417 core + 2 Wasm) |
+| Native release CLI | 1,651,664 bytes |
+| Wasm release module | 1,167,950 bytes |
 
 Artifact sizes are raw filesystem sizes before transport compression or Wasm
 optimization. They are comparison signals, not release limits.

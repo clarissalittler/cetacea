@@ -192,6 +192,15 @@ constructive `fol+induction`. The validator now pins 22 declarations and 19
 receipts. This checkpoint measures 3,907,064 bytes natively and 1,379,905 bytes
 in Wasm.
 
+The browser now exercises the installed package rather than rejecting logical
+imports. Its full-file Wasm result is fail-closed dual checking: legacy UI
+acceptance is necessary, and every declaration must also replay through HOL
+without a mismatch. JSON includes the exact package ID, receipt IDs, fragments,
+features, and dependency status. Goal, step, and explanation requests share the
+HOL-enabled virtual-import path, including certification of completed stepped
+proofs. Size-optimized LTO yields a 1,651,664-byte native CLI and a
+1,167,950-byte raw Wasm module.
+
 ## Remaining migration slices
 
 1. Add generic declaration syntax, then publish the signature, equation,
@@ -200,7 +209,8 @@ in Wasm.
    vocabulary for one release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
-   receipt names to imported theorem aliases and browser/editor results.
+   receipt names to imported theorem aliases and browser assignment-policy
+   enforcement.
 3. Register and expose graph instances once surface imports can bind a checked
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems

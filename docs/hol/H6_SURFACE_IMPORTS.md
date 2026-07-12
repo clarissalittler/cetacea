@@ -166,6 +166,16 @@ its `List A` annotation through open arithmetic normalization, without making
 annotations proof-relevant. This checkpoint produces a 3,907,064-byte native
 CLI and a 1,379,905-byte raw Wasm module.
 
+The browser path now enables the same HOL sidecar. `cetacea_check` reports
+success only when the legacy teaching UI accepts the file and every accepted
+declaration has a mismatch-free HOL replay; the response includes
+`hol_certified`, exact imported package IDs, receipt IDs, least fragments, and
+proof features. Virtual-import goal, step, and explanation endpoints load the
+same List aliases, reject prefix mismatches, and certify completed stepped
+proofs. The web example menu includes the public-surface `length_append` proof.
+Size-optimized LTO produces a 1,651,664-byte native CLI and a 1,167,950-byte raw
+Wasm module.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
 graph packages remain instance-scoped until an import can bind a particular
@@ -191,7 +201,8 @@ allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments, explicit term ascriptions, all structural
 predicate constructor laws, right identity, associativity, and length over
-append are complete as well. The next source slices continue with generic
-declarations, finite and cardinality aliases, browser/editor verification, and
-an explicit decision about ordinary (non-shadow) acceptance. The generic
-induction principle itself is exposed through a receipt-backed theorem alias.
+append and browser/editor verification are complete as well. The next source
+slices continue with generic declarations, finite and cardinality aliases,
+browser assignment-policy enforcement, and an explicit decision about ordinary
+(non-shadow) native acceptance. The generic induction principle itself is
+exposed through a receipt-backed theorem alias.

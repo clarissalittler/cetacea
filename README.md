@@ -107,6 +107,12 @@ The browser UI is also deployed automatically to GitHub Pages by
 `.github/workflows/pages.yml`, which builds the WebAssembly checker and
 publishes the contents of `web/` on every push to `main`.
 
+Browser checks are dual-certified: the teaching UI and the HOL replay must both
+accept the file. Exact logical imports such as `import std/hol/list@1 as L`
+work in checking, goal stepping, and proof explanations; the status and theorem
+library show the imported package and certified least fragment. The bundled
+“HOL List: length of append” example demonstrates the generic List surface.
+
 The CLI prints each root declaration as `accepted theorem`, `incomplete
 theorem`, or `trusted axiom`, together with the strongest mode used by a proof.
 Status lines are printed for every retained declaration even when other
@@ -136,7 +142,8 @@ loaded once.
 - line-oriented terminal shell with goal display, tactic hints, theorem search,
   stepping, and proof explanations
 - WebAssembly exports and a static browser UI for checking, goal stepping,
-  tactic hints, diagnostic help, theorem-library search, and proof explanations
+  tactic hints, diagnostic help, theorem-library search, proof explanations,
+  and fail-closed HOL package certification
 - virtual imports for browser-hosted standard-library files
 - `sort`, `const`, `func`, `pred`, formula and term `def`, `defrec`,
   `data`, and `axiom` declarations
