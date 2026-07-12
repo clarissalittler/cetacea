@@ -116,20 +116,22 @@ engines and certified `fol+induction`. This is still a signature-only bridge:
 expected types flow inward through package applications, so polymorphic `nil`
 can be inferred inside `cons`, on either side of `append`, and beneath an outer
 `Member`. A standalone `nil = nil` remains correctly ambiguous. `All` still
-needs a predicate-argument signature, and no List computation, simplification,
-or induction has been copied into the legacy engine. Default legacy checking
-rejects logical HOL imports, while finite/cardinality imports reject explicitly
-until their end-to-end surfaces are implemented. Reports and JSON carry the
-exact package ID, and assignment manifests allowlist that ID without filesystem
-canonicalization.
+has a predicate-valued source argument rather than pretending its first
+argument is a first-order term. Named predicates and expected-type-directed
+lambdas now cross both checkers; variable-list uses remain policy-visible as
+`hol`, while closed nil uses can normalize to their least `fol+induction`
+dependency. No List computation, simplification, or induction has been copied
+into the legacy engine. Default legacy checking rejects logical HOL imports,
+while finite/cardinality imports reject explicitly until their end-to-end
+surfaces are implemented. Reports and JSON carry the exact package ID, and
+assignment manifests allowlist that ID without filesystem canonicalization.
 
 ## Remaining migration slices
 
 1. Extend the implemented signature-only logical List import through
-   predicate-argument inference, computation, induction, and tactics; add
-   generic declaration syntax, then publish it for ordinary checking. Retain
-   aliases for the current monomorphic list vocabulary for one release cycle.
-   The import seam is
+   computation, induction, and tactics; add generic declaration syntax, then
+   publish it for ordinary checking. Retain aliases for the current monomorphic
+   list vocabulary for one release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser/editor results.
@@ -158,5 +160,5 @@ canonicalization.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the contextual-`nil` checkpoint the release CLI is 3,689,792 bytes and the
-raw Wasm module is 1,358,055 bytes, still below the 1.5 MB review line.
+At the predicate-valued `All` checkpoint the release CLI is 3,711,640 bytes and
+the raw Wasm module is 1,369,207 bytes, still below the 1.5 MB review line.

@@ -445,8 +445,11 @@ statements using those symbols propositionally are checked independently by
 both engines. It also propagates expected types through nested applications,
 allowing contextual uses such as `Member(x, append(nil, nil))` while rejecting
 the genuinely ambiguous `nil = nil`. This catalog contains signatures only:
-`All`, imported computation, simplification, and induction remain explicitly
-unavailable. Default checking and finite/cardinality surfaces fail closed.
-`HolShadowReport`, CLI JSON, and assignment manifests carry and allowlist the
-exact versioned package ID. The release artifacts at this checkpoint are
-3,689,792 bytes for the native CLI and 1,358,055 bytes for raw Wasm.
+`All` now records its predicate-valued argument separately from ordinary term
+arguments, accepts named predicates and lambdas, and remains classified `hol`
+when that higher-order value survives normalization. Imported computation,
+simplification, and induction remain explicitly unavailable. Default checking
+and finite/cardinality surfaces fail closed. `HolShadowReport`, CLI JSON, and
+assignment manifests carry and allowlist the exact versioned package ID. The
+release artifacts at this checkpoint are 3,711,640 bytes for the native CLI and
+1,369,207 bytes for raw Wasm.

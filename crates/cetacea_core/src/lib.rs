@@ -630,9 +630,16 @@ struct RankOneConstDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "hol-shadow"), allow(dead_code))]
+enum RankOnePredicateArgument {
+    Term(Type),
+    Predicate(Vec<Type>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct RankOnePredDecl {
     type_params: Vec<Name>,
-    args: Vec<Type>,
+    args: Vec<RankOnePredicateArgument>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -997,6 +1004,22 @@ impl Env {
 
     #[cfg(feature = "hol-shadow")]
     fn add_rank_one_pred(&mut self, name: Name, type_params: Vec<Name>, args: Vec<Type>) {
+        self.add_rank_one_mixed_pred(
+            name,
+            type_params,
+            args.into_iter()
+                .map(RankOnePredicateArgument::Term)
+                .collect(),
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn add_rank_one_mixed_pred(
+        &mut self,
+        name: Name,
+        type_params: Vec<Name>,
+        args: Vec<RankOnePredicateArgument>,
+    ) {
         self.rank_one_preds
             .insert(name, RankOnePredDecl { type_params, args });
     }
@@ -3302,6 +3325,14 @@ impl FileChecker {
                 type_params.clone(),
                 vec![element_type.clone(), list_type.clone()],
                 list_type.clone(),
+            );
+            staged_env.add_rank_one_mixed_pred(
+                all_name,
+                type_params.clone(),
+                vec![
+                    RankOnePredicateArgument::Predicate(vec![element_type.clone()]),
+                    RankOnePredicateArgument::Term(list_type.clone()),
+                ],
             );
             staged_env.add_rank_one_pred(
                 member_name,
@@ -6111,6 +6142,76 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
     }
 }
 
+fn canonicalize_rank_one_predicate_argument(
+    env: &Env,
+    ctx: &Context,
+    arg: &Term,
+    parameter_types: &[Type],
+) -> Result<Term, ValidationError> {
+    let arg = formula_def_predicate_argument(arg)?;
+    match arg {
+        PredicateArg::Named(_) => {
+            canonicalize_predicate_arg(env, ctx, &arg).map(|arg| predicate_arg_to_term(&arg))
+        }
+        PredicateArg::Lambda { params, body } => {
+            validate_distinct_lambda_params(&params)?;
+            if params.len() != parameter_types.len() {
+                return Err(ValidationError::new(format!(
+                    "predicate lambda expects {} argument(s), but target predicate type has {}",
+                    params.len(),
+                    parameter_types.len()
+                )));
+            }
+            let mut body_ctx = ctx.clone();
+            let mut canonical_params = Vec::new();
+            for (param, placeholder_type) in params.iter().zip(parameter_types) {
+                let ty = param
+                    .ty
+                    .as_ref()
+                    .map(|ty| canonicalize_type(env, ctx, ty))
+                    .transpose()?;
+                body_ctx.add_term(
+                    param.name.clone(),
+                    ty.clone().unwrap_or_else(|| placeholder_type.clone()),
+                );
+                canonical_params.push(LambdaParam {
+                    name: param.name.clone(),
+                    ty,
+                });
+            }
+            Ok(predicate_arg_to_term(&PredicateArg::Lambda {
+                params: canonical_params,
+                body: canonicalize_formula(env, &body_ctx, &body)?,
+            }))
+        }
+    }
+}
+
+fn canonicalize_rank_one_predicate_args(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    decl: &RankOnePredDecl,
+    args: &[Term],
+) -> Result<Vec<Term>, ValidationError> {
+    if decl.args.len() != args.len() {
+        return Err(ValidationError::new(format!(
+            "predicate `{name}` expects {} argument(s), but got {}",
+            decl.args.len(),
+            args.len()
+        )));
+    }
+    args.iter()
+        .zip(&decl.args)
+        .map(|(arg, parameter)| match parameter {
+            RankOnePredicateArgument::Term(_) => canonicalize_term(env, ctx, arg),
+            RankOnePredicateArgument::Predicate(parameter_types) => {
+                canonicalize_rank_one_predicate_argument(env, ctx, arg, parameter_types)
+            }
+        })
+        .collect()
+}
+
 fn canonicalize_formula(
     env: &Env,
     ctx: &Context,
@@ -6164,10 +6265,13 @@ fn canonicalize_formula(
             if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
                 env.preds.contains_key(candidate) || env.rank_one_preds.contains_key(candidate)
             }) {
-                let args = args
-                    .iter()
-                    .map(|arg| canonicalize_term(env, ctx, arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = if let Some(decl) = env.rank_one_preds.get(&name) {
+                    canonicalize_rank_one_predicate_args(env, ctx, &name, decl, args)?
+                } else {
+                    args.iter()
+                        .map(|arg| canonicalize_term(env, ctx, arg))
+                        .collect::<Result<Vec<_>, _>>()?
+                };
                 return Ok(Formula::PredApp(name, args));
             }
             if let Some(name) =
@@ -8328,27 +8432,6 @@ fn infer_rank_one_type_arguments(
     Ok(subst)
 }
 
-fn infer_rank_one_term_arguments(
-    env: &Env,
-    ctx: &Context,
-    name: &str,
-    symbol_kind: &str,
-    type_params: &[Name],
-    parameter_types: &[Type],
-    args: &[Term],
-) -> Result<SchemaSubst, ValidationError> {
-    infer_rank_one_term_arguments_with_subst(
-        env,
-        ctx,
-        name,
-        symbol_kind,
-        type_params,
-        parameter_types,
-        args,
-        SchemaSubst::default(),
-    )
-}
-
 fn infer_rank_one_term_arguments_with_subst(
     env: &Env,
     ctx: &Context,
@@ -8768,11 +8851,24 @@ fn validate_predicate_arg(
     match arg {
         PredicateArg::Named(name) => {
             if let Some(decl) = env.rank_one_preds.get(name) {
+                let Some(parameter_types) = decl
+                    .args
+                    .iter()
+                    .map(|argument| match argument {
+                        RankOnePredicateArgument::Term(ty) => Some(ty.clone()),
+                        RankOnePredicateArgument::Predicate(_) => None,
+                    })
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    return Err(ValidationError::new(format!(
+                        "predicate `{name}` has predicate-valued source arguments and cannot be passed as a first-order predicate"
+                    )));
+                };
                 infer_rank_one_type_arguments(
                     name,
                     "predicate",
                     &decl.type_params,
-                    &decl.args,
+                    &parameter_types,
                     expected,
                 )?;
                 Ok(())
@@ -8839,6 +8935,118 @@ fn predicate_type_display(args: &[Type]) -> String {
     parts.join(" -> ")
 }
 
+fn validate_rank_one_predicate_application(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    decl: &RankOnePredDecl,
+    args: &[Term],
+) -> Result<(), ValidationError> {
+    if decl.args.len() != args.len() {
+        return Err(ValidationError::new(format!(
+            "predicate `{name}` expects {} argument(s), but got {}",
+            decl.args.len(),
+            args.len()
+        )));
+    }
+
+    let schema_params = decl
+        .type_params
+        .iter()
+        .map(|name| Param {
+            name: name.clone(),
+            kind: ParamKind::Type,
+        })
+        .collect::<Vec<_>>();
+    let mut subst = SchemaSubst::default();
+    let mut pending = (0..args.len()).collect::<Vec<_>>();
+    let mut errors = vec![None; args.len()];
+    while !pending.is_empty() {
+        let mut deferred = Vec::new();
+        let mut progress = false;
+        for idx in pending {
+            match &decl.args[idx] {
+                RankOnePredicateArgument::Term(pattern) => {
+                    let expected = subst_type_schema(pattern, &subst);
+                    let actual =
+                        if type_has_unresolved_schema_param(pattern, &schema_params, &subst) {
+                            validate_term(env, ctx, &args[idx])
+                        } else {
+                            validate_term_using_expected_type(env, ctx, &args[idx], &expected)
+                        };
+                    let actual = match actual {
+                        Ok(actual) => actual,
+                        Err(error) => {
+                            errors[idx] = Some(error);
+                            deferred.push(idx);
+                            continue;
+                        }
+                    };
+                    if unify_type(pattern, &actual, &schema_params, &mut subst).is_err() {
+                        return Err(ValidationError::new(format!(
+                            "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
+                            idx + 1
+                        )));
+                    }
+                    progress = true;
+                }
+                RankOnePredicateArgument::Predicate(parameter_types) => {
+                    let predicate_arg = formula_def_predicate_argument(&args[idx])?;
+                    let unresolved = parameter_types.iter().any(|parameter_type| {
+                        type_has_unresolved_schema_param(parameter_type, &schema_params, &subst)
+                    });
+                    let supplies_type_hint = match &predicate_arg {
+                        PredicateArg::Named(_) => true,
+                        PredicateArg::Lambda { params, .. } => {
+                            params.iter().all(|param| param.ty.is_some())
+                        }
+                    };
+                    if unresolved && !supplies_type_hint {
+                        errors[idx] = Some(ValidationError::new(format!(
+                            "cannot infer the type of predicate argument {} of `{name}` without an annotation or another typed argument",
+                            idx + 1
+                        )));
+                        deferred.push(idx);
+                        continue;
+                    }
+                    let mut trial_subst = subst.clone();
+                    validate_predicate_schema_arg(
+                        env,
+                        ctx,
+                        &predicate_arg,
+                        parameter_types,
+                        &schema_params,
+                        &mut trial_subst,
+                    )?;
+                    subst = trial_subst;
+                    progress = true;
+                }
+            }
+        }
+        if deferred.is_empty() {
+            break;
+        }
+        if !progress {
+            let idx = deferred[0];
+            return Err(errors[idx].take().unwrap_or_else(|| {
+                ValidationError::new(format!(
+                    "cannot infer argument {} of predicate `{name}`",
+                    idx + 1
+                ))
+            }));
+        }
+        pending = deferred;
+    }
+    for type_param in &decl.type_params {
+        if !subst.type_args.contains_key(type_param) {
+            return Err(ValidationError::new(format!(
+                "cannot infer type argument `{type_param}` for predicate `{name}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), ValidationError> {
     match formula {
         Formula::True | Formula::False => Ok(()),
@@ -8900,16 +9108,7 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
         }
         Formula::PredApp(name, args) => {
             if let Some(decl) = env.rank_one_preds.get(name) {
-                infer_rank_one_term_arguments(
-                    env,
-                    ctx,
-                    name,
-                    "predicate",
-                    &decl.type_params,
-                    &decl.args,
-                    args,
-                )?;
-                Ok(())
+                validate_rank_one_predicate_application(env, ctx, name, decl, args)
             } else if let Some(signature) = predicate_signature(env, ctx, name) {
                 if signature.len() != args.len() {
                     return Err(ValidationError::new(format!(
@@ -17760,6 +17959,9 @@ sort Color
 
 theorem bad_member (x : Nat) (xs : L.List Color) : L.Member(x, xs) := by
   sorry
+
+theorem bad_all (P : Color -> Prop) (xs : L.List Nat) : L.All(P, xs) := by
+  sorry
 "#,
         );
         let rendered = format!("{:#?}", report.legacy.diagnostics);
@@ -17768,6 +17970,67 @@ theorem bad_member (x : Nat) (xs : L.List Color) : L.Member(x, xs) := by
                 "argument 2 of `L.Member` has type `L.List Color`, but expected `L.List Nat`"
             ),
             "unexpected diagnostics: {rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "argument 2 of `L.All` has type `L.List Nat`, but expected `L.List Color`"
+            ),
+            "unexpected diagnostics: {rendered}"
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_types_all_and_classifies_it_as_hol() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as L
+
+theorem all_id (A : Type) (P : A -> Prop) (xs : L.List A) :
+  L.All(P, xs) ->
+  L.All(fun x => P(x), xs) ->
+  L.All(fun x => P(x), xs) := by
+  intro named
+  intro lambda
+  exact lambda
+
+theorem all_annotated_nil :
+  L.All(fun x : Nat => x = x, L.nil) ->
+  L.All(fun x : Nat => x = x, L.nil) := by
+  intro h
+  exact h
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        let theorem = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "all_id")
+            .expect("all_id receipt");
+        assert_eq!(
+            theorem.statement_fragment,
+            hol::StatementFragment::HigherOrder
+        );
+        assert_eq!(
+            theorem.required_fragment,
+            hol::StatementFragment::HigherOrder
+        );
+        let annotated = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "all_annotated_nil")
+            .expect("all_annotated_nil receipt");
+        // The closed nil instance normalizes away the predicate body, while
+        // its checked List dependency still keeps the least required fragment
+        // at first-order induction rather than plain propositional logic.
+        assert_eq!(
+            annotated.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
         );
     }
 
@@ -17781,8 +18044,8 @@ import std/hol/list@1 as L
 theorem nil_refl : L.nil = L.nil := by
   refl
 
-theorem all_id (P : Nat -> Prop) (xs : L.List Nat) :
-  L.All(P, xs) -> L.All(P, xs) := by
+theorem ambiguous_all :
+  L.All(fun x => x = x, L.nil) -> L.All(fun x => x = x, L.nil) := by
   intro h
   exact h
 "#,
@@ -17795,8 +18058,9 @@ theorem all_id (P : Nat -> Prop) (xs : L.List Nat) :
             "unexpected diagnostics: {rendered}"
         );
         assert!(
-            rendered
-                .contains("logical package predicate `L.All` does not have a source signature yet"),
+            rendered.contains(
+                "cannot infer the type of predicate argument 1 of `L.All` without an annotation or another typed argument"
+            ),
             "unexpected diagnostics: {rendered}"
         );
     }
