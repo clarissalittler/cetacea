@@ -617,6 +617,19 @@ pub struct FuncDecl {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct RankOneFuncDecl {
+    type_params: Vec<Name>,
+    args: Vec<Type>,
+    result: Type,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RankOnePredDecl {
+    type_params: Vec<Name>,
+    args: Vec<Type>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FormulaDef {
     pub name: Name,
     pub params: Vec<Param>,
@@ -884,7 +897,9 @@ pub struct Env {
     package_names: HashSet<Name>,
     consts: HashMap<Name, Type>,
     funcs: HashMap<Name, FuncDecl>,
+    rank_one_funcs: HashMap<Name, RankOneFuncDecl>,
     preds: HashMap<Name, Vec<Type>>,
+    rank_one_preds: HashMap<Name, RankOnePredDecl>,
     defs: HashMap<Name, FormulaDef>,
     term_defs: HashMap<Name, TermDef>,
     data_defs: HashMap<Name, DataDef>,
@@ -940,8 +955,32 @@ impl Env {
         self.funcs.insert(name, FuncDecl { args, result });
     }
 
+    #[cfg(feature = "hol-shadow")]
+    fn add_rank_one_func(
+        &mut self,
+        name: Name,
+        type_params: Vec<Name>,
+        args: Vec<Type>,
+        result: Type,
+    ) {
+        self.rank_one_funcs.insert(
+            name,
+            RankOneFuncDecl {
+                type_params,
+                args,
+                result,
+            },
+        );
+    }
+
     pub fn add_pred(&mut self, name: Name, args: Vec<Type>) {
         self.preds.insert(name, args);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn add_rank_one_pred(&mut self, name: Name, type_params: Vec<Name>, args: Vec<Type>) {
+        self.rank_one_preds
+            .insert(name, RankOnePredDecl { type_params, args });
     }
 
     pub fn add_def(&mut self, def: FormulaDef) {
@@ -1025,13 +1064,14 @@ impl Env {
     }
 
     fn has_func(&self, name: &str) -> bool {
-        self.funcs.contains_key(name)
+        self.funcs.contains_key(name) || self.rank_one_funcs.contains_key(name)
     }
 
     fn ambiguous_function_names(&self, name: &str) -> Option<Vec<Name>> {
         ambiguous_leaf_names(
             self.funcs
                 .keys()
+                .chain(self.rank_one_funcs.keys())
                 .chain(self.term_defs.keys())
                 .chain(self.data_rec_defs.keys()),
             name,
@@ -1039,11 +1079,17 @@ impl Env {
     }
 
     fn has_pred(&self, name: &str) -> bool {
-        self.preds.contains_key(name)
+        self.preds.contains_key(name) || self.rank_one_preds.contains_key(name)
     }
 
     fn ambiguous_predicate_names(&self, name: &str) -> Option<Vec<Name>> {
-        ambiguous_leaf_names(self.preds.keys().chain(self.defs.keys()), name)
+        ambiguous_leaf_names(
+            self.preds
+                .keys()
+                .chain(self.rank_one_preds.keys())
+                .chain(self.defs.keys()),
+            name,
+        )
     }
 
     fn has_theorem(&self, name: &str) -> bool {
@@ -3197,16 +3243,23 @@ impl FileChecker {
                 None => leaf.to_string(),
             };
             let datatype_name = qualify("List");
+            let nil_name = qualify("nil");
+            let cons_name = qualify("cons");
+            let all_name = qualify("All");
+            let member_name = qualify("Member");
+            let nodup_name = qualify("Nodup");
+            let append_name = qualify("append");
+            let length_name = qualify("length");
             let symbol_names = [
-                qualify("nil"),
-                qualify("cons"),
-                qualify("All"),
-                qualify("Member"),
-                qualify("Nodup"),
-                qualify("append"),
-                qualify("length"),
+                &nil_name,
+                &cons_name,
+                &all_name,
+                &member_name,
+                &nodup_name,
+                &append_name,
+                &length_name,
             ];
-            for name in std::iter::once(&datatype_name).chain(symbol_names.iter()) {
+            for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
                 if self.env.has_top_level_name(name) {
                     self.result.diagnostics.push(diagnostic_at(
                         source_path,
@@ -3217,10 +3270,33 @@ impl FileChecker {
                 }
             }
             let mut staged_env = self.env.clone();
-            staged_env.add_type_constructor(datatype_name, 1);
+            staged_env.add_type_constructor(datatype_name.clone(), 1);
             for name in symbol_names {
-                staged_env.reserve_package_name(name);
+                staged_env.reserve_package_name(name.clone());
             }
+            let element_parameter = "A".to_string();
+            let element_type = Type::Named(element_parameter.clone());
+            let list_type = Type::App(datatype_name, vec![element_type.clone()]);
+            let type_params = vec![element_parameter];
+            staged_env.add_rank_one_func(
+                cons_name,
+                type_params.clone(),
+                vec![element_type.clone(), list_type.clone()],
+                list_type.clone(),
+            );
+            staged_env.add_rank_one_pred(
+                member_name,
+                type_params.clone(),
+                vec![element_type, list_type.clone()],
+            );
+            staged_env.add_rank_one_pred(nodup_name, type_params.clone(), vec![list_type.clone()]);
+            staged_env.add_rank_one_func(
+                append_name,
+                type_params.clone(),
+                vec![list_type.clone(), list_type.clone()],
+                list_type.clone(),
+            );
+            staged_env.add_rank_one_func(length_name, type_params, vec![list_type], Type::Nat);
 
             let shadow = self
                 .hol_shadow
@@ -5875,6 +5951,13 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
                     1 + def.extra_params.len()
                 )));
             }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.package_names.contains(candidate))
+            {
+                return Err(ValidationError::new(format!(
+                    "logical package term `{name}` needs contextual source inference, which is not implemented yet"
+                )));
+            }
             if let Some(matches) = env.ambiguous_term_names(name) {
                 return Err(ValidationError::new(ambiguous_reference_message(
                     "term", name, &matches,
@@ -5883,9 +5966,9 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
             Err(ValidationError::new(format!("unknown term `{name}`")))
         }
         Term::App(name, args) => {
-            if let Some(name) =
-                resolve_top_level_name(ctx, name, |candidate| env.funcs.contains_key(candidate))
-            {
+            if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
+                env.funcs.contains_key(candidate) || env.rank_one_funcs.contains_key(candidate)
+            }) {
                 let args = args
                     .iter()
                     .map(|arg| canonicalize_term(env, ctx, arg))
@@ -6023,9 +6106,9 @@ fn canonicalize_formula(
             {
                 return Ok(formula.clone());
             }
-            if let Some(name) =
-                resolve_top_level_name(ctx, name, |candidate| env.preds.contains_key(candidate))
-            {
+            if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
+                env.preds.contains_key(candidate) || env.rank_one_preds.contains_key(candidate)
+            }) {
                 return Ok(Formula::Atom(name));
             }
             if let Some(name) =
@@ -6059,9 +6142,9 @@ fn canonicalize_formula(
                     .collect::<Result<Vec<_>, _>>()?;
                 return Ok(Formula::PredApp(name.clone(), args));
             }
-            if let Some(name) =
-                resolve_top_level_name(ctx, name, |candidate| env.preds.contains_key(candidate))
-            {
+            if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
+                env.preds.contains_key(candidate) || env.rank_one_preds.contains_key(candidate)
+            }) {
                 let args = args
                     .iter()
                     .map(|arg| canonicalize_term(env, ctx, arg))
@@ -6074,6 +6157,13 @@ fn canonicalize_formula(
                 let def = env.formula_def(&name).expect("resolved formula def");
                 let args = canonicalize_formula_def_args(env, ctx, def, args)?;
                 return Ok(Formula::PredApp(name, args));
+            }
+            if let Some(name) =
+                resolve_top_level_name(ctx, name, |candidate| env.package_names.contains(candidate))
+            {
+                return Err(ValidationError::new(format!(
+                    "logical package predicate `{name}` does not have a source signature yet"
+                )));
             }
             if let Some(matches) = env.ambiguous_predicate_names(name) {
                 return Err(ValidationError::new(ambiguous_reference_message(
@@ -6149,9 +6239,9 @@ fn canonicalize_predicate_arg(
             if ctx.lookup_predicate_var(name).is_some() {
                 return Ok(arg.clone());
             }
-            if let Some(name) =
-                resolve_top_level_name(ctx, name, |candidate| env.preds.contains_key(candidate))
-            {
+            if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
+                env.preds.contains_key(candidate) || env.rank_one_preds.contains_key(candidate)
+            }) {
                 return Ok(PredicateArg::Named(name));
             }
             if let Some(name) =
@@ -8177,6 +8267,77 @@ fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationEr
     }
 }
 
+fn infer_rank_one_type_arguments(
+    name: &str,
+    symbol_kind: &str,
+    type_params: &[Name],
+    parameter_types: &[Type],
+    actual_types: &[Type],
+) -> Result<SchemaSubst, ValidationError> {
+    if parameter_types.len() != actual_types.len() {
+        return Err(ValidationError::new(format!(
+            "{symbol_kind} `{name}` expects {} argument(s), but got {}",
+            parameter_types.len(),
+            actual_types.len()
+        )));
+    }
+
+    let schema_params = type_params
+        .iter()
+        .map(|name| Param {
+            name: name.clone(),
+            kind: ParamKind::Type,
+        })
+        .collect::<Vec<_>>();
+    let mut subst = SchemaSubst::default();
+    for (idx, (pattern, actual)) in parameter_types.iter().zip(actual_types).enumerate() {
+        if unify_type(pattern, actual, &schema_params, &mut subst).is_err() {
+            let expected = subst_type_schema(pattern, &subst);
+            return Err(ValidationError::new(format!(
+                "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
+                idx + 1
+            )));
+        }
+    }
+    for type_param in type_params {
+        if !subst.type_args.contains_key(type_param) {
+            return Err(ValidationError::new(format!(
+                "cannot infer type argument `{type_param}` for {symbol_kind} `{name}`"
+            )));
+        }
+    }
+    Ok(subst)
+}
+
+fn infer_rank_one_term_arguments(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    symbol_kind: &str,
+    type_params: &[Name],
+    parameter_types: &[Type],
+    args: &[Term],
+) -> Result<SchemaSubst, ValidationError> {
+    if parameter_types.len() != args.len() {
+        return Err(ValidationError::new(format!(
+            "{symbol_kind} `{name}` expects {} argument(s), but got {}",
+            parameter_types.len(),
+            args.len()
+        )));
+    }
+    let actual_types = args
+        .iter()
+        .map(|arg| validate_term(env, ctx, arg))
+        .collect::<Result<Vec<_>, _>>()?;
+    infer_rank_one_type_arguments(
+        name,
+        symbol_kind,
+        type_params,
+        parameter_types,
+        &actual_types,
+    )
+}
+
 fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, ValidationError> {
     match term {
         Term::Var(name) => {
@@ -8206,6 +8367,18 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             Err(ValidationError::new(format!("unknown term `{name}`")))
         }
         Term::App(name, args) => {
+            if let Some(func) = env.rank_one_funcs.get(name) {
+                let subst = infer_rank_one_term_arguments(
+                    env,
+                    ctx,
+                    name,
+                    "function",
+                    &func.type_params,
+                    &func.args,
+                    args,
+                )?;
+                return Ok(subst_type_schema(&func.result, &subst));
+            }
             if let Some(func) = env.funcs.get(name) {
                 if func.args.len() != args.len() {
                     return Err(ValidationError::new(format!(
@@ -8428,7 +8601,16 @@ fn validate_predicate_arg(
 ) -> Result<(), ValidationError> {
     match arg {
         PredicateArg::Named(name) => {
-            if let Some(signature) = predicate_signature(env, ctx, name) {
+            if let Some(decl) = env.rank_one_preds.get(name) {
+                infer_rank_one_type_arguments(
+                    name,
+                    "predicate",
+                    &decl.type_params,
+                    &decl.args,
+                    expected,
+                )?;
+                Ok(())
+            } else if let Some(signature) = predicate_signature(env, ctx, name) {
                 if signature == expected {
                     Ok(())
                 } else {
@@ -8551,7 +8733,18 @@ fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), V
             }
         }
         Formula::PredApp(name, args) => {
-            if let Some(signature) = predicate_signature(env, ctx, name) {
+            if let Some(decl) = env.rank_one_preds.get(name) {
+                infer_rank_one_term_arguments(
+                    env,
+                    ctx,
+                    name,
+                    "predicate",
+                    &decl.type_params,
+                    &decl.args,
+                    args,
+                )?;
+                Ok(())
+            } else if let Some(signature) = predicate_signature(env, ctx, name) {
                 if signature.len() != args.len() {
                     return Err(ValidationError::new(format!(
                         "predicate `{name}` expects {} argument(s), but got {}",
@@ -17354,6 +17547,92 @@ theorem list_refl (xs : L.List Nat) : xs = xs := by
             .receipt_names
             .values()
             .any(|name| name == "std/hol/list@1::Member"));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_types_rank_one_operations_in_both_engines() {
+        let source = r#"
+import std/hol/list@1 as L
+
+mode constructive
+theorem list_operation_types (A : Type) (x : A) (xs : L.List A) :
+  L.Member(x, L.cons(x, xs)) ->
+  L.Nodup(L.append(xs, L.cons(x, xs))) ->
+  L.length(L.append(xs, xs)) = L.length(L.append(xs, xs)) := by
+  intro member
+  intro nodup
+  refl
+"#;
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(report.imported_packages, ["std/hol/list@1"]);
+        let theorem = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "list_operation_types")
+            .expect("list_operation_types receipt");
+        assert_eq!(theorem.hol_status, hol::EvidenceStatus::Checked);
+        assert_eq!(
+            theorem.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_rejects_inconsistent_rank_one_instances() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as L
+sort Color
+
+theorem bad_member (x : Nat) (xs : L.List Color) : L.Member(x, xs) := by
+  sorry
+"#,
+        );
+        let rendered = format!("{:#?}", report.legacy.diagnostics);
+        assert!(
+            rendered.contains(
+                "argument 2 of `L.Member` has type `L.List Color`, but expected `L.List Nat`"
+            ),
+            "unexpected diagnostics: {rendered}"
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_keeps_contextual_operations_fail_closed() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as L
+
+theorem nil_refl : L.nil = L.nil := by
+  refl
+
+theorem all_id (P : Nat -> Prop) (xs : L.List Nat) :
+  L.All(P, xs) -> L.All(P, xs) := by
+  intro h
+  exact h
+"#,
+        );
+        let rendered = format!("{:#?}", report.legacy.diagnostics);
+        assert!(
+            rendered.contains(
+                "logical package term `L.nil` needs contextual source inference, which is not implemented yet"
+            ),
+            "unexpected diagnostics: {rendered}"
+        );
+        assert!(
+            rendered
+                .contains("logical package predicate `L.All` does not have a source signature yet"),
+            "unexpected diagnostics: {rendered}"
+        );
     }
 
     #[cfg(feature = "hol-shadow")]

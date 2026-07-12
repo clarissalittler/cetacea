@@ -74,21 +74,31 @@ imports, coexistence with a monomorphic List, and collisions at both the first
 and a later alias.
 
 `Command::Import` now recognizes the exact `std/hol/list@1` ID in HOL-shadow
-mode. The transitional legacy environment records only the constructor arity
-and reserves every operation alias; it does not imitate generic List
-computation. Consequently a theorem such as
+mode. The transitional legacy environment records the constructor arity and
+rank-one source signatures for `cons`, `Member`, `Nodup`, `append`, and
+`length`; it does not copy definitions or imitate generic List computation.
+Consequently both type-only statements and propositionally used operations can
+cross the dual-checking boundary, for example:
 
 ```text
 import std/hol/list@1 as L
 theorem list_refl (xs : L.List Nat) : xs = xs := by
   refl
+
+theorem member_id (x : Nat) (xs : L.List Nat) :
+  L.Member(x, L.cons(x, xs)) -> L.Member(x, L.cons(x, xs)) := by
+  intro h
+  exact h
 ```
 
-is checked by the legacy proof UI and independently lowered, checked, and
-classified `fol+induction` by HOL. Default checking rejects the logical import,
-and operations such as `L.Member` remain fail-closed at the source layer until
-their tactic path is ready. Repeated imports are idempotent. Finite and
-cardinality package IDs are recognized but reject with an explicit
+These are checked by the legacy proof UI and independently lowered, checked,
+and classified `fol+induction` by HOL. Rank-one unification rejects mixed
+instances such as a `Nat` member paired with a `List Color`. Polymorphic `nil`
+still needs expected-type propagation, and `All` needs a predicate-argument
+signature, so both produce explicit fail-closed diagnostics. No imported List
+definition is available to legacy `simp`, unfolding, or induction yet. Default
+checking rejects the logical import. Repeated imports are idempotent. Finite
+and cardinality package IDs are recognized but reject with an explicit
 surface-not-implemented diagnostic.
 
 Generated finite facts are not package aliases: `color_has_card` is owned by
@@ -110,8 +120,11 @@ end-to-end slice is complete only when:
 - unimported or colliding package names fail transactionally; and
 - the exact legacy corpus remains unchanged for files without logical imports.
 
-The alias catalog, parser-independent lowering, type-only shadow-driver import,
-stable package reporting, JSON, and exact assignment-manifest allowlisting are
-complete. The remaining sequence is List operation/computation/induction tactic
-support, finite and cardinality aliases, browser/editor verification, then an
-explicit decision about ordinary (non-shadow) acceptance.
+The alias catalog, parser-independent lowering, signature-only shadow-driver
+import, stable package reporting, JSON, and exact assignment-manifest
+allowlisting are complete. The next source slices are expected-type inference
+for `nil`, predicate arguments for `All`, then computation/induction tactic
+support. Finite and cardinality aliases, browser/editor verification, and an
+explicit decision about ordinary (non-shadow) acceptance follow. This
+checkpoint produces a 3,670,144-byte native CLI and a 1,351,124-byte raw Wasm
+module.

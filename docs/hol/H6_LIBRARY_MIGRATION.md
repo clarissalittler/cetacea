@@ -107,22 +107,26 @@ idempotent, while any early or late alias collision rolls back both registry and
 surface state. A qualified generic package can coexist with the current
 monomorphic `List`.
 
-The first source-driver seam is now live but deliberately type-only. Under
-HOL-shadow authority, `import std/hol/list@1 as L` permits a theorem parameter
-such as `xs : L.List Nat`; a reflexivity theorem over that type is independently
-checked by both engines and certified `fol+induction`. Default legacy checking
-rejects logical HOL imports. List operation names are reserved but remain
-unavailable to legacy tactics, and finite/cardinality imports reject explicitly,
-until their end-to-end surfaces are implemented. Reports and JSON carry the
-exact package ID, and assignment manifests allowlist that ID without filesystem
-canonicalization.
+The first source-driver seam is now live under HOL-shadow authority.
+`import std/hol/list@1 as L` permits a theorem parameter such as
+`xs : L.List Nat`, and the transitional proof UI can type-resolve `cons`,
+`Member`, `Nodup`, `append`, and `length` by rank-one unification. Reflexivity
+and propositional proofs over those terms are independently checked by both
+engines and certified `fol+induction`. This is still a signature-only bridge:
+`nil` and `All` need richer contextual inference, and no List computation,
+simplification, or induction has been copied into the legacy engine. Default
+legacy checking rejects logical HOL imports, while finite/cardinality imports
+reject explicitly until their end-to-end surfaces are implemented. Reports and
+JSON carry the exact package ID, and assignment manifests allowlist that ID
+without filesystem canonicalization.
 
 ## Remaining migration slices
 
-1. Extend the implemented type-only logical List import through operation
-   resolution, computation, induction, and tactics; add generic declaration
-   syntax, then publish it for ordinary checking. Retain aliases for the current
-   monomorphic list vocabulary for one release cycle. The import seam is
+1. Extend the implemented signature-only logical List import through
+   expected-type/predicate-argument inference, computation, induction, and
+   tactics; add generic declaration syntax, then publish it for ordinary
+   checking. Retain aliases for the current monomorphic list vocabulary for one
+   release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser/editor results.
@@ -151,5 +155,6 @@ canonicalization.
 - Student exercises need no explicit type lambdas, de Bruijn indices, kernel
   IDs, or other internal HOL machinery in restricted units.
 
-At the type-only logical-import checkpoint the release CLI is 3,632,264 bytes
-and the raw Wasm module is 1,349,516 bytes, still below the 1.5 MB review line.
+At the signature-only logical-import checkpoint the release CLI is 3,670,144
+bytes and the raw Wasm module is 1,351,124 bytes, still below the 1.5 MB review
+line.

@@ -439,8 +439,12 @@ The first logical import now reaches source checking without pretending that
 the legacy kernel implements a polymorphic List library. In HOL-shadow mode,
 `import std/hol/list@1 as L` records the checked package and exposes the arity of
 `L.List`; both engines verify a reflexivity theorem over `L.List Nat`, and HOL
-certifies it `fol+induction`. Package operation aliases are reserved but not yet
-usable by legacy tactics. Default checking and finite/cardinality surfaces fail
-closed. `HolShadowReport`, CLI JSON, and assignment manifests carry and
-allowlist the exact versioned package ID. The checkpoint artifacts are
-3,632,264 bytes for the native CLI and 1,349,516 bytes for Wasm.
+certifies it `fol+induction`. The transitional proof UI now also infers the
+rank-one instances of `cons`, `Member`, `Nodup`, `append`, and `length`, so
+statements using those symbols propositionally are checked independently by
+both engines. This catalog contains signatures only: `nil`, `All`, imported
+computation, simplification, and induction remain explicitly unavailable.
+Default checking and finite/cardinality surfaces fail closed. `HolShadowReport`,
+CLI JSON, and assignment manifests carry and allowlist the exact versioned
+package ID. The release artifacts at this checkpoint are 3,670,144 bytes for
+the native CLI and 1,351,124 bytes for raw Wasm.
