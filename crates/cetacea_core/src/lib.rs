@@ -3332,6 +3332,7 @@ impl FileChecker {
             let all_cons_name = qualify("all_cons");
             let append_nil_right_name = qualify("append_nil_right");
             let append_assoc_name = qualify("append_assoc");
+            let length_append_name = qualify("length_append");
             let list_induction_name = qualify("list_induction");
             let symbol_names = [
                 &nil_name,
@@ -3353,6 +3354,7 @@ impl FileChecker {
                 &all_cons_name,
                 &append_nil_right_name,
                 &append_assoc_name,
+                &length_append_name,
                 &list_induction_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
@@ -3599,7 +3601,7 @@ impl FileChecker {
                 ],
                 statement: Formula::eq(
                     Term::App(
-                        length_name,
+                        length_name.clone(),
                         vec![Term::App(
                             cons_name.clone(),
                             vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
@@ -3962,7 +3964,7 @@ impl FileChecker {
                     },
                     Param {
                         name: "zs".to_string(),
-                        kind: ParamKind::Term(append_right_list_type),
+                        kind: ParamKind::Term(append_right_list_type.clone()),
                     },
                 ],
                 statement: Formula::eq(
@@ -3981,7 +3983,7 @@ impl FileChecker {
                         vec![
                             Term::Var("xs".to_string()),
                             Term::App(
-                                append_name,
+                                append_name.clone(),
                                 vec![Term::Var("ys".to_string()), Term::Var("zs".to_string())],
                             ),
                         ],
@@ -3990,6 +3992,54 @@ impl FileChecker {
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     append_assoc_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let length_append_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "length_append")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered length_append theorem has a receipt");
+            staged_env.add_theorem(Theorem {
+                name: length_append_name,
+                params: vec![
+                    Param {
+                        name: "A".to_string(),
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "xs".to_string(),
+                        kind: ParamKind::Term(append_right_list_type.clone()),
+                    },
+                    Param {
+                        name: "ys".to_string(),
+                        kind: ParamKind::Term(append_right_list_type),
+                    },
+                ],
+                statement: Formula::eq(
+                    Term::App(
+                        length_name.clone(),
+                        vec![Term::App(
+                            append_name,
+                            vec![Term::Var("xs".to_string()), Term::Var("ys".to_string())],
+                        )],
+                    ),
+                    Term::Add(
+                        Box::new(Term::App(
+                            length_name.clone(),
+                            vec![Term::Var("xs".to_string())],
+                        )),
+                        Box::new(Term::App(length_name, vec![Term::Var("ys".to_string())])),
+                    ),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    length_append_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -4026,7 +4076,10 @@ impl FileChecker {
                     },
                 ],
                 statement: Formula::implies(
-                    property(Term::Var(nil_name)),
+                    property(Term::Ascribed {
+                        term: Box::new(Term::Var(nil_name)),
+                        ty: induction_list_type.clone(),
+                    }),
                     Formula::implies(
                         Formula::forall(
                             "h".to_string(),
@@ -10928,6 +10981,13 @@ fn normalize_term_compute(term: &Term) -> Term {
     }
 }
 
+fn term_without_outer_ascriptions(mut term: &Term) -> &Term {
+    while let Term::Ascribed { term: inner, .. } = term {
+        term = inner;
+    }
+    term
+}
+
 fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, ValidationError> {
     match term {
         Term::Ascribed { term, ty } => Ok(Term::Ascribed {
@@ -10967,37 +11027,100 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
         Term::Zero | Term::EmptySet(_) | Term::Universe(_) => Ok(term.clone()),
         Term::Succ(term) => Ok(Term::Succ(Box::new(normalize_term(env, ctx, term)?))),
         Term::Add(left, right) => {
-            let computed = Term::Add(
-                Box::new(normalize_term(env, ctx, left)?),
-                Box::new(normalize_term(env, ctx, right)?),
-            );
-            Ok(normalize_term_compute(&computed))
+            let left = normalize_term(env, ctx, left)?;
+            let right = normalize_term(env, ctx, right)?;
+            match (
+                term_without_outer_ascriptions(&left),
+                term_without_outer_ascriptions(&right),
+            ) {
+                (Term::Zero, _) => Ok(right),
+                (_, Term::Zero) => Ok(left),
+                (Term::Succ(predecessor), _) => normalize_term(
+                    env,
+                    ctx,
+                    &Term::Succ(Box::new(Term::Add(
+                        Box::new((**predecessor).clone()),
+                        Box::new(right.clone()),
+                    ))),
+                ),
+                (_, Term::Succ(predecessor)) => normalize_term(
+                    env,
+                    ctx,
+                    &Term::Succ(Box::new(Term::Add(
+                        Box::new(left.clone()),
+                        Box::new((**predecessor).clone()),
+                    ))),
+                ),
+                _ => Ok(Term::Add(Box::new(left), Box::new(right))),
+            }
         }
         Term::Mul(left, right) => {
-            let computed = Term::Mul(
-                Box::new(normalize_term(env, ctx, left)?),
-                Box::new(normalize_term(env, ctx, right)?),
-            );
-            Ok(normalize_term_compute(&computed))
+            let left = normalize_term(env, ctx, left)?;
+            let right = normalize_term(env, ctx, right)?;
+            match (
+                term_without_outer_ascriptions(&left),
+                term_without_outer_ascriptions(&right),
+            ) {
+                (Term::Zero, _) | (_, Term::Zero) => Ok(Term::Zero),
+                (Term::Succ(predecessor), _) => normalize_term(
+                    env,
+                    ctx,
+                    &Term::Add(
+                        Box::new(right.clone()),
+                        Box::new(Term::Mul(
+                            Box::new((**predecessor).clone()),
+                            Box::new(right.clone()),
+                        )),
+                    ),
+                ),
+                (_, Term::Succ(predecessor)) => normalize_term(
+                    env,
+                    ctx,
+                    &Term::Add(
+                        Box::new(left.clone()),
+                        Box::new(Term::Mul(
+                            Box::new(left.clone()),
+                            Box::new((**predecessor).clone()),
+                        )),
+                    ),
+                ),
+                _ => Ok(Term::Mul(Box::new(left), Box::new(right))),
+            }
         }
         Term::Sub(left, right) => {
-            let computed = Term::Sub(
-                Box::new(normalize_term(env, ctx, left)?),
-                Box::new(normalize_term(env, ctx, right)?),
-            );
-            Ok(normalize_term_compute(&computed))
+            let left = normalize_term(env, ctx, left)?;
+            let right = normalize_term(env, ctx, right)?;
+            match (
+                term_without_outer_ascriptions(&left),
+                term_without_outer_ascriptions(&right),
+            ) {
+                (_, Term::Zero) => Ok(left),
+                (Term::Zero, _) => Ok(Term::Zero),
+                (Term::Succ(left), Term::Succ(right)) => normalize_term(
+                    env,
+                    ctx,
+                    &Term::Sub(Box::new((**left).clone()), Box::new((**right).clone())),
+                ),
+                _ => Ok(Term::Sub(Box::new(left), Box::new(right))),
+            }
         }
         Term::Pair(left, right) => Ok(Term::Pair(
             Box::new(normalize_term(env, ctx, left)?),
             Box::new(normalize_term(env, ctx, right)?),
         )),
         Term::Fst(term) => {
-            let computed = Term::Fst(Box::new(normalize_term(env, ctx, term)?));
-            Ok(normalize_term_compute(&computed))
+            let term = normalize_term(env, ctx, term)?;
+            match term_without_outer_ascriptions(&term) {
+                Term::Pair(left, _) => Ok((**left).clone()),
+                _ => Ok(Term::Fst(Box::new(term))),
+            }
         }
         Term::Snd(term) => {
-            let computed = Term::Snd(Box::new(normalize_term(env, ctx, term)?));
-            Ok(normalize_term_compute(&computed))
+            let term = normalize_term(env, ctx, term)?;
+            match term_without_outer_ascriptions(&term) {
+                Term::Pair(_, right) => Ok((**right).clone()),
+                _ => Ok(Term::Snd(Box::new(term))),
+            }
         }
         Term::Singleton(term) => Ok(Term::Singleton(Box::new(normalize_term(env, ctx, term)?))),
         Term::Union(left, right) => Ok(Term::Union(
@@ -18114,29 +18237,42 @@ fn unify_formula(
 }
 
 fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Result<(), ()> {
+    if !matches!(pattern, Term::Ascribed { .. } | Term::Var(_)) {
+        if let Term::Ascribed { term, .. } = target {
+            return unify_term(pattern, term, unify);
+        }
+    }
     match pattern {
         Term::Ascribed {
             term: pattern,
             ty: pattern_ty,
         } => {
-            let Term::Ascribed {
+            if let Term::Ascribed {
                 term: target,
                 ty: target_ty,
             } = target
-            else {
-                return Err(());
-            };
-            unify_type(
-                pattern_ty,
-                target_ty,
-                unify.schema_params,
-                unify.schema_subst,
-            )?;
-            unify_term(pattern, target, unify)
+            {
+                unify_type(
+                    pattern_ty,
+                    target_ty,
+                    unify.schema_params,
+                    unify.schema_subst,
+                )?;
+                unify_term(pattern, target, unify)
+            } else {
+                let actual =
+                    validate_term_using_expected_type(unify.env, unify.ctx, target, pattern_ty)
+                        .map_err(|_| ())?;
+                unify_type(pattern_ty, &actual, unify.schema_params, unify.schema_subst)?;
+                unify_term(pattern, target, unify)
+            }
         }
         Term::Var(name) if unify.term_metas.contains(name) => {
             if let Some(existing) = unify.term_subst.get(name) {
-                if existing == target {
+                if terms_equal_ignoring_ascriptions(existing, target) {
+                    let expected = validate_term(unify.env, unify.ctx, existing).map_err(|_| ())?;
+                    validate_term_using_expected_type(unify.env, unify.ctx, target, &expected)
+                        .map_err(|_| ())?;
                     Ok(())
                 } else {
                     Err(())
@@ -18149,7 +18285,10 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
         Term::Var(name) if schema_term_param(unify.schema_params, name).is_some() => {
             let param_ty = schema_term_param(unify.schema_params, name).ok_or(())?;
             if let Some(existing) = unify.schema_subst.term_args.get(name) {
-                if existing == target {
+                if terms_equal_ignoring_ascriptions(existing, target) {
+                    let expected = validate_term(unify.env, unify.ctx, existing).map_err(|_| ())?;
+                    validate_term_using_expected_type(unify.env, unify.ctx, target, &expected)
+                        .map_err(|_| ())?;
                     Ok(())
                 } else {
                     Err(())
@@ -18170,7 +18309,7 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             }
         }
         Term::Var(_) => {
-            if pattern == target {
+            if terms_equal_ignoring_ascriptions(pattern, target) {
                 Ok(())
             } else {
                 Err(())
@@ -19234,6 +19373,37 @@ theorem append_assoc_from_surface
   }
   rewrite -> ih
   refl
+
+theorem length_append_exact
+  (A : Type) (xs ys : L.List A) :
+  L.length(L.append(xs, ys)) = add(L.length(xs), L.length(ys)) := by
+  exact L.length_append {A := A; xs := xs; ys := ys}
+
+theorem length_append_from_surface
+  (A : Type) (xs ys : L.List A) :
+  L.length(L.append(xs, ys)) = add(L.length(xs), L.length(ys)) := by
+  apply L.list_induction {
+    A := A;
+    P := fun ws : L.List A =>
+      L.length(L.append(ws, ys)) =
+        add(L.length((ws : L.List A)), L.length(ys));
+    xs := xs
+  }
+  rewrite -> L.append_nil_left {A := A; xs := ys}
+  rewrite -> L.length_nil {A := A}
+  refl
+  intro h
+  intro t
+  intro ih
+  rewrite -> L.append_cons {A := A; h := h; t := t; ys := ys}
+  rewrite -> L.length_cons {
+    A := A;
+    h := h;
+    t := L.append(t, ys)
+  }
+  rewrite -> L.length_cons {A := A; h := h; t := t}
+  rewrite -> ih
+  refl
 "#,
         );
         assert!(
@@ -19255,6 +19425,7 @@ theorem append_assoc_from_surface
             ("nodup_cons_exact", &["nodup_cons"][..]),
             ("append_nil_right_exact", &["append_nil_right"][..]),
             ("append_assoc_exact", &["append_assoc"][..]),
+            ("length_append_exact", &["length_append"][..]),
         ] {
             let theorem = report
                 .theorems
@@ -19292,6 +19463,14 @@ theorem append_assoc_from_surface
         assert!(append_assoc
             .features
             .contains(&hol::ProofFeature::Induction));
+        let length_append = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "length_append_exact")
+            .expect("length_append_exact receipt");
+        assert!(length_append
+            .features
+            .contains(&hol::ProofFeature::Induction));
         let derived_from_surface = report
             .theorems
             .iter()
@@ -19319,6 +19498,41 @@ theorem append_assoc_from_surface
                 "std/hol/list@1::append".to_string(),
                 "std/hol/list@1::append_cons".to_string(),
                 "std/hol/list@1::append_nil_left".to_string(),
+                "std/hol/list@1::list_induction".to_string(),
+            ]
+            .into_iter()
+            .collect()
+        );
+        let length_from_surface = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "length_append_from_surface")
+            .expect("length_append_from_surface receipt");
+        assert_eq!(
+            length_from_surface.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(length_from_surface
+            .features
+            .contains(&hol::ProofFeature::Induction));
+        let package_dependencies = length_from_surface
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .filter_map(|dependency| report.receipt_names.get(dependency))
+            .filter(|name| name.starts_with("std/hol/list@1::"))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            package_dependencies,
+            [
+                "std/hol/list@1::append".to_string(),
+                "std/hol/list@1::append_cons".to_string(),
+                "std/hol/list@1::append_nil_left".to_string(),
+                "std/hol/list@1::length".to_string(),
+                "std/hol/list@1::length_cons".to_string(),
+                "std/hol/list@1::length_nil".to_string(),
                 "std/hol/list@1::list_induction".to_string(),
             ]
             .into_iter()

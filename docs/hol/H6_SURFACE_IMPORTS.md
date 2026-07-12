@@ -156,6 +156,16 @@ Direct alias reuse and a proof written from `list_induction`,
 plus the transparent `append` definition used by conversion. This checkpoint
 produces a 3,885,320-byte native CLI and a 1,374,139-byte raw Wasm module.
 
+`length_append` now connects the List surface to checked Nat arithmetic.
+Addition is an explicit package-installation dependency, while students can
+prove the result with `list_induction`, the two append equations, and the two
+length equations. Direct reuse and reconstruction both remain constructive
+`fol+induction`; the latter receipt pins those five public theorems plus the
+transparent `append` and `length` definitions. The induction base now carries
+its `List A` annotation through open arithmetic normalization, without making
+annotations proof-relevant. This checkpoint produces a 3,907,064-byte native
+CLI and a 1,379,905-byte raw Wasm module.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
 graph packages remain instance-scoped until an import can bind a particular
@@ -180,9 +190,8 @@ import, stable package reporting, JSON, and exact assignment-manifest
 allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments, explicit term ascriptions, all structural
-predicate constructor laws, right identity, and associativity are complete as
-well. The next source slices continue with generic declarations,
-`length_append`, finite and cardinality aliases, browser/editor verification,
-and an explicit decision about ordinary (non-shadow) acceptance. The generic
-induction principle itself is now exposed through a receipt-backed theorem
-alias.
+predicate constructor laws, right identity, associativity, and length over
+append are complete as well. The next source slices continue with generic
+declarations, finite and cardinality aliases, browser/editor verification, and
+an explicit decision about ordinary (non-shadow) acceptance. The generic
+induction principle itself is exposed through a receipt-backed theorem alias.

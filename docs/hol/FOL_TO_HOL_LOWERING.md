@@ -515,3 +515,16 @@ independent source proof uses only `list_induction`, `append_nil_left`, and
 those three public theorems plus the transparent `append` definition used by
 conversion. The measured artifacts are 3,885,320 bytes for the native CLI and
 1,374,139 bytes for Wasm.
+
+`length_append` adds checked Nat arithmetic to this route. Addition is passed
+explicitly into List package installation and is verified as part of the
+package's Nat interface; the kernel proof is structural induction, lifting its
+induction hypothesis through `succ` by equality elimination. A source proof
+uses `list_induction`, `append_nil_left`, `append_cons`, `length_nil`, and
+`length_cons`, with receipts also exposing the transparent `append` and
+`length` definitions used by conversion. Both paths remain constructive
+`fol+induction`. The generic base premise carries an explicit List ascription,
+and legacy normalization now preserves annotations inside stuck arithmetic and
+projections; unification ignores them only after checking their types. The
+measured artifacts are 3,907,064 bytes for the native CLI and 1,379,905 bytes
+for Wasm.

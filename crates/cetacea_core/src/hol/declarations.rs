@@ -198,9 +198,14 @@ impl CompatibilityElaborator {
         let natural_type = self.prelude.nat_type();
         let zero = self.prelude.zero();
         let successor = self.prelude.successor();
-        Ok(self
-            .libraries
-            .install_builtin_list_v1(&mut self.core, natural_type, zero, successor)?)
+        let addition = self.prelude.addition();
+        Ok(self.libraries.install_builtin_list_v1(
+            &mut self.core,
+            natural_type,
+            zero,
+            successor,
+            addition,
+        )?)
     }
 
     /// Atomically install and bind the List package to student-facing names.
@@ -249,6 +254,7 @@ impl CompatibilityElaborator {
         let all_cons_name = qualify("all_cons");
         let append_nil_right_name = qualify("append_nil_right");
         let append_assoc_name = qualify("append_assoc");
+        let length_append_name = qualify("length_append");
         let list_induction_name = qualify("list_induction");
         for name in [
             &datatype_name,
@@ -271,6 +277,7 @@ impl CompatibilityElaborator {
             &all_cons_name,
             &append_nil_right_name,
             &append_assoc_name,
+            &length_append_name,
             &list_induction_name,
         ] {
             self.ensure_name_free(name)?;
@@ -457,7 +464,7 @@ impl CompatibilityElaborator {
         let length_tail = Term::App(length_name.clone(), vec![Term::Var("t".to_string())]);
         let length_cons_statement = Formula::eq(
             Term::App(
-                length_name,
+                length_name.clone(),
                 vec![Term::App(
                     cons_name.clone(),
                     vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
@@ -755,7 +762,7 @@ impl CompatibilityElaborator {
                 vec![
                     Term::Var("xs".to_string()),
                     Term::App(
-                        append_name,
+                        append_name.clone(),
                         vec![Term::Var("ys".to_string()), Term::Var("zs".to_string())],
                     ),
                 ],
@@ -768,6 +775,44 @@ impl CompatibilityElaborator {
             &append_assoc_statement,
             vec![parameter],
             vec![list_type.clone(), list_type.clone(), list_type.clone()],
+        )?;
+        let length_append_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+            Param {
+                name: "ys".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let length_append_statement = Formula::eq(
+            Term::App(
+                length_name.clone(),
+                vec![Term::App(
+                    append_name,
+                    vec![Term::Var("xs".to_string()), Term::Var("ys".to_string())],
+                )],
+            ),
+            Term::Add(
+                Box::new(Term::App(
+                    length_name.clone(),
+                    vec![Term::Var("xs".to_string())],
+                )),
+                Box::new(Term::App(length_name, vec![Term::Var("ys".to_string())])),
+            ),
+        );
+        staged.bind_checked_theorem_alias(
+            length_append_name,
+            installed.length_append,
+            length_append_parameters,
+            &length_append_statement,
+            vec![parameter],
+            vec![list_type.clone(), list_type.clone()],
         )?;
         let induction_list_type = surface_list_type;
         let induction_parameters = vec![
@@ -786,7 +831,10 @@ impl CompatibilityElaborator {
         ];
         let property = |term| Formula::PredApp("P".to_string(), vec![term]);
         let induction_statement = Formula::implies(
-            property(Term::Var(nil_name)),
+            property(Term::Ascribed {
+                term: Box::new(Term::Var(nil_name)),
+                ty: induction_list_type.clone(),
+            }),
             Formula::implies(
                 Formula::forall(
                     "h".to_string(),
@@ -833,11 +881,13 @@ impl CompatibilityElaborator {
         let natural_type = self.prelude.nat_type();
         let zero = self.prelude.zero();
         let successor = self.prelude.successor();
+        let addition = self.prelude.addition();
         Ok(self.libraries.install_builtin_cardinality_v1(
             &mut self.core,
             natural_type,
             zero,
             successor,
+            addition,
         )?)
     }
 
@@ -849,11 +899,13 @@ impl CompatibilityElaborator {
         let natural_type = self.prelude.nat_type();
         let zero = self.prelude.zero();
         let successor = self.prelude.successor();
+        let addition = self.prelude.addition();
         Ok(self.libraries.install_builtin_finite_v1(
             &mut self.core,
             natural_type,
             zero,
             successor,
+            addition,
         )?)
     }
 

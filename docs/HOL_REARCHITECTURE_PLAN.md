@@ -696,6 +696,17 @@ the package theorem itself carries `Induction` without relying on any trusted
 law. The List catalog now has 21 declarations and 18 receipts. This checkpoint
 is 3,885,320 bytes natively and 1,374,139 bytes in Wasm.
 
+`length_append` completes the first derived List trio. The registry now accepts
+Nat addition as an explicit checked interface component, and the stored theorem
+uses direct List induction with dependencies on `append`, `length`, and `add`.
+Direct source reuse and a reconstruction from `list_induction`, the append
+equations, and the length equations are both constructive `fol+induction`.
+That source proof exposed two general typing seams: the imported induction base
+now retains `nil : List A`, and stuck arithmetic or projection normalization
+preserves annotations while unification treats them transparently after type
+validation. The List catalog now has 22 declarations and 19 receipts. This
+checkpoint is 3,907,064 bytes natively and 1,379,905 bytes in Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -711,9 +722,9 @@ is 3,885,320 bytes natively and 1,374,139 bytes in Wasm.
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
   constructor laws are source-facing. `All` constructor laws now demonstrate
   instance-sensitive fragment enforcement. Generic source declarations and
-  ordinary end-to-end acceptance remain; right append identity and append
-  associativity now pass through both the package and student-facing proof
-  routes, with `length_append` the next derived List theorem.
+  ordinary end-to-end acceptance remain; right append identity, append
+  associativity, and length over append now pass through both the package and
+  student-facing proof routes.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

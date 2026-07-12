@@ -70,6 +70,32 @@ fn list_cons_tail_congruence(
     })
 }
 
+fn unary_constant_congruence(
+    function: ConstantId,
+    domain: &CoreType,
+    left: CoreTerm,
+    proof_equality: HolDraftProof,
+) -> Result<HolDraftProof, SpikeError> {
+    let shifted_left = shift_under_new_binder(&left)?;
+    let applied_left = CoreTerm::apply(CoreTerm::Constant(function), left);
+    Ok(HolDraftProof::EqualityElim {
+        proof_equality: Box::new(proof_equality),
+        motive: CoreTerm::lambda(
+            domain.clone(),
+            CoreTerm::equality(
+                domain.clone(),
+                CoreTerm::apply(CoreTerm::Constant(function), shifted_left),
+                CoreTerm::apply(CoreTerm::Constant(function), CoreTerm::Bound(0)),
+            ),
+        ),
+        proof_left: Box::new(HolDraftProof::EqualityRefl(applied_left)),
+    })
+}
+
+fn apply_binary_constant(function: ConstantId, left: CoreTerm, right: CoreTerm) -> CoreTerm {
+    CoreTerm::apply(CoreTerm::apply(CoreTerm::Constant(function), left), right)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LibraryPackageId {
     ListV1,
@@ -140,6 +166,7 @@ pub struct InstalledListLibrary {
     pub record: LibraryPackageRecord,
     pub lists: ListLibrary,
     pub length: ListLength,
+    pub natural_addition: ConstantId,
     pub append_nil_left: TheoremId,
     pub append_cons: TheoremId,
     pub length_nil: TheoremId,
@@ -152,6 +179,7 @@ pub struct InstalledListLibrary {
     pub all_cons: TheoremId,
     pub append_nil_right: TheoremId,
     pub append_assoc: TheoremId,
+    pub length_append: TheoremId,
     pub list_induction: TheoremId,
 }
 
@@ -250,12 +278,14 @@ impl HolLibraryRegistry {
         natural_type: CoreType,
         zero: ConstantId,
         successor: ConstantId,
+        addition: ConstantId,
     ) -> Result<InstalledListLibrary, SpikeError> {
         if let Some(installed) = self.list_v1() {
             validate_installed_list_v1(core, installed)?;
             if installed.length.natural_type != natural_type
                 || installed.length.zero != zero
                 || installed.length.successor != successor
+                || installed.natural_addition != addition
             {
                 return Err(SpikeError {
                     message: format!(
@@ -566,6 +596,62 @@ impl HolLibraryRegistry {
             append_assoc_statement,
             append_assoc_proof,
         )?;
+        let length_append_left = length.apply(
+            element_type.clone(),
+            lists.append_term(element_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(0)),
+        );
+        let length_append_right = apply_binary_constant(
+            addition,
+            length.apply(element_type.clone(), CoreTerm::Bound(1)),
+            length.apply(element_type.clone(), CoreTerm::Bound(0)),
+        );
+        let length_append_statement = CoreTerm::equality(
+            length.natural_type.clone(),
+            length_append_left,
+            length_append_right,
+        );
+        let length_append_motive = CoreTerm::lambda(
+            list_type.clone(),
+            CoreTerm::equality(
+                length.natural_type.clone(),
+                length.apply(
+                    element_type.clone(),
+                    lists.append_term(element_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(1)),
+                ),
+                apply_binary_constant(
+                    addition,
+                    length.apply(element_type.clone(), CoreTerm::Bound(0)),
+                    length.apply(element_type.clone(), CoreTerm::Bound(1)),
+                ),
+            ),
+        );
+        let length_append_base = length.apply(element_type.clone(), CoreTerm::Bound(0));
+        let length_append_step_left = length.apply(
+            element_type.clone(),
+            lists.append_term(element_type.clone(), CoreTerm::Bound(1), CoreTerm::Bound(2)),
+        );
+        let length_append_proof = HolDraftProof::Induction {
+            datatype: lists.datatype,
+            type_arguments: vec![element_type.clone()],
+            motive: length_append_motive,
+            scrutinee: CoreTerm::Bound(1),
+            cases: vec![
+                HolDraftProof::EqualityRefl(length_append_base),
+                unary_constant_congruence(
+                    length.successor,
+                    &length.natural_type,
+                    length_append_step_left,
+                    HolDraftProof::Hypothesis(0),
+                )?,
+            ],
+        };
+        let (length_append, length_append_receipt) = staged_core.declare_theorem_with_parameters(
+            names.length_append.clone(),
+            vec![lists.element_parameter],
+            vec![list_type.clone(), list_type.clone()],
+            length_append_statement,
+            length_append_proof,
+        )?;
         let property_type = CoreType::arrow(list_type.clone(), CoreType::Prop);
         let induction_base =
             CoreTerm::apply(CoreTerm::Bound(1), lists.nil_term(element_type.clone()));
@@ -759,6 +845,12 @@ impl HolLibraryRegistry {
                         Some(append_assoc_receipt.id()),
                     ),
                     declaration(
+                        "length_append",
+                        &names.length_append,
+                        LibraryDeclarationKind::Theorem,
+                        Some(length_append_receipt.id()),
+                    ),
+                    declaration(
                         "list_induction",
                         &names.list_induction,
                         LibraryDeclarationKind::Theorem,
@@ -768,6 +860,7 @@ impl HolLibraryRegistry {
             },
             lists,
             length,
+            natural_addition: addition,
             append_nil_left,
             append_cons,
             length_nil,
@@ -780,6 +873,7 @@ impl HolLibraryRegistry {
             all_cons,
             append_nil_right,
             append_assoc,
+            length_append,
             list_induction,
         };
 
@@ -805,6 +899,7 @@ impl HolLibraryRegistry {
         natural_type: CoreType,
         zero: ConstantId,
         successor: ConstantId,
+        addition: ConstantId,
     ) -> Result<InstalledCardinalityLibrary, SpikeError> {
         let mut staged_core = core.clone();
         let mut staged_registry = self.clone();
@@ -813,6 +908,7 @@ impl HolLibraryRegistry {
             natural_type,
             zero,
             successor,
+            addition,
         )?;
 
         if let Some(installed) = staged_registry.cardinality_v1().cloned() {
@@ -922,6 +1018,7 @@ impl HolLibraryRegistry {
         natural_type: CoreType,
         zero: ConstantId,
         successor: ConstantId,
+        addition: ConstantId,
     ) -> Result<InstalledFiniteLibrary, SpikeError> {
         let mut staged_core = core.clone();
         let mut staged_registry = self.clone();
@@ -930,6 +1027,7 @@ impl HolLibraryRegistry {
             natural_type,
             zero,
             successor,
+            addition,
         )?;
 
         if let Some(installed) = staged_registry.finite_v1().cloned() {
@@ -1100,6 +1198,11 @@ fn validate_installed_list_v1(
             LibraryDeclarationKind::Theorem,
         ),
         (
+            "length_append",
+            names.length_append.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
             "list_induction",
             names.list_induction.as_str(),
             LibraryDeclarationKind::Theorem,
@@ -1144,6 +1247,7 @@ fn validate_installed_list_v1(
         && core.theorems().resolve(&names.all_cons) == Some(installed.all_cons)
         && core.theorems().resolve(&names.append_nil_right) == Some(installed.append_nil_right)
         && core.theorems().resolve(&names.append_assoc) == Some(installed.append_assoc)
+        && core.theorems().resolve(&names.length_append) == Some(installed.length_append)
         && core.theorems().resolve(&names.list_induction) == Some(installed.list_induction);
     if !matches {
         return Err(SpikeError {
@@ -1420,6 +1524,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect("install registered List v1");
 
@@ -1432,7 +1537,7 @@ mod tests {
             LibraryPackageSource::Builtin
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_LIST_V1_NAMESPACE);
-        assert_eq!(installed.record.declarations.len(), 21);
+        assert_eq!(installed.record.declarations.len(), 22);
         assert_eq!(
             installed
                 .record
@@ -1440,7 +1545,7 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.receipt.is_some())
                 .count(),
-            18
+            19
         );
         let member_receipt = installed
             .record
@@ -1526,6 +1631,33 @@ mod tests {
             .proof()
             .transitive_features()
             .contains(&ProofFeature::Induction));
+        let length_append_receipt = core
+            .theorem_receipt(installed.length_append)
+            .expect("length_append theorem receipt");
+        assert_eq!(
+            registry.receipt_name(length_append_receipt.id()).as_deref(),
+            Some("std/hol/list@1::length_append")
+        );
+        assert!(length_append_receipt
+            .proof()
+            .transitive_features()
+            .contains(&ProofFeature::Induction));
+        for definition in [installed.lists.append, installed.length.constant] {
+            let definition_receipt = core
+                .definition_receipt(definition)
+                .expect("length_append definition receipt");
+            assert!(length_append_receipt
+                .proof()
+                .direct_dependencies()
+                .contains(&definition_receipt.id()));
+        }
+        let addition_receipt = core
+            .definition_receipt(prelude.addition())
+            .expect("checked Nat addition receipt");
+        assert!(length_append_receipt
+            .proof()
+            .direct_dependencies()
+            .contains(&addition_receipt.id()));
         let list_induction_receipt = core
             .theorem_receipt(installed.list_induction)
             .expect("list_induction theorem receipt");
@@ -1594,6 +1726,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect("repeat install is idempotent");
         assert_eq!(repeated, installed);
@@ -1614,7 +1747,13 @@ mod tests {
             .expect("declare alternate successor");
         let before_rebind = (core.clone(), registry.clone());
         let rebind_error = registry
-            .install_builtin_list_v1(&mut core, other_nat, other_zero, other_successor)
+            .install_builtin_list_v1(
+                &mut core,
+                other_nat,
+                other_zero,
+                other_successor,
+                prelude.addition(),
+            )
             .expect_err("a package cannot be rebound to a different Nat interface");
         assert!(rebind_error.message.contains("different Nat interface"));
         assert_eq!((core.clone(), registry.clone()), before_rebind);
@@ -1628,6 +1767,7 @@ mod tests {
                 detached_prelude.nat_type(),
                 detached_prelude.zero(),
                 detached_prelude.successor(),
+                detached_prelude.addition(),
             )
             .expect_err("registry handles cannot be reused with another core");
         assert!(detached_error.message.contains("registry/core mismatch"));
@@ -1644,6 +1784,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect("install registered cardinality v1");
 
@@ -1741,6 +1882,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect("repeat install is idempotent");
         assert_eq!(repeated, installed);
@@ -1755,6 +1897,7 @@ mod tests {
                 detached_prelude.nat_type(),
                 detached_prelude.zero(),
                 detached_prelude.successor(),
+                detached_prelude.addition(),
             )
             .expect_err("package handles cannot be reused with another core");
         assert!(detached_error.message.contains("registry/core mismatch"));
@@ -1771,6 +1914,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect("install registered finite v1");
 
@@ -1844,6 +1988,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect("repeat install is idempotent");
         assert_eq!(repeated, installed);
@@ -1858,6 +2003,7 @@ mod tests {
                 detached_prelude.nat_type(),
                 detached_prelude.zero(),
                 detached_prelude.successor(),
+                detached_prelude.addition(),
             )
             .expect_err("package handles cannot be reused with another core");
         assert!(detached_error.message.contains("registry/core mismatch"));
@@ -1884,6 +2030,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect_err("late collision must reject the package");
         assert!(error.message.contains(&names.list_induction));
@@ -1910,6 +2057,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect_err("late cardinality collision must reject the dependency closure");
         assert!(error.message.contains(&names.member_map_reverse));
@@ -1931,6 +2079,7 @@ mod tests {
                 prelude.nat_type(),
                 prelude.zero(),
                 prelude.successor(),
+                prelude.addition(),
             )
             .expect_err("finite collision must reject the dependency closure");
         assert!(error.message.contains(&names.has_card));

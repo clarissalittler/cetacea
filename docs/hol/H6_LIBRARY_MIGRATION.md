@@ -182,11 +182,21 @@ exactly those three theorems and the transparent `append` definition. The
 validator now pins 21 declarations and 18 receipts. This checkpoint measures
 3,885,320 bytes natively and 1,374,139 bytes in Wasm.
 
+Derived theorem `length_append` is now installed and exposed. The package's Nat
+interface explicitly includes checked addition, and the theorem is proved by
+List induction with kernel-visible `append`, `length`, and `add` dependencies.
+An independent source proof uses only `list_induction`, `append_nil_left`,
+`append_cons`, `length_nil`, and `length_cons`; its receipt also records the
+transparent List definitions used during conversion. Both proofs are
+constructive `fol+induction`. The validator now pins 22 declarations and 19
+receipts. This checkpoint measures 3,907,064 bytes natively and 1,379,905 bytes
+in Wasm.
+
 ## Remaining migration slices
 
-1. Add generic declaration syntax and continue with `length_append`, then
-   publish the signature, equation, and induction surfaces
-   for ordinary checking. Retain aliases for the current monomorphic list
+1. Add generic declaration syntax, then publish the signature, equation,
+   induction, and derived-theorem surfaces for ordinary checking. Retain
+   aliases for the current monomorphic list
    vocabulary for one release cycle. The import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
