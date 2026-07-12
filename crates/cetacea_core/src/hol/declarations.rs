@@ -238,6 +238,8 @@ impl CompatibilityElaborator {
         let append_name = qualify("append");
         let length_name = qualify("length");
         let append_nil_left_name = qualify("append_nil_left");
+        let append_cons_name = qualify("append_cons");
+        let length_cons_name = qualify("length_cons");
         let list_induction_name = qualify("list_induction");
         for name in [
             &datatype_name,
@@ -249,6 +251,8 @@ impl CompatibilityElaborator {
             &append_name,
             &length_name,
             &append_nil_left_name,
+            &append_cons_name,
+            &length_cons_name,
             &list_induction_name,
         ] {
             self.ensure_name_free(name)?;
@@ -311,7 +315,7 @@ impl CompatibilityElaborator {
                 result_type: list_type.clone(),
             },
             SymbolRegistration {
-                name: length_name,
+                name: length_name.clone(),
                 constant: installed.length.constant,
                 type_parameters: vec![parameter],
                 parameter_types: vec![list_type.clone()],
@@ -321,6 +325,10 @@ impl CompatibilityElaborator {
             staged.finish_symbol(registration)?;
         }
         let surface_element_parameter = "A".to_string();
+        let surface_list_type = Type::App(
+            datatype_name.clone(),
+            vec![Type::Named(surface_element_parameter.clone())],
+        );
         let append_nil_left_parameters = vec![
             Param {
                 name: surface_element_parameter.clone(),
@@ -328,10 +336,7 @@ impl CompatibilityElaborator {
             },
             Param {
                 name: "xs".to_string(),
-                kind: ParamKind::Term(Type::App(
-                    datatype_name.clone(),
-                    vec![Type::Named(surface_element_parameter.clone())],
-                )),
+                kind: ParamKind::Term(surface_list_type.clone()),
             },
         ];
         let append_nil_left_statement = Formula::eq(
@@ -349,10 +354,86 @@ impl CompatibilityElaborator {
             vec![parameter],
             vec![list_type.clone()],
         )?;
-        let induction_list_type = Type::App(
-            datatype_name,
-            vec![Type::Named(surface_element_parameter.clone())],
+        let append_cons_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "h".to_string(),
+                kind: ParamKind::Term(Type::Named(surface_element_parameter.clone())),
+            },
+            Param {
+                name: "t".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+            Param {
+                name: "ys".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let append_cons_tail = Term::App(
+            append_name.clone(),
+            vec![Term::Var("t".to_string()), Term::Var("ys".to_string())],
         );
+        let append_cons_statement = Formula::eq(
+            Term::App(
+                append_name.clone(),
+                vec![
+                    Term::App(
+                        cons_name.clone(),
+                        vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                    ),
+                    Term::Var("ys".to_string()),
+                ],
+            ),
+            Term::App(
+                cons_name.clone(),
+                vec![Term::Var("h".to_string()), append_cons_tail],
+            ),
+        );
+        staged.bind_checked_theorem_alias(
+            append_cons_name,
+            installed.append_cons,
+            append_cons_parameters,
+            &append_cons_statement,
+            vec![parameter],
+            vec![element_type.clone(), list_type.clone(), list_type.clone()],
+        )?;
+        let length_cons_parameters = vec![
+            Param {
+                name: surface_element_parameter.clone(),
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "h".to_string(),
+                kind: ParamKind::Term(Type::Named(surface_element_parameter.clone())),
+            },
+            Param {
+                name: "t".to_string(),
+                kind: ParamKind::Term(surface_list_type.clone()),
+            },
+        ];
+        let length_tail = Term::App(length_name.clone(), vec![Term::Var("t".to_string())]);
+        let length_cons_statement = Formula::eq(
+            Term::App(
+                length_name,
+                vec![Term::App(
+                    cons_name.clone(),
+                    vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                )],
+            ),
+            Term::Succ(Box::new(length_tail)),
+        );
+        staged.bind_checked_theorem_alias(
+            length_cons_name,
+            installed.length_cons,
+            length_cons_parameters,
+            &length_cons_statement,
+            vec![parameter],
+            vec![element_type.clone(), list_type.clone()],
+        )?;
+        let induction_list_type = surface_list_type;
         let induction_parameters = vec![
             Param {
                 name: surface_element_parameter.clone(),

@@ -115,6 +115,16 @@ idempotent. Finite and cardinality package IDs are recognized but reject with
 an explicit surface-not-implemented diagnostic. The induction checkpoint
 artifacts are 3,764,424 bytes for the native CLI and 1,368,943 bytes for Wasm.
 
+`append_cons` and `length_cons` are now source-bound through the same validated
+alias mechanism. Constructor arguments determine their rank-one instance, and
+a combined explicit `simp` invocation retains both stable theorem receipts.
+The package also owns checked `length_nil`, but it is not yet an alias:
+`length(nil)` returns Nat for every element type and is therefore genuinely
+ambiguous without term-level type application or ascription. The source driver
+continues to fail closed instead of selecting an arbitrary type. This equation
+checkpoint produces a 3,778,176-byte native CLI and a 1,364,950-byte raw Wasm
+module.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`. Likewise,
 graph packages remain instance-scoped until an import can bind a particular
@@ -138,8 +148,9 @@ The alias catalog, parser-independent lowering, signature-only shadow-driver
 import, stable package reporting, JSON, and exact assignment-manifest
 allowlisting are complete. Contextual `nil` inference is also complete for
 package applications; intentionally ambiguous standalone uses remain rejected.
-Predicate-valued `All` arguments are complete as well. The next source slices
-expand the checked equation catalog, followed by finite and cardinality aliases,
-browser/editor verification, and an explicit decision about ordinary
+Predicate-valued `All` arguments are complete as well. The next source slice
+adds explicit term type syntax so the checked `length_nil` theorem can be
+source-bound, then continues with predicate equations, finite and cardinality
+aliases, browser/editor verification, and an explicit decision about ordinary
 (non-shadow) acceptance. The generic induction principle itself is now exposed
 through a receipt-backed theorem alias.

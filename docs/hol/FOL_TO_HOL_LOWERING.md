@@ -465,3 +465,13 @@ first-order predicate produces a `fol+induction` root receipt, carries the
 there is no generic List case splitter in the legacy tactic engine. The
 checkpoint artifacts are 3,764,424 bytes for the native CLI and 1,368,943
 bytes for Wasm.
+
+The next constructor equations use the same path. `append_cons`, `length_nil`,
+and `length_cons` are checked by conversion and retain direct dependencies on
+`append` or `length`. The first and third have source aliases because their
+constructor arguments determine the rank-one instance; an end-to-end `simp`
+proof uses both aliases and retains both receipts. `length_nil` is registered
+but deliberately not source-bound: `length(nil)` has Nat result type regardless
+of the unconstrained element type, and the current surface has no term-level
+type application or ascription with which to choose `A`. The measured artifacts
+are 3,778,176 bytes for the native CLI and 1,364,950 bytes for Wasm.

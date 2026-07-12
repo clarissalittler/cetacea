@@ -643,6 +643,16 @@ dependency without teaching the legacy tactic engine generic List cases. The
 completed induction checkpoint is 3,764,424 bytes natively and 1,368,943 bytes
 in Wasm, still below the 1.5 MB review line.
 
+The checked constructor-equation catalog now also contains `append_cons`,
+`length_nil`, and `length_cons`. Each is a conversion proof whose receipt
+depends on the corresponding registered structural definition. Source imports
+expose `append_cons` and `length_cons`, and combined `simp` use preserves both
+stable dependencies. `length_nil` remains core-only for now: in
+`length(nil) = 0`, neither the result nor another term fixes the element type
+of polymorphic `nil`, so exposing it requires the planned explicit term type
+syntax rather than an arbitrary inference default. This checkpoint is
+3,778,176 bytes natively and 1,364,950 bytes in Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -652,10 +662,10 @@ in Wasm, still below the 1.5 MB review line.
   implemented, together with a signature-only logical import under HOL shadow.
   Five bottom-up-inferable List operations now cross the dual-checking boundary;
   contextual `nil` inference and predicate-valued `All` arguments are
-  implemented as well. One checked computation theorem now drives `exact` and
-  explicit `simp` without adding a legacy reduction rule, and checked generic
-  List induction is available through `apply`. The broader equation catalog and
-  ordinary end-to-end acceptance remain.
+  implemented as well. Three checked computation theorems now drive `exact` or
+  explicit `simp` without adding legacy reduction rules, and checked generic
+  List induction is available through `apply`. Explicit term type syntax,
+  further equation families, and ordinary end-to-end acceptance remain.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

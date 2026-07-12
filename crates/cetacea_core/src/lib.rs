@@ -3316,6 +3316,8 @@ impl FileChecker {
             let append_name = qualify("append");
             let length_name = qualify("length");
             let append_nil_left_name = qualify("append_nil_left");
+            let append_cons_name = qualify("append_cons");
+            let length_cons_name = qualify("length_cons");
             let list_induction_name = qualify("list_induction");
             let symbol_names = [
                 &nil_name,
@@ -3326,6 +3328,8 @@ impl FileChecker {
                 &append_name,
                 &length_name,
                 &append_nil_left_name,
+                &append_cons_name,
+                &length_cons_name,
                 &list_induction_name,
             ];
             for name in std::iter::once(&datatype_name).chain(symbol_names.iter().copied()) {
@@ -3375,7 +3379,7 @@ impl FileChecker {
                 list_type.clone(),
             );
             staged_env.add_rank_one_func(
-                length_name,
+                length_name.clone(),
                 type_params,
                 vec![list_type.clone()],
                 Type::Nat,
@@ -3436,7 +3440,7 @@ impl FileChecker {
                 ],
                 statement: Formula::eq(
                     Term::App(
-                        append_name,
+                        append_name.clone(),
                         vec![Term::Var(nil_name.clone()), Term::Var("xs".to_string())],
                     ),
                     Term::Var("xs".to_string()),
@@ -3444,6 +3448,109 @@ impl FileChecker {
                 evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                     package,
                     append_nil_left_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let append_cons_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "append_cons")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered append_cons theorem has a receipt");
+            let equation_element_parameter = "A".to_string();
+            let equation_element_type = Type::Named(equation_element_parameter.clone());
+            let equation_list_type =
+                Type::App(datatype_name.clone(), vec![equation_element_type.clone()]);
+            let append_tail = Term::App(
+                append_name.clone(),
+                vec![Term::Var("t".to_string()), Term::Var("ys".to_string())],
+            );
+            staged_env.add_theorem(Theorem {
+                name: append_cons_name,
+                params: vec![
+                    Param {
+                        name: equation_element_parameter.clone(),
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "h".to_string(),
+                        kind: ParamKind::Term(equation_element_type.clone()),
+                    },
+                    Param {
+                        name: "t".to_string(),
+                        kind: ParamKind::Term(equation_list_type.clone()),
+                    },
+                    Param {
+                        name: "ys".to_string(),
+                        kind: ParamKind::Term(equation_list_type.clone()),
+                    },
+                ],
+                statement: Formula::eq(
+                    Term::App(
+                        append_name.clone(),
+                        vec![
+                            Term::App(
+                                cons_name.clone(),
+                                vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                            ),
+                            Term::Var("ys".to_string()),
+                        ],
+                    ),
+                    Term::App(
+                        cons_name.clone(),
+                        vec![Term::Var("h".to_string()), append_tail],
+                    ),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    append_cons_receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+            let length_cons_receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == "length_cons")
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered length_cons theorem has a receipt");
+            let length_tail = Term::App(length_name.clone(), vec![Term::Var("t".to_string())]);
+            staged_env.add_theorem(Theorem {
+                name: length_cons_name,
+                params: vec![
+                    Param {
+                        name: equation_element_parameter,
+                        kind: ParamKind::Type,
+                    },
+                    Param {
+                        name: "h".to_string(),
+                        kind: ParamKind::Term(equation_element_type),
+                    },
+                    Param {
+                        name: "t".to_string(),
+                        kind: ParamKind::Term(equation_list_type),
+                    },
+                ],
+                statement: Formula::eq(
+                    Term::App(
+                        length_name,
+                        vec![Term::App(
+                            cons_name.clone(),
+                            vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                        )],
+                    ),
+                    Term::Succ(Box::new(length_tail)),
+                ),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    package,
+                    length_cons_receipt,
                 )),
                 mode_used: LogicMode::Constructive,
                 is_axiom: false,
@@ -18225,6 +18332,61 @@ theorem append_nil_left_simp (A : Type) (xs : L.List A) :
                 report.receipt_names.get(dependency).map(String::as_str)
                     == Some("std/hol/list@1::append_nil_left")
             }));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_list_import_exposes_checked_constructor_equations() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as L
+
+theorem append_cons_exact
+  (A : Type) (h : A) (t ys : L.List A) :
+  L.append(L.cons(h, t), ys) = L.cons(h, L.append(t, ys)) := by
+  exact L.append_cons {A := A; h := h; t := t; ys := ys}
+
+theorem constructor_equations_simp
+  (A : Type) (h : A) (t ys : L.List A) :
+  L.length(L.append(L.cons(h, t), ys)) =
+    succ(L.length(L.append(t, ys))) := by
+  simp [L.append_cons, L.length_cons]
+  refl
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        for (theorem_name, dependency_names) in [
+            ("append_cons_exact", &["append_cons"][..]),
+            (
+                "constructor_equations_simp",
+                &["append_cons", "length_cons"][..],
+            ),
+        ] {
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|theorem| theorem.name == theorem_name)
+                .unwrap_or_else(|| panic!("{theorem_name} receipt"));
+            assert_eq!(theorem.hol_status, hol::EvidenceStatus::Checked);
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+            for dependency_name in dependency_names {
+                let stable_name = format!("std/hol/list@1::{dependency_name}");
+                assert!(theorem
+                    .receipt
+                    .proof()
+                    .direct_dependencies()
+                    .iter()
+                    .any(|dependency| report.receipt_names.get(dependency) == Some(&stable_name)));
+            }
+        }
     }
 
     #[cfg(feature = "hol-shadow")]
