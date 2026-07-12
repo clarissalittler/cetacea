@@ -261,6 +261,30 @@ impl<'a> CompatibilityLowerer<'a> {
         })
     }
 
+    /// Add a rank-one function-symbol parameter. The arrow exists in the HOL
+    /// context, while the compatibility surface may use the symbol only in a
+    /// saturated application.
+    pub fn bind_function_parameter(
+        &mut self,
+        name: impl Into<String>,
+        domains: Vec<CoreType>,
+        result: CoreType,
+    ) -> Result<(), LoweringError> {
+        for domain in &domains {
+            self.require_first_order_type(domain, "legacy function domain")?;
+        }
+        self.require_first_order_type(&result, "legacy function result")?;
+        let ty = domains.iter().rev().fold(result.clone(), |result, domain| {
+            CoreType::arrow(domain.clone(), result)
+        });
+        self.bind_root(LocalBinding {
+            name: name.into(),
+            ty,
+            parameter_types: domains,
+            result_type: result,
+        })
+    }
+
     pub fn lower_type(&self, ty: &Type) -> Result<CoreType, LoweringError> {
         let lowered = match ty {
             Type::Nat => self.prelude.nat_type(),

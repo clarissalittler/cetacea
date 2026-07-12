@@ -166,7 +166,8 @@ loaded once.
   types, computed by `simp` and `refl`; additional fixed parameters after the
   recursive one support binary operations such as
   `defrec append (l : List) (r : List) : List`
-- theorem declarations with proposition, predicate, type, and term parameters
+- theorem declarations with proposition, predicate, rank-one saturated
+  function-symbol, type, and term parameters
 - built-in `Nat`, `Set T`, numeric Nat literals, `0`, `succ(n)`,
   `add(n, m)`, `mul(n, m)`, and `sub(n, m)`, plus Nat predicate `le(n, m)`
 - typed set terms: `empty(T)`, `singleton(x)`, `union(A, B)`, `inter(A, B)`,

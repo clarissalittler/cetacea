@@ -394,6 +394,7 @@ impl fmt::Display for LogicMode {
 pub enum ParamKind {
     Prop,
     Predicate(Vec<Type>),
+    Function { arguments: Vec<Type>, result: Type },
     Type,
     Term(Type),
 }
@@ -402,6 +403,15 @@ pub enum ParamKind {
 pub struct Param {
     pub name: Name,
     pub kind: ParamKind,
+}
+
+fn function_type_label(arguments: &[Type], result: &Type) -> String {
+    arguments
+        .iter()
+        .map(ToString::to_string)
+        .chain(std::iter::once(result.to_string()))
+        .collect::<Vec<_>>()
+        .join(" -> ")
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -422,6 +432,14 @@ fn canonical_theorem_signature(params: &[Param], statement: &Formula) -> String 
                     parts.push("Prop".to_string());
                     parts.join(" -> ")
                 }
+                ParamKind::Function { arguments, result } => {
+                    let mut parts = arguments
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>();
+                    parts.push(result.to_string());
+                    parts.join(" -> ")
+                }
                 ParamKind::Type => "Type".to_string(),
                 ParamKind::Term(ty) => ty.to_string(),
             };
@@ -438,6 +456,7 @@ pub struct SchemaSubst {
     pub term_args: HashMap<Name, Term>,
     pub formula_args: HashMap<Name, Formula>,
     pub predicate_args: HashMap<Name, PredicateArg>,
+    pub function_args: HashMap<Name, Name>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -763,6 +782,7 @@ pub struct Context {
     type_vars: Vec<Name>,
     prop_vars: Vec<Name>,
     pred_vars: HashMap<Name, Vec<Type>>,
+    function_vars: HashMap<Name, FuncDecl>,
     term_vars: Vec<TermBinding>,
     proof_vars: Vec<ProofBinding>,
     proof_terms: Vec<DraftProof>,
@@ -812,6 +832,10 @@ impl Context {
         self.pred_vars.insert(name, args);
     }
 
+    pub fn add_function_var(&mut self, name: Name, args: Vec<Type>, result: Type) {
+        self.function_vars.insert(name, FuncDecl { args, result });
+    }
+
     pub fn add_term(&mut self, name: Name, ty: Type) {
         self.term_vars.push(TermBinding { name, ty });
     }
@@ -826,6 +850,10 @@ impl Context {
 
     pub fn lookup_predicate_var(&self, name: &str) -> Option<&[Type]> {
         self.pred_vars.get(name).map(Vec::as_slice)
+    }
+
+    pub fn lookup_function_var(&self, name: &str) -> Option<&FuncDecl> {
+        self.function_vars.get(name)
     }
 
     pub fn lookup_term(&self, name: &str) -> Option<&Type> {
@@ -916,6 +944,7 @@ impl Context {
         self.has_type_var(name)
             || self.has_prop_var(name)
             || self.lookup_predicate_var(name).is_some()
+            || self.lookup_function_var(name).is_some()
             || self.lookup_term(name).is_some()
     }
 }
@@ -6947,6 +6976,13 @@ fn build_theorem_context(env: &Env, params: &[Param]) -> Result<Context, Validat
                 }
                 ctx.add_predicate_var(param.name.clone(), args.clone());
             }
+            ParamKind::Function { arguments, result } => {
+                for argument in arguments {
+                    validate_type(env, &ctx, argument)?;
+                }
+                validate_type(env, &ctx, result)?;
+                ctx.add_function_var(param.name.clone(), arguments.clone(), result.clone());
+            }
             ParamKind::Type => ctx.add_type_var(param.name.clone()),
             ParamKind::Term(ty) => {
                 validate_type(env, &ctx, ty)?;
@@ -7008,6 +7044,15 @@ fn canonicalize_params(
                     .collect::<Result<Vec<_>, _>>()?;
                 ctx.add_predicate_var(param.name.clone(), args.clone());
                 ParamKind::Predicate(args)
+            }
+            ParamKind::Function { arguments, result } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| canonicalize_type(env, &ctx, argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = canonicalize_type(env, &ctx, result)?;
+                ctx.add_function_var(param.name.clone(), arguments.clone(), result.clone());
+                ParamKind::Function { arguments, result }
             }
             ParamKind::Type => {
                 ctx.add_type_var(param.name.clone());
@@ -7125,6 +7170,13 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
             Err(ValidationError::new(format!("unknown term `{name}`")))
         }
         Term::App(name, args) => {
+            if ctx.lookup_function_var(name).is_some() {
+                let args = args
+                    .iter()
+                    .map(|arg| canonicalize_term(env, ctx, arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Term::App(name.clone(), args));
+            }
             if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
                 env.funcs.contains_key(candidate) || env.rank_one_funcs.contains_key(candidate)
             }) {
@@ -7621,6 +7673,10 @@ fn canonicalize_formula_def_args(
                     canonicalize_predicate_arg(env, ctx, &formula_def_predicate_argument(arg)?)?;
                 canonical.push(predicate_arg_to_term(&pred_arg));
             }
+            ParamKind::Function { .. } => {
+                let arg = args_iter.next().expect("arity checked");
+                canonical.push(Term::Var(canonicalize_function_arg(env, ctx, arg)?));
+            }
             ParamKind::Term(_) => {
                 let arg = args_iter.next().expect("arity checked");
                 canonical.push(canonicalize_term(env, ctx, arg)?);
@@ -7665,6 +7721,10 @@ fn canonicalize_term_def_args(
                 let pred_arg =
                     canonicalize_predicate_arg(env, ctx, &formula_def_predicate_argument(arg)?)?;
                 canonical.push(predicate_arg_to_term(&pred_arg));
+            }
+            ParamKind::Function { .. } => {
+                let arg = args_iter.next().expect("arity checked");
+                canonical.push(Term::Var(canonicalize_function_arg(env, ctx, arg)?));
             }
             ParamKind::Term(_) => {
                 let arg = args_iter.next().expect("arity checked");
@@ -9457,6 +9517,29 @@ fn instantiate_theorem(
                     args.iter().map(|ty| subst_type_schema(ty, subst)).collect();
                 validate_predicate_arg(env, ctx, arg, &expected)?;
             }
+            ParamKind::Function { arguments, result } => {
+                let Some(name) = subst.function_args.get(&param.name) else {
+                    return Err(KernelError::new(format!(
+                        "missing function argument `{}` for theorem `{}`",
+                        param.name, theorem.name
+                    )));
+                };
+                let actual = function_signature(env, ctx, name).ok_or_else(|| {
+                    KernelError::new(format!("unknown function argument `{name}`"))
+                })?;
+                let expected_arguments = arguments
+                    .iter()
+                    .map(|ty| subst_type_schema(ty, subst))
+                    .collect::<Vec<_>>();
+                let expected_result = subst_type_schema(result, subst);
+                if actual.args != expected_arguments || actual.result != expected_result {
+                    return Err(KernelError::new(format!(
+                        "function argument `{name}` has type `{}`, but expected `{}`",
+                        function_type_label(&actual.args, &actual.result),
+                        function_type_label(&expected_arguments, &expected_result)
+                    )));
+                }
+            }
             ParamKind::Term(ty) => {
                 let Some(arg) = subst.term_args.get(&param.name) else {
                     return Err(KernelError::new(format!(
@@ -9778,6 +9861,25 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
             Err(ValidationError::new(format!("unknown term `{name}`")))
         }
         Term::App(name, args) => {
+            if let Some(func) = ctx.lookup_function_var(name) {
+                if func.args.len() != args.len() {
+                    return Err(ValidationError::new(format!(
+                        "function parameter `{name}` expects {} argument(s), but got {}",
+                        func.args.len(),
+                        args.len()
+                    )));
+                }
+                for (idx, (arg, expected)) in args.iter().zip(&func.args).enumerate() {
+                    let actual = validate_term(env, ctx, arg)?;
+                    if &actual != expected {
+                        return Err(ValidationError::new(format!(
+                            "argument {} of function parameter `{name}` has type `{actual}`, but expected `{expected}`",
+                            idx + 1
+                        )));
+                    }
+                }
+                return Ok(func.result.clone());
+            }
             if let Some(func) = env.rank_one_funcs.get(name) {
                 return validate_rank_one_function_application(env, ctx, name, func, args, None);
             }
@@ -9990,6 +10092,72 @@ fn predicate_signature<'a>(env: &'a Env, ctx: &'a Context, name: &str) -> Option
     }
     ctx.lookup_predicate_var(name)
         .or_else(|| env.preds.get(name).map(Vec::as_slice))
+}
+
+fn function_signature<'a>(env: &'a Env, ctx: &'a Context, name: &str) -> Option<&'a FuncDecl> {
+    ctx.lookup_function_var(name)
+        .or_else(|| env.funcs.get(name))
+}
+
+fn canonicalize_function_arg(
+    env: &Env,
+    ctx: &Context,
+    term: &Term,
+) -> Result<Name, ValidationError> {
+    let Term::Var(name) = term else {
+        return Err(ValidationError::new(format!(
+            "function argument must be a named function symbol, got `{term}`"
+        )));
+    };
+    if ctx.lookup_function_var(name).is_some() {
+        return Ok(name.clone());
+    }
+    if let Some(name) =
+        resolve_top_level_name(ctx, name, |candidate| env.funcs.contains_key(candidate))
+    {
+        return Ok(name);
+    }
+    if let Some(matches) = env.ambiguous_function_names(name) {
+        return Err(ValidationError::new(ambiguous_reference_message(
+            "function", name, &matches,
+        )));
+    }
+    Err(ValidationError::new(format!("unknown function `{name}`")))
+}
+
+fn validate_function_schema_arg(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    expected_arguments: &[Type],
+    expected_result: &Type,
+    schema_params: &[Param],
+    schema_subst: &mut SchemaSubst,
+) -> Result<(), ValidationError> {
+    let actual = function_signature(env, ctx, name)
+        .ok_or_else(|| ValidationError::new(format!("unknown function `{name}`")))?;
+    if actual.args.len() != expected_arguments.len() {
+        return Err(ValidationError::new(format!(
+            "function argument `{name}` expects {} argument(s), but parameter expects {}",
+            actual.args.len(),
+            expected_arguments.len()
+        )));
+    }
+    for (pattern, actual) in expected_arguments.iter().zip(&actual.args) {
+        unify_type(pattern, actual, schema_params, schema_subst).map_err(|_| {
+            let expected = subst_type_schema(pattern, schema_subst);
+            ValidationError::new(format!(
+                "function argument `{name}` has incompatible domain `{actual}`, expected `{expected}`"
+            ))
+        })?;
+    }
+    unify_type(expected_result, &actual.result, schema_params, schema_subst).map_err(|_| {
+        let expected = subst_type_schema(expected_result, schema_subst);
+        ValidationError::new(format!(
+            "function argument `{name}` has result type `{}`, expected `{expected}`",
+            actual.result
+        ))
+    })
 }
 
 fn validate_distinct_lambda_params(params: &[LambdaParam]) -> Result<(), ValidationError> {
@@ -10395,6 +10563,26 @@ fn instantiate_formula_def(
                     .insert(param.name.clone(), pred_arg);
                 arg_idx += 1;
             }
+            ParamKind::Function { arguments, result } => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let name = canonicalize_function_arg(env, ctx, arg)?;
+                validate_function_schema_arg(
+                    env,
+                    ctx,
+                    &name,
+                    arguments,
+                    result,
+                    &def.params,
+                    &mut schema_subst,
+                )?;
+                schema_subst.function_args.insert(param.name.clone(), name);
+                arg_idx += 1;
+            }
             ParamKind::Term(ty) => {
                 let Some(arg) = args.next() else {
                     return Err(ValidationError::new(format!(
@@ -10499,12 +10687,12 @@ fn formula_def_predicate_term_types(def: &FormulaDef) -> Result<Vec<Type>, Valid
         .filter_map(|param| match &param.kind {
             ParamKind::Type => None,
             ParamKind::Term(ty) => Some(Ok(ty.clone())),
-            ParamKind::Prop | ParamKind::Predicate(_) => Some(Err(ValidationError::new(
-                format!(
+            ParamKind::Prop | ParamKind::Predicate(_) | ParamKind::Function { .. } => {
+                Some(Err(ValidationError::new(format!(
                     "definition `{}` cannot be used as a predicate argument because it has non-term parameters",
                     def.name
-                ),
-            ))),
+                ))))
+            }
         })
         .collect()
 }
@@ -10636,6 +10824,26 @@ fn instantiate_term_def(
                 schema_subst
                     .predicate_args
                     .insert(param.name.clone(), pred_arg);
+                arg_idx += 1;
+            }
+            ParamKind::Function { arguments, result } => {
+                let Some(arg) = args.next() else {
+                    return Err(ValidationError::new(format!(
+                        "definition `{}` expects {expected_args} argument(s)",
+                        def.name
+                    )));
+                };
+                let name = canonicalize_function_arg(env, ctx, arg)?;
+                validate_function_schema_arg(
+                    env,
+                    ctx,
+                    &name,
+                    arguments,
+                    result,
+                    &def.params,
+                    &mut schema_subst,
+                )?;
+                schema_subst.function_args.insert(param.name.clone(), name);
                 arg_idx += 1;
             }
             ParamKind::Term(ty) => {
@@ -11672,9 +11880,19 @@ fn subst_term_schema(term: &Term, subst: &SchemaSubst) -> Term {
             .get(name)
             .cloned()
             .or_else(|| subst.predicate_args.get(name).map(predicate_arg_as_term))
+            .or_else(|| {
+                subst
+                    .function_args
+                    .get(name)
+                    .map(|name| Term::Var(name.clone()))
+            })
             .unwrap_or_else(|| Term::Var(name.clone())),
         Term::App(name, args) => Term::App(
-            name.clone(),
+            subst
+                .function_args
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
             args.iter()
                 .map(|arg| subst_term_schema(arg, subst))
                 .collect(),
@@ -11793,6 +12011,7 @@ fn schema_subst_free_term_vars(subst: &SchemaSubst) -> HashSet<Name> {
 enum SchemaNameKind {
     Atom,
     Predicate,
+    Function,
 }
 
 fn formula_mentions_schema_name(formula: &Formula, name: &str, kind: SchemaNameKind) -> bool {
@@ -11823,9 +12042,12 @@ fn term_mentions_schema_name(term: &Term, name: &str, kind: SchemaNameKind) -> b
     match term {
         Term::Ascribed { term, .. } => term_mentions_schema_name(term, name, kind),
         Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => false,
-        Term::App(_, args) => args
-            .iter()
-            .any(|arg| term_mentions_schema_name(arg, name, kind)),
+        Term::App(function, args) => {
+            (matches!(kind, SchemaNameKind::Function) && function == name)
+                || args
+                    .iter()
+                    .any(|arg| term_mentions_schema_name(arg, name, kind))
+        }
         Term::PredLambda { body, .. } | Term::SetBuilder { body, .. } => {
             formula_mentions_schema_name(body, name, kind)
         }
@@ -11862,6 +12084,10 @@ fn formula_mentions_schema_subst(formula: &Formula, subst: &SchemaSubst) -> bool
             .predicate_args
             .keys()
             .any(|key| formula_mentions_schema_name(formula, key, SchemaNameKind::Predicate))
+        || subst
+            .function_args
+            .keys()
+            .any(|key| formula_mentions_schema_name(formula, key, SchemaNameKind::Function))
 }
 
 fn rename_schema_binder_if_needed(
@@ -13342,8 +13568,15 @@ impl Tokens {
                         "`Type` cannot appear in predicate arguments",
                     ));
                 }
-                args.push(self.parse_type()?);
-                self.expect_sym("->")?;
+                let next = self.parse_type()?;
+                if self.eat_sym("->") {
+                    args.push(next);
+                } else {
+                    return Ok(ParamKind::Function {
+                        arguments: args,
+                        result: next,
+                    });
+                }
             }
         } else {
             Ok(ParamKind::Term(ty))
@@ -17571,6 +17804,23 @@ fn explicit_schema_subst(
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 subst.predicate_args.insert(arg.name.clone(), pred_arg);
             }
+            ParamKind::Function { arguments, result } => {
+                let term = parse_term_str(&arg.value)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                let name = canonicalize_function_arg(env, ctx, &term)
+                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                validate_function_schema_arg(
+                    env,
+                    ctx,
+                    &name,
+                    arguments,
+                    result,
+                    &theorem.params,
+                    &mut subst,
+                )
+                .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+                subst.function_args.insert(arg.name.clone(), name);
+            }
             ParamKind::Term(_) => {
                 let term = parse_term_str(&arg.value)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
@@ -18059,6 +18309,20 @@ fn remaining_schema_params(params: &[Param], subst: &SchemaSubst) -> Vec<Param> 
                     ),
                 })
             }
+            ParamKind::Function { arguments, result }
+                if !subst.function_args.contains_key(&param.name) =>
+            {
+                Some(Param {
+                    name: param.name.clone(),
+                    kind: ParamKind::Function {
+                        arguments: arguments
+                            .iter()
+                            .map(|ty| subst_type_schema(ty, subst))
+                            .collect(),
+                        result: subst_type_schema(result, subst),
+                    },
+                })
+            }
             ParamKind::Term(ty) if !subst.term_args.contains_key(&param.name) => Some(Param {
                 name: param.name.clone(),
                 kind: ParamKind::Term(subst_type_schema(ty, subst)),
@@ -18124,6 +18388,7 @@ fn ensure_schema_subst_complete(
             ParamKind::Type => subst.type_args.contains_key(&param.name),
             ParamKind::Prop => subst.formula_args.contains_key(&param.name),
             ParamKind::Predicate(_) => subst.predicate_args.contains_key(&param.name),
+            ParamKind::Function { .. } => subst.function_args.contains_key(&param.name),
             ParamKind::Term(_) => subst.term_args.contains_key(&param.name),
         };
         if !complete {
@@ -18149,6 +18414,10 @@ fn schema_param_description(param: &Param) -> String {
             parts.push("Prop".to_string());
             format!("predicate parameter of type `{}`", parts.join(" -> "))
         }
+        ParamKind::Function { arguments, result } => format!(
+            "function parameter of type `{}`",
+            function_type_label(arguments, result)
+        ),
         ParamKind::Term(ty) => format!("term parameter of type `{ty}`"),
     }
 }
@@ -20164,6 +20433,73 @@ import std/hol/finite@1 as F
             .receipt_names
             .values()
             .all(|name| !name.starts_with("std/hol/finite@1::")));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn function_symbol_parameters_parse_validate_instantiate_and_lower() {
+        let report = check_file_with_hol_shadow(
+            r#"
+func inc : Nat -> Nat
+
+def Apply (f : Nat -> Nat) (n : Nat) : Nat := f(n)
+
+theorem function_refl (f : Nat -> Nat) (n : Nat) : f(n) = f(n) := by
+  refl
+
+theorem inc_refl : inc(0) = inc(0) := by
+  exact function_refl {f := inc; n := 0}
+
+theorem apply_inc : Apply(inc, 0) = inc(0) := by
+  refl
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        for name in ["function_refl", "inc_refl", "apply_inc"] {
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|theorem| theorem.name == name)
+                .expect("function-parameter theorem receipt");
+            assert_eq!(
+                theorem.statement_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+        }
+
+        let rejected = check_file_with_hol_shadow(
+            r#"
+func binary : Nat -> Nat -> Nat
+theorem function_refl (f : Nat -> Nat) (n : Nat) : f(n) = f(n) := by
+  refl
+theorem bad_function_argument : binary(0, 0) = binary(0, 0) := by
+  exact function_refl {f := binary; n := 0}
+"#,
+        );
+        let rendered = format!("{:#?}", rejected.legacy.diagnostics);
+        assert!(
+            rendered.contains(
+                "function argument `binary` expects 2 argument(s), but parameter expects 1"
+            ),
+            "unexpected diagnostics: {rendered}"
+        );
+
+        let bare = check_file(
+            r#"
+theorem bad_function_value (f : Nat -> Nat) : f = f := by
+  refl
+"#,
+        );
+        assert!(format!("{:#?}", bare.diagnostics).contains("unknown term `f`"));
     }
 
     #[cfg(feature = "hol-shadow")]

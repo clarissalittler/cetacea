@@ -225,13 +225,22 @@ and names the finite introduction theorem directly. The same example runs in
 the browser. This checkpoint measures 1,675,000 bytes natively and 1,182,740
 bytes in raw Wasm.
 
+Rank-one function-symbol parameters now cover the arrow-valued source seam
+needed by cardinality transport. `(f : A -> B)` records a saturated
+domain/result schema in the transitional checker and a real curried arrow in
+HOL. The schema can be instantiated only by a named function and cannot be used
+bare or partially applied. Dual-checked generic and concrete Nat reflexivity
+examples retain `fol+induction`, while bad arities reject. This checkpoint
+measures 1,700,384 bytes natively and 1,197,428 bytes in raw Wasm.
+
 ## Remaining migration slices
 
-1. Add generic declaration syntax and extend the source surface beyond the
-   pre-registered package aliases, then decide when low-level legacy core APIs
-   should select the sidecar automatically. Native CLI and browser acceptance
-   are already fail-closed and automatic. Retain aliases for the current
-   monomorphic list vocabulary for one release cycle. The import seam is
+1. Extend the implemented function-symbol theorem schemas to the remaining
+   generic declaration forms and source surfaces, then decide when low-level
+   legacy core APIs should select the sidecar automatically. Native CLI and
+   browser acceptance are already fail-closed and automatic. Retain aliases
+   for the current monomorphic list vocabulary for one release cycle. The
+   import seam is
    specified in [`H6_SURFACE_IMPORTS.md`](H6_SURFACE_IMPORTS.md).
 2. Extend the implemented package-ID JSON/manifest policy and stable definition
    receipt names to imported theorem aliases and browser assignment-policy

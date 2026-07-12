@@ -204,6 +204,16 @@ and induction rules. Its root receipt is constructive, trust-free
 `has_card_intro`. This checkpoint is 1,675,000 bytes natively and 1,182,740
 bytes in raw Wasm.
 
+The next cardinality prerequisite is implemented without making arrow types
+ordinary first-order data. A theorem parameter `(f : A -> B)` is a rank-one
+function-symbol schema: it must be saturated in source and instantiated by a
+named function, while HOL lowering binds the actual curried arrow type. The
+parser continues to treat arrows ending in `Prop` as predicate schemas. A
+dual-checked generic reflexivity theorem and its concrete Nat instance retain
+`fol+induction`; bare function values, partial application, lambdas, and arity
+mismatches fail explicitly. This checkpoint is 1,700,384 bytes natively and
+1,197,428 bytes in raw Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages
@@ -231,7 +241,7 @@ package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments, explicit term ascriptions, all structural
 predicate constructor laws, right identity, associativity, and length over
 append and browser/editor verification are complete as well. The next source
-slices continue with generic declarations, cardinality aliases, richer finite
-enumeration exercises, browser assignment-policy enforcement, and an explicit
-decision about the low-level core-API cutover. The generic induction principle
-itself is exposed through a receipt-backed theorem alias.
+slices continue with general generic declarations, cardinality aliases, richer
+finite enumeration exercises, browser assignment-policy enforcement, and an
+explicit decision about the low-level core-API cutover. The generic induction
+principle itself is exposed through a receipt-backed theorem alias.

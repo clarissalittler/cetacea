@@ -1634,6 +1634,16 @@ impl CompatibilityElaborator {
                     lowerer.bind_predicate_parameter(parameter.name.clone(), domains)?;
                     parameter_types.push(predicate_type);
                 }
+                ParamKind::Function { arguments, result } => {
+                    let arguments = arguments
+                        .iter()
+                        .map(|argument| lowerer.lower_type(argument))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let result = lowerer.lower_type(result)?;
+                    let function_type = abstract_type(&arguments, result.clone());
+                    lowerer.bind_function_parameter(parameter.name.clone(), arguments, result)?;
+                    parameter_types.push(function_type);
+                }
             }
         }
         let body = lower_body(&mut lowerer)?;
@@ -2565,6 +2575,20 @@ impl LegacyProofLowerer<'_> {
                         },
                     };
                     self.lowerer.lower_term_at_type(&term, &expected)?
+                }
+                ParamKind::Function { .. } => {
+                    let argument =
+                        substitution
+                            .function_args
+                            .get(&parameter.name)
+                            .ok_or_else(|| {
+                                LoweringError::new(format!(
+                                    "legacy theorem `{name}` is missing function argument `{}`",
+                                    parameter.name
+                                ))
+                            })?;
+                    self.lowerer
+                        .lower_term_at_type(&Term::Var(argument.clone()), &expected)?
                 }
                 ParamKind::Term(_) => {
                     let argument =

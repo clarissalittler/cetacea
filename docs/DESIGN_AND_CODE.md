@@ -1037,6 +1037,15 @@ ergonomics, but registry records and receipt names continue to identify List
 and finite declarations separately. Any dependency or owned-name collision
 rolls the whole import back.
 
+`ParamKind::Function` represents a restricted rank-one function-symbol schema
+such as `(f : A -> B)`. The legacy context stores its saturated domain/result
+signature rather than pretending an arrow is a first-order term type. Explicit
+theorem instantiation accepts named functions only and substitutes application
+heads capture-safely; bare or partially applied function values remain errors.
+The compatibility lowerer binds the same schema name at the actual curried HOL
+arrow type. This is the prerequisite for cardinality transport while preserving
+FOL classification for concrete saturated instances.
+
 ## Wasm And Web UI
 
 The wasm crate is intentionally thin, mirroring the CLI. It exports:

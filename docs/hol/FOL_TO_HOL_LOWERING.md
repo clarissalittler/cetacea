@@ -35,21 +35,22 @@ spans remain in the elaborator for diagnostics.
 | Type schema parameter `(A : Type)` | `TypeParameter::first_order(id)` | Legacy `Type` arguments cannot be arrows or `Prop`, so this is narrower and more accurate than `Any`. |
 | `Prod A B` | `CoreType::Product(A, B)` | First-order iff both components are first-order. H4a now includes typed pair/projection terms and definitional projection reduction. |
 | `Set A` | Distinguished `Set#id A`, with a first-order parameter class | Implemented in H4a. `Set` rejects `Prop`, arrows, and unconstrained higher-order parameters; it is never lowered to `A -> Prop`. |
-| New surface arrow type `A -> B` | `CoreType::Arrow(A, B)` | Higher-order when used as a quantified domain or data value. Existing arrows occur only in predicate-schema parameter kinds. |
+| Function-symbol schema `(f : A1 -> ... -> B)` | Curried `CoreType::Arrow` term parameter | Implemented for theorem/definition schemas. It is FOL when instantiated by a named first-order function and used only saturated; bare values, partial application, and lambdas are rejected. |
 | Proposition schema `(P : Prop)` | Rank-one proposition-symbol parameter | A meta-level schema parameter, not object-level `forall P : Prop`. This distinction preserves the propositional profile of `std/prop.ctea`. |
 | Term schema `(x : A)` | Rank-one term parameter of type `A` | Stored in the theorem template context and explicitly instantiated at references. |
 | Predicate schema `(R : A1 -> ... -> Prop)` | Rank-one saturated symbol parameter | Counts as FOL when used only fully applied to first-order arguments; passing, returning, partially applying, or quantifying over it is HOL. |
+| General object type `A -> B` | `CoreType::Arrow(A, B)` | Still absent from ordinary `Type` positions. Quantifying over, storing, returning, or comparing function values remains explicitly HOL surface work. |
 
 The H4 compatibility layer has the checked term/symbol-parameter context for
 theorem templates. A template statement and proof are checked with those
 parameters in scope, and a `TheoremRef` carries explicit type and term/symbol
 arguments. Instantiation is simultaneous and capture-avoiding, including under
 ambient binders. Saturated predicate-symbol templates retain an FOL receipt;
-partial or value-level uses remain HOL. Surface parameter inference and all
-legacy `ParamKind` forms are connected. Encoding legacy proposition and
-predicate schemas as object-level quantifiers would incorrectly make almost the
-entire propositional and FOL standard library HOL, so that shortcut remains
-rejected.
+the new function-symbol templates do as well. Partial or value-level uses
+remain HOL. Surface parameter inference and all legacy `ParamKind` forms are
+connected. Encoding legacy proposition, predicate, or function schemas as
+object-level quantifiers would incorrectly raise concrete first-order library
+uses, so that shortcut remains rejected.
 
 ## Declaration lowering
 
@@ -561,3 +562,13 @@ instance. A source proof of `one_has_card` exercises the dependency aliases and
 retains the finite theorem receipt without copying the `HasCard` definition
 into the legacy engine. The result is constructive `fol+induction`. This
 checkpoint is 1,675,000 bytes natively and 1,182,740 bytes in raw Wasm.
+
+Rank-one function-symbol parameters now provide the next cardinality
+prerequisite without widening ordinary `Type`. The parser distinguishes
+`(f : A -> B)` from predicate schemas ending in `Prop`; validation records a
+saturated domain/result signature, theorem substitution accepts named
+functions, and the compatibility lowerer binds a genuine curried arrow in the
+core context. A dual-checked theorem and concrete `inc` instance remain
+`fol+induction`, while arity mismatches, bare function values, partial
+application, and function lambdas fail closed. This checkpoint is 1,700,384
+bytes natively and 1,197,428 bytes in raw Wasm.

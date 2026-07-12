@@ -735,6 +735,14 @@ Nodup, length, membership, and induction rules. It is constructive,
 trust-free, and certified `fol+induction`. This checkpoint measures 1,675,000
 bytes natively and 1,182,740 bytes in raw Wasm.
 
+The source schema now distinguishes function symbols from predicates and terms.
+`(f : A -> B)` is lowered to a genuine HOL arrow parameter but may be used only
+as a saturated symbol and instantiated only by a named function. This is enough
+to express cardinality transport interfaces without treating arrows as
+first-order data or enabling unrestricted lambdas. Concrete saturated Nat
+instances remain `fol+induction`; bare values and arity mismatches reject. This
+checkpoint measures 1,700,384 bytes natively and 1,197,428 bytes in raw Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -749,8 +757,10 @@ bytes natively and 1,182,740 bytes in raw Wasm.
   List induction is available through `apply`. Checked term ascriptions resolve
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
   constructor laws are source-facing. `All` constructor laws now demonstrate
-  instance-sensitive fragment enforcement. Generic source declarations and a
-  decision about low-level core-API cutover remain; native and browser
+  instance-sensitive fragment enforcement. Rank-one function-symbol parameters
+  now cover the arrow-valued schema prerequisite for cardinality transport.
+  General generic source declarations and a decision about low-level core-API
+  cutover remain; native and browser
   end-to-end acceptance are automatic. The finite package now exposes
   `HasCard`, its List dependency, and checked introduction through a real
   finite-datatype proof. Right append identity, append associativity, and

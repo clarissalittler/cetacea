@@ -392,6 +392,21 @@ theorem forall_mono
   ...
 ```
 
+Theorem declarations may also use a rank-one function-symbol parameter whose
+arrow ends in a data type:
+
+```text
+theorem function_refl (f : Nat -> Nat) (n : Nat) : f(n) = f(n) := by
+  refl
+```
+
+Function-symbol parameters must be used with all arguments and are instantiated
+with a named function, for example
+`function_refl {f := inc; n := 0}`. They are not ordinary function values:
+bare `f`, partial application, and function lambdas remain outside this
+restricted surface. HOL lowering gives the parameter its real arrow type while
+allowing a saturated first-order instance to retain `fol` or `fol+induction`.
+
 Predicate arguments can be declared predicate names or inline lambdas. A typed
 lambda can infer a definition's type parameter:
 
@@ -712,6 +727,7 @@ The theorem parameters become schema variables. A theorem can quantify over:
 - propositions: `(P : Prop)`
 - types: `(A : Type)`
 - predicates: `(P : A -> Prop)`
+- function symbols: `(f : A -> B)`
 - terms: `(x : A)`
 
 ## Axioms
@@ -1440,6 +1456,7 @@ parsed according to the parameter kind:
 - type parameters, such as `A := Person`
 - proposition parameters, such as `P := P /\ Q`
 - predicate parameters, such as `P := Student` or `P := fun x => x = x`
+- function-symbol parameters, such as `f := mother`
 - term parameters, such as `x := alice`
 
 Cetacea can infer many theorem parameters from the goal, especially for bare
