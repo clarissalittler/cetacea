@@ -2,6 +2,14 @@
 
 Status: experimental, native CLI only, on the `hol` migration branch.
 
+The finite-mathematics pilot contains two executable manifests:
+[`finite_traffic.ctea-assignment`](pilot/finite_traffic.ctea-assignment) pins a
+constructive `fol+induction` enumeration exercise, while
+[`finite_bijection.ctea-assignment`](pilot/finite_bijection.ctea-assignment)
+pins the genuinely higher-order generic-map exercise. The
+[`pilot guide`](pilot/README.md) gives the corresponding starter and solution
+commands.
+
 An assignment manifest fixes the logical fragment and the capabilities available
 to a submission outside the theorem source itself. Invoke it with:
 

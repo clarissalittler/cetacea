@@ -1,0 +1,16 @@
+version = 1
+profile = "fol+induction"
+
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+
+allowed_imports = [
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
+allowed_axioms = []
+
+required_theorem.traffic_has_card_three = 'F.HasCard(F.cons(red, F.cons(yellow, F.cons(green, F.nil))), 3)'

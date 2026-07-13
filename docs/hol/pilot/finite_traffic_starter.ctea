@@ -1,0 +1,15 @@
+import std/hol/finite@1 as F
+
+mode constructive
+
+data Traffic
+| red
+| yellow
+| green
+
+theorem traffic_has_card_three :
+  F.HasCard(
+    F.cons(red, F.cons(yellow, F.cons(green, F.nil))),
+    succ(succ(succ(0)))
+  ) := by
+  sorry

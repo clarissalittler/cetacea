@@ -19,6 +19,9 @@ use super::types::{CoreType, TypeConstructorId, TypeParameter};
 pub struct FiniteEnumerationNames {
     pub has_card: String,
     pub has_card_intro: String,
+    pub has_card_nodup: String,
+    pub has_card_length: String,
+    pub has_card_coverage: String,
 }
 
 impl FiniteEnumerationNames {
@@ -37,6 +40,9 @@ impl FiniteEnumerationNames {
         Self {
             has_card: qualify("HasCard"),
             has_card_intro: qualify("has_card_intro"),
+            has_card_nodup: qualify("has_card_nodup"),
+            has_card_length: qualify("has_card_length"),
+            has_card_coverage: qualify("has_card_coverage"),
         }
     }
 }
@@ -45,6 +51,9 @@ impl FiniteEnumerationNames {
 pub struct FiniteEnumerationLibrary {
     pub has_card: ConstantId,
     pub has_card_intro: TheoremId,
+    pub has_card_nodup: TheoremId,
+    pub has_card_length: TheoremId,
+    pub has_card_coverage: TheoremId,
     pub element_parameter: TypeParameter,
     pub lists: ListLibrary,
     pub length: ListLength,
@@ -151,20 +160,20 @@ impl FiniteEnumerationLibrary {
             nodup.clone(),
             CoreTerm::implies(
                 length_equals.clone(),
-                CoreTerm::implies(coverage.clone(), has_card_statement),
+                CoreTerm::implies(coverage.clone(), has_card_statement.clone()),
             ),
         );
         let (has_card_intro, _) = elaborator.declare_theorem_with_parameters(
             names.has_card_intro.clone(),
             vec![element_parameter],
-            vec![list_type, length.natural_type.clone()],
+            vec![list_type.clone(), length.natural_type.clone()],
             intro_statement,
             HolDraftProof::ImpIntro {
-                premise: nodup,
+                premise: nodup.clone(),
                 body: Box::new(HolDraftProof::ImpIntro {
-                    premise: length_equals,
+                    premise: length_equals.clone(),
                     body: Box::new(HolDraftProof::ImpIntro {
-                        premise: coverage,
+                        premise: coverage.clone(),
                         body: Box::new(HolDraftProof::AndIntro(
                             Box::new(HolDraftProof::Hypothesis(2)),
                             Box::new(HolDraftProof::AndIntro(
@@ -176,9 +185,49 @@ impl FiniteEnumerationLibrary {
                 }),
             },
         )?;
+        let theorem_parameters = vec![list_type, length.natural_type.clone()];
+        let (has_card_nodup, _) = elaborator.declare_theorem_with_parameters(
+            names.has_card_nodup.clone(),
+            vec![element_parameter],
+            theorem_parameters.clone(),
+            CoreTerm::implies(has_card_statement.clone(), nodup),
+            HolDraftProof::ImpIntro {
+                premise: has_card_statement.clone(),
+                body: Box::new(HolDraftProof::AndElimLeft(Box::new(
+                    HolDraftProof::Hypothesis(0),
+                ))),
+            },
+        )?;
+        let (has_card_length, _) = elaborator.declare_theorem_with_parameters(
+            names.has_card_length.clone(),
+            vec![element_parameter],
+            theorem_parameters.clone(),
+            CoreTerm::implies(has_card_statement.clone(), length_equals),
+            HolDraftProof::ImpIntro {
+                premise: has_card_statement.clone(),
+                body: Box::new(HolDraftProof::AndElimLeft(Box::new(
+                    HolDraftProof::AndElimRight(Box::new(HolDraftProof::Hypothesis(0))),
+                ))),
+            },
+        )?;
+        let (has_card_coverage, _) = elaborator.declare_theorem_with_parameters(
+            names.has_card_coverage.clone(),
+            vec![element_parameter],
+            theorem_parameters,
+            CoreTerm::implies(has_card_statement.clone(), coverage),
+            HolDraftProof::ImpIntro {
+                premise: has_card_statement,
+                body: Box::new(HolDraftProof::AndElimRight(Box::new(
+                    HolDraftProof::AndElimRight(Box::new(HolDraftProof::Hypothesis(0))),
+                ))),
+            },
+        )?;
         Ok(Self {
             has_card,
             has_card_intro,
+            has_card_nodup,
+            has_card_length,
+            has_card_coverage,
             element_parameter,
             lists: *lists,
             length: length.clone(),

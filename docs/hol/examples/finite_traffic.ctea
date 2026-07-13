@@ -1,0 +1,147 @@
+import std/hol/finite@1 as F
+
+mode constructive
+
+data Traffic
+| red
+| yellow
+| green
+
+theorem traffic_has_card_three :
+  F.HasCard(
+    F.cons(red, F.cons(yellow, F.cons(green, F.nil))),
+    succ(succ(succ(0)))
+  ) := by
+  apply F.has_card_intro {
+    A := Traffic;
+    xs := F.cons(red, F.cons(yellow, F.cons(green, F.nil)));
+    n := succ(succ(succ(0)))
+  }
+  apply (F.nodup_cons {
+    A := Traffic;
+    h := red;
+    t := F.cons(yellow, F.cons(green, F.nil))
+  }).right
+  split
+  intro red_in_tail
+  have red_cases : red = yellow \/ F.Member(red, F.cons(green, F.nil)) := by
+    apply (F.member_cons {
+      A := Traffic;
+      x := red;
+      h := yellow;
+      t := F.cons(green, F.nil)
+    }).left
+    exact red_in_tail
+  cases red_cases with
+  | left red_yellow =>
+      contradiction
+  | right red_in_last =>
+      have red_last_cases : red = green \/ F.Member(red, (F.nil : F.List Traffic)) := by
+        apply (F.member_cons {
+          A := Traffic;
+          x := red;
+          h := green;
+          t := (F.nil : F.List Traffic)
+        }).left
+        exact red_in_last
+      cases red_last_cases with
+      | left red_green =>
+          contradiction
+      | right red_in_nil =>
+          exact F.member_nil {A := Traffic; x := red} red_in_nil
+  apply (F.nodup_cons {
+    A := Traffic;
+    h := yellow;
+    t := F.cons(green, F.nil)
+  }).right
+  split
+  intro yellow_in_tail
+  have yellow_cases : yellow = green \/ F.Member(yellow, (F.nil : F.List Traffic)) := by
+    apply (F.member_cons {
+      A := Traffic;
+      x := yellow;
+      h := green;
+      t := (F.nil : F.List Traffic)
+    }).left
+    exact yellow_in_tail
+  cases yellow_cases with
+  | left yellow_green =>
+      contradiction
+  | right yellow_in_nil =>
+      exact F.member_nil {A := Traffic; x := yellow} yellow_in_nil
+  apply (F.nodup_cons {
+    A := Traffic;
+    h := green;
+    t := (F.nil : F.List Traffic)
+  }).right
+  split
+  intro green_in_nil
+  exact F.member_nil {A := Traffic; x := green} green_in_nil
+  exact F.nodup_nil {A := Traffic}
+  rewrite -> F.length_cons {
+    A := Traffic;
+    h := red;
+    t := F.cons(yellow, F.cons(green, F.nil))
+  }
+  rewrite -> F.length_cons {
+    A := Traffic;
+    h := yellow;
+    t := F.cons(green, F.nil)
+  }
+  rewrite -> F.length_cons {
+    A := Traffic;
+    h := green;
+    t := (F.nil : F.List Traffic)
+  }
+  rewrite -> F.length_nil {A := Traffic}
+  refl
+  intro signal
+  induction signal with
+  | red =>
+      apply (F.member_cons {
+        A := Traffic;
+        x := red;
+        h := red;
+        t := F.cons(yellow, F.cons(green, F.nil))
+      }).right
+      left
+      trivial
+  | yellow =>
+      apply (F.member_cons {
+        A := Traffic;
+        x := yellow;
+        h := red;
+        t := F.cons(yellow, F.cons(green, F.nil))
+      }).right
+      right
+      apply (F.member_cons {
+        A := Traffic;
+        x := yellow;
+        h := yellow;
+        t := F.cons(green, F.nil)
+      }).right
+      left
+      trivial
+  | green =>
+      apply (F.member_cons {
+        A := Traffic;
+        x := green;
+        h := red;
+        t := F.cons(yellow, F.cons(green, F.nil))
+      }).right
+      right
+      apply (F.member_cons {
+        A := Traffic;
+        x := green;
+        h := yellow;
+        t := F.cons(green, F.nil)
+      }).right
+      right
+      apply (F.member_cons {
+        A := Traffic;
+        x := green;
+        h := green;
+        t := (F.nil : F.List Traffic)
+      }).right
+      left
+      trivial

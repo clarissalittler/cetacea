@@ -1442,6 +1442,20 @@ impl HolLibraryRegistry {
                 ),
             })?
             .id();
+        let checked_theorem_receipt = |theorem, name: &str| {
+            staged_core
+                .theorem_receipt(theorem)
+                .map(|receipt| receipt.id())
+                .ok_or_else(|| SpikeError {
+                    message: format!("checked theorem `{name}` has no declaration receipt"),
+                })
+        };
+        let has_card_nodup_receipt =
+            checked_theorem_receipt(finite.has_card_nodup, &names.has_card_nodup)?;
+        let has_card_length_receipt =
+            checked_theorem_receipt(finite.has_card_length, &names.has_card_length)?;
+        let has_card_coverage_receipt =
+            checked_theorem_receipt(finite.has_card_coverage, &names.has_card_coverage)?;
         let installed = InstalledFiniteLibrary {
             record: LibraryPackageRecord {
                 id: LibraryPackageId::FiniteV1,
@@ -1464,6 +1478,24 @@ impl HolLibraryRegistry {
                         core_name: names.has_card_intro,
                         kind: LibraryDeclarationKind::Theorem,
                         receipt: Some(has_card_intro_receipt),
+                    },
+                    LibraryDeclaration {
+                        logical_name: "has_card_nodup".to_string(),
+                        core_name: names.has_card_nodup,
+                        kind: LibraryDeclarationKind::Theorem,
+                        receipt: Some(has_card_nodup_receipt),
+                    },
+                    LibraryDeclaration {
+                        logical_name: "has_card_length".to_string(),
+                        core_name: names.has_card_length,
+                        kind: LibraryDeclarationKind::Theorem,
+                        receipt: Some(has_card_length_receipt),
+                    },
+                    LibraryDeclaration {
+                        logical_name: "has_card_coverage".to_string(),
+                        core_name: names.has_card_coverage,
+                        kind: LibraryDeclarationKind::Theorem,
+                        receipt: Some(has_card_coverage_receipt),
                     },
                 ],
             },
@@ -1900,7 +1932,7 @@ fn validate_installed_finite_v1(
         || installed.record.provenance.source != LibraryPackageSource::Builtin
         || installed.record.core_namespace != BUILTIN_FINITE_V1_NAMESPACE
         || installed.record.dependencies != [LibraryPackageId::ListV1]
-        || installed.record.declarations.len() != 2
+        || installed.record.declarations.len() != 5
     {
         return Err(SpikeError {
             message: format!("invalid package metadata for `{package}`"),
@@ -1915,6 +1947,21 @@ fn validate_installed_finite_v1(
         (
             "has_card_intro",
             names.has_card_intro.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "has_card_nodup",
+            names.has_card_nodup.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "has_card_length",
+            names.has_card_length.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "has_card_coverage",
+            names.has_card_coverage.as_str(),
             LibraryDeclarationKind::Theorem,
         ),
     ];
@@ -1936,6 +1983,10 @@ fn validate_installed_finite_v1(
     }
     if core.constants().resolve(&names.has_card) != Some(installed.finite.has_card)
         || core.theorems().resolve(&names.has_card_intro) != Some(installed.finite.has_card_intro)
+        || core.theorems().resolve(&names.has_card_nodup) != Some(installed.finite.has_card_nodup)
+        || core.theorems().resolve(&names.has_card_length) != Some(installed.finite.has_card_length)
+        || core.theorems().resolve(&names.has_card_coverage)
+            != Some(installed.finite.has_card_coverage)
     {
         return Err(SpikeError {
             message: format!("library registry/core mismatch for package `{package}`"),
@@ -1958,11 +2009,11 @@ fn validate_installed_finite_v1(
                 message: format!("library dependency receipt missing for package `{package}`"),
             })
     };
-    let expected_dependencies = BTreeSet::from([
-        dependency_receipt(lists.lists.member)?,
-        dependency_receipt(lists.lists.nodup)?,
-        dependency_receipt(lists.length.constant)?,
-    ]);
+    let member_dependency = dependency_receipt(lists.lists.member)?;
+    let nodup_dependency = dependency_receipt(lists.lists.nodup)?;
+    let length_dependency = dependency_receipt(lists.length.constant)?;
+    let expected_dependencies =
+        BTreeSet::from([member_dependency, nodup_dependency, length_dependency]);
     if has_card_receipt.proof().direct_dependencies() != &expected_dependencies {
         return Err(SpikeError {
             message: format!("library dependency mismatch for package `{package}`"),
@@ -1983,6 +2034,43 @@ fn validate_installed_finite_v1(
                 "library receipt mismatch for `has_card_intro` in package `{package}`"
             ),
         });
+    }
+    for (index, theorem, logical_name, component_dependency) in [
+        (
+            2,
+            installed.finite.has_card_nodup,
+            "has_card_nodup",
+            nodup_dependency,
+        ),
+        (
+            3,
+            installed.finite.has_card_length,
+            "has_card_length",
+            length_dependency,
+        ),
+        (
+            4,
+            installed.finite.has_card_coverage,
+            "has_card_coverage",
+            member_dependency,
+        ),
+    ] {
+        let receipt = core.theorem_receipt(theorem).ok_or_else(|| SpikeError {
+            message: format!("library theorem receipt missing for `{logical_name}` in `{package}`"),
+        })?;
+        let expected_projection_dependencies =
+            BTreeSet::from([has_card_receipt.id(), component_dependency]);
+        if installed.record.declarations[index].receipt != Some(receipt.id())
+            || receipt.proof().direct_dependencies() != &expected_projection_dependencies
+        {
+            return Err(SpikeError {
+                message: format!(
+                    "library receipt mismatch for `{logical_name}` in package `{package}`: expected {:?}, found {:?}",
+                    expected_projection_dependencies,
+                    receipt.proof().direct_dependencies(),
+                ),
+            });
+        }
     }
     Ok(())
 }
@@ -2514,7 +2602,7 @@ mod tests {
         );
         assert_eq!(installed.record.core_namespace, BUILTIN_FINITE_V1_NAMESPACE);
         assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
-        assert_eq!(installed.record.declarations.len(), 2);
+        assert_eq!(installed.record.declarations.len(), 5);
         let has_card = &installed.record.declarations[0];
         assert_eq!(has_card.logical_name, "HasCard");
         assert_eq!(has_card.kind, LibraryDeclarationKind::Definition);
@@ -2584,6 +2672,28 @@ mod tests {
                 "std/hol/list@1::length".to_string(),
             ])
         );
+        for (index, logical_name, theorem) in [
+            (2, "has_card_nodup", installed.finite.has_card_nodup),
+            (3, "has_card_length", installed.finite.has_card_length),
+            (4, "has_card_coverage", installed.finite.has_card_coverage),
+        ] {
+            let declaration = &installed.record.declarations[index];
+            assert_eq!(declaration.logical_name, logical_name);
+            assert_eq!(declaration.kind, LibraryDeclarationKind::Theorem);
+            assert_eq!(
+                registry.receipt_name(declaration.receipt.expect("projection receipt")),
+                Some(format!("std/hol/finite@1::{logical_name}"))
+            );
+            let receipt = core
+                .theorem_receipt(theorem)
+                .expect("checked HasCard projection receipt");
+            assert_eq!(receipt.status(), EvidenceStatus::Checked);
+            assert_eq!(
+                receipt.proof().required_fragment(),
+                StatementFragment::HigherOrder
+            );
+            assert!(receipt.proof().axiom_dependencies().is_empty());
+        }
 
         let traffic = core
             .declare_inductive(InductiveSpec::new(

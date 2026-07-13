@@ -1,0 +1,17 @@
+version = 1
+profile = "hol"
+
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+
+allowed_imports = [
+  "std/hol/cardinality@1",
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
+allowed_axioms = []
+
+required_theorem.has_card_map_bijection = '(A : Type) (B : Type) (f : A -> B) (g : B -> A) (xs : F.List A) (n : Nat) : F.HasCard(xs, n) -> (forall x : A, g(f(x)) = x) -> (forall y : B, f(g(y)) = y) -> F.HasCard(F.map(f, xs), n)'

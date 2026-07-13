@@ -1375,8 +1375,14 @@ impl CompatibilityElaborator {
         };
         let has_card_name = qualify("HasCard");
         let has_card_intro_name = qualify("has_card_intro");
+        let has_card_nodup_name = qualify("has_card_nodup");
+        let has_card_length_name = qualify("has_card_length");
+        let has_card_coverage_name = qualify("has_card_coverage");
         self.ensure_name_free(&has_card_name)?;
         self.ensure_name_free(&has_card_intro_name)?;
+        self.ensure_name_free(&has_card_nodup_name)?;
+        self.ensure_name_free(&has_card_length_name)?;
+        self.ensure_name_free(&has_card_coverage_name)?;
 
         let mut staged = self.clone();
         let lists = staged.import_builtin_list_v1(namespace.as_deref())?;
@@ -1411,37 +1417,66 @@ impl CompatibilityElaborator {
                 kind: ParamKind::Term(Type::Nat),
             },
         ];
+        let nodup = Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]);
+        let length_equals = Formula::eq(
+            Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
+            Term::Var("n".to_string()),
+        );
+        let coverage = Formula::forall(
+            "x".to_string(),
+            surface_element_type,
+            Formula::PredApp(
+                qualify("Member"),
+                vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+            ),
+        );
+        let has_card_statement = Formula::PredApp(
+            has_card_name.clone(),
+            vec![Term::Var("xs".to_string()), Term::Var("n".to_string())],
+        );
         let statement = Formula::implies(
-            Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+            nodup.clone(),
             Formula::implies(
-                Formula::eq(
-                    Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
-                    Term::Var("n".to_string()),
-                ),
-                Formula::implies(
-                    Formula::forall(
-                        "x".to_string(),
-                        surface_element_type,
-                        Formula::PredApp(
-                            qualify("Member"),
-                            vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
-                        ),
-                    ),
-                    Formula::PredApp(
-                        has_card_name,
-                        vec![Term::Var("xs".to_string()), Term::Var("n".to_string())],
-                    ),
-                ),
+                length_equals.clone(),
+                Formula::implies(coverage.clone(), has_card_statement.clone()),
             ),
         );
         staged.bind_checked_theorem_alias(
             has_card_intro_name,
             installed.finite.has_card_intro,
-            parameters,
+            parameters.clone(),
             &statement,
             vec![parameter],
-            vec![list_type, installed.finite.length.natural_type.clone()],
+            vec![
+                list_type.clone(),
+                installed.finite.length.natural_type.clone(),
+            ],
         )?;
+        for (name, theorem, conclusion) in [
+            (has_card_nodup_name, installed.finite.has_card_nodup, nodup),
+            (
+                has_card_length_name,
+                installed.finite.has_card_length,
+                length_equals,
+            ),
+            (
+                has_card_coverage_name,
+                installed.finite.has_card_coverage,
+                coverage,
+            ),
+        ] {
+            staged.bind_checked_theorem_alias(
+                name,
+                theorem,
+                parameters.clone(),
+                &Formula::implies(has_card_statement.clone(), conclusion),
+                vec![parameter],
+                vec![
+                    list_type.clone(),
+                    installed.finite.length.natural_type.clone(),
+                ],
+            )?;
+        }
         staged.library_aliases.push(LibraryAliasRegistration {
             package: LibraryPackageId::FiniteV1,
             namespace,
@@ -1959,7 +1994,13 @@ impl CompatibilityElaborator {
         let lowered = self.lower_definition_parameters(parameters, |lowerer| {
             let statement = lowerer.lower_formula(statement)?;
             let proof = lower_legacy_proof(self, lowerer.clone(), proof, false)?;
-            ensure_same_proposition(self, lowerer, &proof.proposition, &statement)?;
+            let proof = LegacyProofLowerer {
+                environment: self,
+                lowerer: lowerer.clone(),
+                hypotheses: Vec::new(),
+                allow_incomplete: false,
+            }
+            .lower_compatibility_conversion(proof, statement.clone())?;
             Ok((statement, proof.proof))
         })?;
         let (statement, proof) = lowered.body;
@@ -1995,7 +2036,13 @@ impl CompatibilityElaborator {
         let lowered = self.lower_definition_parameters(parameters, |lowerer| {
             let statement = lowerer.lower_formula(statement)?;
             let proof = lower_legacy_proof(self, lowerer.clone(), proof, true)?;
-            ensure_same_proposition(self, lowerer, &proof.proposition, &statement)?;
+            let proof = LegacyProofLowerer {
+                environment: self,
+                lowerer: lowerer.clone(),
+                hypotheses: Vec::new(),
+                allow_incomplete: true,
+            }
+            .lower_compatibility_conversion(proof, statement.clone())?;
             Ok((statement, proof.proof))
         })?;
         let (statement, proof) = lowered.body;
@@ -2334,15 +2381,26 @@ impl LegacyProofLowerer<'_> {
                 target,
             } => {
                 let proof_false = self.lower(proof_false)?;
-                self.expect_normalized_shape(
-                    &proof_false.proposition,
-                    |term| matches!(term, CoreTerm::Falsity),
-                    "false elimination needs a proof of falsity",
-                )?;
+                let normalized_false = self.normalize(&proof_false.proposition)?;
+                let proof_false = match normalized_false {
+                    CoreTerm::Falsity => proof_false.proof,
+                    // The legacy kernel treats equality between distinct
+                    // constructors as conversion to `False`. HOL keeps
+                    // no-confusion explicit, so replay that conversion with
+                    // the checked constructor-disjointness rule.
+                    CoreTerm::Equality { .. } => HolDraftProof::ConstructorDisjoint {
+                        proof_equality: Box::new(proof_false.proof),
+                    },
+                    _ => {
+                        return Err(LoweringError::new(
+                            "false elimination needs a proof of falsity",
+                        ));
+                    }
+                };
                 let target = self.lowerer.lower_proof_formula(target)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::FalseElim {
-                        proof_false: Box::new(proof_false.proof),
+                        proof_false: Box::new(proof_false),
                         target: target.clone(),
                     },
                     proposition: target,
@@ -2424,23 +2482,15 @@ impl LegacyProofLowerer<'_> {
                     .hypotheses
                     .push((left_name.clone(), (*left).clone()));
                 let left_case = left_scope.lower(left_case)?;
-                ensure_same_proposition(
-                    self.environment,
-                    &self.lowerer,
-                    &left_case.proposition,
-                    &target,
-                )?;
+                let left_case =
+                    left_scope.lower_compatibility_conversion(left_case, target.clone())?;
                 let mut right_scope = self.clone();
                 right_scope
                     .hypotheses
                     .push((right_name.clone(), (*right).clone()));
                 let right_case = right_scope.lower(right_case)?;
-                ensure_same_proposition(
-                    self.environment,
-                    &self.lowerer,
-                    &right_case.proposition,
-                    &target,
-                )?;
+                let right_case =
+                    right_scope.lower_compatibility_conversion(right_case, target.clone())?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::OrElim {
                         proof_or: Box::new(proof_or.proof),
@@ -2482,12 +2532,7 @@ impl LegacyProofLowerer<'_> {
                     ));
                 };
                 let argument = self.lower(proof_arg)?;
-                ensure_same_proposition(
-                    self.environment,
-                    &self.lowerer,
-                    &argument.proposition,
-                    &premise,
-                )?;
+                let argument = self.lower_compatibility_conversion(argument, (*premise).clone())?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::ImpElim {
                         proof_implication: Box::new(implication.proof),
@@ -2647,12 +2692,7 @@ impl LegacyProofLowerer<'_> {
                     &witness,
                 )?;
                 let proof_body = self.lower(proof_body)?;
-                ensure_same_proposition(
-                    self.environment,
-                    &self.lowerer,
-                    &proof_body.proposition,
-                    &expected_body,
-                )?;
+                let proof_body = self.lower_compatibility_conversion(proof_body, expected_body)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::ExistsIntro {
                         domain,
@@ -2688,12 +2728,7 @@ impl LegacyProofLowerer<'_> {
                     .hypotheses
                     .push((hyp_name.clone(), (*exists_body).clone()));
                 let body = body_scope.lower(body)?;
-                ensure_same_proposition(
-                    self.environment,
-                    &body_scope.lowerer,
-                    &body.proposition,
-                    &shifted_target,
-                )?;
+                let body = body_scope.lower_compatibility_conversion(body, shifted_target)?;
                 Ok(LoweredLegacyProof {
                     proof: HolDraftProof::ExistsElim {
                         proof_exists: Box::new(proof_exists.proof),
@@ -2773,12 +2808,7 @@ impl LegacyProofLowerer<'_> {
             CoreTerm::Constant(self.environment.prelude.zero()),
         ))?;
         let base_case = self.lower(base_case)?;
-        ensure_same_proposition(
-            self.environment,
-            &self.lowerer,
-            &base_case.proposition,
-            &base_expected,
-        )?;
+        let base_case = self.lower_compatibility_conversion(base_case, base_expected)?;
 
         let mut step_scope = self.under_term_binder(step_var, nat.clone())?;
         let shifted_motive = shift_under_new_binder(&motive)?;
@@ -2795,12 +2825,7 @@ impl LegacyProofLowerer<'_> {
             ),
         ))?;
         let step_case = step_scope.lower(step_case)?;
-        ensure_same_proposition(
-            self.environment,
-            &step_scope.lowerer,
-            &step_case.proposition,
-            &step_expected,
-        )?;
+        let step_case = step_scope.lower_compatibility_conversion(step_case, step_expected)?;
 
         Ok(LoweredLegacyProof {
             proof: HolDraftProof::Induction {
@@ -2902,12 +2927,7 @@ impl LegacyProofLowerer<'_> {
                     .push((ih_name.clone(), induction_hypothesis));
             }
             let case = arm_scope.lower(&arm.proof)?;
-            ensure_same_proposition(
-                self.environment,
-                &arm_scope.lowerer,
-                &case.proposition,
-                &case_expected,
-            )?;
+            let case = arm_scope.lower_compatibility_conversion(case, case_expected)?;
             cases.push(case.proof);
 
             debug_assert_eq!(
@@ -3121,6 +3141,19 @@ impl LegacyProofLowerer<'_> {
             });
         }
 
+        let source_normalized = self.normalize(&proof_body.proposition)?;
+        let target_normalized = self.normalize(&target)?;
+        if let Some(proof) = self.lower_no_confusion_conversion(
+            proof_body.proof.clone(),
+            &source_normalized,
+            &target_normalized,
+        )? {
+            return Ok(LoweredLegacyProof {
+                proof,
+                proposition: target,
+            });
+        }
+
         let (source_steps, source_normalized) =
             self.compatibility_arithmetic_path(&proof_body.proposition)?;
         let (target_steps, target_normalized) = self.compatibility_arithmetic_path(&target)?;
@@ -3186,6 +3219,243 @@ impl LegacyProofLowerer<'_> {
             proof,
             proposition: target,
         })
+    }
+
+    /// Reconstruct the legacy kernel's datatype no-confusion conversion with
+    /// explicit HOL evidence. Tactic-facing legacy normalization may replace
+    /// nullary reflexive equalities by `True` and distinct-constructor
+    /// equalities by `False`, including below conjunctions and disjunctions.
+    /// HOL intentionally keeps those equations visible, so compatibility
+    /// replay maps the proof through the surrounding connective.
+    fn lower_no_confusion_conversion(
+        &self,
+        proof: HolDraftProof,
+        source: &CoreTerm,
+        target: &CoreTerm,
+    ) -> Result<Option<HolDraftProof>, LoweringError> {
+        if definitionally_equal(
+            self.environment.core.types(),
+            self.environment.core.constants(),
+            &self.lowerer.core_context(),
+            source,
+            target,
+        )? {
+            return Ok(Some(proof));
+        }
+
+        let retain_result = |result| {
+            HolDraftProof::AndElimRight(Box::new(HolDraftProof::AndIntro(
+                Box::new(proof.clone()),
+                Box::new(result),
+            )))
+        };
+        match (source, target) {
+            (CoreTerm::Truth, CoreTerm::Equality { left, right, .. })
+                if definitionally_equal(
+                    self.environment.core.types(),
+                    self.environment.core.constants(),
+                    &self.lowerer.core_context(),
+                    left,
+                    right,
+                )? =>
+            {
+                Ok(Some(retain_result(HolDraftProof::EqualityRefl(
+                    (**left).clone(),
+                ))))
+            }
+            (CoreTerm::Equality { .. }, CoreTerm::Truth) => {
+                Ok(Some(retain_result(HolDraftProof::TruthIntro)))
+            }
+            (CoreTerm::Equality { .. }, CoreTerm::Falsity) => {
+                Ok(Some(HolDraftProof::ConstructorDisjoint {
+                    proof_equality: Box::new(proof),
+                }))
+            }
+            (CoreTerm::Falsity, _) => Ok(Some(HolDraftProof::FalseElim {
+                proof_false: Box::new(proof),
+                target: target.clone(),
+            })),
+            (
+                CoreTerm::And(source_left, source_right),
+                CoreTerm::And(target_left, target_right),
+            ) => {
+                let Some(left) = self.lower_no_confusion_conversion(
+                    HolDraftProof::AndElimLeft(Box::new(proof.clone())),
+                    source_left,
+                    target_left,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let Some(right) = self.lower_no_confusion_conversion(
+                    HolDraftProof::AndElimRight(Box::new(proof)),
+                    source_right,
+                    target_right,
+                )?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(HolDraftProof::AndIntro(
+                    Box::new(left),
+                    Box::new(right),
+                )))
+            }
+            (CoreTerm::Or(source_left, source_right), CoreTerm::Or(target_left, target_right)) => {
+                let left = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_left,
+                    target_left,
+                )?;
+                let right = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_right,
+                    target_right,
+                )?;
+                if let (Some(left), Some(right)) = (left, right) {
+                    return Ok(Some(HolDraftProof::OrElim {
+                        proof_or: Box::new(proof),
+                        left_case: Box::new(HolDraftProof::OrIntroLeft {
+                            proof_left: Box::new(left),
+                            right: (**target_right).clone(),
+                        }),
+                        right_case: Box::new(HolDraftProof::OrIntroRight {
+                            left: (**target_left).clone(),
+                            proof_right: Box::new(right),
+                        }),
+                        target: target.clone(),
+                    }));
+                }
+
+                // Legacy propositional normalization also erases impossible
+                // disjuncts after no-confusion (for example
+                // `red = yellow \/ P` becomes `P`). Reinsert or eliminate
+                // those branches with ordinary constructive evidence.
+                if let Some(right) =
+                    self.lower_no_confusion_conversion(proof.clone(), source, target_right)?
+                {
+                    return Ok(Some(HolDraftProof::OrIntroRight {
+                        left: (**target_left).clone(),
+                        proof_right: Box::new(right),
+                    }));
+                }
+                if let Some(left) =
+                    self.lower_no_confusion_conversion(proof.clone(), source, target_left)?
+                {
+                    return Ok(Some(HolDraftProof::OrIntroLeft {
+                        proof_left: Box::new(left),
+                        right: (**target_right).clone(),
+                    }));
+                }
+                let left_false = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_left,
+                    &CoreTerm::Falsity,
+                )?;
+                let right_target = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_right,
+                    target,
+                )?;
+                if let (Some(left_false), Some(right_target)) = (left_false, right_target) {
+                    return Ok(Some(HolDraftProof::OrElim {
+                        proof_or: Box::new(proof.clone()),
+                        left_case: Box::new(HolDraftProof::FalseElim {
+                            proof_false: Box::new(left_false),
+                            target: target.clone(),
+                        }),
+                        right_case: Box::new(right_target),
+                        target: target.clone(),
+                    }));
+                }
+                let right_false = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_right,
+                    &CoreTerm::Falsity,
+                )?;
+                let left_target = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_left,
+                    target,
+                )?;
+                if let (Some(right_false), Some(left_target)) = (right_false, left_target) {
+                    return Ok(Some(HolDraftProof::OrElim {
+                        proof_or: Box::new(proof),
+                        left_case: Box::new(left_target),
+                        right_case: Box::new(HolDraftProof::FalseElim {
+                            proof_false: Box::new(right_false),
+                            target: target.clone(),
+                        }),
+                        target: target.clone(),
+                    }));
+                }
+                Ok(None)
+            }
+            (_, CoreTerm::Or(target_left, target_right)) => {
+                if let Some(right) =
+                    self.lower_no_confusion_conversion(proof.clone(), source, target_right)?
+                {
+                    return Ok(Some(HolDraftProof::OrIntroRight {
+                        left: (**target_left).clone(),
+                        proof_right: Box::new(right),
+                    }));
+                }
+                if let Some(left) =
+                    self.lower_no_confusion_conversion(proof, source, target_left)?
+                {
+                    return Ok(Some(HolDraftProof::OrIntroLeft {
+                        proof_left: Box::new(left),
+                        right: (**target_right).clone(),
+                    }));
+                }
+                Ok(None)
+            }
+            (CoreTerm::Or(source_left, source_right), _) => {
+                let left_false = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_left,
+                    &CoreTerm::Falsity,
+                )?;
+                let right_target = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_right,
+                    target,
+                )?;
+                if let (Some(left_false), Some(right_target)) = (left_false, right_target) {
+                    return Ok(Some(HolDraftProof::OrElim {
+                        proof_or: Box::new(proof.clone()),
+                        left_case: Box::new(HolDraftProof::FalseElim {
+                            proof_false: Box::new(left_false),
+                            target: target.clone(),
+                        }),
+                        right_case: Box::new(right_target),
+                        target: target.clone(),
+                    }));
+                }
+                let right_false = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_right,
+                    &CoreTerm::Falsity,
+                )?;
+                let left_target = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    source_left,
+                    target,
+                )?;
+                if let (Some(right_false), Some(left_target)) = (right_false, left_target) {
+                    return Ok(Some(HolDraftProof::OrElim {
+                        proof_or: Box::new(proof),
+                        left_case: Box::new(left_target),
+                        right_case: Box::new(HolDraftProof::FalseElim {
+                            proof_false: Box::new(right_false),
+                            target: target.clone(),
+                        }),
+                        target: target.clone(),
+                    }));
+                }
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
     }
 
     fn compatibility_arithmetic_path(
@@ -3424,20 +3694,6 @@ impl LegacyProofLowerer<'_> {
             &self.lowerer.core_context(),
             proposition,
         )?)
-    }
-
-    fn expect_normalized_shape(
-        &self,
-        proposition: &CoreTerm,
-        predicate: impl FnOnce(&CoreTerm) -> bool,
-        message: &str,
-    ) -> Result<(), LoweringError> {
-        let normalized = self.normalize(proposition)?;
-        if predicate(&normalized) {
-            Ok(())
-        } else {
-            Err(LoweringError::new(message))
-        }
     }
 
     fn expect_type(
@@ -4039,10 +4295,17 @@ mod tests {
             .import_builtin_finite_v1(Some("F"))
             .expect("import finite package");
         assert_eq!(elaborator.libraries().packages().len(), 2);
-        assert!(elaborator
-            .theorems
-            .iter()
-            .any(|theorem| theorem.name == "F.has_card_intro"));
+        for theorem in [
+            "F.has_card_intro",
+            "F.has_card_nodup",
+            "F.has_card_length",
+            "F.has_card_coverage",
+        ] {
+            assert!(elaborator
+                .theorems
+                .iter()
+                .any(|registration| registration.name == theorem));
+        }
         let lists = elaborator
             .libraries()
             .list_v1()

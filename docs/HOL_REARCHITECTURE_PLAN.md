@@ -772,6 +772,20 @@ the browser proof reconstructs final transport from the public Nodup, length,
 and coverage lemmas, retaining their individual stable receipts. This
 checkpoint measures 1,775,272 bytes natively and 1,262,322 bytes in raw Wasm.
 
+The first vertical finite-mathematics pilot now checks two student-facing
+assignments. A three-constructor exhaustive enumeration is constructive,
+trust-free `fol+induction`; transporting a `HasCard` witness through generic
+`map` is honestly `hol`. Checked `has_card_nodup`, `has_card_length`, and
+`has_card_coverage` aliases give the witness a usable elimination interface.
+The multi-constructor proof also closed a shadow-only semantic seam: legacy
+no-confusion conversion beneath propositional connectives is reconstructed as
+explicit HOL disjointness, reflexivity, and natural-deduction evidence. Exact
+manifests freeze both profiles and package closures, and native/browser tests
+run both complete solutions. This 451-test checkpoint is 1,793,096 bytes
+natively and 1,281,435 bytes in raw Wasm. The explicit enumeration proof is
+still too ceremonial for a polished chapter; shortening it with checked support
+is now a measured curriculum requirement rather than speculative surface work.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -793,9 +807,11 @@ checkpoint measures 1,775,272 bytes natively and 1,262,322 bytes in raw Wasm.
   General generic source declarations and a decision about low-level core-API
   cutover remain; native and browser
   end-to-end acceptance are automatic. The finite package now exposes
-  `HasCard`, its List dependency, and checked introduction through a real
-  finite-datatype proof. Right append identity, append associativity, and
-  length over append pass through both the package and student-facing routes.
+  `HasCard`, its List dependency, checked introduction and elimination, and
+  real one- and three-constructor datatype proofs. A combined finite/cardinality
+  namespace now supports a complete `HasCard`-under-bijection source proof.
+  Right append identity, append associativity, and length over append pass
+  through both the package and student-facing routes.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass: path

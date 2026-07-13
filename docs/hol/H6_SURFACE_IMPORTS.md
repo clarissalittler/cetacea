@@ -254,6 +254,19 @@ lemmas, so the final theorem is convenient rather than opaque or indispensable.
 The complete catalog checkpoint is 1,775,272 bytes natively and 1,262,322 bytes
 in raw Wasm.
 
+`std/hol/finite@1` now exposes the elimination side of its witness interface as
+well: `has_card_nodup`, `has_card_length`, and `has_card_coverage` are distinct
+checked aliases with stable package receipts. Importing finite and cardinality
+under the same namespace composes their shared List aliases idempotently. The
+vertical pilot uses that surface to derive `HasCard(map(f, xs), n)` from one
+source `HasCard(xs, n)` hypothesis. A separate three-constructor source proof
+forced compatibility replay to make legacy datatype no-confusion explicit
+below disjunctions; it now constructs kernel-checked disjointness, reflexivity,
+and connective evidence rather than treating legacy conversion as HOL
+definitional equality. Native and browser tests pin the datatype exercise to
+`fol+induction` and the genuine `map` exercise to `hol`. The checkpoint is
+1,793,096 bytes natively and 1,281,435 bytes in raw Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages

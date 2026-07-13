@@ -265,6 +265,23 @@ three-component result from `nodup_map_injective`, `map_length`, and
 directly. This complete-catalog checkpoint measures 1,775,272 bytes natively
 and 1,262,322 bytes in raw Wasm.
 
+The first finite-mathematics vertical pilot is now executable rather than a
+library-only acceptance test. A three-constructor `Traffic` exercise proves
+`HasCard([red, yellow, green], 3)` through the public surface and is certified
+constructive, trust-free `fol+induction`. It exposed a compatibility gap where
+legacy datatype no-confusion had simplified constructor equalities beneath
+disjunctions; HOL replay now reconstructs those conversions with explicit
+constructor-disjointness, reflexivity, and natural-deduction evidence. The
+finite package also exports checked `has_card_nodup`, `has_card_length`, and
+`has_card_coverage` projections, so later mathematics consumes one `HasCard`
+hypothesis rather than three unrelated implementation premises. A second
+exercise imports finite enumeration and cardinality under one shared namespace
+and proves that mapping a bijection preserves `HasCard`. Its manifest honestly
+requires `hol`, while the datatype exercise's manifest enforces
+`fol+induction`; both run through native and browser dual checking. See the
+[`pilot`](pilot/README.md). This checkpoint has 451 passing tests and measures
+1,793,096 bytes natively and 1,281,435 bytes in raw Wasm.
+
 ## Remaining migration slices
 
 1. Extend the implemented function-symbol theorem schemas to the remaining
@@ -281,11 +298,11 @@ and 1,262,322 bytes in raw Wasm.
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
-4. Extend the implemented finite surface to representative multi-constructor
-   exercises, then prove pigeonhole,
-   finite-union-cardinality, and handshake targets through checked library
-   theorems. Extend enumeration generation beyond nullary datatypes only when a
-   course theorem requires it.
+4. The first representative multi-constructor exercise and `HasCard` transport
+   exercise now pass. Shorten the intentionally explicit enumeration proof with
+   checked reusable support, then prove pigeonhole, finite-union-cardinality,
+   and handshake targets through checked library theorems. Extend enumeration
+   generation beyond nullary datatypes only when a course theorem requires it.
 5. Add the finite tree edge/vertex theorem and a pilot chapter sequence. Freeze
    each assignment's profile, imports, trusted principles, and theorem
    signatures with manifests.

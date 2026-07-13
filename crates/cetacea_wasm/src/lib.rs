@@ -736,4 +736,59 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
             assert!(json.contains(expected), "missing {expected} in {json}");
         }
     }
+
+    #[test]
+    fn browser_check_certifies_the_finite_vertical_pilot() {
+        let traffic = include_str!("../../../docs/hol/examples/finite_traffic.ctea");
+        let traffic_report = check_file_with_imports_and_hol_shadow(traffic, &standard_imports());
+        assert!(
+            traffic_report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            traffic_report.legacy.diagnostics
+        );
+        assert!(
+            traffic_report.is_match(),
+            "mismatches: {:#?}",
+            traffic_report.mismatches
+        );
+        let traffic_json = hol_shadow_result_json(&traffic_report);
+        for expected in [
+            r#""hol_certified":true"#,
+            r#""required_fragment":"fol+induction""#,
+            r#""imported_packages":["std/hol/finite@1","std/hol/list@1"]"#,
+        ] {
+            assert!(
+                traffic_json.contains(expected),
+                "missing {expected} in {traffic_json}"
+            );
+        }
+
+        let bijection = include_str!("../../../docs/hol/examples/finite_bijection.ctea");
+        let bijection_report =
+            check_file_with_imports_and_hol_shadow(bijection, &standard_imports());
+        assert!(
+            bijection_report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            bijection_report.legacy.diagnostics
+        );
+        assert!(
+            bijection_report.is_match(),
+            "mismatches: {:#?}",
+            bijection_report.mismatches
+        );
+        let bijection_json = hol_shadow_result_json(&bijection_report);
+        for expected in [
+            r#""hol_certified":true"#,
+            r#""required_fragment":"hol""#,
+            r#""imported_packages":["std/hol/cardinality@1","std/hol/finite@1","std/hol/list@1"]"#,
+            r#"std/hol/finite@1::has_card_nodup"#,
+            r#"std/hol/finite@1::has_card_length"#,
+            r#"std/hol/finite@1::has_card_coverage"#,
+        ] {
+            assert!(
+                bijection_json.contains(expected),
+                "missing {expected} in {bijection_json}"
+            );
+        }
+    }
 }

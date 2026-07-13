@@ -4840,7 +4840,16 @@ impl FileChecker {
         };
         let has_card_name = qualify("HasCard");
         let has_card_intro_name = qualify("has_card_intro");
-        for name in [&has_card_name, &has_card_intro_name] {
+        let has_card_nodup_name = qualify("has_card_nodup");
+        let has_card_length_name = qualify("has_card_length");
+        let has_card_coverage_name = qualify("has_card_coverage");
+        for name in [
+            &has_card_name,
+            &has_card_intro_name,
+            &has_card_nodup_name,
+            &has_card_length_name,
+            &has_card_coverage_name,
+        ] {
             if self.env.has_top_level_name(name) {
                 self.result.diagnostics.push(diagnostic_at(
                     source_path,
@@ -4877,6 +4886,9 @@ impl FileChecker {
         let mut staged_env = self.env.clone();
         staged_env.reserve_package_name(has_card_name.clone());
         staged_env.reserve_package_name(has_card_intro_name.clone());
+        staged_env.reserve_package_name(has_card_nodup_name.clone());
+        staged_env.reserve_package_name(has_card_length_name.clone());
+        staged_env.reserve_package_name(has_card_coverage_name.clone());
         staged_env.add_rank_one_pred(
             has_card_name.clone(),
             vec![element_parameter],
@@ -4913,6 +4925,15 @@ impl FileChecker {
             .find(|declaration| declaration.logical_name == "has_card_intro")
             .and_then(|declaration| declaration.receipt)
             .expect("registered has_card_intro theorem has a receipt");
+        let finite_theorem_receipt = |logical_name: &str| {
+            installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == logical_name)
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered finite theorem has a receipt")
+        };
         let coverage = Formula::forall(
             "x".to_string(),
             Type::Named("A".to_string()),
@@ -4921,36 +4942,39 @@ impl FileChecker {
                 vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
             ),
         );
-        staged_env.add_theorem(Theorem {
-            name: has_card_intro_name,
-            params: vec![
+        let nodup = Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]);
+        let length_equals = Formula::eq(
+            Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
+            Term::Var("n".to_string()),
+        );
+        let has_card = Formula::PredApp(
+            has_card_name,
+            vec![Term::Var("xs".to_string()), Term::Var("n".to_string())],
+        );
+        let theorem_parameters = || {
+            vec![
                 Param {
                     name: "A".to_string(),
                     kind: ParamKind::Type,
                 },
                 Param {
                     name: "xs".to_string(),
-                    kind: ParamKind::Term(list_type),
+                    kind: ParamKind::Term(list_type.clone()),
                 },
                 Param {
                     name: "n".to_string(),
                     kind: ParamKind::Term(Type::Nat),
                 },
-            ],
+            ]
+        };
+        staged_env.add_theorem(Theorem {
+            name: has_card_intro_name,
+            params: theorem_parameters(),
             statement: Formula::implies(
-                Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+                nodup.clone(),
                 Formula::implies(
-                    Formula::eq(
-                        Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
-                        Term::Var("n".to_string()),
-                    ),
-                    Formula::implies(
-                        coverage,
-                        Formula::PredApp(
-                            has_card_name,
-                            vec![Term::Var("xs".to_string()), Term::Var("n".to_string())],
-                        ),
-                    ),
+                    length_equals.clone(),
+                    Formula::implies(coverage.clone(), has_card.clone()),
                 ),
             ),
             evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
@@ -4962,6 +4986,25 @@ impl FileChecker {
             uses_sorry: false,
             axiom_deps: Vec::new(),
         });
+        for (name, logical_name, conclusion) in [
+            (has_card_nodup_name, "has_card_nodup", nodup),
+            (has_card_length_name, "has_card_length", length_equals),
+            (has_card_coverage_name, "has_card_coverage", coverage),
+        ] {
+            staged_env.add_theorem(Theorem {
+                name,
+                params: theorem_parameters(),
+                statement: Formula::implies(has_card.clone(), conclusion),
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    hol::LibraryPackageId::FiniteV1,
+                    finite_theorem_receipt(logical_name),
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: Vec::new(),
+            });
+        }
         let shadow = self
             .hol_shadow
             .as_mut()
@@ -20892,6 +20935,17 @@ theorem singleton_has_card_id :
   intro h
   exact h
 
+theorem has_card_components (A : Type) (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  F.Nodup(xs) /\
+    (F.length(xs) = n /\ (forall x : A, F.Member(x, xs))) := by
+  intro h
+  split
+  exact F.has_card_nodup {A := A; xs := xs; n := n} h
+  split
+  exact F.has_card_length {A := A; xs := xs; n := n} h
+  exact F.has_card_coverage {A := A; xs := xs; n := n} h
+
 data One
 | only
 
@@ -20947,7 +21001,12 @@ theorem one_has_card :
             .receipt_names
             .values()
             .any(|name| name == "std/hol/finite@1::HasCard"));
-        for name in ["has_card_id", "singleton_has_card_id", "one_has_card"] {
+        for name in [
+            "has_card_id",
+            "singleton_has_card_id",
+            "has_card_components",
+            "one_has_card",
+        ] {
             let theorem = report
                 .theorems
                 .iter()
@@ -20975,6 +21034,82 @@ theorem one_has_card :
                 report.receipt_names.get(dependency).map(String::as_str)
                     == Some("std/hol/finite@1::has_card_intro")
             }));
+        let components = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "has_card_components")
+            .expect("HasCard elimination receipt");
+        for dependency in [
+            "std/hol/finite@1::has_card_nodup",
+            "std/hol/finite@1::has_card_length",
+            "std/hol/finite@1::has_card_coverage",
+        ] {
+            assert!(components
+                .receipt
+                .proof()
+                .direct_dependencies()
+                .iter()
+                .any(
+                    |receipt| report.receipt_names.get(receipt).map(String::as_str)
+                        == Some(dependency)
+                ));
+        }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn finite_vertical_pilot_examples_are_dual_checked_and_fragment_honest() {
+        let traffic =
+            check_file_at_path_with_hol_shadow(repo_path("docs/hol/examples/finite_traffic.ctea"));
+        assert!(
+            traffic.legacy.diagnostics.is_empty(),
+            "unexpected traffic diagnostics: {:#?}",
+            traffic.legacy.diagnostics
+        );
+        assert!(
+            traffic.is_match(),
+            "traffic mismatches: {:#?}",
+            traffic.mismatches
+        );
+        let traffic_theorem = traffic
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "traffic_has_card_three")
+            .expect("traffic cardinality receipt");
+        assert_eq!(
+            traffic_theorem.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+
+        let bijection = check_file_at_path_with_hol_shadow(repo_path(
+            "docs/hol/examples/finite_bijection.ctea",
+        ));
+        assert!(
+            bijection.legacy.diagnostics.is_empty(),
+            "unexpected bijection diagnostics: {:#?}",
+            bijection.legacy.diagnostics
+        );
+        assert!(
+            bijection.is_match(),
+            "bijection mismatches: {:#?}",
+            bijection.mismatches
+        );
+        assert_eq!(
+            bijection.imported_packages,
+            [
+                "std/hol/cardinality@1",
+                "std/hol/finite@1",
+                "std/hol/list@1",
+            ]
+        );
+        for theorem in &bijection.theorems {
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::HigherOrder
+            );
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
     }
 
     #[cfg(feature = "hol-shadow")]

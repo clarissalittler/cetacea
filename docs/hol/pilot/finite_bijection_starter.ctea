@@ -1,0 +1,14 @@
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+theorem has_card_map_bijection
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  F.HasCard(F.map(f, xs), n) := by
+  sorry
