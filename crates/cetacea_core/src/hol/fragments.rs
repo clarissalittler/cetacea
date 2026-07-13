@@ -46,6 +46,7 @@ impl fmt::Display for StatementFragment {
 pub struct FragmentMetadata {
     inductive_types: BTreeSet<TypeConstructorId>,
     structurally_recursive_constants: BTreeSet<ConstantId>,
+    first_order_implementation_constants: BTreeSet<ConstantId>,
 }
 
 impl FragmentMetadata {
@@ -59,6 +60,15 @@ impl FragmentMetadata {
 
     pub fn mark_structurally_recursive_constant(&mut self, id: ConstantId) {
         self.structurally_recursive_constants.insert(id);
+    }
+
+    /// Mark an internal, inaccessible helper whose arrow-valued parameter is
+    /// an implementation detail of a saturated first-order recursive symbol.
+    /// This is deliberately narrower than structural recursion: public
+    /// functions such as `map` must still reveal function-valued arguments as
+    /// HOL.
+    pub fn mark_first_order_implementation_constant(&mut self, id: ConstantId) {
+        self.first_order_implementation_constants.insert(id);
     }
 }
 
@@ -327,6 +337,8 @@ fn classify_declared_application(
 ) -> Result<StatementFragment, FragmentError> {
     let mut arguments = Vec::new();
     let head = application_spine(application, &mut arguments);
+    let first_order_implementation = declared_head(head)
+        .is_some_and(|(id, _)| metadata.first_order_implementation_constants.contains(&id));
     let (mut current_type, mut fragment) = if let Some((id, type_arguments)) = declared_head(head) {
         let fragment = classify_type_arguments(types, metadata, type_arguments)?.combine(
             if metadata.structurally_recursive_constants.contains(&id) {
@@ -358,7 +370,17 @@ fn classify_declared_application(
         };
         let domain_fragment = classify_data_type(types, metadata, &domain)?;
         if domain_fragment == StatementFragment::HigherOrder {
-            return Ok(StatementFragment::HigherOrder);
+            if !first_order_implementation {
+                return Ok(StatementFragment::HigherOrder);
+            }
+            // The marked helper is not source-accessible. Its predicate
+            // argument was produced by normalization of a saturated
+            // first-order recursive relation, so retain the recursion
+            // boundary without misclassifying that implementation closure as
+            // a user-level higher-order value.
+            fragment = fragment.combine(StatementFragment::FirstOrderInductive);
+            current_type = *codomain;
+            continue;
         }
         fragment = fragment
             .combine(domain_fragment)

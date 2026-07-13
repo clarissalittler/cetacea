@@ -196,6 +196,7 @@ impl CompatibilityPrelude {
                 ),
             ],
         })?;
+        staged.mark_first_order_implementation_constant(less_equal_tail);
         let less_equal = staged.declare_structural_definition(StructuralDefinitionSpec {
             name: "le".to_string(),
             type_parameters: Vec::new(),
@@ -899,7 +900,9 @@ fn declare_subtraction_successor_successor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hol::fragments::{EvidenceStatus, ProofFeature, StatementFragment, TeachingProfile};
+    use crate::hol::fragments::{
+        classify_statement, EvidenceStatus, ProofFeature, StatementFragment, TeachingProfile,
+    };
     use crate::hol::proofs::HolDraftProof;
     use crate::hol::terms::{definitionally_equal, infer_type, normalize, TermContext};
     use crate::hol::{ReceiptPolicy, TypeSignature};
@@ -1202,6 +1205,27 @@ mod tests {
         assert!(ReceiptPolicy::new(TeachingProfile::FirstOrderInductive)
             .check(&receipt)
             .is_empty());
+
+        let open_context = TermContext::new().with_bound(nat.clone());
+        let open_successor_order = CoreTerm::implies(
+            binary(
+                prelude.less_equal(),
+                successor(&prelude, CoreTerm::Bound(0)),
+                CoreTerm::Bound(0),
+            ),
+            CoreTerm::Falsity,
+        );
+        assert_eq!(
+            classify_statement(
+                elaborator.types(),
+                elaborator.constants(),
+                &open_context,
+                elaborator.fragment_metadata(),
+                &open_successor_order,
+            )
+            .expect("classify open saturated order relation"),
+            StatementFragment::FirstOrderInductive
+        );
 
         let predicate = CoreTerm::apply(CoreTerm::Constant(prelude.less_equal()), zero);
         let higher_order_statement = CoreTerm::equality(

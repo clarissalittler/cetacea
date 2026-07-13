@@ -731,12 +731,34 @@ impl DataCtor {
             .map(|(idx, _)| idx)
             .collect()
     }
+
+    fn recursive_arg_indices_for_type(&self, data_type: &Type) -> Vec<usize> {
+        self.arg_types
+            .iter()
+            .enumerate()
+            .filter_map(|(index, ty)| (ty == data_type).then_some(index))
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataDef {
     pub name: Name,
     pub ctors: Vec<DataCtor>,
+}
+
+/// Induction metadata for a logical package datatype whose element types are
+/// instantiated at the use site.  The ordinary compatibility `DataDef` is
+/// monomorphic; this small schema lets the tactic layer recover the checked
+/// induction theorem without pretending an imported `List A` is a local data
+/// declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RankOneDataDef {
+    type_params: Vec<Name>,
+    data: DataDef,
+    induction_theorem: Name,
+    predicate_parameter: Name,
+    scrutinee_parameter: Name,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -781,6 +803,40 @@ fn data_def_for_type(env: &Env, ty: &Type) -> Option<DataDef> {
         Type::Named(name) => env.data_def(name).cloned(),
         _ => None,
     }
+}
+
+fn instantiate_rank_one_data_def(
+    env: &Env,
+    data_name: &str,
+    type_arguments: &[Type],
+) -> Option<(RankOneDataDef, DataDef)> {
+    let schema = env.rank_one_data_defs.get(data_name)?.clone();
+    if schema.type_params.len() != type_arguments.len() {
+        return None;
+    }
+    let mut substitution = SchemaSubst::default();
+    for (parameter, argument) in schema.type_params.iter().zip(type_arguments) {
+        substitution
+            .type_args
+            .insert(parameter.clone(), argument.clone());
+    }
+    let data = DataDef {
+        name: schema.data.name.clone(),
+        ctors: schema
+            .data
+            .ctors
+            .iter()
+            .map(|constructor| DataCtor {
+                name: constructor.name.clone(),
+                arg_types: constructor
+                    .arg_types
+                    .iter()
+                    .map(|ty| subst_type_schema(ty, &substitution))
+                    .collect(),
+            })
+            .collect(),
+    };
+    Some((schema, data))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -982,6 +1038,7 @@ pub struct Env {
     defs: HashMap<Name, FormulaDef>,
     term_defs: HashMap<Name, TermDef>,
     data_defs: HashMap<Name, DataDef>,
+    rank_one_data_defs: HashMap<Name, RankOneDataDef>,
     data_rec_defs: HashMap<Name, DataRecDef>,
     theorems: HashMap<Name, Theorem>,
 }
@@ -1014,6 +1071,11 @@ impl Env {
 
     pub fn add_sort(&mut self, name: Name) {
         self.sorts.insert(name.clone(), Type::Named(name));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn add_rank_one_data_def(&mut self, data: RankOneDataDef) {
+        self.rank_one_data_defs.insert(data.data.name.clone(), data);
     }
 
     #[cfg(feature = "hol-shadow")]
@@ -1530,15 +1592,26 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
     if message.contains("cannot induct on") && message.contains("depends on it") {
         let var = extract_backtick_after(message, "cannot induct on `").unwrap_or("n");
         let hyp = extract_backtick_after(message, "while hypothesis `").unwrap_or("h");
+        let induction_type =
+            extract_backtick_after(message, "induction variable has type `").unwrap_or("Nat");
+        let example = if induction_type == "Nat" {
+            format!(
+                "revert {hyp}\ninduction {var} with\n| zero =>\n    intro {hyp}\n    ...\n| succ k ih =>\n    intro {hyp}\n    ..."
+            )
+        } else if induction_type.contains("List ") {
+            format!(
+                "revert {hyp}\ninduction {var} with\n| nil =>\n    intro {hyp}\n    ...\n| cons h t ih =>\n    intro {hyp}\n    ..."
+            )
+        } else {
+            format!("revert {hyp}\ninduction {var} with\n| ...")
+        };
         push(
             &mut suggestions,
             "Revert dependent hypotheses before induction",
             format!(
                 "Hypothesis `{hyp}` mentions `{var}`, so it cannot be kept unchanged while `{var}` is split into cases. Use `revert {hyp}` to move it back into the goal, run induction, then introduce `{hyp}` inside each arm."
             ),
-            Some(&format!(
-                "revert {hyp}\ninduction {var} with\n| zero =>\n    intro {hyp}\n    ...\n| succ k ih =>\n    intro {hyp}\n    ..."
-            )),
+            Some(&example),
         );
     }
     if message.contains("requires classical mode")
@@ -3625,6 +3698,31 @@ impl FileChecker {
                 vec![list_type.clone()],
                 Type::Nat,
             );
+            staged_env.add_rank_one_data_def(RankOneDataDef {
+                type_params: vec!["A".to_string()],
+                data: DataDef {
+                    name: datatype_name.clone(),
+                    ctors: vec![
+                        DataCtor {
+                            name: nil_name.clone(),
+                            arg_types: Vec::new(),
+                        },
+                        DataCtor {
+                            name: cons_name.clone(),
+                            arg_types: vec![
+                                Type::Named("A".to_string()),
+                                Type::App(
+                                    datatype_name.clone(),
+                                    vec![Type::Named("A".to_string())],
+                                ),
+                            ],
+                        },
+                    ],
+                },
+                induction_theorem: list_induction_name.clone(),
+                predicate_parameter: "P".to_string(),
+                scrutinee_parameter: "xs".to_string(),
+            });
 
             let shadow = self
                 .hol_shadow
@@ -4343,6 +4441,8 @@ impl FileChecker {
             None => leaf.to_string(),
         };
         let map_name = qualify("map");
+        let map_nil_name = qualify("map_nil");
+        let map_cons_name = qualify("map_cons");
         let map_length_name = qualify("map_length");
         let member_map_forward_name = qualify("member_map_forward");
         let member_map_reverse_name = qualify("member_map_reverse");
@@ -4351,6 +4451,8 @@ impl FileChecker {
         let cardinality_transport_name = qualify("cardinality_transport");
         for name in [
             &map_name,
+            &map_nil_name,
+            &map_cons_name,
             &map_length_name,
             &member_map_forward_name,
             &member_map_reverse_name,
@@ -4394,6 +4496,8 @@ impl FileChecker {
         let target_list_type = Type::App(qualify("List"), vec![codomain_type.clone()]);
         let mut staged_env = self.env.clone();
         staged_env.reserve_package_name(map_name.clone());
+        staged_env.reserve_package_name(map_nil_name.clone());
+        staged_env.reserve_package_name(map_cons_name.clone());
         staged_env.reserve_package_name(map_length_name.clone());
         staged_env.reserve_package_name(member_map_forward_name.clone());
         staged_env.reserve_package_name(member_map_reverse_name.clone());
@@ -4410,7 +4514,7 @@ impl FileChecker {
                 },
                 RankOneFunctionArgument::Term(source_list_type.clone()),
             ],
-            target_list_type,
+            target_list_type.clone(),
         );
 
         let installed = match self
@@ -4436,6 +4540,114 @@ impl FileChecker {
                 return;
             }
         };
+        let computation_receipt = |logical_name: &str| {
+            installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == logical_name)
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered map computation theorem has a receipt")
+        };
+        let computation_type_parameters = || {
+            vec![
+                Param {
+                    name: "A".to_string(),
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: "B".to_string(),
+                    kind: ParamKind::Type,
+                },
+            ]
+        };
+        let computation_domain_type = Type::Named("A".to_string());
+        let computation_codomain_type = Type::Named("B".to_string());
+        let computation_source_list =
+            Type::App(qualify("List"), vec![computation_domain_type.clone()]);
+        let computation_target_list =
+            Type::App(qualify("List"), vec![computation_codomain_type.clone()]);
+        let computation_function_parameter = || Param {
+            name: "f".to_string(),
+            kind: ParamKind::Function {
+                arguments: vec![computation_domain_type.clone()],
+                result: computation_codomain_type.clone(),
+            },
+        };
+        let mut map_nil_parameters = computation_type_parameters();
+        map_nil_parameters.push(computation_function_parameter());
+        staged_env.add_theorem(Theorem {
+            name: map_nil_name,
+            params: map_nil_parameters,
+            statement: Formula::eq(
+                Term::App(
+                    map_name.clone(),
+                    vec![
+                        Term::Var("f".to_string()),
+                        Term::Ascribed {
+                            term: Box::new(Term::Var(qualify("nil"))),
+                            ty: computation_source_list.clone(),
+                        },
+                    ],
+                ),
+                Term::Ascribed {
+                    term: Box::new(Term::Var(qualify("nil"))),
+                    ty: computation_target_list,
+                },
+            ),
+            evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                hol::LibraryPackageId::CardinalityV1,
+                computation_receipt("map_nil"),
+            )),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+        let mut map_cons_parameters = computation_type_parameters();
+        map_cons_parameters.push(computation_function_parameter());
+        map_cons_parameters.push(Param {
+            name: "h".to_string(),
+            kind: ParamKind::Term(computation_domain_type),
+        });
+        map_cons_parameters.push(Param {
+            name: "t".to_string(),
+            kind: ParamKind::Term(computation_source_list),
+        });
+        staged_env.add_theorem(Theorem {
+            name: map_cons_name,
+            params: map_cons_parameters,
+            statement: Formula::eq(
+                Term::App(
+                    map_name.clone(),
+                    vec![
+                        Term::Var("f".to_string()),
+                        Term::App(
+                            qualify("cons"),
+                            vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                        ),
+                    ],
+                ),
+                Term::App(
+                    qualify("cons"),
+                    vec![
+                        Term::App("f".to_string(), vec![Term::Var("h".to_string())]),
+                        Term::App(
+                            map_name.clone(),
+                            vec![Term::Var("f".to_string()), Term::Var("t".to_string())],
+                        ),
+                    ],
+                ),
+            ),
+            evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                hol::LibraryPackageId::CardinalityV1,
+                computation_receipt("map_cons"),
+            )),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
         let map_length_receipt = installed
             .record
             .declarations
@@ -17396,10 +17608,15 @@ fn run_tactic_step_inner(
                 .iter()
                 .find(|binding| formula_has_free_term(&binding.formula, var_name))
             {
-                return Err(TacticError::new(format!(
+                let message = format!(
                     "cannot induct on `{var_name}` while hypothesis `{}` depends on it",
-                    binding.name
-                )));
+                    binding.name,
+                );
+                return Err(TacticError::new(if var_type == Type::Nat {
+                    message
+                } else {
+                    format!("{message} (induction variable has type `{var_type}`)")
+                }));
             }
 
             match &var_type {
@@ -17523,6 +17740,168 @@ fn run_tactic_step_inner(
                             target: goal.target,
                             arms: proof_arms,
                         }),
+                        new_goals: Vec::new(),
+                        notes,
+                    })
+                }
+                Type::App(data_name, type_arguments)
+                    if env.rank_one_data_defs.contains_key(data_name) =>
+                {
+                    let (schema, data) = instantiate_rank_one_data_def(
+                        env,
+                        data_name,
+                        type_arguments,
+                    )
+                    .expect("guarded rank-one data definition has matching arguments");
+                    if arms.len() != data.ctors.len() {
+                        let expected = data
+                            .ctors
+                            .iter()
+                            .map(|constructor| constructor.name.as_str())
+                            .collect::<Vec<_>>();
+                        return Err(TacticError::new(format!(
+                            "induction on `{var_name}` over `{var_type}` needs one arm per constructor: {}",
+                            expected.join(", ")
+                        )));
+                    }
+
+                    let mut case_proofs = Vec::with_capacity(arms.len());
+                    let mut notes = Vec::new();
+                    for (arm, constructor) in arms.iter().zip(&data.ctors) {
+                        let resolved = resolve_data_ctor_label(env, &goal.context, &arm.ctor);
+                        let leaf_matches = qualified_name_leaf(&constructor.name)
+                            .is_some_and(|leaf| leaf == arm.ctor);
+                        if resolved != constructor.name && !leaf_matches {
+                            return Err(TacticError::new(format!(
+                                "induction arm `{}` does not match constructor `{}`; arms must follow the declaration order",
+                                arm.ctor, constructor.name
+                            )));
+                        }
+                        let recursive_indices =
+                            constructor.recursive_arg_indices_for_type(&var_type);
+                        let expected_binders =
+                            constructor.arg_types.len() + recursive_indices.len();
+                        if arm.binders.len() != expected_binders {
+                            return Err(TacticError::new(format!(
+                                "induction arm `{}` expects {} binder(s): one per constructor argument, then one induction hypothesis per recursive argument",
+                                constructor.name, expected_binders
+                            )));
+                        }
+                        for binder in &arm.binders {
+                            ensure_induction_binder_unused(&goal.context, binder)?;
+                        }
+                        let argument_names = &arm.binders[..constructor.arg_types.len()];
+                        let induction_names = &arm.binders[constructor.arg_types.len()..];
+
+                        let mut arm_context = goal.context.clone();
+                        for (name, ty) in argument_names.iter().zip(&constructor.arg_types) {
+                            arm_context.add_term(name.clone(), ty.clone());
+                        }
+                        for (name, recursive_index) in
+                            induction_names.iter().zip(&recursive_indices)
+                        {
+                            arm_context.add_proof(
+                                name.clone(),
+                                subst_formula_term(
+                                    &goal.target,
+                                    var_name,
+                                    &Term::Var(argument_names[*recursive_index].clone()),
+                                ),
+                            );
+                        }
+                        let constructor_term = Term::Ascribed {
+                            term: Box::new(data_ctor_term(
+                                &constructor.name,
+                                argument_names,
+                            )),
+                            ty: var_type.clone(),
+                        };
+                        let arm_target =
+                            subst_formula_term(&goal.target, var_name, &constructor_term);
+                        let arm_proof = prove(
+                            env,
+                            arm_context,
+                            arm_target,
+                            &arm.tactics,
+                            allowed_mode,
+                        )?;
+                        notes.extend(arm_proof.notes);
+
+                        let mut case_proof = arm_proof.proof;
+                        for (name, recursive_index) in induction_names
+                            .iter()
+                            .zip(&recursive_indices)
+                            .rev()
+                        {
+                            case_proof = DraftProof::ImpIntro {
+                                hyp_name: name.clone(),
+                                hyp_formula: subst_formula_term(
+                                    &goal.target,
+                                    var_name,
+                                    &Term::Var(argument_names[*recursive_index].clone()),
+                                ),
+                                body: Box::new(case_proof),
+                            };
+                        }
+                        for (name, ty) in argument_names
+                            .iter()
+                            .zip(&constructor.arg_types)
+                            .rev()
+                        {
+                            case_proof = DraftProof::ForallIntro {
+                                var: name.clone(),
+                                var_type: ty.clone(),
+                                body: Box::new(case_proof),
+                            };
+                        }
+                        case_proofs.push(case_proof);
+                    }
+
+                    let mut motive_name = "__cetacea_induction_value".to_string();
+                    while goal.context.lookup_term(&motive_name).is_some()
+                        || goal.context.lookup(&motive_name).is_some()
+                    {
+                        motive_name.push('_');
+                    }
+                    let mut substitution = SchemaSubst::default();
+                    for (parameter, argument) in
+                        schema.type_params.iter().zip(type_arguments)
+                    {
+                        substitution
+                            .type_args
+                            .insert(parameter.clone(), argument.clone());
+                    }
+                    substitution.predicate_args.insert(
+                        schema.predicate_parameter,
+                        PredicateArg::Lambda {
+                            params: vec![LambdaParam {
+                                name: motive_name.clone(),
+                                ty: Some(var_type.clone()),
+                            }],
+                            body: subst_formula_term(
+                                &goal.target,
+                                var_name,
+                                &Term::Var(motive_name),
+                            ),
+                        },
+                    );
+                    substitution.term_args.insert(
+                        schema.scrutinee_parameter,
+                        Term::Var(var_name.clone()),
+                    );
+                    let mut proof = DraftProof::TheoremRef {
+                        name: schema.induction_theorem,
+                        subst: substitution,
+                    };
+                    for case_proof in case_proofs {
+                        proof = DraftProof::ImpElim {
+                            proof_imp: Box::new(proof),
+                            proof_arg: Box::new(case_proof),
+                        };
+                    }
+
+                    Ok(StepResult {
+                        replacement: PartialProof::Done(proof),
                         new_goals: Vec::new(),
                         notes,
                     })
@@ -20869,6 +21248,16 @@ theorem list_induction_smoke (A : Type) (x : A) (xs : L.List A) :
   intro ih
   intro member
   exact member
+
+theorem direct_list_induction_smoke (A : Type) (x : A) (xs : L.List A) :
+  L.Member(x, xs) -> L.Member(x, xs) := by
+  induction xs with
+  | nil =>
+      intro member
+      exact member
+  | cons h t ih =>
+      intro member
+      exact member
 "#,
         );
         assert!(
@@ -20877,29 +21266,31 @@ theorem list_induction_smoke (A : Type) (x : A) (xs : L.List A) :
             report.legacy.diagnostics
         );
         assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
-        let theorem = report
-            .theorems
-            .iter()
-            .find(|theorem| theorem.name == "list_induction_smoke")
-            .expect("list_induction_smoke receipt");
-        assert_eq!(
-            theorem.statement_fragment,
-            hol::StatementFragment::FirstOrderInductive
-        );
-        assert_eq!(
-            theorem.required_fragment,
-            hol::StatementFragment::FirstOrderInductive
-        );
-        assert!(theorem.features.contains(&hol::ProofFeature::Induction));
-        assert!(theorem
-            .receipt
-            .proof()
-            .direct_dependencies()
-            .iter()
-            .any(|dependency| {
-                report.receipt_names.get(dependency).map(String::as_str)
-                    == Some("std/hol/list@1::list_induction")
-            }));
+        for name in ["list_induction_smoke", "direct_list_induction_smoke"] {
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|theorem| theorem.name == name)
+                .expect("generic List induction receipt");
+            assert_eq!(
+                theorem.statement_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+            assert!(theorem.features.contains(&hol::ProofFeature::Induction));
+            assert!(theorem
+                .receipt
+                .proof()
+                .direct_dependencies()
+                .iter()
+                .any(|dependency| {
+                    report.receipt_names.get(dependency).map(String::as_str)
+                        == Some("std/hol/list@1::list_induction")
+                }));
+        }
     }
 
     #[cfg(feature = "hol-shadow")]
@@ -21194,6 +21585,64 @@ theorem one_has_card :
             assert!(theorem.axiom_deps.is_empty());
             assert!(theorem.incomplete_deps.is_empty());
         }
+
+        let pigeonhole =
+            check_file_at_path_with_hol_shadow(repo_path("docs/book/hol-code/ch15-solutions.ctea"));
+        assert!(
+            pigeonhole.legacy.diagnostics.is_empty(),
+            "unexpected Chapter 15 diagnostics: {:#?}",
+            pigeonhole.legacy.diagnostics
+        );
+        assert!(
+            pigeonhole.is_match(),
+            "Chapter 15 mismatches: {:#?}",
+            pigeonhole.mismatches
+        );
+        assert_eq!(
+            pigeonhole.imported_packages,
+            [
+                "std/hol/cardinality@1",
+                "std/hol/finite@1",
+                "std/hol/list@1",
+            ]
+        );
+        for theorem in &pigeonhole.theorems {
+            if theorem.is_imported {
+                continue;
+            }
+            let expected = match theorem.name.as_str() {
+                "ex15_1" | "ex15_2" | "ex15_5" => hol::StatementFragment::FirstOrderInductive,
+                "ex15_3" | "ex15_4" | "ex15_6" => hol::StatementFragment::HigherOrder,
+                other => panic!("unexpected Chapter 15 theorem `{other}`"),
+            };
+            let dependency_names = theorem
+                .receipt
+                .proof()
+                .direct_dependencies()
+                .iter()
+                .map(|dependency| {
+                    pigeonhole
+                        .receipt_names
+                        .get(dependency)
+                        .cloned()
+                        .or_else(|| {
+                            pigeonhole
+                                .theorems
+                                .iter()
+                                .find(|candidate| candidate.receipt.id() == *dependency)
+                                .map(|candidate| candidate.name.clone())
+                        })
+                        .unwrap_or_else(|| format!("receipt#{}", dependency.0))
+                })
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                theorem.required_fragment, expected,
+                "unexpected Chapter 15 fragment for {}; direct dependencies: {dependency_names:?}",
+                theorem.name
+            );
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
     }
 
     #[cfg(feature = "hol-shadow")]
@@ -21208,6 +21657,14 @@ func inc : Nat -> Nat
 theorem mapped_refl (xs : C.List Nat) :
   C.map(inc, xs) = C.map(inc, xs) := by
   refl
+
+theorem map_nil_inc :
+  C.map(inc, (C.nil : C.List Nat)) = (C.nil : C.List Nat) := by
+  exact C.map_nil {A := Nat; B := Nat; f := inc}
+
+theorem map_cons_inc (h : Nat) (t : C.List Nat) :
+  C.map(inc, C.cons(h, t)) = C.cons(inc(h), C.map(inc, t)) := by
+  exact C.map_cons {A := Nat; B := Nat; f := inc; h := h; t := t}
 
 theorem map_length_inc (xs : C.List Nat) :
   C.length(C.map(inc, xs)) = C.length(xs) := by
@@ -21282,6 +21739,8 @@ theorem transport_from_parts
         );
         for name in [
             "mapped_refl",
+            "map_nil_inc",
+            "map_cons_inc",
             "map_length_inc",
             "member_forward_use",
             "member_reverse_use",
@@ -21293,13 +21752,18 @@ theorem transport_from_parts
                 .iter()
                 .find(|theorem| theorem.name == name)
                 .expect("cardinality surface theorem receipt");
-            assert_eq!(
-                theorem.statement_fragment,
+            let statement_fragment = if name == "map_nil_inc" {
+                hol::StatementFragment::FirstOrderInductive
+            } else {
                 hol::StatementFragment::HigherOrder
+            };
+            assert_eq!(
+                theorem.statement_fragment, statement_fragment,
+                "unexpected statement fragment for {name}"
             );
             assert_eq!(
-                theorem.required_fragment,
-                hol::StatementFragment::HigherOrder
+                theorem.required_fragment, statement_fragment,
+                "unexpected required fragment for {name}"
             );
         }
         let map_length_inc = report
@@ -21316,6 +21780,25 @@ theorem transport_from_parts
                 report.receipt_names.get(dependency).map(String::as_str)
                     == Some("std/hol/cardinality@1::map_length_schema")
             }));
+        for (theorem_name, dependency_name) in [
+            ("map_nil_inc", "std/hol/cardinality@1::map_nil"),
+            ("map_cons_inc", "std/hol/cardinality@1::map_cons"),
+        ] {
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|theorem| theorem.name == theorem_name)
+                .expect("map computation surface theorem receipt");
+            assert!(theorem
+                .receipt
+                .proof()
+                .direct_dependencies()
+                .iter()
+                .any(|dependency| {
+                    report.receipt_names.get(dependency).map(String::as_str)
+                        == Some(dependency_name)
+                }));
+        }
         for (theorem_name, dependency_name) in [
             (
                 "member_forward_use",

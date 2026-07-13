@@ -1,0 +1,23 @@
+version = 1
+profile = "hol"
+
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+
+allowed_imports = [
+  "../../../std/nat.ctea",
+  "std/hol/cardinality@1",
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
+allowed_axioms = []
+
+required_theorem.ex15_1 = '(A : Type) (a : A) (ys : F.List A) : F.Member(a, ys) -> exists zs : F.List A, F.length(ys) = succ(F.length(zs)) /\ (forall x : A, (not x = a) -> F.Member(x, ys) -> F.Member(x, zs))'
+required_theorem.ex15_2 = '(A : Type) (xs : F.List A) : forall ys : F.List A, F.Nodup(xs) -> (forall x : A, F.Member(x, xs) -> F.Member(x, ys)) -> le(F.length(xs), F.length(ys))'
+required_theorem.ex15_3 = '(A : Type) (B : Type) (f : A -> B) (xs : F.List A) (y : B) : F.Member(y, F.map(f, xs)) -> exists x : A, F.Member(x, xs) /\ f(x) = y'
+required_theorem.ex15_4 = '(A : Type) (B : Type) (f : A -> B) (xs : F.List A) : (forall x1 : A, forall x2 : A, f(x1) = f(x2) -> x1 = x2) -> F.Nodup(xs) -> F.Nodup(F.map(f, xs))'
+required_theorem.ex15_5 = '(n : Nat) : not le(succ(n), n)'
+required_theorem.ex15_6 = '(A : Type) (B : Type) (f : A -> B) (xs : F.List A) (ys : F.List B) (n : Nat) : F.HasCard(xs, succ(n)) -> F.HasCard(ys, n) -> not (forall x1 : A, forall x2 : A, f(x1) = f(x2) -> x1 = x2)'

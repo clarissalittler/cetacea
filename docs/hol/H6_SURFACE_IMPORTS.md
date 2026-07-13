@@ -278,6 +278,21 @@ Chapters 13–14, their twelve exercises, both manifests, and native/browser
 solution tests form the new curriculum checkpoint. It measures 1,794,264 bytes
 natively and 1,282,208 bytes in raw Wasm.
 
+Chapter 15 now completes the next theorem-sized vertical target. Direct
+`induction xs` recognizes imported `List A` and elaborates through the checked
+package induction theorem; `map_nil` and `map_cons` expose the structural map
+equations as receipt-backed schemas. A constructive member-removal invariant
+proves that a duplicate-free included list cannot be longer than its
+container, and an existential map-membership theorem derives `Nodup(map f xs)`
+from ordinary injectivity. The final pigeonhole theorem consumes two
+`HasCard` witnesses and remains classical-, axiom-, and hole-free. Its
+first-order schema conclusion retains a transitive `hol` requirement from the
+mapped proof, while the removal, inclusion, and arithmetic exercises remain
+`fol+induction`. The expanded checker validates 86 `.ctea` files, the frozen
+74-file pre-HOL baseline remains exact, all 453 workspace tests pass, and the
+release artifacts measure 1,815,032 bytes natively and 1,301,134 bytes in raw
+Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages

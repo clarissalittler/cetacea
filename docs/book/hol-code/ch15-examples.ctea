@@ -1,0 +1,260 @@
+-- Proofs, Checked -- Chapter 15: Pigeonhole
+-- Companion file for docs/book/15-pigeonhole.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch15-examples.ctea
+
+import ../../../std/nat.ctea
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+-- Removing one known occurrence needs no equality decision.  The proof of
+-- membership tells us which branch of the list contains the occurrence.
+theorem member_remove_one
+  (A : Type) (a : A) (ys : F.List A) :
+  F.Member(a, ys) ->
+  exists zs : F.List A,
+    F.length(ys) = succ(F.length(zs)) /\
+    (forall x : A,
+      (x = a -> False) ->
+      F.Member(x, ys) ->
+      F.Member(x, zs)) := by
+  induction ys with
+  | nil =>
+      intro member_a
+      exfalso
+      exact F.member_nil {A := A; x := a} member_a
+  | cons h t ih =>
+      intro member_a
+      have member_cases : a = h \/ F.Member(a, t) := by
+        apply (F.member_cons {A := A; x := a; h := h; t := t}).left
+        exact member_a
+      cases member_cases with
+      | left a_h =>
+          exists t
+          split
+          rewrite -> F.length_cons {A := A; h := h; t := t}
+          refl
+          intro x
+          intro x_not_a
+          intro member_x
+          have x_cases : x = h \/ F.Member(x, t) := by
+            apply (F.member_cons {A := A; x := x; h := h; t := t}).left
+            exact member_x
+          cases x_cases with
+          | left x_h =>
+              exfalso
+              apply x_not_a
+              rewrite -> a_h
+              exact x_h
+          | right x_in_t =>
+              exact x_in_t
+      | right a_in_t =>
+          cases ih a_in_t with
+          | intro zs removal =>
+              exists F.cons(h, zs)
+              split
+              rewrite -> F.length_cons {A := A; h := h; t := t}
+              rewrite -> F.length_cons {A := A; h := h; t := zs}
+              rewrite -> removal.left
+              refl
+              intro x
+              intro x_not_a
+              intro member_x
+              have x_cases : x = h \/ F.Member(x, t) := by
+                apply (F.member_cons {A := A; x := x; h := h; t := t}).left
+                exact member_x
+              apply (F.member_cons {
+                A := A; x := x; h := h; t := zs
+              }).right
+              cases x_cases with
+              | left x_h =>
+                  left
+                  exact x_h
+              | right x_in_t =>
+                  right
+                  exact removal.right x x_not_a x_in_t
+
+-- A duplicate-free list included in another list cannot be longer.
+-- Notice that the containing list need not itself be duplicate-free.
+theorem nodup_inclusion_length_le
+  (A : Type) (xs : F.List A) :
+  forall ys : F.List A,
+  F.Nodup(xs) ->
+  (forall x : A, F.Member(x, xs) -> F.Member(x, ys)) ->
+  le(F.length(xs), F.length(ys)) := by
+  induction xs with
+  | nil =>
+      intro ys
+      intro nodup_xs
+      intro included
+      rewrite -> F.length_nil {A := A}
+      exact zero_le {n := F.length(ys)}
+  | cons h t ih =>
+      intro ys
+      intro nodup_xs
+      intro included
+      have nodup_parts : (F.Member(h, t) -> False) /\ F.Nodup(t) := by
+        apply (F.nodup_cons {A := A; h := h; t := t}).left
+        exact nodup_xs
+      have h_in_xs : F.Member(h, F.cons(h, t)) := by
+        apply (F.member_cons {A := A; x := h; h := h; t := t}).right
+        left
+        refl
+      have h_in_ys : F.Member(h, ys) := included h h_in_xs
+      cases member_remove_one {A := A; a := h; ys := ys} h_in_ys with
+      | intro zs removal =>
+          have tail_included : forall x : A, F.Member(x, t) -> F.Member(x, zs) := by
+            intro x
+            intro x_in_t
+            apply removal.right x
+            intro x_h
+            apply nodup_parts.left
+            rewrite <- x_h
+            exact x_in_t
+            apply included x
+            apply (F.member_cons {A := A; x := x; h := h; t := t}).right
+            right
+            exact x_in_t
+          have tail_le : le(F.length(t), F.length(zs)) := by
+            apply ih zs
+            exact nodup_parts.right
+            exact tail_included
+          have lifted_tail_le : le(succ(F.length(t)), succ(F.length(zs))) := by
+            exact le_succ_succ_rev {
+              n := F.length(t); m := F.length(zs)
+            } tail_le
+          rewrite -> F.length_cons {A := A; h := h; t := t}
+          rewrite -> removal.left
+          exact lifted_tail_le
+
+-- Membership in a mapped list carries a source witness.  This is the
+-- direction needed for ordinary injectivity; no global inverse is assumed.
+theorem member_map_witness
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (y : B) :
+  F.Member(y, F.map(f, xs)) ->
+  exists x : A, F.Member(x, xs) /\ f(x) = y := by
+  induction xs with
+  | nil =>
+      intro member_y
+      exfalso
+      apply F.member_nil {A := B; x := y}
+      rewrite <- F.map_nil {A := A; B := B; f := f}
+      exact member_y
+  | cons h t ih =>
+      intro member_y
+      have member_cases : y = f(h) \/ F.Member(y, F.map(f, t)) := by
+        apply (F.member_cons {
+          A := B; x := y; h := f(h); t := F.map(f, t)
+        }).left
+        rewrite <- F.map_cons {
+          A := A; B := B; f := f; h := h; t := t
+        }
+        exact member_y
+      cases member_cases with
+      | left y_fh =>
+          exists h
+          split
+          apply (F.member_cons {A := A; x := h; h := h; t := t}).right
+          left
+          refl
+          rewrite -> y_fh
+          refl
+      | right y_in_map_t =>
+          cases ih y_in_map_t with
+          | intro x witness =>
+              exists x
+              split
+              apply (F.member_cons {A := A; x := x; h := h; t := t}).right
+              right
+              exact witness.left
+              exact witness.right
+
+-- Ordinary injectivity, rather than a supplied inverse, is enough to keep a
+-- mapped list duplicate-free.
+theorem nodup_map_of_injective
+  (A : Type) (B : Type) (f : A -> B) (xs : F.List A) :
+  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->
+  F.Nodup(xs) ->
+  F.Nodup(F.map(f, xs)) := by
+  induction xs with
+  | nil =>
+      intro injective
+      intro nodup_xs
+      rewrite -> F.map_nil {A := A; B := B; f := f}
+      exact F.nodup_nil {A := B}
+  | cons h t ih =>
+      intro injective
+      intro nodup_xs
+      have nodup_parts : (F.Member(h, t) -> False) /\ F.Nodup(t) := by
+        apply (F.nodup_cons {A := A; h := h; t := t}).left
+        exact nodup_xs
+      rewrite -> F.map_cons {A := A; B := B; f := f; h := h; t := t}
+      apply (F.nodup_cons {
+        A := B; h := f(h); t := F.map(f, t)
+      }).right
+      split
+      intro fh_in_tail
+      have preimage : exists x : A, F.Member(x, t) /\ f(x) = f(h) := by
+        exact member_map_witness {
+          A := A; B := B; f := f; xs := t; y := f(h)
+        } fh_in_tail
+      cases preimage with
+      | intro x witness =>
+          apply nodup_parts.left
+          have x_h : x = h := injective x h witness.right
+          rewrite <- x_h
+          exact witness.left
+      apply ih injective
+      exact nodup_parts.right
+
+theorem succ_not_le_self (n : Nat) : le(succ(n), n) -> False := by
+  induction n with
+  | zero =>
+      exact succ_not_le_zero 0
+  | succ k ih =>
+      intro bad_order
+      apply ih
+      exact le_succ_succ {n := succ(k); m := k} bad_order
+
+-- The generic pigeonhole principle in constructive negative form: an
+-- injection from n+1 enumerated values into n enumerated values is impossible.
+theorem pigeonhole
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (ys : F.List B) (n : Nat) :
+  F.HasCard(xs, succ(n)) ->
+  F.HasCard(ys, n) ->
+  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->
+  False := by
+  intro source_cardinality
+  intro target_cardinality
+  intro injective
+  have mapped_nodup : F.Nodup(F.map(f, xs)) := by
+    apply nodup_map_of_injective {A := A; B := B; f := f; xs := xs}
+    exact injective
+    exact F.has_card_nodup {
+      A := A; xs := xs; n := succ(n)
+    } source_cardinality
+  have mapped_in_target : forall y : B, F.Member(y, F.map(f, xs)) -> F.Member(y, ys) := by
+    intro y
+    intro y_in_map
+    exact F.has_card_coverage {
+      A := B; xs := ys; n := n
+    } target_cardinality y
+  have bad_order : le(F.length(F.map(f, xs)), F.length(ys)) := by
+    apply nodup_inclusion_length_le {
+      A := B; xs := F.map(f, xs)
+    } ys
+    exact mapped_nodup
+    exact mapped_in_target
+  apply succ_not_le_self n
+  rewrite <- F.has_card_length {
+    A := A; xs := xs; n := succ(n)
+  } source_cardinality
+  rewrite <- F.has_card_length {
+    A := B; xs := ys; n := n
+  } target_cardinality
+  rewrite <- F.map_length {A := A; B := B; f := f; xs := xs}
+  exact bad_order

@@ -115,6 +115,10 @@ impl SpikeElaborator {
         &self.fragments
     }
 
+    pub(crate) fn mark_first_order_implementation_constant(&mut self, id: ConstantId) {
+        self.fragments.mark_first_order_implementation_constant(id);
+    }
+
     pub fn theorems(&self) -> &HolTheoremSignature {
         &self.theorems
     }

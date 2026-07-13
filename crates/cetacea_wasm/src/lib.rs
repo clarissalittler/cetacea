@@ -844,5 +844,33 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
                 "missing {expected} in {bijection_json}"
             );
         }
+
+        let pigeonhole = include_str!("../../../docs/book/hol-code/ch15-solutions.ctea");
+        let pigeonhole_report =
+            check_file_with_imports_and_hol_shadow(pigeonhole, &standard_imports());
+        assert!(
+            pigeonhole_report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            pigeonhole_report.legacy.diagnostics
+        );
+        assert!(
+            pigeonhole_report.is_match(),
+            "mismatches: {:#?}",
+            pigeonhole_report.mismatches
+        );
+        let pigeonhole_json = hol_shadow_result_json(&pigeonhole_report);
+        for expected in [
+            r#""hol_certified":true"#,
+            r#""required_fragment":"hol""#,
+            r#""name":"ex15_6""#,
+            r#""imported_packages":["std/hol/cardinality@1","std/hol/finite@1","std/hol/list@1"]"#,
+            r#"std/hol/cardinality@1::map_nil"#,
+            r#"std/hol/cardinality@1::map_cons"#,
+        ] {
+            assert!(
+                pigeonhole_json.contains(expected),
+                "missing {expected} in {pigeonhole_json}"
+            );
+        }
     }
 }

@@ -918,6 +918,8 @@ impl CompatibilityElaborator {
             None => leaf.to_string(),
         };
         let map_name = qualify("map");
+        let map_nil_name = qualify("map_nil");
+        let map_cons_name = qualify("map_cons");
         let map_length_name = qualify("map_length");
         let member_map_forward_name = qualify("member_map_forward");
         let member_map_reverse_name = qualify("member_map_reverse");
@@ -925,6 +927,8 @@ impl CompatibilityElaborator {
         let map_coverage_surjective_name = qualify("map_coverage_surjective");
         let cardinality_transport_name = qualify("cardinality_transport");
         self.ensure_name_free(&map_name)?;
+        self.ensure_name_free(&map_nil_name)?;
+        self.ensure_name_free(&map_cons_name)?;
         self.ensure_name_free(&map_length_name)?;
         self.ensure_name_free(&member_map_forward_name)?;
         self.ensure_name_free(&member_map_reverse_name)?;
@@ -954,6 +958,96 @@ impl CompatibilityElaborator {
         let surface_domain_type = Type::Named(surface_domain_parameter.clone());
         let surface_codomain_type = Type::Named(surface_codomain_parameter.clone());
         let surface_list_type = Type::App(qualify("List"), vec![surface_domain_type.clone()]);
+        let surface_target_list_type =
+            Type::App(qualify("List"), vec![surface_codomain_type.clone()]);
+        let surface_function_parameter = || Param {
+            name: "f".to_string(),
+            kind: ParamKind::Function {
+                arguments: vec![surface_domain_type.clone()],
+                result: surface_codomain_type.clone(),
+            },
+        };
+        let surface_type_parameters = || {
+            vec![
+                Param {
+                    name: surface_domain_parameter.clone(),
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: surface_codomain_parameter.clone(),
+                    kind: ParamKind::Type,
+                },
+            ]
+        };
+        let mut map_nil_parameters = surface_type_parameters();
+        map_nil_parameters.push(surface_function_parameter());
+        staged.bind_checked_theorem_alias(
+            map_nil_name,
+            installed.map_nil_schema,
+            map_nil_parameters,
+            &Formula::eq(
+                Term::App(
+                    map_name.clone(),
+                    vec![
+                        Term::Var("f".to_string()),
+                        Term::Ascribed {
+                            term: Box::new(Term::Var(qualify("nil"))),
+                            ty: surface_list_type.clone(),
+                        },
+                    ],
+                ),
+                Term::Ascribed {
+                    term: Box::new(Term::Var(qualify("nil"))),
+                    ty: surface_target_list_type.clone(),
+                },
+            ),
+            vec![domain_parameter, codomain_parameter],
+            vec![function_type.clone()],
+        )?;
+        let mut map_cons_parameters = surface_type_parameters();
+        map_cons_parameters.push(surface_function_parameter());
+        map_cons_parameters.push(Param {
+            name: "h".to_string(),
+            kind: ParamKind::Term(surface_domain_type.clone()),
+        });
+        map_cons_parameters.push(Param {
+            name: "t".to_string(),
+            kind: ParamKind::Term(surface_list_type.clone()),
+        });
+        let mapped_tail = Term::App(
+            map_name.clone(),
+            vec![Term::Var("f".to_string()), Term::Var("t".to_string())],
+        );
+        staged.bind_checked_theorem_alias(
+            map_cons_name,
+            installed.map_cons_schema,
+            map_cons_parameters,
+            &Formula::eq(
+                Term::App(
+                    map_name.clone(),
+                    vec![
+                        Term::Var("f".to_string()),
+                        Term::App(
+                            qualify("cons"),
+                            vec![Term::Var("h".to_string()), Term::Var("t".to_string())],
+                        ),
+                    ],
+                ),
+                Term::App(
+                    qualify("cons"),
+                    vec![
+                        Term::App("f".to_string(), vec![Term::Var("h".to_string())]),
+                        mapped_tail,
+                    ],
+                ),
+            ),
+            vec![domain_parameter, codomain_parameter],
+            vec![
+                function_type.clone(),
+                domain_type.clone(),
+                source_list_type.clone(),
+            ],
+        )?;
         let parameters = vec![
             Param {
                 name: surface_domain_parameter,

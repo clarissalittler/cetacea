@@ -802,6 +802,21 @@ bytes natively and 1,282,208 bytes in raw Wasm. The book's friction ledger now
 pins proposition-aware simplification, goal-directed package inference, and
 term-definition unfolding as measured follow-up work before pigeonhole.
 
+The pigeonhole vertical is now executable as Chapter 15. Its constructive
+negative theorem derives a length contradiction from ordinary injectivity and
+two `HasCard` witnesses. The intervening proof establishes proof-relevant
+member removal, duplicate-free inclusion bounds, mapped-member witnesses, and
+injective preservation of `Nodup`. The exercise split remains exact:
+removal/inclusion/arithmetic are `fol+induction`, map lemmas are `hol`, and the
+first-order-looking final statement retains the mapped proof's transitive HOL
+requirement. Direct induction on imported `List A`, checked `map_nil` and
+`map_cons`, and internal-helper-safe `le` classification were implemented as
+measured prerequisites. The next reuse gate is finite-union cardinality, after
+promoting the stable counting subset instead of copying it again. The expanded
+book checker now covers 86 `.ctea` files; the frozen 74-file pre-HOL oracle
+still matches exactly. All 453 workspace tests pass, and the release artifacts
+measure 1,815,032 bytes natively and 1,301,134 bytes in raw Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -811,14 +826,16 @@ term-definition unfolding as measured follow-up work before pigeonhole.
   implemented, together with a signature-only logical import under HOL shadow.
   Five bottom-up-inferable List operations now cross the dual-checking boundary;
   contextual `nil` inference and predicate-valued `All` arguments are
-  implemented as well. Three checked computation theorems now drive `exact` or
-  explicit `simp` without adding legacy reduction rules, and checked generic
-  List induction is available through `apply`. Checked term ascriptions resolve
+  implemented as well. Checked computation theorems now drive `exact` or
+  explicit `simp` without adding legacy reduction rules; generic List
+  induction is available through `apply`, and direct `induction xs` routes an
+  imported `List A` through the same receipt. Checked term ascriptions resolve
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
   constructor laws are source-facing. `All` constructor laws now demonstrate
   instance-sensitive fragment enforcement. Rank-one function-symbol parameters
   now cover the arrow-valued schema prerequisite for cardinality transport, and
-  the cardinality `map`, `map_length`, and final transport surfaces are source-
+  the cardinality `map`, `map_nil`, `map_cons`, `map_length`, and final
+  transport surfaces are source-
   and browser-facing with an honest HOL boundary.
   General generic source declarations and a decision about low-level core-API
   cutover remain; native and browser
@@ -827,15 +844,15 @@ term-definition unfolding as measured follow-up work before pigeonhole.
   real one- and three-constructor datatype proofs. A combined finite/cardinality
   namespace now supports a complete `HasCard`-under-bijection source proof.
   Student-defined structural encoders can now occupy the same checked
-  function-valued package positions without being replaced by axioms, and two
+  function-valued package positions without being replaced by axioms, and three
   executable book chapters exercise that path.
   Right append identity, append associativity, and length over append pass
   through both the package and student-facing routes.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass. The
-  finite-enumeration and bijection chapters now pass; path concatenation,
-  pigeonhole, finite union cardinality, handshake, and a finite tree
+  finite-enumeration, bijection, and pigeonhole chapters now pass; path
+  concatenation, finite union cardinality, handshake, and a finite tree
   edge/vertex theorem remain vertical targets.
 - Retain explicit path witnesses in FOL exercises even though HOL libraries can
   express closures more abstractly.

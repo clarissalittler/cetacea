@@ -1,0 +1,18 @@
+version = 1
+profile = "fol+induction"
+
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+
+allowed_imports = [
+  "../../../std/nat.ctea",
+  "std/hol/cardinality@1",
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
+allowed_axioms = []
+
+required_theorem.ex15_6 = '(A : Type) (B : Type) (f : A -> B) (xs : F.List A) (ys : F.List B) (n : Nat) : F.HasCard(xs, succ(n)) -> F.HasCard(ys, n) -> not (forall x1 : A, forall x2 : A, f(x1) = f(x2) -> x1 = x2)'

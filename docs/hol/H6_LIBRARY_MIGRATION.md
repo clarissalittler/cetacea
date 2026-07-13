@@ -296,6 +296,21 @@ tests run both complete chapter solutions. The expanded book checker validates
 453-test checkpoint measures 1,794,264 bytes natively and 1,282,208 bytes in
 raw Wasm.
 
+The next vertical target, pigeonhole, is now integrated as Chapter 15 with six
+more exercises, complete solutions, intended failures, and paired assignment
+policies. The proof is constructive in negative form. It factors through a
+proof-relevant member-removal lemma, a duplicate-free inclusion length bound,
+a mapped-member source witness, and ordinary injectivity preserving `Nodup`.
+Writing it added checked `map_nil`/`map_cons` schemas, direct tactic induction
+over imported polymorphic List, and a narrow classification marker preventing
+the inaccessible predicate-valued implementation helper for `le` from
+mislabeling saturated first-order order formulas as HOL. The public `map`
+boundary remains HOL, and the final theorem cannot launder that transitive
+dependency through its first-order-looking conclusion.
+The expanded book checker now validates 86 `.ctea` files, while the frozen
+74-file pre-HOL oracle still matches exactly. This 453-test checkpoint measures
+1,815,032 bytes natively and 1,301,134 bytes in raw Wasm.
+
 ## Remaining migration slices
 
 1. Extend the implemented function-symbol theorem schemas beyond the now-
@@ -313,15 +328,16 @@ raw Wasm.
    edge-symbol family. Keep path witnesses explicit in restricted FOL
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
-4. The first representative multi-constructor exercise and `HasCard` transport
-   exercise now pass. Shorten the intentionally explicit enumeration proof with
-   checked reusable support, then prove pigeonhole, finite-union-cardinality,
-   and handshake targets through checked library theorems. Extend enumeration
+4. The first representative multi-constructor exercise, `HasCard` transport,
+   and generic pigeonhole theorem now pass. Shorten the intentionally explicit
+   enumeration proof and promote Chapter 15's stable removal/inclusion subset
+   to checked reusable support, then prove finite-union-cardinality and
+   handshake targets through checked library theorems. Extend enumeration
    generation beyond nullary datatypes only when a course theorem requires it.
-5. Chapters 13–14 now provide the first pilot sequence and freeze each
+5. Chapters 13–15 now provide the first pilot sequence and freeze each
    assignment's profile, imports, trusted principles, and theorem signatures.
    Add the finite tree edge/vertex theorem and its chapter after the intervening
-   pigeonhole/counting surface is proved usable.
+   counting surface is packaged and proved reusable.
 
 ## Gates for each slice
 

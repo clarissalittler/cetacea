@@ -217,6 +217,60 @@ edges.
     nested `cons` terms in the component proofs. This is separate from kernel
     transparency: it is a proof-state and tactic-surface gap.
 
+27. **Resolved: direct induction now recognizes imported polymorphic
+    datatypes.** `induction xs` rejected `xs : F.List A` even though the List
+    package exported a checked induction theorem. The workaround required an
+    explicit predicate-valued `apply F.list_induction`. Logical imports now
+    register their rank-one datatype/constructor metadata, and the induction
+    tactic elaborates the ordinary `nil`/`cons` arms through that checked
+    theorem. The receipt retains the package dependency and the least
+    `fol+induction` fragment. Dependent-hypothesis diagnostics also render the
+    List constructor skeleton rather than the old hard-coded Nat skeleton.
+
+28. **Resolved: generic `map` exposes checked constructor equations.** The
+    cardinality package had `map_length` and membership transport but no public
+    way to reduce `map(f, nil)` or `map(f, cons(h,t))`. Consequently even the
+    base case of “mapped membership has a source witness” was inaccessible
+    from source. `map_nil` and `map_cons` are now checked theorem schemas backed
+    by the existing structural definition, registered transactionally and
+    available through native/browser imports. They add no reduction axiom.
+
+29. **Resolved: an internal recursion closure no longer mislabels open order
+    formulas as HOL.** The checked binary `le` definition uses the inaccessible
+    predicate-valued helper `@compat.le_tail`. Delta-normalizing
+    `not le(succ(n), n)` exposed that helper and classified an ordinary order
+    statement as `hol`. Fragment metadata now marks only this internal helper
+    as first-order implementation scaffolding. Saturated open order remains
+    `fol+induction`; public structural functions such as `map` still expose
+    genuine function-valued arguments as HOL.
+
+30. **Open, high impact: the counting infrastructure is reusable but not yet
+    packaged.** Chapter 15's final pigeonhole assembly is about forty lines,
+    while constructive member removal, duplicate-free inclusion, mapped-member
+    witnesses, and injective `Nodup` preservation take roughly two hundred.
+    Finite-union cardinality will need much of the same surface. Before copying
+    it again, promote the stable subset to a checked versioned counting package
+    and decide whether proof-relevant removal or a higher-level inclusion
+    theorem is the public abstraction.
+
+31. **Open, medium impact: proof-state generalization and local rewriting are
+    too narrow.** The inclusion induction needs an induction hypothesis
+    quantified over a changing container list. `revert` moves proof
+    hypotheses but not a term variable such as `ys`, so the theorem statement
+    must place `forall ys` below the `xs` parameter in advance. Likewise
+    `rewrite ... at h` is unavailable; Chapter 15 has to reshape goals and use
+    hypotheses afterward. Generalizing term variables and equality rewriting
+    in named hypotheses would make standard induction invariants much easier
+    to discover interactively.
+
+32. **Open design choice: positive constructive collision witnesses need more
+    data.** The generic cardinality proof constructively establishes
+    `not Injective(f)`, but intuitionistic logic does not turn that negated
+    universal into `exists x1 x2, x1 != x2 /\ f(x1) = f(x2)`. A later API can
+    offer a classical corollary, or finite evidence can grow a decidable/search
+    interface that computes the pair. Do not silently add classical reasoning
+    to the base pigeonhole theorem.
+
 ## Already fixed while writing the book
 
 - `le_trans` was missing from `std/nat.ctea` (chapter 7 needed it) —

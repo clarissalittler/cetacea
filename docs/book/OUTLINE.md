@@ -238,3 +238,22 @@ make the fragment boundary executable.
 function-symbol schema parameters, structural definitions in function-valued
 positions, generic `map`, fragment classification, assignment-policy
 rejection.
+
+## Chapter 15 — Pigeonhole, One Element at a Time
+
+*Drafted: [15-pigeonhole.md](15-pigeonhole.md)*
+
+The generic pigeonhole principle is proved constructively in negative form:
+an injective function cannot send an enumerated type of size `n + 1` into one
+of size `n`. A proof-relevant removal lemma establishes that a duplicate-free
+included list cannot be longer than its container; a mapped-membership witness
+then upgrades Chapter 14's left-inverse interface to ordinary injectivity.
+The chapter explains why negated injectivity does not construct a collision
+pair without additional logical or computational data. Exact policies keep
+the removal, inclusion, and arithmetic exercises in `fol+induction` while
+rejecting the map arguments and final transitive client under that profile.
+
+**Cetacea features:** direct induction on imported polymorphic `List A`,
+checked `map_nil`/`map_cons`, `HasCard` projections, constructive existential
+list witnesses, ordinary function injectivity, transitive fragment
+enforcement, internal-helper-safe classification of `le`.

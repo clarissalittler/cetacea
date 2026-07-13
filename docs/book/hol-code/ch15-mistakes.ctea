@@ -1,0 +1,43 @@
+-- Proofs, Checked -- Chapter 15: mistakes (this file should fail).
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch15-mistakes.ctea
+
+import ../../../std/nat.ctea
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+-- Mistake 1: introducing a premise that depends on the list before
+-- induction asks the checker to keep an impossible fixed hypothesis in
+-- every constructor arm.  Induct first; introduce member_a inside each arm.
+theorem dependent_member_before_induction
+  (A : Type) (a : A) (ys : F.List A) :
+  F.Member(a, ys) -> exists zs : F.List A, True := by
+  intro member_a
+  induction ys with
+  | nil =>
+      sorry
+  | cons h t ih =>
+      sorry
+
+-- Mistake 2: equal map length is only bookkeeping.  It cannot prove a
+-- contradiction without Nodup, inclusion in the target, and arithmetic.
+theorem length_alone_is_not_pigeonhole
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (ys : F.List B) (n : Nat) :
+  F.HasCard(xs, succ(n)) -> F.HasCard(ys, n) -> False := by
+  intro source_cardinality
+  intro target_cardinality
+  exact F.map_length {A := A; B := B; f := f; xs := xs}
+
+-- Mistake 3: refuting universal injectivity does not construct witnesses
+-- in constructive logic.  A positive collision theorem needs additional
+-- decidability/computational data or an explicitly classical exercise.
+theorem negative_is_not_a_collision_witness
+  (A : Type) (B : Type) (f : A -> B) :
+  ((forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) -> False) ->
+  exists x1 : A, exists x2 : A,
+    (x1 = x2 -> False) /\ f(x1) = f(x2) := by
+  intro not_injective
+  exact not_injective

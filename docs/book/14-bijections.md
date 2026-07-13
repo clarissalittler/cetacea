@@ -281,5 +281,6 @@ and list APIs expose the right induction invariant.
 
 ---
 
-*Back to [Chapter 13 — Finite Types and Honest Counting](13-finite-types.md) ·
+*Next: [Chapter 15 — Pigeonhole, One Element at a Time](15-pigeonhole.md) ·
+back to [Chapter 13 — Finite Types and Honest Counting](13-finite-types.md) ·
 [full outline](OUTLINE.md).*

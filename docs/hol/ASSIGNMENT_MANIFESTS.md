@@ -17,7 +17,14 @@ freezes the complete finite-enumeration exercise at `fol+induction`, while
 permits the higher-order bijection/map sequence. An intentionally restrictive
 [`ch14-solutions-fol.ctea-assignment`](../book/hol-code/ch14-solutions-fol.ctea-assignment)
 is expected to reject only the mapped theorems; the book regression script
-checks that policy failure as a teaching artifact.
+checks that policy failure as a teaching artifact. Chapter 15 adds
+[`ch15-solutions.ctea-assignment`](../book/hol-code/ch15-solutions.ctea-assignment),
+which accepts the constructive pigeonhole sequence at `hol`, and the
+deliberately restrictive
+[`ch15-solutions-fol.ctea-assignment`](../book/hol-code/ch15-solutions-fol.ctea-assignment).
+The latter accepts member removal, list inclusion, and arithmetic but rejects
+mapped-membership, injective-map preservation, and the final theorem's
+transitive HOL dependency.
 
 An assignment manifest fixes the logical fragment and the capabilities available
 to a submission outside the theorem source itself. Invoke it with:

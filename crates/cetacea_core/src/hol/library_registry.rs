@@ -187,6 +187,8 @@ pub struct InstalledListLibrary {
 pub struct InstalledCardinalityLibrary {
     pub record: LibraryPackageRecord,
     pub cardinality: CardinalityTransportLibrary,
+    pub map_nil_schema: TheoremId,
+    pub map_cons_schema: TheoremId,
     pub map_length_schema: TheoremId,
     pub member_map_forward_schema: TheoremId,
     pub member_map_reverse_schema: TheoremId,
@@ -935,6 +937,62 @@ impl HolLibraryRegistry {
         let codomain_type = CoreType::Parameter(cardinality.codomain_parameter);
         let function_type = CoreType::arrow(domain_type.clone(), codomain_type.clone());
         let source_list_type = lists.lists.list_type(domain_type.clone());
+        let target_list_type = lists.lists.list_type(codomain_type.clone());
+        let map_values = |function: CoreTerm, values: CoreTerm| {
+            CoreTerm::apply(
+                CoreTerm::apply(
+                    CoreTerm::instantiate_constant(
+                        cardinality.map,
+                        vec![domain_type.clone(), codomain_type.clone()],
+                    ),
+                    function,
+                ),
+                values,
+            )
+        };
+        let map_nil_schema_name = format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.map_nil_schema");
+        let mapped_nil = map_values(
+            CoreTerm::Bound(0),
+            lists.lists.nil_term(domain_type.clone()),
+        );
+        let (map_nil_schema, _) = staged_core.declare_theorem_with_parameters(
+            map_nil_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![function_type.clone()],
+            CoreTerm::equality(
+                target_list_type.clone(),
+                mapped_nil.clone(),
+                lists.lists.nil_term(codomain_type.clone()),
+            ),
+            HolDraftProof::EqualityRefl(mapped_nil),
+        )?;
+        let map_cons_schema_name = format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.map_cons_schema");
+        let source_cons = CoreTerm::apply(
+            CoreTerm::apply(
+                CoreTerm::instantiate_constant(lists.lists.cons, vec![domain_type.clone()]),
+                CoreTerm::Bound(1),
+            ),
+            CoreTerm::Bound(0),
+        );
+        let mapped_cons = map_values(CoreTerm::Bound(2), source_cons);
+        let target_cons = CoreTerm::apply(
+            CoreTerm::apply(
+                CoreTerm::instantiate_constant(lists.lists.cons, vec![codomain_type.clone()]),
+                CoreTerm::apply(CoreTerm::Bound(2), CoreTerm::Bound(1)),
+            ),
+            map_values(CoreTerm::Bound(2), CoreTerm::Bound(0)),
+        );
+        let (map_cons_schema, _) = staged_core.declare_theorem_with_parameters(
+            map_cons_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![
+                function_type.clone(),
+                domain_type.clone(),
+                source_list_type.clone(),
+            ],
+            CoreTerm::equality(target_list_type, mapped_cons.clone(), target_cons),
+            HolDraftProof::EqualityRefl(mapped_cons),
+        )?;
         let mapped_values = CoreTerm::apply(
             CoreTerm::apply(
                 CoreTerm::instantiate_constant(
@@ -972,18 +1030,6 @@ impl HolLibraryRegistry {
             },
         )?;
         let inverse_function_type = CoreType::arrow(codomain_type.clone(), domain_type.clone());
-        let map_values = |function: CoreTerm, values: CoreTerm| {
-            CoreTerm::apply(
-                CoreTerm::apply(
-                    CoreTerm::instantiate_constant(
-                        cardinality.map,
-                        vec![domain_type.clone(), codomain_type.clone()],
-                    ),
-                    function,
-                ),
-                values,
-            )
-        };
         let member = |element_type: CoreType, value: CoreTerm, values: CoreTerm| {
             CoreTerm::apply(
                 CoreTerm::apply(
@@ -1315,6 +1361,8 @@ impl HolLibraryRegistry {
                 dependencies: vec![LibraryPackageId::ListV1],
                 declarations: vec![
                     definition("map", &names.map, cardinality.map)?,
+                    theorem("map_nil", &map_nil_schema_name, map_nil_schema)?,
+                    theorem("map_cons", &map_cons_schema_name, map_cons_schema)?,
                     theorem("map_length", &names.map_length, cardinality.map_length)?,
                     theorem(
                         "map_length_schema",
@@ -1374,6 +1422,8 @@ impl HolLibraryRegistry {
                 ],
             },
             cardinality,
+            map_nil_schema,
+            map_cons_schema,
             map_length_schema,
             member_map_forward_schema,
             member_map_reverse_schema,
@@ -1725,7 +1775,7 @@ fn validate_installed_cardinality_v1(
         || installed.record.provenance.source != LibraryPackageSource::Builtin
         || installed.record.core_namespace != BUILTIN_CARDINALITY_V1_NAMESPACE
         || installed.record.dependencies != [LibraryPackageId::ListV1]
-        || installed.record.declarations.len() != 13
+        || installed.record.declarations.len() != 15
     {
         return Err(SpikeError {
             message: format!("invalid package metadata for `{package}`"),
@@ -1739,6 +1789,16 @@ fn validate_installed_cardinality_v1(
             "map",
             names.map.as_str(),
             LibraryDeclarationKind::Definition,
+        ),
+        (
+            "map_nil",
+            "@library.cardinality.v1.map_nil_schema",
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "map_cons",
+            "@library.cardinality.v1.map_cons_schema",
+            LibraryDeclarationKind::Theorem,
         ),
         (
             "map_length",
@@ -1819,6 +1879,14 @@ fn validate_installed_cardinality_v1(
     }
 
     let handles_match = core.constants().resolve(&names.map) == Some(cardinality.map)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.map_nil_schema")
+            == Some(installed.map_nil_schema)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.map_cons_schema")
+            == Some(installed.map_cons_schema)
         && core.theorems().resolve(&names.map_length) == Some(cardinality.map_length)
         && core
             .theorems()
@@ -2382,7 +2450,7 @@ mod tests {
             BUILTIN_CARDINALITY_V1_NAMESPACE
         );
         assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
-        assert_eq!(installed.record.declarations.len(), 13);
+        assert_eq!(installed.record.declarations.len(), 15);
         assert!(installed
             .record
             .declarations
@@ -2407,8 +2475,24 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.kind == LibraryDeclarationKind::Theorem)
                 .count(),
-            12
+            14
         );
+        for (theorem, stable_name) in [
+            (installed.map_nil_schema, "std/hol/cardinality@1::map_nil"),
+            (installed.map_cons_schema, "std/hol/cardinality@1::map_cons"),
+        ] {
+            let receipt = core
+                .theorem_receipt(theorem)
+                .expect("registered map computation receipt");
+            assert_eq!(
+                receipt.proof().statement_fragment(),
+                StatementFragment::HigherOrder
+            );
+            assert_eq!(
+                registry.receipt_name(receipt.id()).as_deref(),
+                Some(stable_name)
+            );
+        }
         for (theorem, stable_name) in [
             (
                 installed.member_map_forward_schema,

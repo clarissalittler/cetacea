@@ -58,8 +58,9 @@ HOL surface can evolve without weakening that regression oracle.
 From the repository root, `./scripts/check_all.sh` verifies the companion files,
 requires each deliberately wrong theorem to fail independently, and checks the
 book's quoted error headlines and acceptance receipts against current output.
-For Chapters 13–14 it also runs the solution manifests and confirms that the
-intentionally first-order Chapter 14 policy rejects the mapped theorems.
+For Chapters 13–15 it also runs the solution manifests and confirms that the
+intentionally first-order Chapter 14 and Chapter 15 policies reject the mapped
+theorems and their transitive clients.
 
 The rhythm for each chapter:
 
@@ -77,7 +78,7 @@ So `h : P /\ Q |- Q /\ P` reads "you have a hypothesis `h` proving
 
 ## Chapters
 
-The twelve-chapter first-order course and two experimental finite-mathematics
+The twelve-chapter first-order course and three experimental finite-mathematics
 chapters are drafted; [`OUTLINE.md`](OUTLINE.md) has a one-paragraph synopsis
 of each.
 
@@ -97,8 +98,9 @@ of each.
 | 12 | [Strong Induction, and Where to Go Next](12-strong-induction.md) |
 | 13 | [Finite Types and Honest Counting](13-finite-types.md) |
 | 14 | [Bijections and the HOL Boundary](14-bijections.md) |
+| 15 | [Pigeonhole, One Element at a Time](15-pigeonhole.md) |
 
-Chapters 13–14 require the `hol` branch. Their assignment manifests distinguish
+Chapters 13–15 require the `hol` branch. Their assignment manifests distinguish
 concrete `fol+induction` work from the genuinely higher-order act of passing a
 function to generic `map`.
 

@@ -250,6 +250,13 @@ Cetacea's teaching philosophy.
 Representative acceptance theorems should include finite union cardinality,
 bijections preserving cardinality, and the pigeonhole principle.
 
+On the `hol` migration branch, explicit finite enumeration, bijection
+transport, and the generic constructive pigeonhole principle now pass through
+the public source surface as Chapters 13–15. The remaining Phase 2 acceptance
+work is to package the reusable removal/inclusion counting lemmas and exercise
+them in finite-union cardinality rather than copy the pigeonhole proof
+infrastructure.
+
 ## Phase 3: complete the discrete-mathematics arc
 
 Build on finite mathematics with:

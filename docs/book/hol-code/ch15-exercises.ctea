@@ -1,0 +1,69 @@
+-- Proofs, Checked -- Chapter 15: exercises.
+-- Replace every `sorry` with a proof.  The sequence builds the generic
+-- pigeonhole theorem from its two independent list arguments.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch15-exercises.ctea
+
+import ../../../std/nat.ctea
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+-- Exercise 15.1.  Remove one known occurrence without assuming that
+-- equality on A is decidable.  The membership proof chooses the branch.
+theorem ex15_1
+  (A : Type) (a : A) (ys : F.List A) :
+  F.Member(a, ys) ->
+  exists zs : F.List A,
+    F.length(ys) = succ(F.length(zs)) /\
+    (forall x : A,
+      (x = a -> False) ->
+      F.Member(x, ys) ->
+      F.Member(x, zs)) := by
+  sorry
+
+-- Exercise 15.2.  A duplicate-free included list is no longer than its
+-- container.  Generalize ys by leaving it under the forall before
+-- inducting on xs.
+theorem ex15_2 (A : Type) (xs : F.List A) :
+  forall ys : F.List A,
+  F.Nodup(xs) ->
+  (forall x : A, F.Member(x, xs) -> F.Member(x, ys)) ->
+  le(F.length(xs), F.length(ys)) := by
+  sorry
+
+-- Exercise 15.3.  If y occurs in map f xs, recover the source element
+-- that produced it.  The new map_nil and map_cons equations expose the
+-- two induction cases without adding axioms.
+theorem ex15_3
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (y : B) :
+  F.Member(y, F.map(f, xs)) ->
+  exists x : A, F.Member(x, xs) /\ f(x) = y := by
+  sorry
+
+-- Exercise 15.4.  Use the witness from Exercise 15.3 to show that an
+-- ordinary injective function preserves duplicate-freedom under map.
+theorem ex15_4
+  (A : Type) (B : Type) (f : A -> B) (xs : F.List A) :
+  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->
+  F.Nodup(xs) ->
+  F.Nodup(F.map(f, xs)) := by
+  sorry
+
+-- Exercise 15.5.  No successor is at most the number it succeeds.
+theorem ex15_5 (n : Nat) : le(succ(n), n) -> False := by
+  sorry
+
+-- Exercise 15.6.  Assemble the generic pigeonhole principle.  Keep the
+-- conclusion negative: constructively, the cardinality argument refutes
+-- injectivity but does not manufacture a particular colliding pair.
+theorem ex15_6
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (ys : F.List B) (n : Nat) :
+  F.HasCard(xs, succ(n)) ->
+  F.HasCard(ys, n) ->
+  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->
+  False := by
+  sorry
