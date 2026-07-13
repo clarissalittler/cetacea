@@ -919,9 +919,17 @@ impl CompatibilityElaborator {
         };
         let map_name = qualify("map");
         let map_length_name = qualify("map_length");
+        let member_map_forward_name = qualify("member_map_forward");
+        let member_map_reverse_name = qualify("member_map_reverse");
+        let nodup_map_injective_name = qualify("nodup_map_injective");
+        let map_coverage_surjective_name = qualify("map_coverage_surjective");
         let cardinality_transport_name = qualify("cardinality_transport");
         self.ensure_name_free(&map_name)?;
         self.ensure_name_free(&map_length_name)?;
+        self.ensure_name_free(&member_map_forward_name)?;
+        self.ensure_name_free(&member_map_reverse_name)?;
+        self.ensure_name_free(&nodup_map_injective_name)?;
+        self.ensure_name_free(&map_coverage_surjective_name)?;
         self.ensure_name_free(&cardinality_transport_name)?;
 
         let mut staged = self.clone();
@@ -984,6 +992,220 @@ impl CompatibilityElaborator {
             &statement,
             vec![domain_parameter, codomain_parameter],
             vec![function_type, source_list_type],
+        )?;
+        let support_domain_type = Type::Named("A".to_string());
+        let support_codomain_type = Type::Named("B".to_string());
+        let support_list_type = Type::App(qualify("List"), vec![support_domain_type.clone()]);
+        let function_parameter = |name: &str, arguments: Vec<Type>, result: Type| Param {
+            name: name.to_string(),
+            kind: ParamKind::Function { arguments, result },
+        };
+        let type_parameters = || {
+            vec![
+                Param {
+                    name: "A".to_string(),
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: "B".to_string(),
+                    kind: ParamKind::Type,
+                },
+            ]
+        };
+        let forward_function_parameter = || {
+            function_parameter(
+                "f",
+                vec![support_domain_type.clone()],
+                support_codomain_type.clone(),
+            )
+        };
+        let inverse_function_parameter = || {
+            function_parameter(
+                "g",
+                vec![support_codomain_type.clone()],
+                support_domain_type.clone(),
+            )
+        };
+        let list_parameter = || Param {
+            name: "xs".to_string(),
+            kind: ParamKind::Term(support_list_type.clone()),
+        };
+        let mapped_values = || {
+            Term::App(
+                map_name.clone(),
+                vec![Term::Var("f".to_string()), Term::Var("xs".to_string())],
+            )
+        };
+        let left_inverse = || {
+            Formula::forall(
+                "x".to_string(),
+                support_domain_type.clone(),
+                Formula::eq(
+                    Term::App(
+                        "g".to_string(),
+                        vec![Term::App("f".to_string(), vec![Term::Var("x".to_string())])],
+                    ),
+                    Term::Var("x".to_string()),
+                ),
+            )
+        };
+        let right_inverse = || {
+            Formula::forall(
+                "y".to_string(),
+                support_codomain_type.clone(),
+                Formula::eq(
+                    Term::App(
+                        "f".to_string(),
+                        vec![Term::App("g".to_string(), vec![Term::Var("y".to_string())])],
+                    ),
+                    Term::Var("y".to_string()),
+                ),
+            )
+        };
+        let source_coverage = || {
+            Formula::forall(
+                "x".to_string(),
+                support_domain_type.clone(),
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+                ),
+            )
+        };
+        let mapped_coverage = || {
+            Formula::forall(
+                "y".to_string(),
+                support_codomain_type.clone(),
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![Term::Var("y".to_string()), mapped_values()],
+                ),
+            )
+        };
+        let core_function_type = || {
+            CoreType::arrow(
+                CoreType::Parameter(domain_parameter),
+                CoreType::Parameter(codomain_parameter),
+            )
+        };
+        let core_inverse_function_type = || {
+            CoreType::arrow(
+                CoreType::Parameter(codomain_parameter),
+                CoreType::Parameter(domain_parameter),
+            )
+        };
+        let core_list_type = || lists.lists.list_type(CoreType::Parameter(domain_parameter));
+
+        let mut forward_parameters = type_parameters();
+        forward_parameters.push(forward_function_parameter());
+        forward_parameters.push(list_parameter());
+        forward_parameters.push(Param {
+            name: "x".to_string(),
+            kind: ParamKind::Term(support_domain_type.clone()),
+        });
+        staged.bind_checked_theorem_alias(
+            member_map_forward_name,
+            installed.member_map_forward_schema,
+            forward_parameters,
+            &Formula::implies(
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+                ),
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![
+                        Term::App("f".to_string(), vec![Term::Var("x".to_string())]),
+                        mapped_values(),
+                    ],
+                ),
+            ),
+            vec![domain_parameter, codomain_parameter],
+            vec![
+                core_function_type(),
+                core_list_type(),
+                CoreType::Parameter(domain_parameter),
+            ],
+        )?;
+
+        let mut reverse_parameters = type_parameters();
+        reverse_parameters.push(forward_function_parameter());
+        reverse_parameters.push(inverse_function_parameter());
+        reverse_parameters.push(list_parameter());
+        reverse_parameters.push(Param {
+            name: "x".to_string(),
+            kind: ParamKind::Term(support_domain_type.clone()),
+        });
+        staged.bind_checked_theorem_alias(
+            member_map_reverse_name,
+            installed.member_map_reverse_schema,
+            reverse_parameters,
+            &Formula::implies(
+                left_inverse(),
+                Formula::implies(
+                    Formula::PredApp(
+                        qualify("Member"),
+                        vec![
+                            Term::App("f".to_string(), vec![Term::Var("x".to_string())]),
+                            mapped_values(),
+                        ],
+                    ),
+                    Formula::PredApp(
+                        qualify("Member"),
+                        vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+                    ),
+                ),
+            ),
+            vec![domain_parameter, codomain_parameter],
+            vec![
+                core_function_type(),
+                core_inverse_function_type(),
+                core_list_type(),
+                CoreType::Parameter(domain_parameter),
+            ],
+        )?;
+
+        let mut nodup_parameters = type_parameters();
+        nodup_parameters.push(forward_function_parameter());
+        nodup_parameters.push(inverse_function_parameter());
+        nodup_parameters.push(list_parameter());
+        staged.bind_checked_theorem_alias(
+            nodup_map_injective_name,
+            installed.nodup_map_injective_schema,
+            nodup_parameters,
+            &Formula::implies(
+                left_inverse(),
+                Formula::implies(
+                    Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+                    Formula::PredApp(qualify("Nodup"), vec![mapped_values()]),
+                ),
+            ),
+            vec![domain_parameter, codomain_parameter],
+            vec![
+                core_function_type(),
+                core_inverse_function_type(),
+                core_list_type(),
+            ],
+        )?;
+
+        let mut coverage_parameters = type_parameters();
+        coverage_parameters.push(forward_function_parameter());
+        coverage_parameters.push(inverse_function_parameter());
+        coverage_parameters.push(list_parameter());
+        staged.bind_checked_theorem_alias(
+            map_coverage_surjective_name,
+            installed.map_coverage_surjective_schema,
+            coverage_parameters,
+            &Formula::implies(
+                right_inverse(),
+                Formula::implies(source_coverage(), mapped_coverage()),
+            ),
+            vec![domain_parameter, codomain_parameter],
+            vec![
+                core_function_type(),
+                core_inverse_function_type(),
+                core_list_type(),
+            ],
         )?;
         let transport_domain_parameter = "A".to_string();
         let transport_codomain_parameter = "B".to_string();
@@ -3932,6 +4154,23 @@ mod tests {
             theorem.name == "C.cardinality_transport"
                 && theorem.theorem == installed.cardinality_transport_schema
         }));
+        for (name, theorem) in [
+            ("C.member_map_forward", installed.member_map_forward_schema),
+            ("C.member_map_reverse", installed.member_map_reverse_schema),
+            (
+                "C.nodup_map_injective",
+                installed.nodup_map_injective_schema,
+            ),
+            (
+                "C.map_coverage_surjective",
+                installed.map_coverage_surjective_schema,
+            ),
+        ] {
+            assert!(elaborator
+                .theorems
+                .iter()
+                .any(|registration| registration.name == name && registration.theorem == theorem));
+        }
 
         let after_import = elaborator.clone();
         assert_eq!(

@@ -713,7 +713,7 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
     }
 
     #[test]
-    fn browser_check_certifies_cardinality_map_length_and_its_dependency() {
+    fn browser_check_certifies_cardinality_transport_and_its_dependency() {
         let source = include_str!("../../../docs/hol/examples/cardinality_map_length.ctea");
         let report = check_file_with_imports_and_hol_shadow(source, &standard_imports());
         assert!(
@@ -730,6 +730,8 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
             r#""required_fragment":"hol""#,
             r#"std/hol/cardinality@1::map_length_schema"#,
             r#"std/hol/cardinality@1::cardinality_transport_schema"#,
+            r#"std/hol/cardinality@1::nodup_map_injective_schema"#,
+            r#"std/hol/cardinality@1::map_coverage_surjective_schema"#,
         ] {
             assert!(json.contains(expected), "missing {expected} in {json}");
         }

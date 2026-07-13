@@ -188,6 +188,10 @@ pub struct InstalledCardinalityLibrary {
     pub record: LibraryPackageRecord,
     pub cardinality: CardinalityTransportLibrary,
     pub map_length_schema: TheoremId,
+    pub member_map_forward_schema: TheoremId,
+    pub member_map_reverse_schema: TheoremId,
+    pub nodup_map_injective_schema: TheoremId,
+    pub map_coverage_surjective_schema: TheoremId,
     pub cardinality_transport_schema: TheoremId,
 }
 
@@ -995,6 +999,102 @@ impl HolLibraryRegistry {
                 values,
             )
         };
+        let member_map_forward_schema_name =
+            format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.member_map_forward_schema");
+        let (member_map_forward_schema, _) = staged_core.declare_theorem_with_parameters(
+            member_map_forward_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![
+                function_type.clone(),
+                source_list_type.clone(),
+                domain_type.clone(),
+            ],
+            CoreTerm::implies(
+                member(domain_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(1)),
+                member(
+                    codomain_type.clone(),
+                    CoreTerm::apply(CoreTerm::Bound(2), CoreTerm::Bound(0)),
+                    map_values(CoreTerm::Bound(2), CoreTerm::Bound(1)),
+                ),
+            ),
+            HolDraftProof::ForallElim {
+                proof_forall: Box::new(HolDraftProof::ForallElim {
+                    proof_forall: Box::new(HolDraftProof::ForallElim {
+                        proof_forall: Box::new(HolDraftProof::TheoremRef {
+                            theorem: cardinality.member_map_forward,
+                            type_arguments: vec![
+                                CoreType::Parameter(cardinality.domain_parameter),
+                                CoreType::Parameter(cardinality.codomain_parameter),
+                            ],
+                            term_arguments: Vec::new(),
+                        }),
+                        argument: CoreTerm::Bound(2),
+                    }),
+                    argument: CoreTerm::Bound(1),
+                }),
+                argument: CoreTerm::Bound(0),
+            },
+        )?;
+        let reverse_left_inverse = CoreTerm::forall(
+            domain_type.clone(),
+            CoreTerm::equality(
+                domain_type.clone(),
+                CoreTerm::apply(
+                    CoreTerm::Bound(3),
+                    CoreTerm::apply(CoreTerm::Bound(4), CoreTerm::Bound(0)),
+                ),
+                CoreTerm::Bound(0),
+            ),
+        );
+        let member_map_reverse_schema_name =
+            format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.member_map_reverse_schema");
+        let (member_map_reverse_schema, _) = staged_core.declare_theorem_with_parameters(
+            member_map_reverse_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![
+                function_type.clone(),
+                inverse_function_type.clone(),
+                source_list_type.clone(),
+                domain_type.clone(),
+            ],
+            CoreTerm::implies(
+                reverse_left_inverse.clone(),
+                CoreTerm::implies(
+                    member(
+                        codomain_type.clone(),
+                        CoreTerm::apply(CoreTerm::Bound(3), CoreTerm::Bound(0)),
+                        map_values(CoreTerm::Bound(3), CoreTerm::Bound(1)),
+                    ),
+                    member(domain_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(1)),
+                ),
+            ),
+            HolDraftProof::ImpIntro {
+                premise: reverse_left_inverse,
+                body: Box::new(HolDraftProof::ForallElim {
+                    proof_forall: Box::new(HolDraftProof::ForallElim {
+                        proof_forall: Box::new(HolDraftProof::ImpElim {
+                            proof_implication: Box::new(HolDraftProof::ForallElim {
+                                proof_forall: Box::new(HolDraftProof::ForallElim {
+                                    proof_forall: Box::new(HolDraftProof::TheoremRef {
+                                        theorem: cardinality.member_map_reverse,
+                                        type_arguments: vec![
+                                            CoreType::Parameter(cardinality.domain_parameter),
+                                            CoreType::Parameter(cardinality.codomain_parameter),
+                                        ],
+                                        term_arguments: Vec::new(),
+                                    }),
+                                    argument: CoreTerm::Bound(3),
+                                }),
+                                argument: CoreTerm::Bound(2),
+                            }),
+                            proof_argument: Box::new(HolDraftProof::Hypothesis(0)),
+                        }),
+                        argument: CoreTerm::Bound(1),
+                    }),
+                    argument: CoreTerm::Bound(0),
+                }),
+            },
+        )?;
         let left_inverse = CoreTerm::forall(
             domain_type.clone(),
             CoreTerm::equality(
@@ -1017,6 +1117,50 @@ impl HolLibraryRegistry {
                 CoreTerm::Bound(0),
             ),
         );
+        let nodup_map_injective_schema_name =
+            format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.nodup_map_injective_schema");
+        let (nodup_map_injective_schema, _) = staged_core.declare_theorem_with_parameters(
+            nodup_map_injective_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![
+                function_type.clone(),
+                inverse_function_type.clone(),
+                source_list_type.clone(),
+            ],
+            CoreTerm::implies(
+                left_inverse.clone(),
+                CoreTerm::implies(
+                    nodup(domain_type.clone(), CoreTerm::Bound(0)),
+                    nodup(
+                        codomain_type.clone(),
+                        map_values(CoreTerm::Bound(2), CoreTerm::Bound(0)),
+                    ),
+                ),
+            ),
+            HolDraftProof::ImpIntro {
+                premise: left_inverse.clone(),
+                body: Box::new(HolDraftProof::ForallElim {
+                    proof_forall: Box::new(HolDraftProof::ImpElim {
+                        proof_implication: Box::new(HolDraftProof::ForallElim {
+                            proof_forall: Box::new(HolDraftProof::ForallElim {
+                                proof_forall: Box::new(HolDraftProof::TheoremRef {
+                                    theorem: cardinality.nodup_map_injective,
+                                    type_arguments: vec![
+                                        CoreType::Parameter(cardinality.domain_parameter),
+                                        CoreType::Parameter(cardinality.codomain_parameter),
+                                    ],
+                                    term_arguments: Vec::new(),
+                                }),
+                                argument: CoreTerm::Bound(2),
+                            }),
+                            argument: CoreTerm::Bound(1),
+                        }),
+                        proof_argument: Box::new(HolDraftProof::Hypothesis(0)),
+                    }),
+                    argument: CoreTerm::Bound(0),
+                }),
+            },
+        )?;
         let mapped_values = map_values(CoreTerm::Bound(2), CoreTerm::Bound(0));
         let source_coverage = CoreTerm::forall(
             domain_type.clone(),
@@ -1030,6 +1174,44 @@ impl HolLibraryRegistry {
                 map_values(CoreTerm::Bound(3), CoreTerm::Bound(1)),
             ),
         );
+        let map_coverage_surjective_schema_name =
+            format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.map_coverage_surjective_schema");
+        let (map_coverage_surjective_schema, _) = staged_core.declare_theorem_with_parameters(
+            map_coverage_surjective_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![
+                function_type.clone(),
+                inverse_function_type.clone(),
+                source_list_type.clone(),
+            ],
+            CoreTerm::implies(
+                right_inverse.clone(),
+                CoreTerm::implies(source_coverage.clone(), mapped_coverage.clone()),
+            ),
+            HolDraftProof::ImpIntro {
+                premise: right_inverse.clone(),
+                body: Box::new(HolDraftProof::ForallElim {
+                    proof_forall: Box::new(HolDraftProof::ImpElim {
+                        proof_implication: Box::new(HolDraftProof::ForallElim {
+                            proof_forall: Box::new(HolDraftProof::ForallElim {
+                                proof_forall: Box::new(HolDraftProof::TheoremRef {
+                                    theorem: cardinality.map_coverage_surjective,
+                                    type_arguments: vec![
+                                        CoreType::Parameter(cardinality.domain_parameter),
+                                        CoreType::Parameter(cardinality.codomain_parameter),
+                                    ],
+                                    term_arguments: Vec::new(),
+                                }),
+                                argument: CoreTerm::Bound(2),
+                            }),
+                            argument: CoreTerm::Bound(1),
+                        }),
+                        proof_argument: Box::new(HolDraftProof::Hypothesis(0)),
+                    }),
+                    argument: CoreTerm::Bound(0),
+                }),
+            },
+        )?;
         let transport_conclusion = CoreTerm::and(
             nodup(codomain_type.clone(), mapped_values.clone()),
             CoreTerm::and(
@@ -1145,9 +1327,19 @@ impl HolLibraryRegistry {
                         cardinality.member_map_forward,
                     )?,
                     theorem(
+                        "member_map_forward_schema",
+                        &member_map_forward_schema_name,
+                        member_map_forward_schema,
+                    )?,
+                    theorem(
                         "member_map_reverse",
                         &names.member_map_reverse,
                         cardinality.member_map_reverse,
+                    )?,
+                    theorem(
+                        "member_map_reverse_schema",
+                        &member_map_reverse_schema_name,
+                        member_map_reverse_schema,
                     )?,
                     theorem(
                         "nodup_map_injective",
@@ -1155,9 +1347,19 @@ impl HolLibraryRegistry {
                         cardinality.nodup_map_injective,
                     )?,
                     theorem(
+                        "nodup_map_injective_schema",
+                        &nodup_map_injective_schema_name,
+                        nodup_map_injective_schema,
+                    )?,
+                    theorem(
                         "map_coverage_surjective",
                         &names.map_coverage_surjective,
                         cardinality.map_coverage_surjective,
+                    )?,
+                    theorem(
+                        "map_coverage_surjective_schema",
+                        &map_coverage_surjective_schema_name,
+                        map_coverage_surjective_schema,
                     )?,
                     theorem(
                         "cardinality_transport",
@@ -1173,6 +1375,10 @@ impl HolLibraryRegistry {
             },
             cardinality,
             map_length_schema,
+            member_map_forward_schema,
+            member_map_reverse_schema,
+            nodup_map_injective_schema,
+            map_coverage_surjective_schema,
             cardinality_transport_schema,
         };
         staged_registry.packages.insert(
@@ -1487,7 +1693,7 @@ fn validate_installed_cardinality_v1(
         || installed.record.provenance.source != LibraryPackageSource::Builtin
         || installed.record.core_namespace != BUILTIN_CARDINALITY_V1_NAMESPACE
         || installed.record.dependencies != [LibraryPackageId::ListV1]
-        || installed.record.declarations.len() != 9
+        || installed.record.declarations.len() != 13
     {
         return Err(SpikeError {
             message: format!("invalid package metadata for `{package}`"),
@@ -1518,8 +1724,18 @@ fn validate_installed_cardinality_v1(
             LibraryDeclarationKind::Theorem,
         ),
         (
+            "member_map_forward_schema",
+            "@library.cardinality.v1.member_map_forward_schema",
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
             "member_map_reverse",
             names.member_map_reverse.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "member_map_reverse_schema",
+            "@library.cardinality.v1.member_map_reverse_schema",
             LibraryDeclarationKind::Theorem,
         ),
         (
@@ -1528,8 +1744,18 @@ fn validate_installed_cardinality_v1(
             LibraryDeclarationKind::Theorem,
         ),
         (
+            "nodup_map_injective_schema",
+            "@library.cardinality.v1.nodup_map_injective_schema",
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
             "map_coverage_surjective",
             names.map_coverage_surjective.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "map_coverage_surjective_schema",
+            "@library.cardinality.v1.map_coverage_surjective_schema",
             LibraryDeclarationKind::Theorem,
         ),
         (
@@ -1568,12 +1794,28 @@ fn validate_installed_cardinality_v1(
             == Some(installed.map_length_schema)
         && core.theorems().resolve(&names.member_map_forward)
             == Some(cardinality.member_map_forward)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.member_map_forward_schema")
+            == Some(installed.member_map_forward_schema)
         && core.theorems().resolve(&names.member_map_reverse)
             == Some(cardinality.member_map_reverse)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.member_map_reverse_schema")
+            == Some(installed.member_map_reverse_schema)
         && core.theorems().resolve(&names.nodup_map_injective)
             == Some(cardinality.nodup_map_injective)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.nodup_map_injective_schema")
+            == Some(installed.nodup_map_injective_schema)
         && core.theorems().resolve(&names.map_coverage_surjective)
             == Some(cardinality.map_coverage_surjective)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.map_coverage_surjective_schema")
+            == Some(installed.map_coverage_surjective_schema)
         && core.theorems().resolve(&names.cardinality_transport) == Some(cardinality.theorem)
         && core
             .theorems()
@@ -2052,7 +2294,7 @@ mod tests {
             BUILTIN_CARDINALITY_V1_NAMESPACE
         );
         assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
-        assert_eq!(installed.record.declarations.len(), 9);
+        assert_eq!(installed.record.declarations.len(), 13);
         assert!(installed
             .record
             .declarations
@@ -2077,8 +2319,38 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.kind == LibraryDeclarationKind::Theorem)
                 .count(),
-            8
+            12
         );
+        for (theorem, stable_name) in [
+            (
+                installed.member_map_forward_schema,
+                "std/hol/cardinality@1::member_map_forward_schema",
+            ),
+            (
+                installed.member_map_reverse_schema,
+                "std/hol/cardinality@1::member_map_reverse_schema",
+            ),
+            (
+                installed.nodup_map_injective_schema,
+                "std/hol/cardinality@1::nodup_map_injective_schema",
+            ),
+            (
+                installed.map_coverage_surjective_schema,
+                "std/hol/cardinality@1::map_coverage_surjective_schema",
+            ),
+        ] {
+            let receipt = core
+                .theorem_receipt(theorem)
+                .expect("registered cardinality supporting source template receipt");
+            assert_eq!(
+                receipt.proof().statement_fragment(),
+                StatementFragment::HigherOrder
+            );
+            assert_eq!(
+                registry.receipt_name(receipt.id()).as_deref(),
+                Some(stable_name)
+            );
+        }
 
         let map_length_schema_receipt = core
             .theorem_receipt(installed.map_length_schema)

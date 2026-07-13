@@ -1061,6 +1061,11 @@ and returns mapped Nodup, length equality, and mapped coverage. The adapter is a
 kernel proof that specializes the original theorem; the source driver only
 binds its validated descriptor and stable receipt.
 
+The same mechanism covers `member_map_forward`, `member_map_reverse`,
+`nodup_map_injective`, and `map_coverage_surjective`. This completes the
+cardinality package's public theorem catalog and allows a client to reconstruct
+the final result from smaller receipt-backed facts.
+
 ## Wasm And Web UI
 
 The wasm crate is intentionally thin, mirroring the CLI. It exports:

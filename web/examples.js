@@ -33,6 +33,31 @@ theorem transport_use
   exact C.cardinality_transport {
     A := A; B := B; f := f; g := g; xs := xs
   }
+
+theorem transport_from_parts
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : C.List A) :
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  C.Nodup(xs) ->
+  (forall x : A, C.Member(x, xs)) ->
+  C.Nodup(C.map(f, xs)) /\\
+    (C.length(C.map(f, xs)) = C.length(xs) /\\
+      (forall y : B, C.Member(y, C.map(f, xs)))) := by
+  intro left_inverse
+  intro right_inverse
+  intro source_nodup
+  intro source_coverage
+  split
+  exact C.nodup_map_injective {
+    A := A; B := B; f := f; g := g; xs := xs
+  } left_inverse source_nodup
+  split
+  exact C.map_length {A := A; B := B; f := f; xs := xs}
+  exact C.map_coverage_surjective {
+    A := A; B := B; f := f; g := g; xs := xs
+  } right_inverse source_coverage
 `,
   },
   {

@@ -764,6 +764,14 @@ the browser example exercises both this theorem and concrete `map_length`.
 This checkpoint measures 1,753,232 bytes natively and 1,244,116 bytes in raw
 Wasm.
 
+The source catalog now includes all four transport supports: forward and
+inverse-reflected membership, preservation of Nodup under an injective map, and
+preservation of coverage under a surjective map. Each alias targets a distinct
+checked `*_schema` adapter. Native tests apply both membership directions, and
+the browser proof reconstructs final transport from the public Nodup, length,
+and coverage lemmas, retaining their individual stable receipts. This
+checkpoint measures 1,775,272 bytes natively and 1,262,322 bytes in raw Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked

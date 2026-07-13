@@ -4344,8 +4344,20 @@ impl FileChecker {
         };
         let map_name = qualify("map");
         let map_length_name = qualify("map_length");
+        let member_map_forward_name = qualify("member_map_forward");
+        let member_map_reverse_name = qualify("member_map_reverse");
+        let nodup_map_injective_name = qualify("nodup_map_injective");
+        let map_coverage_surjective_name = qualify("map_coverage_surjective");
         let cardinality_transport_name = qualify("cardinality_transport");
-        for name in [&map_name, &map_length_name, &cardinality_transport_name] {
+        for name in [
+            &map_name,
+            &map_length_name,
+            &member_map_forward_name,
+            &member_map_reverse_name,
+            &nodup_map_injective_name,
+            &map_coverage_surjective_name,
+            &cardinality_transport_name,
+        ] {
             if self.env.has_top_level_name(name) {
                 self.result.diagnostics.push(diagnostic_at(
                     source_path,
@@ -4383,6 +4395,10 @@ impl FileChecker {
         let mut staged_env = self.env.clone();
         staged_env.reserve_package_name(map_name.clone());
         staged_env.reserve_package_name(map_length_name.clone());
+        staged_env.reserve_package_name(member_map_forward_name.clone());
+        staged_env.reserve_package_name(member_map_reverse_name.clone());
+        staged_env.reserve_package_name(nodup_map_injective_name.clone());
+        staged_env.reserve_package_name(map_coverage_surjective_name.clone());
         staged_env.reserve_package_name(cardinality_transport_name.clone());
         staged_env.add_rank_one_mixed_func(
             map_name.clone(),
@@ -4464,6 +4480,209 @@ impl FileChecker {
                 hol::LibraryPackageId::CardinalityV1,
                 map_length_receipt,
             )),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+        let supporting_receipt = |logical_name: &str| {
+            installed
+                .record
+                .declarations
+                .iter()
+                .find(|declaration| declaration.logical_name == logical_name)
+                .and_then(|declaration| declaration.receipt)
+                .expect("registered cardinality supporting theorem template has a receipt")
+        };
+        let support_domain_type = Type::Named("A".to_string());
+        let support_codomain_type = Type::Named("B".to_string());
+        let support_list_type = Type::App(qualify("List"), vec![support_domain_type.clone()]);
+        let type_parameters = || {
+            vec![
+                Param {
+                    name: "A".to_string(),
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: "B".to_string(),
+                    kind: ParamKind::Type,
+                },
+            ]
+        };
+        let forward_function_parameter = || Param {
+            name: "f".to_string(),
+            kind: ParamKind::Function {
+                arguments: vec![support_domain_type.clone()],
+                result: support_codomain_type.clone(),
+            },
+        };
+        let inverse_function_parameter = || Param {
+            name: "g".to_string(),
+            kind: ParamKind::Function {
+                arguments: vec![support_codomain_type.clone()],
+                result: support_domain_type.clone(),
+            },
+        };
+        let list_parameter = || Param {
+            name: "xs".to_string(),
+            kind: ParamKind::Term(support_list_type.clone()),
+        };
+        let mapped_values = || {
+            Term::App(
+                qualify("map"),
+                vec![Term::Var("f".to_string()), Term::Var("xs".to_string())],
+            )
+        };
+        let left_inverse = || {
+            Formula::forall(
+                "x".to_string(),
+                support_domain_type.clone(),
+                Formula::eq(
+                    Term::App(
+                        "g".to_string(),
+                        vec![Term::App("f".to_string(), vec![Term::Var("x".to_string())])],
+                    ),
+                    Term::Var("x".to_string()),
+                ),
+            )
+        };
+        let right_inverse = || {
+            Formula::forall(
+                "y".to_string(),
+                support_codomain_type.clone(),
+                Formula::eq(
+                    Term::App(
+                        "f".to_string(),
+                        vec![Term::App("g".to_string(), vec![Term::Var("y".to_string())])],
+                    ),
+                    Term::Var("y".to_string()),
+                ),
+            )
+        };
+        let source_coverage = || {
+            Formula::forall(
+                "x".to_string(),
+                support_domain_type.clone(),
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+                ),
+            )
+        };
+        let mapped_coverage = || {
+            Formula::forall(
+                "y".to_string(),
+                support_codomain_type.clone(),
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![Term::Var("y".to_string()), mapped_values()],
+                ),
+            )
+        };
+        let theorem_evidence = |receipt| {
+            TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                hol::LibraryPackageId::CardinalityV1,
+                receipt,
+            ))
+        };
+
+        let mut forward_parameters = type_parameters();
+        forward_parameters.push(forward_function_parameter());
+        forward_parameters.push(list_parameter());
+        forward_parameters.push(Param {
+            name: "x".to_string(),
+            kind: ParamKind::Term(support_domain_type.clone()),
+        });
+        staged_env.add_theorem(Theorem {
+            name: member_map_forward_name,
+            params: forward_parameters,
+            statement: Formula::implies(
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+                ),
+                Formula::PredApp(
+                    qualify("Member"),
+                    vec![
+                        Term::App("f".to_string(), vec![Term::Var("x".to_string())]),
+                        mapped_values(),
+                    ],
+                ),
+            ),
+            evidence: theorem_evidence(supporting_receipt("member_map_forward_schema")),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+
+        let mut reverse_parameters = type_parameters();
+        reverse_parameters.push(forward_function_parameter());
+        reverse_parameters.push(inverse_function_parameter());
+        reverse_parameters.push(list_parameter());
+        reverse_parameters.push(Param {
+            name: "x".to_string(),
+            kind: ParamKind::Term(support_domain_type.clone()),
+        });
+        staged_env.add_theorem(Theorem {
+            name: member_map_reverse_name,
+            params: reverse_parameters,
+            statement: Formula::implies(
+                left_inverse(),
+                Formula::implies(
+                    Formula::PredApp(
+                        qualify("Member"),
+                        vec![
+                            Term::App("f".to_string(), vec![Term::Var("x".to_string())]),
+                            mapped_values(),
+                        ],
+                    ),
+                    Formula::PredApp(
+                        qualify("Member"),
+                        vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+                    ),
+                ),
+            ),
+            evidence: theorem_evidence(supporting_receipt("member_map_reverse_schema")),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+
+        let mut nodup_parameters = type_parameters();
+        nodup_parameters.push(forward_function_parameter());
+        nodup_parameters.push(inverse_function_parameter());
+        nodup_parameters.push(list_parameter());
+        staged_env.add_theorem(Theorem {
+            name: nodup_map_injective_name,
+            params: nodup_parameters,
+            statement: Formula::implies(
+                left_inverse(),
+                Formula::implies(
+                    Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+                    Formula::PredApp(qualify("Nodup"), vec![mapped_values()]),
+                ),
+            ),
+            evidence: theorem_evidence(supporting_receipt("nodup_map_injective_schema")),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+
+        let mut coverage_parameters = type_parameters();
+        coverage_parameters.push(forward_function_parameter());
+        coverage_parameters.push(inverse_function_parameter());
+        coverage_parameters.push(list_parameter());
+        staged_env.add_theorem(Theorem {
+            name: map_coverage_surjective_name,
+            params: coverage_parameters,
+            statement: Formula::implies(
+                right_inverse(),
+                Formula::implies(source_coverage(), mapped_coverage()),
+            ),
+            evidence: theorem_evidence(supporting_receipt("map_coverage_surjective_schema")),
             mode_used: LogicMode::Constructive,
             is_axiom: false,
             uses_sorry: false,
@@ -20760,7 +20979,7 @@ theorem one_has_card :
 
     #[cfg(feature = "hol-shadow")]
     #[test]
-    fn logical_cardinality_import_exposes_checked_map_length_and_list_dependency() {
+    fn logical_cardinality_import_exposes_complete_checked_transport_catalog() {
         let report = check_file_with_hol_shadow(
             r#"
 import std/hol/cardinality@1 as C
@@ -20774,6 +20993,22 @@ theorem mapped_refl (xs : C.List Nat) :
 theorem map_length_inc (xs : C.List Nat) :
   C.length(C.map(inc, xs)) = C.length(xs) := by
   exact C.map_length {A := Nat; B := Nat; f := inc; xs := xs}
+
+theorem member_forward_use
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : C.List A) (x : A) :
+  C.Member(x, xs) -> C.Member(f(x), C.map(f, xs)) := by
+  exact C.member_map_forward {A := A; B := B; f := f; xs := xs; x := x}
+
+theorem member_reverse_use
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : C.List A) (x : A) :
+  (forall z : A, g(f(z)) = z) ->
+  C.Member(f(x), C.map(f, xs)) -> C.Member(x, xs) := by
+  exact C.member_map_reverse {
+    A := A; B := B; f := f; g := g; xs := xs; x := x
+  }
 
 theorem transport_use
   (A : Type) (B : Type)
@@ -20789,6 +21024,31 @@ theorem transport_use
   exact C.cardinality_transport {
     A := A; B := B; f := f; g := g; xs := xs
   }
+
+theorem transport_from_parts
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : C.List A) :
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  C.Nodup(xs) ->
+  (forall x : A, C.Member(x, xs)) ->
+  C.Nodup(C.map(f, xs)) /\
+    (C.length(C.map(f, xs)) = C.length(xs) /\
+      (forall y : B, C.Member(y, C.map(f, xs)))) := by
+  intro left_inverse
+  intro right_inverse
+  intro source_nodup
+  intro source_coverage
+  split
+  exact C.nodup_map_injective {
+    A := A; B := B; f := f; g := g; xs := xs
+  } left_inverse source_nodup
+  split
+  exact C.map_length {A := A; B := B; f := f; xs := xs}
+  exact C.map_coverage_surjective {
+    A := A; B := B; f := f; g := g; xs := xs
+  } right_inverse source_coverage
 "#,
         );
         assert!(
@@ -20801,7 +21061,14 @@ theorem transport_use
             report.imported_packages,
             ["std/hol/cardinality@1", "std/hol/list@1"]
         );
-        for name in ["mapped_refl", "map_length_inc", "transport_use"] {
+        for name in [
+            "mapped_refl",
+            "map_length_inc",
+            "member_forward_use",
+            "member_reverse_use",
+            "transport_use",
+            "transport_from_parts",
+        ] {
             let theorem = report
                 .theorems
                 .iter()
@@ -20830,6 +21097,31 @@ theorem transport_use
                 report.receipt_names.get(dependency).map(String::as_str)
                     == Some("std/hol/cardinality@1::map_length_schema")
             }));
+        for (theorem_name, dependency_name) in [
+            (
+                "member_forward_use",
+                "std/hol/cardinality@1::member_map_forward_schema",
+            ),
+            (
+                "member_reverse_use",
+                "std/hol/cardinality@1::member_map_reverse_schema",
+            ),
+        ] {
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|theorem| theorem.name == theorem_name)
+                .expect("member map source theorem receipt");
+            assert!(theorem
+                .receipt
+                .proof()
+                .direct_dependencies()
+                .iter()
+                .any(|dependency| {
+                    report.receipt_names.get(dependency).map(String::as_str)
+                        == Some(dependency_name)
+                }));
+        }
         let transport_use = report
             .theorems
             .iter()
@@ -20844,6 +21136,21 @@ theorem transport_use
                 report.receipt_names.get(dependency).map(String::as_str)
                     == Some("std/hol/cardinality@1::cardinality_transport_schema")
             }));
+        let transport_from_parts = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "transport_from_parts")
+            .expect("transport_from_parts receipt");
+        let dependency_names = transport_from_parts
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .filter_map(|dependency| report.receipt_names.get(dependency).cloned())
+            .collect::<BTreeSet<_>>();
+        assert!(dependency_names.contains("std/hol/cardinality@1::map_length_schema"));
+        assert!(dependency_names.contains("std/hol/cardinality@1::nodup_map_injective_schema"));
+        assert!(dependency_names.contains("std/hol/cardinality@1::map_coverage_surjective_schema"));
     }
 
     #[cfg(feature = "hol-shadow")]

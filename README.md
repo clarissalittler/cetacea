@@ -84,8 +84,9 @@ another source file. The finite package exposes its checked List dependency
 under the same alias. `--hol-shadow` remains available to force the same
 certification for package-free files. The cardinality package currently exposes
 checked `map`, `map_length`, and the final `cardinality_transport` theorem;
-because `map` consumes a function argument, their uses are honestly reported as
-`hol`.
+the forward/reverse membership, injective-Nodup, and surjective-coverage lemmas
+are source-facing too. Because `map` consumes a function argument, their uses
+are honestly reported as `hol`.
 
 Run the full-screen terminal TUI with:
 

@@ -244,6 +244,16 @@ pins the original transport theorem and the Map/List definitions visible in
 the specialized statement. This checkpoint is 1,753,232 bytes natively and
 1,244,116 bytes in raw Wasm.
 
+The four supporting lemmas complete the source catalog:
+`C.member_map_forward`, `C.member_map_reverse`,
+`C.nodup_map_injective`, and `C.map_coverage_surjective`. Each has a checked
+explicit-parameter adapter with its own stable `*_schema` receipt. Native tests
+reuse both membership directions directly. The browser example proves the same
+transport conclusion a second time from public Nodup, length, and coverage
+lemmas, so the final theorem is convenient rather than opaque or indispensable.
+The complete catalog checkpoint is 1,775,272 bytes natively and 1,262,322 bytes
+in raw Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages

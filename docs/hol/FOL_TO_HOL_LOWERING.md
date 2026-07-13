@@ -593,3 +593,11 @@ specializes the remaining List quantifier at `xs`. Source and core statements
 are compared after lowering, so the nested Nodup/length/coverage conclusion
 cannot drift from the checked package theorem. This checkpoint is 1,753,232
 bytes natively and 1,244,116 bytes in raw Wasm.
+
+Forward/reverse membership, injective Nodup, and surjective coverage now use the
+same lowering rule. Each adapter removes only its outer object-level function,
+List, and element quantifiers; implications and inner first-order quantifiers
+remain in the open statement. Direct source applications and a reconstruction
+of final transport validate the descriptors against their checked templates and
+retain the individual `*_schema` receipts.
+This checkpoint is 1,775,272 bytes natively and 1,262,322 bytes in raw Wasm.
