@@ -83,8 +83,9 @@ replay both succeed, including when the package import is reached through
 another source file. The finite package exposes its checked List dependency
 under the same alias. `--hol-shadow` remains available to force the same
 certification for package-free files. The cardinality package currently exposes
-checked `map` and `map_length`; because `map` consumes a function argument, its
-uses are honestly reported as `hol`.
+checked `map`, `map_length`, and the final `cardinality_transport` theorem;
+because `map` consumes a function argument, their uses are honestly reported as
+`hol`.
 
 Run the full-screen terminal TUI with:
 

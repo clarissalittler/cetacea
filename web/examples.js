@@ -7,7 +7,7 @@
 window.CETACEA_EXAMPLES = [
   {
     id: "hol-cardinality",
-    label: "HOL Cardinality: map preserves length",
+    label: "HOL Cardinality: map and transport",
     path: "docs/hol/examples/cardinality_map_length.ctea",
     source: `import std/hol/cardinality@1 as C
 
@@ -18,6 +18,21 @@ func inc : Nat -> Nat
 theorem map_length_inc (xs : C.List Nat) :
   C.length(C.map(inc, xs)) = C.length(xs) := by
   exact C.map_length {A := Nat; B := Nat; f := inc; xs := xs}
+
+theorem transport_use
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : C.List A) :
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  C.Nodup(xs) ->
+  (forall x : A, C.Member(x, xs)) ->
+  C.Nodup(C.map(f, xs)) /\\
+    (C.length(C.map(f, xs)) = C.length(xs) /\\
+      (forall y : B, C.Member(y, C.map(f, xs)))) := by
+  exact C.cardinality_transport {
+    A := A; B := B; f := f; g := g; xs := xs
+  }
 `,
   },
   {

@@ -59,8 +59,8 @@ private H3.5 builder.
 
 It is also registered as logical module `std/hol/cardinality@1` under reserved
 namespace `@library.cardinality.v1`. The record catalogs `map`, all six theorem
-receipts, a checked explicit-parameter `map_length` wrapper, and an explicit
-dependency on `std/hol/list@1`. Installing cardinality
+receipts, checked explicit-parameter wrappers for `map_length` and final
+transport, and an explicit dependency on `std/hol/list@1`. Installing cardinality
 installs that dependency when necessary, but stages the complete closure as one
 transaction: a late theorem collision rolls back both packages. Reinstallation
 validates the core binding, Nat binding, declaration catalog, individual
@@ -247,6 +247,15 @@ assignment tests therefore require the HOL profile and both exact package IDs.
 This checkpoint measures 1,741,224 bytes natively and 1,234,290 bytes in raw
 Wasm.
 
+`cardinality_transport` is now source-bound as well. A checked wrapper removes
+only the outer function and List quantifiers; its inverse, Nodup, and coverage
+premises and its three-part conclusion are unchanged. Generic source reuse with
+function-symbol parameters crosses both engines and retains
+`std/hol/cardinality@1::cardinality_transport_schema`. The browser example now
+checks both the concrete map-length instance and the generic final transport.
+This checkpoint measures 1,753,232 bytes natively and 1,244,116 bytes in raw
+Wasm.
+
 ## Remaining migration slices
 
 1. Extend the implemented function-symbol theorem schemas to the remaining
@@ -264,8 +273,8 @@ Wasm.
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
 4. Extend the implemented finite surface to representative multi-constructor
-   exercises and expand the initial cardinality `map`/`map_length` surface to
-   full transport, then prove pigeonhole,
+   exercises and expose the remaining cardinality supporting lemmas, then prove
+   pigeonhole,
    finite-union-cardinality, and handshake targets through checked library
    theorems. Extend enumeration generation beyond nullary datatypes only when a
    course theorem requires it.

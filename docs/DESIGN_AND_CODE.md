@@ -1055,6 +1055,12 @@ domain/codomain type. Uses of `map` are nevertheless classified `hol`, because
 the library operator itself consumes a function; restricted function-symbol
 syntax controls elaboration but does not weaken receipt classification.
 
+`C.cardinality_transport` uses a second checked template with explicit `f`,
+`g`, and `xs` parameters. It retains the inverse, Nodup, and coverage premises
+and returns mapped Nodup, length equality, and mapped coverage. The adapter is a
+kernel proof that specializes the original theorem; the source driver only
+binds its validated descriptor and stable receipt.
+
 ## Wasm And Web UI
 
 The wasm crate is intentionally thin, mirroring the CLI. It exports:

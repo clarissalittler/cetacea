@@ -755,6 +755,15 @@ a concrete named function, so the restricted source mode cannot launder it.
 This checkpoint measures 1,741,224 bytes natively and 1,234,290 bytes in raw
 Wasm.
 
+The package's final `cardinality_transport` theorem now has a source alias too.
+A second checked template specializes the original theorem at explicit forward
+and inverse symbols plus the source List, while preserving all inverse, Nodup,
+coverage, and conclusion structure. A generic dual-checked client retains the
+stable `std/hol/cardinality@1::cardinality_transport_schema` dependency, and
+the browser example exercises both this theorem and concrete `map_length`.
+This checkpoint measures 1,753,232 bytes natively and 1,244,116 bytes in raw
+Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -771,8 +780,8 @@ Wasm.
   constructor laws are source-facing. `All` constructor laws now demonstrate
   instance-sensitive fragment enforcement. Rank-one function-symbol parameters
   now cover the arrow-valued schema prerequisite for cardinality transport, and
-  the initial cardinality `map`/`map_length` surface is source- and
-  browser-facing with an honest HOL boundary.
+  the cardinality `map`, `map_length`, and final transport surfaces are source-
+  and browser-facing with an honest HOL boundary.
   General generic source declarations and a decision about low-level core-API
   cutover remain; native and browser
   end-to-end acceptance are automatic. The finite package now exposes

@@ -180,8 +180,9 @@ shows the exact imported package and theorem entries display their certified
 least fragment. Load “HOL List: length of append” for a complete generic List
 induction example, or “HOL Finite: cardinality of One” for a trust-free
 `fol+induction` proof using `HasCard` and its checked introduction theorem.
-Load “HOL Cardinality: map preserves length” for the checked higher-order
-`map_length` surface and its explicit List dependency.
+Load “HOL Cardinality: map and transport” for the checked higher-order
+`map_length` and finite-enumeration transport surfaces with their explicit List
+dependency.
 
 The browser UI also shows the current proof goals, rule-based tactic hints for
 each open goal, diagnostic repair suggestions, a searchable theorem-library

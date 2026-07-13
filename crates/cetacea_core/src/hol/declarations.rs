@@ -919,8 +919,10 @@ impl CompatibilityElaborator {
         };
         let map_name = qualify("map");
         let map_length_name = qualify("map_length");
+        let cardinality_transport_name = qualify("cardinality_transport");
         self.ensure_name_free(&map_name)?;
         self.ensure_name_free(&map_length_name)?;
+        self.ensure_name_free(&cardinality_transport_name)?;
 
         let mut staged = self.clone();
         let lists = staged.import_builtin_list_v1(namespace.as_deref())?;
@@ -969,7 +971,7 @@ impl CompatibilityElaborator {
             Term::App(
                 qualify("length"),
                 vec![Term::App(
-                    map_name,
+                    map_name.clone(),
                     vec![Term::Var("f".to_string()), Term::Var("xs".to_string())],
                 )],
             ),
@@ -982,6 +984,120 @@ impl CompatibilityElaborator {
             &statement,
             vec![domain_parameter, codomain_parameter],
             vec![function_type, source_list_type],
+        )?;
+        let transport_domain_parameter = "A".to_string();
+        let transport_codomain_parameter = "B".to_string();
+        let transport_domain_type = Type::Named(transport_domain_parameter.clone());
+        let transport_codomain_type = Type::Named(transport_codomain_parameter.clone());
+        let transport_source_list_type =
+            Type::App(qualify("List"), vec![transport_domain_type.clone()]);
+        let transport_parameters = vec![
+            Param {
+                name: transport_domain_parameter,
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: transport_codomain_parameter,
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "f".to_string(),
+                kind: ParamKind::Function {
+                    arguments: vec![transport_domain_type.clone()],
+                    result: transport_codomain_type.clone(),
+                },
+            },
+            Param {
+                name: "g".to_string(),
+                kind: ParamKind::Function {
+                    arguments: vec![transport_codomain_type.clone()],
+                    result: transport_domain_type.clone(),
+                },
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(transport_source_list_type),
+            },
+        ];
+        let left_inverse = Formula::forall(
+            "x".to_string(),
+            transport_domain_type.clone(),
+            Formula::eq(
+                Term::App(
+                    "g".to_string(),
+                    vec![Term::App("f".to_string(), vec![Term::Var("x".to_string())])],
+                ),
+                Term::Var("x".to_string()),
+            ),
+        );
+        let right_inverse = Formula::forall(
+            "y".to_string(),
+            transport_codomain_type.clone(),
+            Formula::eq(
+                Term::App(
+                    "f".to_string(),
+                    vec![Term::App("g".to_string(), vec![Term::Var("y".to_string())])],
+                ),
+                Term::Var("y".to_string()),
+            ),
+        );
+        let mapped_values = Term::App(
+            map_name,
+            vec![Term::Var("f".to_string()), Term::Var("xs".to_string())],
+        );
+        let source_coverage = Formula::forall(
+            "x".to_string(),
+            transport_domain_type,
+            Formula::PredApp(
+                qualify("Member"),
+                vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+            ),
+        );
+        let mapped_coverage = Formula::forall(
+            "y".to_string(),
+            transport_codomain_type,
+            Formula::PredApp(
+                qualify("Member"),
+                vec![Term::Var("y".to_string()), mapped_values.clone()],
+            ),
+        );
+        let transport_conclusion = Formula::and(
+            Formula::PredApp(qualify("Nodup"), vec![mapped_values.clone()]),
+            Formula::and(
+                Formula::eq(
+                    Term::App(qualify("length"), vec![mapped_values]),
+                    Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
+                ),
+                mapped_coverage,
+            ),
+        );
+        let transport_statement = Formula::implies(
+            left_inverse,
+            Formula::implies(
+                right_inverse,
+                Formula::implies(
+                    Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+                    Formula::implies(source_coverage, transport_conclusion),
+                ),
+            ),
+        );
+        staged.bind_checked_theorem_alias(
+            cardinality_transport_name,
+            installed.cardinality_transport_schema,
+            transport_parameters,
+            &transport_statement,
+            vec![domain_parameter, codomain_parameter],
+            vec![
+                CoreType::arrow(
+                    CoreType::Parameter(domain_parameter),
+                    CoreType::Parameter(codomain_parameter),
+                ),
+                CoreType::arrow(
+                    CoreType::Parameter(codomain_parameter),
+                    CoreType::Parameter(domain_parameter),
+                ),
+                lists.lists.list_type(CoreType::Parameter(domain_parameter)),
+            ],
         )?;
         staged.library_aliases.push(LibraryAliasRegistration {
             package: LibraryPackageId::CardinalityV1,
@@ -3766,7 +3882,7 @@ mod tests {
     }
 
     #[test]
-    fn cardinality_package_aliases_checked_map_and_map_length_atomically() {
+    fn cardinality_package_aliases_checked_map_and_transport_atomically() {
         let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
         let installed = elaborator
             .import_builtin_cardinality_v1(Some("C"))
@@ -3812,6 +3928,10 @@ mod tests {
             .iter()
             .any(|theorem| theorem.name == "C.map_length"
                 && theorem.theorem == installed.map_length_schema));
+        assert!(elaborator.theorems.iter().any(|theorem| {
+            theorem.name == "C.cardinality_transport"
+                && theorem.theorem == installed.cardinality_transport_schema
+        }));
 
         let after_import = elaborator.clone();
         assert_eq!(

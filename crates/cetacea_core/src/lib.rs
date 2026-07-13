@@ -4344,7 +4344,8 @@ impl FileChecker {
         };
         let map_name = qualify("map");
         let map_length_name = qualify("map_length");
-        for name in [&map_name, &map_length_name] {
+        let cardinality_transport_name = qualify("cardinality_transport");
+        for name in [&map_name, &map_length_name, &cardinality_transport_name] {
             if self.env.has_top_level_name(name) {
                 self.result.diagnostics.push(diagnostic_at(
                     source_path,
@@ -4382,6 +4383,7 @@ impl FileChecker {
         let mut staged_env = self.env.clone();
         staged_env.reserve_package_name(map_name.clone());
         staged_env.reserve_package_name(map_length_name.clone());
+        staged_env.reserve_package_name(cardinality_transport_name.clone());
         staged_env.add_rank_one_mixed_func(
             map_name.clone(),
             vec![domain_parameter.clone(), codomain_parameter.clone()],
@@ -4461,6 +4463,123 @@ impl FileChecker {
             evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
                 hol::LibraryPackageId::CardinalityV1,
                 map_length_receipt,
+            )),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+        let cardinality_transport_receipt = installed
+            .record
+            .declarations
+            .iter()
+            .find(|declaration| declaration.logical_name == "cardinality_transport_schema")
+            .and_then(|declaration| declaration.receipt)
+            .expect("registered cardinality transport theorem template has a receipt");
+        let transport_domain_type = Type::Named("A".to_string());
+        let transport_codomain_type = Type::Named("B".to_string());
+        let transport_source_list_type =
+            Type::App(qualify("List"), vec![transport_domain_type.clone()]);
+        let left_inverse = Formula::forall(
+            "x".to_string(),
+            transport_domain_type.clone(),
+            Formula::eq(
+                Term::App(
+                    "g".to_string(),
+                    vec![Term::App("f".to_string(), vec![Term::Var("x".to_string())])],
+                ),
+                Term::Var("x".to_string()),
+            ),
+        );
+        let right_inverse = Formula::forall(
+            "y".to_string(),
+            transport_codomain_type.clone(),
+            Formula::eq(
+                Term::App(
+                    "f".to_string(),
+                    vec![Term::App("g".to_string(), vec![Term::Var("y".to_string())])],
+                ),
+                Term::Var("y".to_string()),
+            ),
+        );
+        let mapped_values = Term::App(
+            qualify("map"),
+            vec![Term::Var("f".to_string()), Term::Var("xs".to_string())],
+        );
+        let source_coverage = Formula::forall(
+            "x".to_string(),
+            transport_domain_type.clone(),
+            Formula::PredApp(
+                qualify("Member"),
+                vec![Term::Var("x".to_string()), Term::Var("xs".to_string())],
+            ),
+        );
+        let mapped_coverage = Formula::forall(
+            "y".to_string(),
+            transport_codomain_type.clone(),
+            Formula::PredApp(
+                qualify("Member"),
+                vec![Term::Var("y".to_string()), mapped_values.clone()],
+            ),
+        );
+        staged_env.add_theorem(Theorem {
+            name: cardinality_transport_name,
+            params: vec![
+                Param {
+                    name: "A".to_string(),
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: "B".to_string(),
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: "f".to_string(),
+                    kind: ParamKind::Function {
+                        arguments: vec![transport_domain_type.clone()],
+                        result: transport_codomain_type.clone(),
+                    },
+                },
+                Param {
+                    name: "g".to_string(),
+                    kind: ParamKind::Function {
+                        arguments: vec![transport_codomain_type],
+                        result: transport_domain_type,
+                    },
+                },
+                Param {
+                    name: "xs".to_string(),
+                    kind: ParamKind::Term(transport_source_list_type),
+                },
+            ],
+            statement: Formula::implies(
+                left_inverse,
+                Formula::implies(
+                    right_inverse,
+                    Formula::implies(
+                        Formula::PredApp(qualify("Nodup"), vec![Term::Var("xs".to_string())]),
+                        Formula::implies(
+                            source_coverage,
+                            Formula::and(
+                                Formula::PredApp(qualify("Nodup"), vec![mapped_values.clone()]),
+                                Formula::and(
+                                    Formula::eq(
+                                        Term::App(qualify("length"), vec![mapped_values.clone()]),
+                                        Term::App(
+                                            qualify("length"),
+                                            vec![Term::Var("xs".to_string())],
+                                        ),
+                                    ),
+                                    mapped_coverage,
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                hol::LibraryPackageId::CardinalityV1,
+                cardinality_transport_receipt,
             )),
             mode_used: LogicMode::Constructive,
             is_axiom: false,
@@ -20655,6 +20774,21 @@ theorem mapped_refl (xs : C.List Nat) :
 theorem map_length_inc (xs : C.List Nat) :
   C.length(C.map(inc, xs)) = C.length(xs) := by
   exact C.map_length {A := Nat; B := Nat; f := inc; xs := xs}
+
+theorem transport_use
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : C.List A) :
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  C.Nodup(xs) ->
+  (forall x : A, C.Member(x, xs)) ->
+  C.Nodup(C.map(f, xs)) /\
+    (C.length(C.map(f, xs)) = C.length(xs) /\
+      (forall y : B, C.Member(y, C.map(f, xs)))) := by
+  exact C.cardinality_transport {
+    A := A; B := B; f := f; g := g; xs := xs
+  }
 "#,
         );
         assert!(
@@ -20667,7 +20801,7 @@ theorem map_length_inc (xs : C.List Nat) :
             report.imported_packages,
             ["std/hol/cardinality@1", "std/hol/list@1"]
         );
-        for name in ["mapped_refl", "map_length_inc"] {
+        for name in ["mapped_refl", "map_length_inc", "transport_use"] {
             let theorem = report
                 .theorems
                 .iter()
@@ -20695,6 +20829,20 @@ theorem map_length_inc (xs : C.List Nat) :
             .any(|dependency| {
                 report.receipt_names.get(dependency).map(String::as_str)
                     == Some("std/hol/cardinality@1::map_length_schema")
+            }));
+        let transport_use = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "transport_use")
+            .expect("transport_use receipt");
+        assert!(transport_use
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/cardinality@1::cardinality_transport_schema")
             }));
     }
 

@@ -584,3 +584,12 @@ constant has a function-valued argument, both the concrete statement and its
 proof are classified `hol`; this is the intended contrast with first-order
 function-symbol substitution. This checkpoint is 1,741,224 bytes natively and
 1,234,290 bytes in raw Wasm.
+
+The same adapter pattern now exposes the final `cardinality_transport` theorem.
+The open core template has explicit `f : A -> B`, `g : B -> A`, and
+`xs : List A` parameters. Its proof introduces the two inverse premises,
+specializes the original theorem at `f` and `g`, discharges those premises, and
+specializes the remaining List quantifier at `xs`. Source and core statements
+are compared after lowering, so the nested Nodup/length/coverage conclusion
+cannot drift from the checked package theorem. This checkpoint is 1,753,232
+bytes natively and 1,244,116 bytes in raw Wasm.

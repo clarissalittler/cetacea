@@ -188,6 +188,7 @@ pub struct InstalledCardinalityLibrary {
     pub record: LibraryPackageRecord,
     pub cardinality: CardinalityTransportLibrary,
     pub map_length_schema: TheoremId,
+    pub cardinality_transport_schema: TheoremId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -945,11 +946,11 @@ impl HolLibraryRegistry {
         let (map_length_schema, _) = staged_core.declare_theorem_with_parameters(
             map_length_schema_name.clone(),
             vec![cardinality.domain_parameter, cardinality.codomain_parameter],
-            vec![function_type, source_list_type],
+            vec![function_type.clone(), source_list_type.clone()],
             CoreTerm::equality(
                 lists.length.natural_type.clone(),
-                lists.length.apply(codomain_type, mapped_values),
-                lists.length.apply(domain_type, CoreTerm::Bound(0)),
+                lists.length.apply(codomain_type.clone(), mapped_values),
+                lists.length.apply(domain_type.clone(), CoreTerm::Bound(0)),
             ),
             HolDraftProof::ForallElim {
                 proof_forall: Box::new(HolDraftProof::ForallElim {
@@ -964,6 +965,126 @@ impl HolLibraryRegistry {
                     argument: CoreTerm::Bound(1),
                 }),
                 argument: CoreTerm::Bound(0),
+            },
+        )?;
+        let inverse_function_type = CoreType::arrow(codomain_type.clone(), domain_type.clone());
+        let map_values = |function: CoreTerm, values: CoreTerm| {
+            CoreTerm::apply(
+                CoreTerm::apply(
+                    CoreTerm::instantiate_constant(
+                        cardinality.map,
+                        vec![domain_type.clone(), codomain_type.clone()],
+                    ),
+                    function,
+                ),
+                values,
+            )
+        };
+        let member = |element_type: CoreType, value: CoreTerm, values: CoreTerm| {
+            CoreTerm::apply(
+                CoreTerm::apply(
+                    CoreTerm::instantiate_constant(lists.lists.member, vec![element_type]),
+                    value,
+                ),
+                values,
+            )
+        };
+        let nodup = |element_type: CoreType, values: CoreTerm| {
+            CoreTerm::apply(
+                CoreTerm::instantiate_constant(lists.lists.nodup, vec![element_type]),
+                values,
+            )
+        };
+        let left_inverse = CoreTerm::forall(
+            domain_type.clone(),
+            CoreTerm::equality(
+                domain_type.clone(),
+                CoreTerm::apply(
+                    CoreTerm::Bound(2),
+                    CoreTerm::apply(CoreTerm::Bound(3), CoreTerm::Bound(0)),
+                ),
+                CoreTerm::Bound(0),
+            ),
+        );
+        let right_inverse = CoreTerm::forall(
+            codomain_type.clone(),
+            CoreTerm::equality(
+                codomain_type.clone(),
+                CoreTerm::apply(
+                    CoreTerm::Bound(3),
+                    CoreTerm::apply(CoreTerm::Bound(2), CoreTerm::Bound(0)),
+                ),
+                CoreTerm::Bound(0),
+            ),
+        );
+        let mapped_values = map_values(CoreTerm::Bound(2), CoreTerm::Bound(0));
+        let source_coverage = CoreTerm::forall(
+            domain_type.clone(),
+            member(domain_type.clone(), CoreTerm::Bound(0), CoreTerm::Bound(1)),
+        );
+        let mapped_coverage = CoreTerm::forall(
+            codomain_type.clone(),
+            member(
+                codomain_type.clone(),
+                CoreTerm::Bound(0),
+                map_values(CoreTerm::Bound(3), CoreTerm::Bound(1)),
+            ),
+        );
+        let transport_conclusion = CoreTerm::and(
+            nodup(codomain_type.clone(), mapped_values.clone()),
+            CoreTerm::and(
+                CoreTerm::equality(
+                    lists.length.natural_type.clone(),
+                    lists.length.apply(codomain_type.clone(), mapped_values),
+                    lists.length.apply(domain_type.clone(), CoreTerm::Bound(0)),
+                ),
+                mapped_coverage,
+            ),
+        );
+        let cardinality_transport_schema_name =
+            format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.cardinality_transport_schema");
+        let (cardinality_transport_schema, _) = staged_core.declare_theorem_with_parameters(
+            cardinality_transport_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![function_type, inverse_function_type, source_list_type],
+            CoreTerm::implies(
+                left_inverse.clone(),
+                CoreTerm::implies(
+                    right_inverse.clone(),
+                    CoreTerm::implies(
+                        nodup(domain_type, CoreTerm::Bound(0)),
+                        CoreTerm::implies(source_coverage, transport_conclusion),
+                    ),
+                ),
+            ),
+            HolDraftProof::ImpIntro {
+                premise: left_inverse,
+                body: Box::new(HolDraftProof::ImpIntro {
+                    premise: right_inverse,
+                    body: Box::new(HolDraftProof::ForallElim {
+                        proof_forall: Box::new(HolDraftProof::ImpElim {
+                            proof_implication: Box::new(HolDraftProof::ImpElim {
+                                proof_implication: Box::new(HolDraftProof::ForallElim {
+                                    proof_forall: Box::new(HolDraftProof::ForallElim {
+                                        proof_forall: Box::new(HolDraftProof::TheoremRef {
+                                            theorem: cardinality.theorem,
+                                            type_arguments: vec![
+                                                CoreType::Parameter(cardinality.domain_parameter),
+                                                CoreType::Parameter(cardinality.codomain_parameter),
+                                            ],
+                                            term_arguments: Vec::new(),
+                                        }),
+                                        argument: CoreTerm::Bound(2),
+                                    }),
+                                    argument: CoreTerm::Bound(1),
+                                }),
+                                proof_argument: Box::new(HolDraftProof::Hypothesis(1)),
+                            }),
+                            proof_argument: Box::new(HolDraftProof::Hypothesis(0)),
+                        }),
+                        argument: CoreTerm::Bound(0),
+                    }),
+                }),
             },
         )?;
         let definition = |logical_name: &str,
@@ -1043,10 +1164,16 @@ impl HolLibraryRegistry {
                         &names.cardinality_transport,
                         cardinality.theorem,
                     )?,
+                    theorem(
+                        "cardinality_transport_schema",
+                        &cardinality_transport_schema_name,
+                        cardinality_transport_schema,
+                    )?,
                 ],
             },
             cardinality,
             map_length_schema,
+            cardinality_transport_schema,
         };
         staged_registry.packages.insert(
             LibraryPackageId::CardinalityV1,
@@ -1360,7 +1487,7 @@ fn validate_installed_cardinality_v1(
         || installed.record.provenance.source != LibraryPackageSource::Builtin
         || installed.record.core_namespace != BUILTIN_CARDINALITY_V1_NAMESPACE
         || installed.record.dependencies != [LibraryPackageId::ListV1]
-        || installed.record.declarations.len() != 8
+        || installed.record.declarations.len() != 9
     {
         return Err(SpikeError {
             message: format!("invalid package metadata for `{package}`"),
@@ -1410,6 +1537,11 @@ fn validate_installed_cardinality_v1(
             names.cardinality_transport.as_str(),
             LibraryDeclarationKind::Theorem,
         ),
+        (
+            "cardinality_transport_schema",
+            "@library.cardinality.v1.cardinality_transport_schema",
+            LibraryDeclarationKind::Theorem,
+        ),
     ];
     if !installed
         .record
@@ -1442,7 +1574,11 @@ fn validate_installed_cardinality_v1(
             == Some(cardinality.nodup_map_injective)
         && core.theorems().resolve(&names.map_coverage_surjective)
             == Some(cardinality.map_coverage_surjective)
-        && core.theorems().resolve(&names.cardinality_transport) == Some(cardinality.theorem);
+        && core.theorems().resolve(&names.cardinality_transport) == Some(cardinality.theorem)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.cardinality_transport_schema")
+            == Some(installed.cardinality_transport_schema);
     if !handles_match {
         return Err(SpikeError {
             message: format!("library registry/core mismatch for package `{package}`"),
@@ -1916,7 +2052,7 @@ mod tests {
             BUILTIN_CARDINALITY_V1_NAMESPACE
         );
         assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
-        assert_eq!(installed.record.declarations.len(), 8);
+        assert_eq!(installed.record.declarations.len(), 9);
         assert!(installed
             .record
             .declarations
@@ -1941,7 +2077,7 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.kind == LibraryDeclarationKind::Theorem)
                 .count(),
-            7
+            8
         );
 
         let map_length_schema_receipt = core
@@ -1972,6 +2108,40 @@ mod tests {
             BTreeSet::from([
                 "std/hol/cardinality@1::map".to_string(),
                 "std/hol/cardinality@1::map_length".to_string(),
+                "std/hol/list@1::length".to_string(),
+            ])
+        );
+
+        let transport_schema_receipt = core
+            .theorem_receipt(installed.cardinality_transport_schema)
+            .expect("registered cardinality transport source template receipt");
+        assert_eq!(
+            transport_schema_receipt.proof().statement_fragment(),
+            StatementFragment::HigherOrder
+        );
+        assert_eq!(
+            registry
+                .receipt_name(transport_schema_receipt.id())
+                .as_deref(),
+            Some("std/hol/cardinality@1::cardinality_transport_schema")
+        );
+        let transport_schema_dependencies = transport_schema_receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .map(|dependency| {
+                registry
+                    .receipt_name(*dependency)
+                    .expect("every transport template dependency belongs to a package")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            transport_schema_dependencies,
+            BTreeSet::from([
+                "std/hol/cardinality@1::cardinality_transport".to_string(),
+                "std/hol/cardinality@1::map".to_string(),
+                "std/hol/list@1::Member".to_string(),
+                "std/hol/list@1::Nodup".to_string(),
                 "std/hol/list@1::length".to_string(),
             ])
         );

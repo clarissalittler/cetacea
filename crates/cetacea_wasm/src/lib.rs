@@ -729,6 +729,7 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
             r#""imported_packages":["std/hol/cardinality@1","std/hol/list@1"]"#,
             r#""required_fragment":"hol""#,
             r#"std/hol/cardinality@1::map_length_schema"#,
+            r#"std/hol/cardinality@1::cardinality_transport_schema"#,
         ] {
             assert!(json.contains(expected), "missing {expected} in {json}");
         }

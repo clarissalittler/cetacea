@@ -233,6 +233,17 @@ assignments must opt into the `hol` profile; ordinary finite-cardinality
 exercises can continue to use `HasCard` under `fol+induction`. This checkpoint
 is 1,741,224 bytes natively and 1,234,290 bytes in raw Wasm.
 
+The final `C.cardinality_transport` theorem now crosses the same boundary. Its
+checked source template takes explicit forward and inverse function symbols and
+an enumeration List, leaving the left-inverse, right-inverse, Nodup, and source
+coverage facts as ordinary premises. The conclusion packages mapped Nodup,
+length preservation, and target coverage exactly as the original theorem does.
+Its stable adapter receipt is
+`std/hol/cardinality@1::cardinality_transport_schema`; that receipt directly
+pins the original transport theorem and the Map/List definitions visible in
+the specialized statement. This checkpoint is 1,753,232 bytes natively and
+1,244,116 bytes in raw Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages
