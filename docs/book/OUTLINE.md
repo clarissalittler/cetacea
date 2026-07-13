@@ -257,3 +257,21 @@ rejecting the map arguments and final transitive client under that profile.
 checked `map_nil`/`map_cons`, `HasCard` projections, constructive existential
 list witnesses, ordinary function injectivity, transitive fragment
 enforcement, internal-helper-safe classification of `le`.
+
+## Chapter 16 — Finite Unions Need Relative Evidence
+
+*Drafted: [16-finite-unions.md](16-finite-unions.md)*
+
+Finite types and finite subsets are separated explicitly. A checked source
+module introduces `HasSize(S,xs,n)`, whose duplicate-free list enumerates one
+particular set, while retaining `HasCard` for whole types. Membership in
+`append` supports an exact disjoint-union construction and, through Chapter
+15's packaged inclusion bound, the general inequality
+`|S union T| <= |S| + |T|`. The chapter explains why a constructive theorem
+for arbitrary union-enumeration existence needs decidable equality or an
+explicit witness.
+
+**Cetacea features:** aliased checked source modules over logical packages,
+transparent formula definitions with type parameters, generic `Set A` and
+`List A` in one theorem, append induction, reusable receipt dependencies,
+set simplification, and a complete `fol+induction` assignment profile.

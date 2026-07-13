@@ -94,17 +94,17 @@ At the time of the audit:
 |---|---|---|
 | Logic and natural deduction | Strong | No truth-table/model explorer; limited bridge back to polished prose proofs |
 | First-order logic | Strong | Limited predicate/function abstraction and inference |
-| Sets | Good for identities | No finiteness or cardinality |
+| Sets | Identities plus checked finite-size witnesses | No generic decidable finite-set construction |
 | Relations | Good for local properties | Thin coverage of orders, closures, equivalence classes, and quotients |
 | Functions | Adequate as graph predicates | Functions are not first-class objects; no function equality or generic function spaces |
 | Induction | Good introductory examples | No hypothesis generalization; several ordinary induction patterns are rejected |
 | Data and recursion | Useful but incomplete | Monomorphic types, no recursive propositions, no mutual/deeper recursion |
 | Number theory | Partial | No division, remainder, gcd, primes library, integers, or arithmetic procedure |
 | Recurrences | Partial | Primitive unary recursion and strong induction cover selected examples only |
-| Counting/combinatorics | Blocked | No finite-cardinality foundation |
+| Counting/combinatorics | First verticals pass | Needs decidable overlap, sums, and richer counting principles |
 | Graph theory | Mostly blocked | No generic paths/reachability, degree, finite vertex counts, or graph invariants |
 | Probability | Absent | Depends on the missing finite/counting layer |
-| Classroom workflow | Prototype | No strict grading mode, assignment policy, multi-file browser projects, or stable releases |
+| Classroom workflow | Native grading prototype | Browser manifest enforcement, multi-file projects, and stable releases remain |
 
 ## Phase 0: restore the logical and documentary contract
 
@@ -251,11 +251,17 @@ Representative acceptance theorems should include finite union cardinality,
 bijections preserving cardinality, and the pigeonhole principle.
 
 On the `hol` migration branch, explicit finite enumeration, bijection
-transport, and the generic constructive pigeonhole principle now pass through
-the public source surface as Chapters 13–15. The remaining Phase 2 acceptance
-work is to package the reusable removal/inclusion counting lemmas and exercise
-them in finite-union cardinality rather than copy the pigeonhole proof
-infrastructure.
+transport, the generic constructive pigeonhole principle, and finite-union
+cardinality now pass through the public source surface as Chapters 13–16.
+Chapter 16 introduces checked set-relative `HasSize` evidence, constructs exact
+disjoint-union witnesses, and proves the general union upper bound from a
+supplied duplicate-free witness. Its reusable removal/inclusion core lives in
+`std/hol/counting.ctea` and remains `fol+induction`.
+
+The remaining Phase 2 work is now more precise: design a decidable
+equality/membership interface that can construct an enumeration for an
+overlapping union, provide a source-to-versioned-package publication path, and
+exercise the counting surface in the handshake and finite-tree targets.
 
 ## Phase 3: complete the discrete-mathematics arc
 

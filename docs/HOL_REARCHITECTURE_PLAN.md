@@ -811,11 +811,27 @@ removal/inclusion/arithmetic are `fol+induction`, map lemmas are `hol`, and the
 first-order-looking final statement retains the mapped proof's transitive HOL
 requirement. Direct induction on imported `List A`, checked `map_nil` and
 `map_cons`, and internal-helper-safe `le` classification were implemented as
-measured prerequisites. The next reuse gate is finite-union cardinality, after
-promoting the stable counting subset instead of copying it again. The expanded
+measured prerequisites. At that checkpoint, the next reuse gate was
+finite-union cardinality after promoting the stable counting subset instead of
+copying it again. The expanded
 book checker now covers 86 `.ctea` files; the frozen 74-file pre-HOL oracle
 still matches exactly. All 453 workspace tests pass, and the release artifacts
 measure 1,815,032 bytes natively and 1,301,134 bytes in raw Wasm.
+
+That reuse gate now passes as Chapter 16. A checked source module promotes
+member removal and duplicate-free inclusion, introduces set-relative
+`HasSize`, and proves both exact disjoint-union size and the arbitrary-union
+upper bound. All four exercises remain constructive, trust-free
+`fol+induction`; native and browser regressions pin that classification and
+the transitive List package identity. Keeping counting as source has exposed a
+new architectural gate: already checked `.ctea` declarations cannot yet be
+published transactionally as a versioned logical package without manually
+rebuilding their proofs in Rust. The corpus, including the executable hands-on
+tutorial, now covers 92 `.ctea` files. The next theorem-sized pressure test is
+the handshake lemma, preceded by an explicit decidable equality/membership
+decision for constructive finite-set operations. All 453 workspace tests pass;
+release artifacts measure 1,815,032 bytes natively and 1,309,239 bytes in raw
+Wasm.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
@@ -851,9 +867,9 @@ measure 1,815,032 bytes natively and 1,301,134 bytes in raw Wasm.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
 - Add course chapters only after representative theorem targets pass. The
-  finite-enumeration, bijection, and pigeonhole chapters now pass; path
-  concatenation, finite union cardinality, handshake, and a finite tree
-  edge/vertex theorem remain vertical targets.
+  finite-enumeration, bijection, pigeonhole, and finite-union chapters now
+  pass; path concatenation has a checked substrate, while handshake and a
+  finite-tree edge/vertex theorem remain curriculum vertical targets.
 - Retain explicit path witnesses in FOL exercises even though HOL libraries can
   express closures more abstractly.
 

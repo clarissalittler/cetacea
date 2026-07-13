@@ -27,6 +27,11 @@ CORPUS_ROOTS = (
     ROOT / "docs" / "cs250" / "code",
     ROOT / "docs" / "book" / "code",
 )
+# The oracle freezes the pre-HOL teaching corpus. New source libraries layered
+# over logical packages live under std/hol and are checked by check_all plus
+# native/browser HOL regressions; adding one must not silently widen this
+# historical baseline.
+CORPUS_EXCLUDED_ROOTS = (ROOT / "std" / "hol",)
 NEGATIVE_MARKERS = ("mistakes", "fallacies", "negative")
 THEOREM_DECL = re.compile(r"^\s*theorem\s+([A-Za-z_][A-Za-z0-9_.]*)", re.MULTILINE)
 
@@ -41,7 +46,14 @@ def relative(path: Path) -> str:
 
 def corpus_files() -> list[Path]:
     return sorted(
-        (path for root in CORPUS_ROOTS for path in root.rglob("*.ctea")),
+        (
+            path
+            for root in CORPUS_ROOTS
+            for path in root.rglob("*.ctea")
+            if not any(
+                path.is_relative_to(excluded) for excluded in CORPUS_EXCLUDED_ROOTS
+            )
+        ),
         key=relative,
     )
 
@@ -242,4 +254,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

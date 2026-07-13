@@ -1,0 +1,201 @@
+-- Proofs, Checked -- Chapter 16: Finite Unions
+-- Companion file for docs/book/16-finite-unions.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch16-examples.ctea
+
+import ../../../std/hol/counting.ctea as C
+
+mode constructive
+
+-- Exact set membership from two set-relative enumeration witnesses becomes
+-- list membership in their append.
+theorem union_member_in_append
+  (A : Type) (S T : Set A)
+  (xs ys : C.List A) (m n : Nat) (x : A) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  x in union(S, T) ->
+  C.Member(x, C.append(xs, ys)) := by
+  intro size_s
+  intro size_t
+  intro x_in_union
+  simp at x_in_union
+  apply (C.member_append {A := A; x := x; xs := xs} ys).right
+  cases x_in_union with
+  | left x_in_s =>
+      left
+      apply (C.has_size_members {
+        A := A; S := S; xs := xs; n := m
+      } size_s x).right
+      exact x_in_s
+  | right x_in_t =>
+      right
+      apply (C.has_size_members {
+        A := A; S := T; xs := ys; n := n
+      } size_t x).right
+      exact x_in_t
+
+-- Append preserves duplicate-freedom when no value occurs in both inputs.
+theorem nodup_append_of_disjoint
+  (A : Type) (xs : C.List A) :
+  forall ys : C.List A,
+  C.Nodup(xs) ->
+  C.Nodup(ys) ->
+  (forall x : A, C.Member(x, xs) -> C.Member(x, ys) -> False) ->
+  C.Nodup(C.append(xs, ys)) := by
+  induction xs with
+  | nil =>
+      intro ys
+      intro nodup_xs
+      intro nodup_ys
+      intro disjoint
+      rewrite -> C.append_nil_left {A := A; xs := ys}
+      exact nodup_ys
+  | cons h t ih =>
+      intro ys
+      intro nodup_xs
+      intro nodup_ys
+      intro disjoint
+      have nodup_parts : (C.Member(h, t) -> False) /\ C.Nodup(t) := by
+        apply (C.nodup_cons {A := A; h := h; t := t}).left
+        exact nodup_xs
+      rewrite -> C.append_cons {A := A; h := h; t := t; ys := ys}
+      apply (C.nodup_cons {
+        A := A; h := h; t := C.append(t, ys)
+      }).right
+      split
+      intro h_in_append
+      have h_cases : C.Member(h, t) \/ C.Member(h, ys) := by
+        apply (C.member_append {A := A; x := h; xs := t} ys).left
+        exact h_in_append
+      cases h_cases with
+      | left h_in_t =>
+          exact nodup_parts.left h_in_t
+      | right h_in_ys =>
+          apply disjoint h
+          apply (C.member_cons {A := A; x := h; h := h; t := t}).right
+          left
+          refl
+          exact h_in_ys
+      apply ih
+      exact nodup_parts.right
+      exact nodup_ys
+      intro x
+      intro x_in_t
+      intro x_in_ys
+      apply disjoint x
+      apply (C.member_cons {A := A; x := x; h := h; t := t}).right
+      right
+      exact x_in_t
+      exact x_in_ys
+
+-- Disjointness supplies exactly the information needed to construct a
+-- duplicate-free union enumeration without deciding equality globally.
+theorem has_size_disjoint_union
+  (A : Type) (S T : Set A)
+  (xs ys : C.List A) (m n : Nat) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  (forall x : A, x in S -> x in T -> False) ->
+  C.HasSize(union(S, T), C.append(xs, ys), add(m, n)) := by
+  intro size_s
+  intro size_t
+  intro disjoint
+  apply C.has_size_intro {
+    A := A;
+    S := union(S, T);
+    xs := C.append(xs, ys);
+    n := add(m, n)
+  }
+  apply nodup_append_of_disjoint {A := A; xs := xs}
+  exact C.has_size_nodup {A := A; S := S; xs := xs; n := m} size_s
+  exact C.has_size_nodup {A := A; S := T; xs := ys; n := n} size_t
+  intro x
+  intro x_in_xs
+  intro x_in_ys
+  apply disjoint x
+  apply (C.has_size_members {
+    A := A; S := S; xs := xs; n := m
+  } size_s x).left
+  exact x_in_xs
+  apply (C.has_size_members {
+    A := A; S := T; xs := ys; n := n
+  } size_t x).left
+  exact x_in_ys
+  rewrite -> C.length_append {A := A; xs := xs; ys := ys}
+  rewrite -> C.has_size_length {
+    A := A; S := S; xs := xs; n := m
+  } size_s
+  rewrite -> C.has_size_length {
+    A := A; S := T; xs := ys; n := n
+  } size_t
+  refl
+  intro x
+  split
+  intro x_in_append
+  have x_cases : C.Member(x, xs) \/ C.Member(x, ys) := by
+    apply (C.member_append {A := A; x := x; xs := xs} ys).left
+    exact x_in_append
+  simp
+  cases x_cases with
+  | left x_in_xs =>
+      left
+      apply (C.has_size_members {
+        A := A; S := S; xs := xs; n := m
+      } size_s x).left
+      exact x_in_xs
+  | right x_in_ys =>
+      right
+      apply (C.has_size_members {
+        A := A; S := T; xs := ys; n := n
+      } size_t x).left
+      exact x_in_ys
+  intro x_in_union
+  apply union_member_in_append {
+    A := A; S := S; T := T; xs := xs; ys := ys; m := m; n := n; x := x
+  }
+  exact size_s
+  exact size_t
+  exact x_in_union
+
+-- Without disjointness, a supplied duplicate-free union enumeration is no
+-- larger than the two source enumerations put together.
+theorem finite_union_cardinality_le
+  (A : Type) (S T : Set A)
+  (xs ys zs : C.List A) (m n k : Nat) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  C.HasSize(union(S, T), zs, k) ->
+  le(k, add(m, n)) := by
+  intro size_s
+  intro size_t
+  intro size_union
+  have union_in_append : forall x : A, C.Member(x, zs) -> C.Member(x, C.append(xs, ys)) := by
+    intro x
+    intro x_in_zs
+    apply union_member_in_append {
+      A := A; S := S; T := T; xs := xs; ys := ys; m := m; n := n; x := x
+    }
+    exact size_s
+    exact size_t
+    apply (C.has_size_members {
+      A := A; S := union(S, T); xs := zs; n := k
+    } size_union x).left
+    exact x_in_zs
+  have list_bound : le(C.length(zs), C.length(C.append(xs, ys))) := by
+    apply C.nodup_inclusion_length_le {A := A; xs := zs}
+    exact C.has_size_nodup {
+      A := A; S := union(S, T); xs := zs; n := k
+    } size_union
+    exact union_in_append
+  rewrite <- C.has_size_length {
+    A := A; S := union(S, T); xs := zs; n := k
+  } size_union
+  rewrite <- C.has_size_length {
+    A := A; S := S; xs := xs; n := m
+  } size_s
+  rewrite <- C.has_size_length {
+    A := A; S := T; xs := ys; n := n
+  } size_t
+  rewrite <- C.length_append {A := A; xs := xs; ys := ys}
+  exact list_bound

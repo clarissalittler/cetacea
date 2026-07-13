@@ -4,6 +4,10 @@ This guide explains how to write and check Cetacea files. It is written for
 someone who wants to use the language, read the standard library, and write new
 proofs without first studying the Rust implementation.
 
+For a shorter guided tour with safe experiments, use the
+[hands-on tutorial](HANDS_ON_TUTORIAL.md) and its checked
+[`PLAYGROUND.ctea`](tutorial/PLAYGROUND.ctea) companion.
+
 Cetacea is a small tactic-based theorem prover. A Cetacea file contains
 declarations, theorem statements, and tactic scripts. The checker elaborates
 the tactic script into a proof object and then checks that proof object against
@@ -171,6 +175,7 @@ http://localhost:8000/web/
 The browser build embeds the standard library for virtual imports, so tutorial
 sources can still use imports such as `import std/prelude.ctea`,
 `import std/qualified_prelude.ctea`, or `import ../../../std/prelude.ctea`.
+The checked `std/hol/counting.ctea` source module is embedded too.
 It also accepts exact versioned logical imports such as
 `import std/hol/list@1 as L`, `import std/hol/finite@1 as F`, and
 `import std/hol/cardinality@1 as C`. A browser check
@@ -1821,13 +1826,20 @@ Cetacea is intentionally small. Important current limitations:
   still need explicit theorem parameters.
 - Nat has addition, multiplication, truncated subtraction, and `le`, but no
   division, modular arithmetic, or decidable equality tactic.
-- Data types are monomorphic: there are no type parameters, so there is no
-  polymorphic `List A`.
+- User `data` declarations are monomorphic. Exact logical imports provide a
+  checked polymorphic `List A`, but arbitrary parameterized datatype
+  declarations are not yet source syntax.
 - `defrec` recurses on its first argument, with optional fixed extra
   parameters; recursion on later arguments and mutual recursion are not
   supported.
-- `induction` rejects induction when local hypotheses depend on the induction
-  variable.
+- `induction` rejects unreverted local proof hypotheses that depend on the
+  induction variable. `revert h` handles proof hypotheses, but term-variable
+  generalization is not yet available.
+- `simp [lemma] at h` can rewrite a hypothesis, but general
+  `rewrite -> lemma at h` syntax is not yet available.
+- Checked source modules can consume versioned logical packages, but there is
+  no direct compiler from a source module to a new transactional `@1` package
+  record.
 - `intro`, `cases` arm binders, and `induction` arm binders reject names that
   would shadow an existing local variable or hypothesis.
 

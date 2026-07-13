@@ -1,0 +1,250 @@
+-- Checked constructive support for finite list counting.
+--
+-- This source module is the staging surface for a future versioned counting
+-- package.  Keeping the proofs visible while the finite-union vertical is
+-- exercised lets us test the abstraction before freezing it in the builtin
+-- registry.
+
+import ../nat.ctea
+import std/hol/list@1
+
+mode constructive
+
+-- `HasSize(S,xs,n)` is set-relative finite-cardinality evidence.  Unlike
+-- `HasCard(xs,n)`, which enumerates an entire type, it says that `xs`
+-- enumerates exactly the members of one particular set `S`.
+def HasSize (A : Type) (S : Set A) (xs : List A) (n : Nat) : Prop := Nodup(xs) /\ (length(xs) = n /\ (forall x : A, Member(x, xs) <-> x in S))
+
+theorem has_size_intro
+  (A : Type) (S : Set A) (xs : List A) (n : Nat) :
+  Nodup(xs) ->
+  length(xs) = n ->
+  (forall x : A, Member(x, xs) <-> x in S) ->
+  HasSize(S, xs, n) := by
+  intro nodup_xs
+  intro length_xs
+  intro enumerates
+  unfold HasSize
+  split
+  exact nodup_xs
+  split
+  exact length_xs
+  exact enumerates
+
+theorem has_size_nodup
+  (A : Type) (S : Set A) (xs : List A) (n : Nat) :
+  HasSize(S, xs, n) -> Nodup(xs) := by
+  intro size
+  exact size.left
+
+theorem has_size_length
+  (A : Type) (S : Set A) (xs : List A) (n : Nat) :
+  HasSize(S, xs, n) -> length(xs) = n := by
+  intro size
+  exact size.right.left
+
+theorem has_size_members
+  (A : Type) (S : Set A) (xs : List A) (n : Nat) :
+  HasSize(S, xs, n) ->
+  forall x : A, Member(x, xs) <-> x in S := by
+  intro size
+  exact size.right.right
+
+-- Membership in append is exactly membership in either input list.
+theorem member_append
+  (A : Type) (x : A) (xs : List A) :
+  forall ys : List A,
+  Member(x, append(xs, ys)) <-> Member(x, xs) \/ Member(x, ys) := by
+  induction xs with
+  | nil =>
+      intro ys
+      split
+      intro member_appended
+      have member_y : Member(x, ys) := by
+        rewrite <- append_nil_left {A := A; xs := ys}
+        exact member_appended
+      right
+      exact member_y
+      intro member_side
+      cases member_side with
+      | left member_nil_x =>
+          exfalso
+          exact member_nil {A := A; x := x} member_nil_x
+      | right member_y =>
+          rewrite -> append_nil_left {A := A; xs := ys}
+          exact member_y
+  | cons h t ih =>
+      intro ys
+      split
+      intro member_appended
+      have member_cons_appended : Member(x, cons(h, append(t, ys))) := by
+        rewrite <- append_cons {A := A; h := h; t := t; ys := ys}
+        exact member_appended
+      have member_cases : x = h \/ Member(x, append(t, ys)) := by
+        apply (member_cons {
+          A := A; x := x; h := h; t := append(t, ys)
+        }).left
+        exact member_cons_appended
+      cases member_cases with
+      | left x_h =>
+          left
+          apply (member_cons {A := A; x := x; h := h; t := t}).right
+          left
+          exact x_h
+      | right member_tail_append =>
+          have tail_cases : Member(x, t) \/ Member(x, ys) := by
+            apply (ih ys).left
+            exact member_tail_append
+          cases tail_cases with
+          | left member_t =>
+              left
+              apply (member_cons {A := A; x := x; h := h; t := t}).right
+              right
+              exact member_t
+          | right member_ys =>
+              right
+              exact member_ys
+      intro member_side
+      rewrite -> append_cons {A := A; h := h; t := t; ys := ys}
+      apply (member_cons {
+        A := A; x := x; h := h; t := append(t, ys)
+      }).right
+      cases member_side with
+      | left member_cons_x =>
+          have member_cases : x = h \/ Member(x, t) := by
+            apply (member_cons {A := A; x := x; h := h; t := t}).left
+            exact member_cons_x
+          cases member_cases with
+          | left x_h =>
+              left
+              exact x_h
+          | right member_t =>
+              right
+              apply (ih ys).right
+              left
+              exact member_t
+      | right member_ys =>
+          right
+          apply (ih ys).right
+          right
+          exact member_ys
+
+-- Remove one occurrence selected by a membership proof.  No decidable
+-- equality on the element type is required.
+theorem member_remove_one
+  (A : Type) (a : A) (ys : List A) :
+  Member(a, ys) ->
+  exists zs : List A,
+    length(ys) = succ(length(zs)) /\
+    (forall x : A,
+      (x = a -> False) ->
+      Member(x, ys) ->
+      Member(x, zs)) := by
+  induction ys with
+  | nil =>
+      intro member_a
+      exfalso
+      exact member_nil {A := A; x := a} member_a
+  | cons h t ih =>
+      intro member_a
+      have member_cases : a = h \/ Member(a, t) := by
+        apply (member_cons {A := A; x := a; h := h; t := t}).left
+        exact member_a
+      cases member_cases with
+      | left a_h =>
+          exists t
+          split
+          rewrite -> length_cons {A := A; h := h; t := t}
+          refl
+          intro x
+          intro x_not_a
+          intro member_x
+          have x_cases : x = h \/ Member(x, t) := by
+            apply (member_cons {A := A; x := x; h := h; t := t}).left
+            exact member_x
+          cases x_cases with
+          | left x_h =>
+              exfalso
+              apply x_not_a
+              rewrite -> a_h
+              exact x_h
+          | right x_in_t =>
+              exact x_in_t
+      | right a_in_t =>
+          cases ih a_in_t with
+          | intro zs removal =>
+              exists cons(h, zs)
+              split
+              rewrite -> length_cons {A := A; h := h; t := t}
+              rewrite -> length_cons {A := A; h := h; t := zs}
+              rewrite -> removal.left
+              refl
+              intro x
+              intro x_not_a
+              intro member_x
+              have x_cases : x = h \/ Member(x, t) := by
+                apply (member_cons {A := A; x := x; h := h; t := t}).left
+                exact member_x
+              apply (member_cons {
+                A := A; x := x; h := h; t := zs
+              }).right
+              cases x_cases with
+              | left x_h =>
+                  left
+                  exact x_h
+              | right x_in_t =>
+                  right
+                  exact removal.right x x_not_a x_in_t
+
+-- A duplicate-free list included in another list cannot be longer.  The
+-- containing list may contain duplicates.
+theorem nodup_inclusion_length_le
+  (A : Type) (xs : List A) :
+  forall ys : List A,
+  Nodup(xs) ->
+  (forall x : A, Member(x, xs) -> Member(x, ys)) ->
+  le(length(xs), length(ys)) := by
+  induction xs with
+  | nil =>
+      intro ys
+      intro nodup_xs
+      intro included
+      rewrite -> length_nil {A := A}
+      exact zero_le {n := length(ys)}
+  | cons h t ih =>
+      intro ys
+      intro nodup_xs
+      intro included
+      have nodup_parts : (Member(h, t) -> False) /\ Nodup(t) := by
+        apply (nodup_cons {A := A; h := h; t := t}).left
+        exact nodup_xs
+      have h_in_xs : Member(h, cons(h, t)) := by
+        apply (member_cons {A := A; x := h; h := h; t := t}).right
+        left
+        refl
+      have h_in_ys : Member(h, ys) := included h h_in_xs
+      cases member_remove_one {A := A; a := h; ys := ys} h_in_ys with
+      | intro zs removal =>
+          have tail_included : forall x : A, Member(x, t) -> Member(x, zs) := by
+            intro x
+            intro x_in_t
+            apply removal.right x
+            intro x_h
+            apply nodup_parts.left
+            rewrite <- x_h
+            exact x_in_t
+            apply included x
+            apply (member_cons {A := A; x := x; h := h; t := t}).right
+            right
+            exact x_in_t
+          have tail_le : le(length(t), length(zs)) := by
+            apply ih zs
+            exact nodup_parts.right
+            exact tail_included
+          have lifted_tail_le : le(succ(length(t)), succ(length(zs))) := by
+            exact le_succ_succ_rev {
+              n := length(t); m := length(zs)
+            } tail_le
+          rewrite -> length_cons {A := A; h := h; t := t}
+          rewrite -> removal.left
+          exact lifted_tail_le

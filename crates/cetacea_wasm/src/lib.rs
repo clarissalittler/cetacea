@@ -186,6 +186,10 @@ fn standard_imports() -> Vec<VirtualFile> {
         ("std/list.ctea", include_str!("../../../std/list.ctea")),
         ("std/fun.ctea", include_str!("../../../std/fun.ctea")),
         (
+            "std/hol/counting.ctea",
+            include_str!("../../../std/hol/counting.ctea"),
+        ),
+        (
             "std/modular.ctea",
             include_str!("../../../std/modular.ctea"),
         ),
@@ -870,6 +874,59 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
             assert!(
                 pigeonhole_json.contains(expected),
                 "missing {expected} in {pigeonhole_json}"
+            );
+        }
+
+        let finite_unions = include_str!("../../../docs/book/hol-code/ch16-solutions.ctea");
+        let finite_union_report =
+            check_file_with_imports_and_hol_shadow(finite_unions, &standard_imports());
+        assert!(
+            finite_union_report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            finite_union_report.legacy.diagnostics
+        );
+        assert!(
+            finite_union_report.is_match(),
+            "mismatches: {:#?}",
+            finite_union_report.mismatches
+        );
+        let finite_union_json = hol_shadow_result_json(&finite_union_report);
+        for expected in [
+            r#""hol_certified":true"#,
+            r#""required_fragment":"fol+induction""#,
+            r#""name":"ex16_4""#,
+            r#""imported_packages":["std/hol/list@1"]"#,
+        ] {
+            assert!(
+                finite_union_json.contains(expected),
+                "missing {expected} in {finite_union_json}"
+            );
+        }
+
+        let playground = include_str!("../../../docs/tutorial/PLAYGROUND.ctea");
+        let playground_report =
+            check_file_with_imports_and_hol_shadow(playground, &standard_imports());
+        assert!(
+            playground_report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            playground_report.legacy.diagnostics
+        );
+        assert!(
+            playground_report.is_match(),
+            "mismatches: {:#?}",
+            playground_report.mismatches
+        );
+        let playground_json = hol_shadow_result_json(&playground_report);
+        for expected in [
+            r#""hol_certified":true"#,
+            r#""name":"playground_and_swap","statement":"P /\\ Q -> Q /\\ P","mode":"constructive""#,
+            r#""name":"playground_map_refl","statement":"H.map(bump, xs) = H.map(bump, xs)","mode":"constructive""#,
+            r#""name":"playground_excluded_middle","statement":"P \\/ (not P)","mode":"classical""#,
+            r#""statement_fragment":"hol","required_fragment":"hol","features":["structural-recursion"],"dependencies":["std/hol/cardinality@1::map"]"#,
+        ] {
+            assert!(
+                playground_json.contains(expected),
+                "missing {expected} in {playground_json}"
             );
         }
     }

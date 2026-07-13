@@ -1,0 +1,58 @@
+-- Finite-union cardinality from set-relative enumeration witnesses.
+
+import ../../../std/hol/counting.ctea as C
+
+mode constructive
+
+theorem finite_union_cardinality_le
+  (A : Type) (S T : Set A)
+  (xs ys zs : C.List A) (m n k : Nat) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  C.HasSize(union(S, T), zs, k) ->
+  le(k, add(m, n)) := by
+  intro size_s
+  intro size_t
+  intro size_union
+  have union_in_append : forall x : A, C.Member(x, zs) -> C.Member(x, C.append(xs, ys)) := by
+    intro x
+    intro x_in_zs
+    have x_in_union : x in union(S, T) := by
+      apply (C.has_size_members {
+        A := A; S := union(S, T); xs := zs; n := k
+      } size_union x).left
+      exact x_in_zs
+    simp at x_in_union
+    apply (C.member_append {A := A; x := x; xs := xs} ys).right
+    cases x_in_union with
+    | left x_in_s =>
+        left
+        apply (C.has_size_members {
+          A := A; S := S; xs := xs; n := m
+        } size_s x).right
+        exact x_in_s
+    | right x_in_t =>
+        right
+        apply (C.has_size_members {
+          A := A; S := T; xs := ys; n := n
+        } size_t x).right
+        exact x_in_t
+  have list_bound : le(C.length(zs), C.length(C.append(xs, ys))) := by
+    apply C.nodup_inclusion_length_le {
+      A := A; xs := zs
+    }
+    exact C.has_size_nodup {
+      A := A; S := union(S, T); xs := zs; n := k
+    } size_union
+    exact union_in_append
+  rewrite <- C.has_size_length {
+    A := A; S := union(S, T); xs := zs; n := k
+  } size_union
+  rewrite <- C.has_size_length {
+    A := A; S := S; xs := xs; n := m
+  } size_s
+  rewrite <- C.has_size_length {
+    A := A; S := T; xs := ys; n := n
+  } size_t
+  rewrite <- C.length_append {A := A; xs := xs; ys := ys}
+  exact list_bound

@@ -21643,6 +21643,70 @@ theorem one_has_card :
             assert!(theorem.axiom_deps.is_empty());
             assert!(theorem.incomplete_deps.is_empty());
         }
+
+        let finite_unions =
+            check_file_at_path_with_hol_shadow(repo_path("docs/book/hol-code/ch16-solutions.ctea"));
+        assert!(
+            finite_unions.legacy.diagnostics.is_empty(),
+            "unexpected Chapter 16 diagnostics: {:#?}",
+            finite_unions.legacy.diagnostics
+        );
+        assert!(
+            finite_unions.is_match(),
+            "Chapter 16 mismatches: {:#?}",
+            finite_unions.mismatches
+        );
+        assert_eq!(finite_unions.imported_packages, ["std/hol/list@1"]);
+        let finite_union_roots = finite_unions
+            .theorems
+            .iter()
+            .filter(|theorem| !theorem.is_imported)
+            .map(|theorem| theorem.name.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            finite_union_roots,
+            ["ex16_1", "ex16_2", "ex16_3", "ex16_4"]
+                .into_iter()
+                .collect()
+        );
+        for theorem in finite_unions
+            .theorems
+            .iter()
+            .filter(|theorem| !theorem.is_imported)
+        {
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive,
+                "unexpected Chapter 16 fragment for {}",
+                theorem.name
+            );
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+
+        let finite_union_example =
+            check_file_at_path_with_hol_shadow(repo_path("docs/hol/examples/finite_union.ctea"));
+        assert!(
+            finite_union_example.legacy.diagnostics.is_empty(),
+            "unexpected finite-union example diagnostics: {:#?}",
+            finite_union_example.legacy.diagnostics
+        );
+        assert!(
+            finite_union_example.is_match(),
+            "finite-union example mismatches: {:#?}",
+            finite_union_example.mismatches
+        );
+        let finite_union_theorem = finite_union_example
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "finite_union_cardinality_le")
+            .expect("finite-union cardinality receipt");
+        assert_eq!(
+            finite_union_theorem.required_fragment,
+            hol::StatementFragment::FirstOrderInductive
+        );
+        assert!(finite_union_theorem.axiom_deps.is_empty());
+        assert!(finite_union_theorem.incomplete_deps.is_empty());
     }
 
     #[cfg(feature = "hol-shadow")]

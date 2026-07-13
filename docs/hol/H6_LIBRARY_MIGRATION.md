@@ -311,6 +311,19 @@ The expanded book checker now validates 86 `.ctea` files, while the frozen
 74-file pre-HOL oracle still matches exactly. This 453-test checkpoint measures
 1,815,032 bytes natively and 1,301,134 bytes in raw Wasm.
 
+Chapter 16 now completes the finite-union reuse gate. The stable
+member-removal and duplicate-free inclusion proofs have moved from Chapter 15
+into checked source module `std/hol/counting.ctea`, alongside set-relative
+`HasSize` evidence and append membership. Disjoint sets construct an exact
+union enumeration by append; arbitrary overlap consumes a supplied union
+witness and proves `k <= m+n`. Every root exercise remains constructive,
+trust-free `fol+induction`, even though the module transitively uses the
+polymorphic logical List package. The hands-on tutorial exercises the same
+source/package boundary in native and browser checking, and the expanded
+corpus now checks 92 `.ctea` files. All 453 workspace tests pass; the native
+release remains 1,815,032 bytes and embedding the checked counting source makes
+the raw Wasm module 1,309,239 bytes.
+
 ## Remaining migration slices
 
 1. Extend the implemented function-symbol theorem schemas beyond the now-
@@ -329,15 +342,16 @@ The expanded book checker now validates 86 `.ctea` files, while the frozen
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
 4. The first representative multi-constructor exercise, `HasCard` transport,
-   and generic pigeonhole theorem now pass. Shorten the intentionally explicit
-   enumeration proof and promote Chapter 15's stable removal/inclusion subset
-   to checked reusable support, then prove finite-union-cardinality and
-   handshake targets through checked library theorems. Extend enumeration
-   generation beyond nullary datatypes only when a course theorem requires it.
-5. Chapters 13–15 now provide the first pilot sequence and freeze each
+   generic pigeonhole theorem, and finite-union bound now pass. Design the
+   decidable equality/membership input needed to construct overlapping-union
+   witnesses, then drive the handshake target through checked library
+   theorems. Extend enumeration generation beyond nullary datatypes only when
+   a course theorem requires it.
+5. Chapters 13–16 now provide the first pilot sequence and freeze each
    assignment's profile, imports, trusted principles, and theorem signatures.
-   Add the finite tree edge/vertex theorem and its chapter after the intervening
-   counting surface is packaged and proved reusable.
+   Add handshake and finite-tree edge/vertex chapters after the intervening
+   graph/counting surfaces are proved reusable. Publish the counting source as
+   a versioned package only after its decidability API stabilizes.
 
 ## Gates for each slice
 

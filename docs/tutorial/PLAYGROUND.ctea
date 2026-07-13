@@ -1,0 +1,186 @@
+-- Cetacea hands-on tutorial playground.
+--
+-- Run from the repository root:
+--   cargo run -p cetacea_cli -- docs/tutorial/PLAYGROUND.ctea
+--
+-- Copy this file before editing if you want `git status` to stay clean.
+
+import ../../std/prelude.ctea
+import ../../std/hol/counting.ctea as C
+import std/hol/cardinality@1 as H
+
+mode constructive
+
+-- -------------------------------------------------------------------------
+-- Propositions and the basic tactic rhythm
+
+theorem playground_and_swap (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  split
+  exact h.right
+  exact h.left
+
+theorem playground_imp_chain (P Q R : Prop) :
+  (P -> Q) -> (Q -> R) -> P -> R := by
+  intro pq
+  intro qr
+  intro p
+  exact qr (pq p)
+
+-- -------------------------------------------------------------------------
+-- First-order declarations and quantifiers
+
+sort Person
+
+const alice : Person
+const bob : Person
+
+pred Student(Person)
+pred Reads(Person)
+
+theorem playground_every_student_reads :
+  (forall x : Person, Student(x) -> Reads(x)) ->
+  Student(alice) ->
+  Reads(alice) := by
+  intro all_read
+  intro alice_student
+  exact all_read alice alice_student
+
+theorem playground_exists_reader :
+  Reads(alice) -> exists x : Person, Reads(x) := by
+  intro alice_reads
+  exists alice
+  exact alice_reads
+
+-- -------------------------------------------------------------------------
+-- Equality, transparent definitions, and typed sets
+
+func mentor : Person -> Person
+
+def MentoredStudent (x : Person) : Prop := Student(mentor(x))
+def Readers : Set Person := { x : Person | Reads(x) }
+
+theorem playground_definition (x : Person) :
+  Student(mentor(x)) -> MentoredStudent(x) := by
+  intro h
+  unfold MentoredStudent
+  exact h
+
+theorem playground_set_builder (x : Person) :
+  Reads(x) -> x in Readers := by
+  intro reads_x
+  simp
+  exact reads_x
+
+theorem playground_equality_substitution (x y : Person) :
+  x = y -> Reads(x) -> Reads(y) := by
+  intro xy
+  intro reads_x
+  rewrite <- xy
+  exact reads_x
+
+theorem playground_product_member :
+  pair(alice, bob) in prod(singleton(alice), singleton(bob)) := by
+  apply prod_member_intro
+  simp
+  refl
+  simp
+  refl
+
+-- Ordinary functions are studied extensionally through relation graphs.
+theorem playground_mentor_graph_total :
+  Total(fun x y : Person => mentor(x) = y) := by
+  unfold Total
+  intro x
+  exists mentor(x)
+  refl
+
+-- -------------------------------------------------------------------------
+-- Natural numbers and induction
+
+theorem playground_add_zero (n : Nat) : add(n, 0) = n := by
+  exact add_zero_right
+
+theorem playground_add_assoc (a b c : Nat) :
+  add(add(a, b), c) = add(a, add(b, c)) := by
+  exact add_assoc
+
+theorem playground_zero_le (n : Nat) : le(0, n) := by
+  exact zero_le
+
+theorem playground_three_divides_twelve : Divides(3, 12) := by
+  exact divides_3_12
+
+-- -------------------------------------------------------------------------
+-- User datatypes, structural recursion, and structural induction
+
+data Light
+| red_light
+| green_light
+
+defrec flip_light (light : Light) : Light
+| red_light => green_light
+| green_light => red_light
+
+theorem playground_flip_twice (light : Light) :
+  flip_light(flip_light(light)) = light := by
+  induction light with
+  | red_light =>
+      refl
+  | green_light =>
+      refl
+
+theorem playground_constructors_distinct :
+  red_light = green_light -> False := by
+  intro impossible
+  contradiction
+
+-- -------------------------------------------------------------------------
+-- Generic checked List A and reusable counting source
+
+theorem playground_member_append
+  (A : Type) (x : A) (xs ys : C.List A) :
+  C.Member(x, xs) -> C.Member(x, C.append(xs, ys)) := by
+  intro x_in_xs
+  apply (C.member_append {A := A; x := x; xs := xs} ys).right
+  left
+  exact x_in_xs
+
+theorem playground_size_projection
+  (A : Type) (S : Set A) (xs : C.List A) (n : Nat) :
+  C.HasSize(S, xs, n) -> C.length(xs) = n := by
+  exact C.has_size_length {A := A; S := S; xs := xs; n := n}
+
+-- -------------------------------------------------------------------------
+-- The honest HOL boundary: map consumes a function value
+
+func bump : Nat -> Nat
+
+theorem playground_map_refl (xs : H.List Nat) :
+  H.map(bump, xs) = H.map(bump, xs) := by
+  refl
+
+-- -------------------------------------------------------------------------
+-- Classical mode is explicit and local to subsequent declarations
+
+mode classical
+
+theorem playground_excluded_middle (P : Prop) : P \/ (P -> False) := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+
+mode constructive
+
+-- Try these experiments one at a time:
+--
+-- 1. Replace `exact h.right` in playground_and_swap with `exact h.left`.
+-- 2. Move `intro alice_student` after the final `exact`.
+-- 3. Change `exists alice` to `exists 0` and inspect the type diagnostic.
+-- 4. Delete `simp` in playground_set_builder.
+-- 5. Rename the `green_light` induction arm to `red_light`.
+-- 6. Replace `H.map(bump, xs)` with `succ(0)` and compare its fragment.
+-- 7. Put `mode constructive` before playground_excluded_middle.
+-- 8. Add a theorem proved by `sorry`, then run with `--strict`.

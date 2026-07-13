@@ -351,5 +351,6 @@ public abstraction or merely a pigeonhole-specific proof device.
 
 ---
 
-*Back to [Chapter 14 — Bijections and the HOL Boundary](14-bijections.md) ·
+*Next: [Chapter 16 — Finite Unions Need Relative Evidence](16-finite-unions.md) ·
+back to [Chapter 14 — Bijections and the HOL Boundary](14-bijections.md) ·
 [full outline](OUTLINE.md).*

@@ -1,0 +1,52 @@
+-- Proofs, Checked -- Chapter 16: exercises.
+-- Replace every `sorry` with a proof.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch16-exercises.ctea
+
+import ../../../std/hol/counting.ctea as C
+
+mode constructive
+
+-- Exercise 16.1.  Translate membership in a set union into membership in
+-- the append of two exact set enumerations.
+theorem ex16_1
+  (A : Type) (S T : Set A)
+  (xs ys : C.List A) (m n : Nat) (x : A) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  x in union(S, T) ->
+  C.Member(x, C.append(xs, ys)) := by
+  sorry
+
+-- Exercise 16.2.  Append preserves Nodup when the two lists have no common
+-- member.  Keep ys generalized while inducting on xs.
+theorem ex16_2
+  (A : Type) (xs : C.List A) :
+  forall ys : C.List A,
+  C.Nodup(xs) ->
+  C.Nodup(ys) ->
+  (forall x : A, C.Member(x, xs) -> C.Member(x, ys) -> False) ->
+  C.Nodup(C.append(xs, ys)) := by
+  sorry
+
+-- Exercise 16.3.  Disjoint finite sets can use append itself as an exact
+-- enumeration of their union, so their cardinalities add.
+theorem ex16_3
+  (A : Type) (S T : Set A)
+  (xs ys : C.List A) (m n : Nat) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  (forall x : A, x in S -> x in T -> False) ->
+  C.HasSize(union(S, T), C.append(xs, ys), add(m, n)) := by
+  sorry
+
+-- Exercise 16.4.  For arbitrary overlap, any duplicate-free enumeration of
+-- the union has size at most the sum of the two input sizes.
+theorem ex16_4
+  (A : Type) (S T : Set A)
+  (xs ys zs : C.List A) (m n k : Nat) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  C.HasSize(union(S, T), zs, k) ->
+  le(k, add(m, n)) := by
+  sorry

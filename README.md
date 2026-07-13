@@ -21,6 +21,10 @@ compatibility, and argument type compatibility.
 - `crates/cetacea_wasm`: WebAssembly exports for checking, goal stepping, and
   proof explanations.
 - `web`: static browser UI.
+- `docs/HANDS_ON_TUTORIAL.md`: an executable first tour and focused
+  pain-point lab, with `docs/tutorial/PLAYGROUND.ctea` as its companion.
+- `docs/book`: the in-progress course text, exercises, solutions, deliberate
+  failures, and assignment policies.
 - `docs/USAGE.md`: language and proving guide.
 - `docs/DESIGN_AND_CODE.md`: implementation and design guide.
 - `docs/DISCRETE_MATH_GAP_AUDIT.md`: curriculum coverage audit and staged
@@ -32,6 +36,8 @@ compatibility, and argument type compatibility.
 - `std/fun.ctea`: functions modeled as graphs, with `Total`, `SingleValued`,
   `Injective`, `Surjective`, identity-function theorems, and composition
   theorems.
+- `std/hol/counting.ctea`: checked set-relative finite-size evidence and
+  reusable List counting lemmas over the versioned logical List package.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
 - `examples/fol_advanced.ctea`: harder first-order examples — quantifier
@@ -54,16 +60,18 @@ cargo run -p cetacea_cli -- examples/fol_advanced.ctea
 cargo run -p cetacea_cli -- examples/set_nat.ctea
 cargo run -p cetacea_cli -- examples/library_patterns.ctea
 cargo run -p cetacea_cli -- examples/imports.ctea
+cargo run -p cetacea_cli -- docs/tutorial/PLAYGROUND.ctea
 cargo run -p cetacea_cli -- std/prelude.ctea
 cargo run -p cetacea_cli -- std/set.ctea
 cargo run -p cetacea_cli -- std/nat.ctea
 ```
 
-The corpus script checks every standard-library, example, CS250, and book
-companion file. Every theorem in a `mistakes`, `fallacies`, or `negative`
-fixture must be individually rejected, so one earlier diagnostic cannot hide
-an accidentally accepted teaching example. Quoted book error headlines and
-acceptance receipts are also checked against live CLI output.
+The corpus script checks every standard-library, example, CS250, book
+companion, and hands-on tutorial source. Every theorem in a `mistakes`,
+`fallacies`, or `negative` fixture must be individually rejected, so one
+earlier diagnostic cannot hide an accidentally accepted teaching example.
+Quoted book error headlines and acceptance receipts are also checked against
+live CLI output.
 
 Use strict, machine-readable checking for assignments and automation with:
 
@@ -82,11 +90,13 @@ in the native CLI. The file is accepted only when the teaching checker and HOL
 replay both succeed, including when the package import is reached through
 another source file. The finite package exposes its checked List dependency
 under the same alias. `--hol-shadow` remains available to force the same
-certification for package-free files. The cardinality package currently exposes
-checked `map`, `map_length`, and the final `cardinality_transport` theorem;
-the forward/reverse membership, injective-Nodup, and surjective-coverage lemmas
-are source-facing too. Because `map` consumes a function argument, their uses
-are honestly reported as `hol`.
+certification for package-free files. The cardinality package exposes checked
+`map`, `map_nil`, `map_cons`, `map_length`, membership transport,
+injective-Nodup, surjective coverage, and the final `cardinality_transport`
+theorem. Because `map` consumes a function argument, its uses are honestly
+reported as `hol`. The checked `std/hol/counting.ctea` source module builds
+set-relative `HasSize` and first-order-inductive counting support over the List
+package without forcing those clients into HOL.
 
 Run the full-screen terminal TUI with:
 
@@ -125,7 +135,8 @@ accept the file. Exact logical imports work in checking, goal stepping, and
 proof explanations; the status and theorem library show the imported packages
 and certified least fragment. The bundled HOL examples derive length over List
 append and the cardinality of a one-constructor datatype through the public
-package surfaces.
+package surfaces. Browser regressions also run the checked finite-union and
+hands-on tutorial sources through their source-module imports.
 
 The CLI prints each root declaration as `accepted theorem`, `incomplete
 theorem`, or `trusted axiom`, together with the strongest mode used by a proof.
@@ -251,14 +262,16 @@ constructive simply typed higher-order core while retaining enforceable Prop and
 FOL teaching fragments. See
 [`docs/HOL_REARCHITECTURE_PLAN.md`](docs/HOL_REARCHITECTURE_PLAN.md).
 
-1. Parameterized (polymorphic) data types, so `List` and `Tree` can be
-   declared once for any element type. Deliberately deferred: it requires
-   polymorphic function signatures and a type-application form threaded
-   through the whole kernel, while concrete declarations such as
-   `data NatList` cover the course exercises.
-2. Mutual recursion and recursion on later `defrec` arguments.
-3. Cardinality and counting support for the combinatorics side of a discrete
-   math course.
-4. Decision procedures for modular arithmetic goals.
-5. Finish migrating book and course examples to qualified standard-library
-   names where that removes `_demo` collision workarounds.
+1. Add a decidable equality or membership interface so overlapping finite
+   unions can construct canonical witnesses rather than merely bound a
+   supplied one.
+2. Publish stable checked source libraries as versioned logical packages
+   without manually duplicating their proofs as Rust terms.
+3. Build the next counting/graph verticals: handshake and finite-tree
+   edge/vertex theorems.
+4. Extend user-declared datatypes beyond the current monomorphic surface and
+   add mutual recursion or recursion on later `defrec` arguments when a course
+   example requires them.
+5. Grow arithmetic with division/remainder, gcd, primes, integers, and useful
+   decision procedures; promote assignment-manifest enforcement to the
+   browser/grading surface.

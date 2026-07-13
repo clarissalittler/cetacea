@@ -1,0 +1,40 @@
+-- Proofs, Checked -- Chapter 16: mistakes (this file should fail).
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch16-mistakes.ctea
+
+import ../../../std/hol/counting.ctea as C
+
+mode constructive
+
+-- Mistake 1: append is only an exact union enumeration when cross-list
+-- duplicates are ruled out.
+theorem append_is_not_automatically_nodup
+  (A : Type) (S T : Set A)
+  (xs ys : C.List A) (m n : Nat) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  C.Nodup(C.append(xs, ys)) := by
+  intro size_s
+  intro size_t
+  exact C.has_size_nodup {A := A; S := S; xs := xs; n := m} size_s
+
+-- Mistake 2: set membership and membership in a chosen enumeration are
+-- related by HasSize evidence; they are not the same proposition.
+theorem set_union_membership_is_not_list_membership
+  (A : Type) (S T : Set A)
+  (xs ys : C.List A) (x : A) :
+  x in union(S, T) -> C.Member(x, C.append(xs, ys)) := by
+  intro x_in_union
+  exact x_in_union
+
+-- Mistake 3: overlap yields an upper bound, not exact addition.  A union
+-- enumeration and its count cannot be replaced by one input witness.
+theorem overlap_does_not_give_exact_addition
+  (A : Type) (S T : Set A)
+  (xs ys zs : C.List A) (m n : Nat) :
+  C.HasSize(S, xs, m) ->
+  C.HasSize(T, ys, n) ->
+  C.HasSize(union(S, T), zs, add(m, n)) := by
+  intro size_s
+  intro size_t
+  exact size_s

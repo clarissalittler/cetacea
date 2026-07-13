@@ -25,6 +25,11 @@ deliberately restrictive
 The latter accepts member removal, list inclusion, and arithmetic but rejects
 mapped-membership, injective-map preservation, and the final theorem's
 transitive HOL dependency.
+Chapter 16 adds
+[`ch16-solutions.ctea-assignment`](../book/hol-code/ch16-solutions.ctea-assignment),
+which authorizes the checked counting source module, its Nat source dependency,
+and `std/hol/list@1`, while keeping all four finite-union exercises at
+`fol+induction` with no classical, trust, or incomplete permission.
 
 An assignment manifest fixes the logical fragment and the capabilities available
 to a submission outside the theorem source itself. Invoke it with:

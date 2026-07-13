@@ -244,14 +244,14 @@ edges.
     `fol+induction`; public structural functions such as `map` still expose
     genuine function-valued arguments as HOL.
 
-30. **Open, high impact: the counting infrastructure is reusable but not yet
-    packaged.** Chapter 15's final pigeonhole assembly is about forty lines,
-    while constructive member removal, duplicate-free inclusion, mapped-member
-    witnesses, and injective `Nodup` preservation take roughly two hundred.
-    Finite-union cardinality will need much of the same surface. Before copying
-    it again, promote the stable subset to a checked versioned counting package
-    and decide whether proof-relevant removal or a higher-level inclusion
-    theorem is the public abstraction.
+30. **Resolved at the checked source-module layer: the counting core is
+    reusable.** Chapter 15's proof-relevant member removal and duplicate-free
+    inclusion bound now live in `std/hol/counting.ctea`, together with
+    `member_append` and a set-relative `HasSize` interface. Chapter 16 proves
+    finite-union cardinality by applying the inclusion theorem rather than
+    copying its removal induction. The source remains visible while the
+    decidable-overlap API is unsettled; freezing a builtin package ID is a
+    separate publication step, not a prerequisite for checked reuse.
 
 31. **Open, medium impact: proof-state generalization and local rewriting are
     too narrow.** The inclusion induction needs an induction hypothesis
@@ -270,6 +270,33 @@ edges.
     offer a classical corollary, or finite evidence can grow a decidable/search
     interface that computes the pair. Do not silently add classical reasoning
     to the base pigeonhole theorem.
+
+33. **Resolved: subset cardinality is no longer forced through whole-type
+    `HasCard`.** `HasCard(xs,n)` says every value of the carrier type occurs in
+    `xs`, so it cannot distinguish two subsets `S` and `T` of the same type.
+    Chapter 16's transparent `HasSize(S,xs,n)` records `Nodup`, length, and an
+    exact `Member(x,xs) <-> x in S` correspondence. Disjoint union constructs
+    a new witness by append; arbitrary union consumes a supplied witness and
+    proves the expected upper bound. All of this remains `fol+induction`.
+
+34. **Open, medium impact: checked source libraries have no direct publication
+    path to a versioned logical package.** A `.ctea` module is dual-checked and
+    reusable, but the current `std/hol/name@1` registry requires each theorem
+    to be reconstructed manually as de Bruijn-indexed Rust proof terms. There
+    is no package compiler that takes already checked source declarations,
+    assigns stable receipt names, and emits a transactional registry record.
+    Counting should not be duplicated in Rust merely to obtain an `@1` suffix;
+    design that publication boundary after the source API survives another
+    consumer.
+
+35. **Open, medium impact: definition and proof-expression parsing exposes
+    avoidable line-oriented seams.** The `HasSize` formula definition had to
+    place its whole body on one physical line. Nested expressions such as
+    `(has_size_members ... x).left member_x` were rejected even though the
+    equivalent two-step `apply ...left` followed by `exact member_x` works.
+    Multiline definition bodies and ordinary left-associative application of
+    projected proofs would remove incidental formatting work from otherwise
+    routine counting arguments.
 
 ## Already fixed while writing the book
 

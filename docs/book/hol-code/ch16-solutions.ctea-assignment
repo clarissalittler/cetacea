@@ -1,0 +1,20 @@
+version = 1
+profile = "fol+induction"
+
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+
+allowed_imports = [
+  "../../../std/hol/counting.ctea",
+  "../../../std/nat.ctea",
+  "std/hol/list@1",
+]
+allowed_axioms = []
+
+required_theorem.ex16_1 = '(A : Type) (S : Set A) (T : Set A) (xs : C.List A) (ys : C.List A) (m : Nat) (n : Nat) (x : A) : C.HasSize(S, xs, m) -> C.HasSize(T, ys, n) -> x in union(S, T) -> C.Member(x, C.append(xs, ys))'
+required_theorem.ex16_2 = '(A : Type) (xs : C.List A) : forall ys : C.List A, C.Nodup(xs) -> C.Nodup(ys) -> (forall x : A, C.Member(x, xs) -> not C.Member(x, ys)) -> C.Nodup(C.append(xs, ys))'
+required_theorem.ex16_3 = '(A : Type) (S : Set A) (T : Set A) (xs : C.List A) (ys : C.List A) (m : Nat) (n : Nat) : C.HasSize(S, xs, m) -> C.HasSize(T, ys, n) -> (forall x : A, x in S -> not x in T) -> C.HasSize(union(S, T), C.append(xs, ys), add(m, n))'
+required_theorem.ex16_4 = '(A : Type) (S : Set A) (T : Set A) (xs : C.List A) (ys : C.List A) (zs : C.List A) (m : Nat) (n : Nat) (k : Nat) : C.HasSize(S, xs, m) -> C.HasSize(T, ys, n) -> C.HasSize(union(S, T), zs, k) -> le(k, add(m, n))'

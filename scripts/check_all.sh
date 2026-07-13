@@ -31,7 +31,10 @@ allows_incomplete() {
   esac
 }
 
-mapfile -t files < <(find std examples docs/cs250/code docs/book/code docs/book/hol-code -type f -name '*.ctea' | sort)
+mapfile -t files < <(
+  find std examples docs/cs250/code docs/book/code docs/book/hol-code docs/tutorial \
+    -type f -name '*.ctea' | sort
+)
 
 status=0
 book_error_lines=""

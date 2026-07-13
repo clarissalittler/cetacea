@@ -293,6 +293,19 @@ mapped proof, while the removal, inclusion, and arithmetic exercises remain
 release artifacts measure 1,815,032 bytes natively and 1,301,134 bytes in raw
 Wasm.
 
+Chapter 16 now layers ordinary checked source over that package surface.
+`std/hol/counting.ctea` exports `HasSize`, append membership, proof-relevant
+member removal, and the duplicate-free inclusion bound; importing it aliases
+its transitive List surface without hiding `std/hol/list@1` provenance. The
+finite-union solutions and tutorial both replay through native and browser
+checking. Their set-relative counting theorems remain trust-free
+`fol+induction`, demonstrating that a source module over a polymorphic package
+does not itself imply HOL. A separate source-to-registry publication path is
+still needed before this evolving interface should become
+`std/hol/counting@1`. The checkpoint retains 453 passing workspace tests and a
+1,815,032-byte native release; the embedded source brings raw Wasm to
+1,309,239 bytes.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages
@@ -320,7 +333,8 @@ package applications; intentionally ambiguous standalone uses remain rejected.
 Predicate-valued `All` arguments, explicit term ascriptions, all structural
 predicate constructor laws, right identity, associativity, and length over
 append and browser/editor verification are complete as well. The next source
-slices continue with general generic declarations, cardinality aliases, richer
-finite enumeration exercises, browser assignment-policy enforcement, and an
-explicit decision about the low-level core-API cutover. The generic induction
-principle itself is exposed through a receipt-backed theorem alias.
+slices continue with general generic declarations, a decidable finite-set
+construction interface, source-to-package publication, browser
+assignment-policy enforcement, and an explicit decision about the low-level
+core-API cutover. The generic induction principle itself is exposed through a
+receipt-backed theorem alias.
