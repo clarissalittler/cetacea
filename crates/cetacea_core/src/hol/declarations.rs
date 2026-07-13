@@ -891,6 +891,106 @@ impl CompatibilityElaborator {
         )?)
     }
 
+    /// Atomically install and bind the checked cardinality `map` surface
+    /// together with its List dependency. The source theorem is backed by a
+    /// checked explicit-parameter wrapper around the package's quantified
+    /// `map_length` theorem.
+    pub fn import_builtin_cardinality_v1(
+        &mut self,
+        namespace: Option<&str>,
+    ) -> Result<InstalledCardinalityLibrary, CompatibilityDeclarationError> {
+        if namespace.is_some_and(|namespace| {
+            namespace.is_empty() || namespace.split('.').any(str::is_empty)
+        }) {
+            return Err(CompatibilityDeclarationError::new(
+                "library import namespace must contain nonempty qualified name segments",
+            ));
+        }
+        let namespace = namespace.map(str::to_string);
+        if self.library_aliases.iter().any(|registration| {
+            registration.package == LibraryPackageId::CardinalityV1
+                && registration.namespace == namespace
+        }) {
+            return self.install_builtin_cardinality_v1();
+        }
+        let qualify = |leaf: &str| match &namespace {
+            Some(namespace) => format!("{namespace}.{leaf}"),
+            None => leaf.to_string(),
+        };
+        let map_name = qualify("map");
+        let map_length_name = qualify("map_length");
+        self.ensure_name_free(&map_name)?;
+        self.ensure_name_free(&map_length_name)?;
+
+        let mut staged = self.clone();
+        let lists = staged.import_builtin_list_v1(namespace.as_deref())?;
+        let installed = staged.install_builtin_cardinality_v1()?;
+        let domain_parameter = installed.cardinality.domain_parameter;
+        let codomain_parameter = installed.cardinality.codomain_parameter;
+        let domain_type = CoreType::Parameter(domain_parameter);
+        let codomain_type = CoreType::Parameter(codomain_parameter);
+        let function_type = CoreType::arrow(domain_type.clone(), codomain_type.clone());
+        let source_list_type = lists.lists.list_type(domain_type.clone());
+        staged.finish_symbol(SymbolRegistration {
+            name: map_name.clone(),
+            constant: installed.cardinality.map,
+            type_parameters: vec![domain_parameter, codomain_parameter],
+            parameter_types: vec![function_type.clone(), source_list_type.clone()],
+            result_type: lists.lists.list_type(codomain_type),
+        })?;
+
+        let surface_domain_parameter = "A".to_string();
+        let surface_codomain_parameter = "B".to_string();
+        let surface_domain_type = Type::Named(surface_domain_parameter.clone());
+        let surface_codomain_type = Type::Named(surface_codomain_parameter.clone());
+        let surface_list_type = Type::App(qualify("List"), vec![surface_domain_type.clone()]);
+        let parameters = vec![
+            Param {
+                name: surface_domain_parameter,
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: surface_codomain_parameter,
+                kind: ParamKind::Type,
+            },
+            Param {
+                name: "f".to_string(),
+                kind: ParamKind::Function {
+                    arguments: vec![surface_domain_type],
+                    result: surface_codomain_type,
+                },
+            },
+            Param {
+                name: "xs".to_string(),
+                kind: ParamKind::Term(surface_list_type),
+            },
+        ];
+        let statement = Formula::eq(
+            Term::App(
+                qualify("length"),
+                vec![Term::App(
+                    map_name,
+                    vec![Term::Var("f".to_string()), Term::Var("xs".to_string())],
+                )],
+            ),
+            Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
+        );
+        staged.bind_checked_theorem_alias(
+            map_length_name,
+            installed.map_length_schema,
+            parameters,
+            &statement,
+            vec![domain_parameter, codomain_parameter],
+            vec![function_type, source_list_type],
+        )?;
+        staged.library_aliases.push(LibraryAliasRegistration {
+            package: LibraryPackageId::CardinalityV1,
+            namespace,
+        });
+        *self = staged;
+        Ok(installed)
+    }
+
     /// Install the versioned finite-enumeration predicate and its generic List
     /// dependency without adding `HasCard` to the legacy surface.
     pub fn install_builtin_finite_v1(
@@ -3662,6 +3762,75 @@ mod tests {
             .import_builtin_finite_v1(Some("F"))
             .expect_err("dependency collision rejects the complete finite import");
         assert!(error.message.contains("F.List"));
+        assert_eq!(collision, before_collision);
+    }
+
+    #[test]
+    fn cardinality_package_aliases_checked_map_and_map_length_atomically() {
+        let mut elaborator = CompatibilityElaborator::new().expect("compatibility elaborator");
+        let installed = elaborator
+            .import_builtin_cardinality_v1(Some("C"))
+            .expect("import cardinality package");
+        let increment = elaborator
+            .declare_function("inc", &[Type::Nat], &Type::Nat)
+            .expect("declare concrete function symbol");
+        let lists = elaborator
+            .libraries()
+            .list_v1()
+            .expect("registered List dependency");
+        let natural_type = elaborator.prelude().nat_type();
+        let source_values = Term::App(
+            "C.cons".to_string(),
+            vec![Term::Zero, Term::Var("C.nil".to_string())],
+        );
+        let lowered_map = elaborator
+            .lower_term(&Term::App(
+                "C.map".to_string(),
+                vec![Term::Var("inc".to_string()), source_values.clone()],
+            ))
+            .expect("lower checked map surface");
+        let expected_values = lists.lists.cons_term(
+            natural_type.clone(),
+            CoreTerm::Constant(elaborator.prelude().zero()),
+            lists.lists.nil_term(natural_type.clone()),
+        );
+        assert_eq!(
+            lowered_map,
+            CoreTerm::apply(
+                CoreTerm::apply(
+                    CoreTerm::instantiate_constant(
+                        installed.cardinality.map,
+                        vec![natural_type.clone(), natural_type],
+                    ),
+                    CoreTerm::Constant(increment),
+                ),
+                expected_values,
+            )
+        );
+        assert!(elaborator
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "C.map_length"
+                && theorem.theorem == installed.map_length_schema));
+
+        let after_import = elaborator.clone();
+        assert_eq!(
+            elaborator
+                .import_builtin_cardinality_v1(Some("C"))
+                .expect("repeated cardinality alias import"),
+            installed
+        );
+        assert_eq!(elaborator, after_import);
+
+        let mut collision = CompatibilityElaborator::new().expect("collision elaborator");
+        collision
+            .declare_sort("C.map_length")
+            .expect("reserve owned theorem alias");
+        let before_collision = collision.clone();
+        let error = collision
+            .import_builtin_cardinality_v1(Some("C"))
+            .expect_err("owned collision rejects complete cardinality import");
+        assert!(error.message.contains("C.map_length"));
         assert_eq!(collision, before_collision);
     }
 

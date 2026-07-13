@@ -1,0 +1,9 @@
+import std/hol/cardinality@1 as C
+
+mode constructive
+
+func inc : Nat -> Nat
+
+theorem map_length_inc (xs : C.List Nat) :
+  C.length(C.map(inc, xs)) = C.length(xs) := by
+  exact C.map_length {A := Nat; B := Nat; f := inc; xs := xs}

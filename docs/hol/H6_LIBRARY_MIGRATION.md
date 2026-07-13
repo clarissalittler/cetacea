@@ -59,7 +59,8 @@ private H3.5 builder.
 
 It is also registered as logical module `std/hol/cardinality@1` under reserved
 namespace `@library.cardinality.v1`. The record catalogs `map`, all six theorem
-receipts, and an explicit dependency on `std/hol/list@1`. Installing cardinality
+receipts, a checked explicit-parameter `map_length` wrapper, and an explicit
+dependency on `std/hol/list@1`. Installing cardinality
 installs that dependency when necessary, but stages the complete closure as one
 transaction: a late theorem collision rolls back both packages. Reinstallation
 validates the core binding, Nat binding, declaration catalog, individual
@@ -233,6 +234,19 @@ bare or partially applied. Dual-checked generic and concrete Nat reflexivity
 examples retain `fol+induction`, while bad arities reject. This checkpoint
 measures 1,700,384 bytes natively and 1,197,428 bytes in raw Wasm.
 
+The first cardinality source import now exposes `map` and `map_length` together
+with the complete checked List dependency. The source theorem alias targets a
+new kernel-checked template that specializes the package's original quantified
+`map_length`; no proof is trusted or replayed by the legacy engine. Mixed
+rank-one inference checks the named function's domain and codomain before
+inferring the List instances, and the complete import is transactional and
+idempotent. A saturated concrete use remains honestly `hol`: `map` takes a
+function as data, unlike a theorem schema that merely substitutes a function
+symbol into first-order application positions. The browser example and
+assignment tests therefore require the HOL profile and both exact package IDs.
+This checkpoint measures 1,741,224 bytes natively and 1,234,290 bytes in raw
+Wasm.
+
 ## Remaining migration slices
 
 1. Extend the implemented function-symbol theorem schemas to the remaining
@@ -250,7 +264,8 @@ measures 1,700,384 bytes natively and 1,197,428 bytes in raw Wasm.
    exercises; predicate-valued relations and more abstract closure theorems
    remain HOL and must stay policy-visible when reused.
 4. Extend the implemented finite surface to representative multi-constructor
-   exercises and expose cardinality transport, then prove pigeonhole,
+   exercises and expand the initial cardinality `map`/`map_length` surface to
+   full transport, then prove pigeonhole,
    finite-union-cardinality, and handshake targets through checked library
    theorems. Extend enumeration generation beyond nullary datatypes only when a
    course theorem requires it.

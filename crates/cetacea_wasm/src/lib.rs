@@ -711,4 +711,26 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
             assert!(json.contains(expected), "missing {expected} in {json}");
         }
     }
+
+    #[test]
+    fn browser_check_certifies_cardinality_map_length_and_its_dependency() {
+        let source = include_str!("../../../docs/hol/examples/cardinality_map_length.ctea");
+        let report = check_file_with_imports_and_hol_shadow(source, &standard_imports());
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        let json = hol_shadow_result_json(&report);
+        for expected in [
+            r#""ok":true"#,
+            r#""hol_certified":true"#,
+            r#""imported_packages":["std/hol/cardinality@1","std/hol/list@1"]"#,
+            r#""required_fragment":"hol""#,
+            r#"std/hol/cardinality@1::map_length_schema"#,
+        ] {
+            assert!(json.contains(expected), "missing {expected} in {json}");
+        }
+    }
 }

@@ -1046,6 +1046,15 @@ The compatibility lowerer binds the same schema name at the actual curried HOL
 arrow type. This is the prerequisite for cardinality transport while preserving
 FOL classification for concrete saturated instances.
 
+The first cardinality surface builds on that mechanism:
+`import std/hol/cardinality@1 as C` atomically exposes the checked List catalog,
+`C.map`, and a receipt-backed `C.map_length`. The source theorem targets a
+checked explicit-parameter wrapper around the original quantified package
+theorem. Mixed rank-one validation accepts only a named function of the inferred
+domain/codomain type. Uses of `map` are nevertheless classified `hol`, because
+the library operator itself consumes a function; restricted function-symbol
+syntax controls elaboration but does not weaken receipt classification.
+
 ## Wasm And Web UI
 
 The wasm crate is intentionally thin, mirroring the CLI. It exports:

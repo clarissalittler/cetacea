@@ -214,6 +214,25 @@ dual-checked generic reflexivity theorem and its concrete Nat instance retain
 mismatches fail explicitly. This checkpoint is 1,700,384 bytes natively and
 1,197,428 bytes in raw Wasm.
 
+`std/hol/cardinality@1` now has its first source-facing slice. Importing it as
+`C` transactionally binds the checked List dependency under `C`, the polymorphic
+`C.map`, and `C.map_length`. The registry retains the original universally
+quantified theorem and adds a checked explicit-parameter wrapper solely for
+source theorem application; the public receipt is
+`std/hol/cardinality@1::map_length_schema`. The transitional descriptor accepts
+only a named function with the inferred `A -> B` signature. A complete browser
+example proves length preservation for `inc` without copying `map` or its proof
+into the legacy engine, and collisions roll back both cardinality and List.
+
+This slice also makes the policy boundary concrete: a proposition containing
+`map(inc, xs)` is `hol`, even though `inc` is a first-order symbol, because
+`map` itself consumes a function argument. Function-symbol schemas do preserve
+FOL for theorems whose function is used only as an application head, but they
+do not launder higher-order library operators. Consequently cardinality-map
+assignments must opt into the `hol` profile; ordinary finite-cardinality
+exercises can continue to use `HasCard` under `fol+induction`. This checkpoint
+is 1,741,224 bytes natively and 1,234,290 bytes in raw Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages

@@ -6,6 +6,21 @@
 
 window.CETACEA_EXAMPLES = [
   {
+    id: "hol-cardinality",
+    label: "HOL Cardinality: map preserves length",
+    path: "docs/hol/examples/cardinality_map_length.ctea",
+    source: `import std/hol/cardinality@1 as C
+
+mode constructive
+
+func inc : Nat -> Nat
+
+theorem map_length_inc (xs : C.List Nat) :
+  C.length(C.map(inc, xs)) = C.length(xs) := by
+  exact C.map_length {A := Nat; B := Nat; f := inc; xs := xs}
+`,
+  },
+  {
     id: "hol-finite",
     label: "HOL Finite: cardinality of One",
     path: "docs/hol/examples/finite_one.ctea",

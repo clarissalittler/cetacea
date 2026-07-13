@@ -667,8 +667,15 @@ pub struct FuncDecl {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RankOneFuncDecl {
     type_params: Vec<Name>,
-    args: Vec<Type>,
+    args: Vec<RankOneFunctionArgument>,
     result: Type,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "hol-shadow"), allow(dead_code))]
+enum RankOneFunctionArgument {
+    Term(Type),
+    Function { arguments: Vec<Type>, result: Type },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1044,6 +1051,24 @@ impl Env {
         name: Name,
         type_params: Vec<Name>,
         args: Vec<Type>,
+        result: Type,
+    ) {
+        self.add_rank_one_mixed_func(
+            name,
+            type_params,
+            args.into_iter()
+                .map(RankOneFunctionArgument::Term)
+                .collect(),
+            result,
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn add_rank_one_mixed_func(
+        &mut self,
+        name: Name,
+        type_params: Vec<Name>,
+        args: Vec<RankOneFunctionArgument>,
         result: Type,
     ) {
         self.rank_one_funcs.insert(
@@ -3476,6 +3501,10 @@ impl FileChecker {
             if self.loaded_library_packages.contains(&key) {
                 return;
             }
+            if package == hol::LibraryPackageId::CardinalityV1 {
+                self.check_logical_cardinality_import(logical_id, alias, line, source_path, key);
+                return;
+            }
             if package == hol::LibraryPackageId::FiniteV1 {
                 self.check_logical_finite_import(logical_id, alias, line, source_path, key);
                 return;
@@ -4298,6 +4327,164 @@ impl FileChecker {
             self.env = staged_env;
             self.loaded_library_packages.insert(key);
         }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn check_logical_cardinality_import(
+        &mut self,
+        logical_id: &str,
+        alias: Option<Name>,
+        line: usize,
+        source_path: Option<&Path>,
+        key: (hol::LibraryPackageId, Option<Name>),
+    ) {
+        let qualify = |leaf: &str| match &alias {
+            Some(alias) => format!("{alias}.{leaf}"),
+            None => leaf.to_string(),
+        };
+        let map_name = qualify("map");
+        let map_length_name = qualify("map_length");
+        for name in [&map_name, &map_length_name] {
+            if self.env.has_top_level_name(name) {
+                self.result.diagnostics.push(diagnostic_at(
+                    source_path,
+                    line,
+                    format!("logical package alias `{name}` is already declared"),
+                ));
+                return;
+            }
+        }
+
+        let env_before = self.env.clone();
+        let shadow_before = self.hol_shadow.clone();
+        let loaded_packages_before = self.loaded_library_packages.clone();
+        let diagnostic_count = self.result.diagnostics.len();
+        self.check_logical_library_import(
+            hol::LibraryPackageId::ListV1,
+            "std/hol/list@1",
+            alias.clone(),
+            line,
+            source_path,
+        );
+        if self.result.diagnostics.len() != diagnostic_count {
+            self.env = env_before;
+            self.hol_shadow = shadow_before;
+            self.loaded_library_packages = loaded_packages_before;
+            return;
+        }
+
+        let domain_parameter = "A".to_string();
+        let codomain_parameter = "B".to_string();
+        let domain_type = Type::Named(domain_parameter.clone());
+        let codomain_type = Type::Named(codomain_parameter.clone());
+        let source_list_type = Type::App(qualify("List"), vec![domain_type.clone()]);
+        let target_list_type = Type::App(qualify("List"), vec![codomain_type.clone()]);
+        let mut staged_env = self.env.clone();
+        staged_env.reserve_package_name(map_name.clone());
+        staged_env.reserve_package_name(map_length_name.clone());
+        staged_env.add_rank_one_mixed_func(
+            map_name.clone(),
+            vec![domain_parameter.clone(), codomain_parameter.clone()],
+            vec![
+                RankOneFunctionArgument::Function {
+                    arguments: vec![domain_type.clone()],
+                    result: codomain_type.clone(),
+                },
+                RankOneFunctionArgument::Term(source_list_type.clone()),
+            ],
+            target_list_type,
+        );
+
+        let installed = match self
+            .hol_shadow
+            .as_mut()
+            .expect("HOL package imports require an initialized sidecar")
+            .elaborator
+            .import_builtin_cardinality_v1(alias.as_deref())
+        {
+            Ok(installed) => installed,
+            Err(error) => {
+                self.env = env_before;
+                self.hol_shadow = shadow_before;
+                self.loaded_library_packages = loaded_packages_before;
+                self.result.diagnostics.push(
+                    diagnostic_at(
+                        source_path,
+                        line,
+                        format!("could not import logical HOL package `{logical_id}`"),
+                    )
+                    .with_note(error.message),
+                );
+                return;
+            }
+        };
+        let map_length_receipt = installed
+            .record
+            .declarations
+            .iter()
+            .find(|declaration| declaration.logical_name == "map_length_schema")
+            .and_then(|declaration| declaration.receipt)
+            .expect("registered map_length theorem template has a receipt");
+        staged_env.add_theorem(Theorem {
+            name: map_length_name,
+            params: vec![
+                Param {
+                    name: domain_parameter,
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: codomain_parameter,
+                    kind: ParamKind::Type,
+                },
+                Param {
+                    name: "f".to_string(),
+                    kind: ParamKind::Function {
+                        arguments: vec![domain_type],
+                        result: codomain_type,
+                    },
+                },
+                Param {
+                    name: "xs".to_string(),
+                    kind: ParamKind::Term(source_list_type),
+                },
+            ],
+            statement: Formula::eq(
+                Term::App(
+                    qualify("length"),
+                    vec![Term::App(
+                        map_name,
+                        vec![Term::Var("f".to_string()), Term::Var("xs".to_string())],
+                    )],
+                ),
+                Term::App(qualify("length"), vec![Term::Var("xs".to_string())]),
+            ),
+            evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                hol::LibraryPackageId::CardinalityV1,
+                map_length_receipt,
+            )),
+            mode_used: LogicMode::Constructive,
+            is_axiom: false,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+        });
+        let shadow = self
+            .hol_shadow
+            .as_mut()
+            .expect("HOL package imports require an initialized sidecar");
+        for declaration in &installed.record.declarations {
+            let Some(receipt) = declaration.receipt else {
+                continue;
+            };
+            let stable_name = shadow
+                .elaborator
+                .libraries()
+                .receipt_name(receipt)
+                .expect("registered package receipts have stable names");
+            shadow.receipt_names.insert(receipt, stable_name);
+        }
+        shadow.imported_packages.insert(logical_id.to_string());
+        self.env = staged_env;
+        self.loaded_library_packages.insert(key);
     }
 
     #[cfg(feature = "hol-shadow")]
@@ -7180,10 +7367,13 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
             if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
                 env.funcs.contains_key(candidate) || env.rank_one_funcs.contains_key(candidate)
             }) {
-                let args = args
-                    .iter()
-                    .map(|arg| canonicalize_term(env, ctx, arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = if let Some(decl) = env.rank_one_funcs.get(&name) {
+                    canonicalize_rank_one_function_args(env, ctx, &name, decl, args)?
+                } else {
+                    args.iter()
+                        .map(|arg| canonicalize_term(env, ctx, arg))
+                        .collect::<Result<Vec<_>, _>>()?
+                };
                 return Ok(Term::App(name, args));
             }
             if let Some(name) =
@@ -7350,6 +7540,31 @@ fn canonicalize_rank_one_predicate_argument(
             }))
         }
     }
+}
+
+fn canonicalize_rank_one_function_args(
+    env: &Env,
+    ctx: &Context,
+    name: &str,
+    decl: &RankOneFuncDecl,
+    args: &[Term],
+) -> Result<Vec<Term>, ValidationError> {
+    if decl.args.len() != args.len() {
+        return Err(ValidationError::new(format!(
+            "function `{name}` expects {} argument(s), but got {}",
+            decl.args.len(),
+            args.len()
+        )));
+    }
+    args.iter()
+        .zip(&decl.args)
+        .map(|(arg, parameter)| match parameter {
+            RankOneFunctionArgument::Term(_) => canonicalize_term(env, ctx, arg),
+            RankOneFunctionArgument::Function { .. } => {
+                canonicalize_function_arg(env, ctx, arg).map(Term::Var)
+            }
+        })
+        .collect()
 }
 
 fn canonicalize_rank_one_predicate_args(
@@ -9659,20 +9874,20 @@ fn infer_rank_one_type_arguments(
     Ok(subst)
 }
 
-fn infer_rank_one_term_arguments_with_subst(
+fn infer_rank_one_function_arguments_with_subst(
     env: &Env,
     ctx: &Context,
     name: &str,
     symbol_kind: &str,
     type_params: &[Name],
-    parameter_types: &[Type],
+    parameters: &[RankOneFunctionArgument],
     args: &[Term],
     mut subst: SchemaSubst,
 ) -> Result<SchemaSubst, ValidationError> {
-    if parameter_types.len() != args.len() {
+    if parameters.len() != args.len() {
         return Err(ValidationError::new(format!(
             "{symbol_kind} `{name}` expects {} argument(s), but got {}",
-            parameter_types.len(),
+            parameters.len(),
             args.len()
         )));
     }
@@ -9690,28 +9905,47 @@ fn infer_rank_one_term_arguments_with_subst(
         let mut deferred = Vec::new();
         let mut progress = false;
         for idx in pending {
-            let pattern = &parameter_types[idx];
-            let expected = subst_type_schema(pattern, &subst);
-            let actual = if type_has_unresolved_schema_param(pattern, &schema_params, &subst) {
-                validate_term(env, ctx, &args[idx])
-            } else {
-                validate_term_using_expected_type(env, ctx, &args[idx], &expected)
-            };
-            let actual = match actual {
-                Ok(actual) => actual,
-                Err(error) => {
-                    errors[idx] = Some(error);
-                    deferred.push(idx);
-                    continue;
+            match &parameters[idx] {
+                RankOneFunctionArgument::Term(pattern) => {
+                    let expected = subst_type_schema(pattern, &subst);
+                    let actual =
+                        if type_has_unresolved_schema_param(pattern, &schema_params, &subst) {
+                            validate_term(env, ctx, &args[idx])
+                        } else {
+                            validate_term_using_expected_type(env, ctx, &args[idx], &expected)
+                        };
+                    let actual = match actual {
+                        Ok(actual) => actual,
+                        Err(error) => {
+                            errors[idx] = Some(error);
+                            deferred.push(idx);
+                            continue;
+                        }
+                    };
+                    if unify_type(pattern, &actual, &schema_params, &mut subst).is_err() {
+                        return Err(ValidationError::new(format!(
+                            "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
+                            idx + 1
+                        )));
+                    }
+                    progress = true;
                 }
-            };
-            if unify_type(pattern, &actual, &schema_params, &mut subst).is_err() {
-                return Err(ValidationError::new(format!(
-                    "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
-                    idx + 1
-                )));
+                RankOneFunctionArgument::Function { arguments, result } => {
+                    let function_name = canonicalize_function_arg(env, ctx, &args[idx])?;
+                    let mut trial_subst = subst.clone();
+                    validate_function_schema_arg(
+                        env,
+                        ctx,
+                        &function_name,
+                        arguments,
+                        result,
+                        &schema_params,
+                        &mut trial_subst,
+                    )?;
+                    subst = trial_subst;
+                    progress = true;
+                }
             }
-            progress = true;
         }
         if deferred.is_empty() {
             break;
@@ -9761,7 +9995,7 @@ fn validate_rank_one_function_application(
             )));
         }
     }
-    let subst = infer_rank_one_term_arguments_with_subst(
+    let subst = infer_rank_one_function_arguments_with_subst(
         env,
         ctx,
         name,
@@ -20407,11 +20641,83 @@ theorem one_has_card :
 
     #[cfg(feature = "hol-shadow")]
     #[test]
-    fn logical_cardinality_import_fails_closed_before_its_surface_is_ready() {
-        let report = check_file_with_hol_shadow("import std/hol/cardinality@1\n");
-        assert!(format!("{:#?}", report.legacy.diagnostics)
-            .contains("surface aliases are not implemented yet"));
+    fn logical_cardinality_import_exposes_checked_map_length_and_list_dependency() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import std/hol/cardinality@1 as C
+
+func inc : Nat -> Nat
+
+theorem mapped_refl (xs : C.List Nat) :
+  C.map(inc, xs) = C.map(inc, xs) := by
+  refl
+
+theorem map_length_inc (xs : C.List Nat) :
+  C.length(C.map(inc, xs)) = C.length(xs) := by
+  exact C.map_length {A := Nat; B := Nat; f := inc; xs := xs}
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected legacy diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(
+            report.imported_packages,
+            ["std/hol/cardinality@1", "std/hol/list@1"]
+        );
+        for name in ["mapped_refl", "map_length_inc"] {
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|theorem| theorem.name == name)
+                .expect("cardinality surface theorem receipt");
+            assert_eq!(
+                theorem.statement_fragment,
+                hol::StatementFragment::HigherOrder
+            );
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::HigherOrder
+            );
+        }
+        let map_length_inc = report
+            .theorems
+            .iter()
+            .find(|theorem| theorem.name == "map_length_inc")
+            .expect("map_length_inc receipt");
+        assert!(map_length_inc
+            .receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .any(|dependency| {
+                report.receipt_names.get(dependency).map(String::as_str)
+                    == Some("std/hol/cardinality@1::map_length_schema")
+            }));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn logical_cardinality_import_rolls_back_its_list_dependency_after_a_surface_collision() {
+        let report = check_file_with_hol_shadow(
+            r#"
+sort C.map_length
+import std/hol/cardinality@1 as C
+"#,
+        );
+        let rendered = format!("{:#?}", report.legacy.diagnostics);
+        assert!(
+            rendered.contains("logical package alias `C.map_length` is already declared"),
+            "unexpected diagnostics: {rendered}"
+        );
         assert!(report.imported_packages.is_empty());
+        assert!(report
+            .receipt_names
+            .values()
+            .all(|name| !name.starts_with("std/hol/cardinality@1::")
+                && !name.starts_with("std/hol/list@1::")));
     }
 
     #[cfg(feature = "hol-shadow")]

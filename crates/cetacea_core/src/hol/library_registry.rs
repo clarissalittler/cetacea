@@ -187,6 +187,7 @@ pub struct InstalledListLibrary {
 pub struct InstalledCardinalityLibrary {
     pub record: LibraryPackageRecord,
     pub cardinality: CardinalityTransportLibrary,
+    pub map_length_schema: TheoremId,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -925,6 +926,46 @@ impl HolLibraryRegistry {
             &lists.length,
             &names,
         )?;
+        let domain_type = CoreType::Parameter(cardinality.domain_parameter);
+        let codomain_type = CoreType::Parameter(cardinality.codomain_parameter);
+        let function_type = CoreType::arrow(domain_type.clone(), codomain_type.clone());
+        let source_list_type = lists.lists.list_type(domain_type.clone());
+        let mapped_values = CoreTerm::apply(
+            CoreTerm::apply(
+                CoreTerm::instantiate_constant(
+                    cardinality.map,
+                    vec![domain_type.clone(), codomain_type.clone()],
+                ),
+                CoreTerm::Bound(1),
+            ),
+            CoreTerm::Bound(0),
+        );
+        let map_length_schema_name =
+            format!("{BUILTIN_CARDINALITY_V1_NAMESPACE}.map_length_schema");
+        let (map_length_schema, _) = staged_core.declare_theorem_with_parameters(
+            map_length_schema_name.clone(),
+            vec![cardinality.domain_parameter, cardinality.codomain_parameter],
+            vec![function_type, source_list_type],
+            CoreTerm::equality(
+                lists.length.natural_type.clone(),
+                lists.length.apply(codomain_type, mapped_values),
+                lists.length.apply(domain_type, CoreTerm::Bound(0)),
+            ),
+            HolDraftProof::ForallElim {
+                proof_forall: Box::new(HolDraftProof::ForallElim {
+                    proof_forall: Box::new(HolDraftProof::TheoremRef {
+                        theorem: cardinality.map_length,
+                        type_arguments: vec![
+                            CoreType::Parameter(cardinality.domain_parameter),
+                            CoreType::Parameter(cardinality.codomain_parameter),
+                        ],
+                        term_arguments: Vec::new(),
+                    }),
+                    argument: CoreTerm::Bound(1),
+                }),
+                argument: CoreTerm::Bound(0),
+            },
+        )?;
         let definition = |logical_name: &str,
                           core_name: &str,
                           constant: ConstantId|
@@ -973,6 +1014,11 @@ impl HolLibraryRegistry {
                     definition("map", &names.map, cardinality.map)?,
                     theorem("map_length", &names.map_length, cardinality.map_length)?,
                     theorem(
+                        "map_length_schema",
+                        &map_length_schema_name,
+                        map_length_schema,
+                    )?,
+                    theorem(
                         "member_map_forward",
                         &names.member_map_forward,
                         cardinality.member_map_forward,
@@ -1000,6 +1046,7 @@ impl HolLibraryRegistry {
                 ],
             },
             cardinality,
+            map_length_schema,
         };
         staged_registry.packages.insert(
             LibraryPackageId::CardinalityV1,
@@ -1313,7 +1360,7 @@ fn validate_installed_cardinality_v1(
         || installed.record.provenance.source != LibraryPackageSource::Builtin
         || installed.record.core_namespace != BUILTIN_CARDINALITY_V1_NAMESPACE
         || installed.record.dependencies != [LibraryPackageId::ListV1]
-        || installed.record.declarations.len() != 7
+        || installed.record.declarations.len() != 8
     {
         return Err(SpikeError {
             message: format!("invalid package metadata for `{package}`"),
@@ -1331,6 +1378,11 @@ fn validate_installed_cardinality_v1(
         (
             "map_length",
             names.map_length.as_str(),
+            LibraryDeclarationKind::Theorem,
+        ),
+        (
+            "map_length_schema",
+            "@library.cardinality.v1.map_length_schema",
             LibraryDeclarationKind::Theorem,
         ),
         (
@@ -1378,6 +1430,10 @@ fn validate_installed_cardinality_v1(
 
     let handles_match = core.constants().resolve(&names.map) == Some(cardinality.map)
         && core.theorems().resolve(&names.map_length) == Some(cardinality.map_length)
+        && core
+            .theorems()
+            .resolve("@library.cardinality.v1.map_length_schema")
+            == Some(installed.map_length_schema)
         && core.theorems().resolve(&names.member_map_forward)
             == Some(cardinality.member_map_forward)
         && core.theorems().resolve(&names.member_map_reverse)
@@ -1860,7 +1916,7 @@ mod tests {
             BUILTIN_CARDINALITY_V1_NAMESPACE
         );
         assert_eq!(installed.record.dependencies, [LibraryPackageId::ListV1]);
-        assert_eq!(installed.record.declarations.len(), 7);
+        assert_eq!(installed.record.declarations.len(), 8);
         assert!(installed
             .record
             .declarations
@@ -1885,7 +1941,39 @@ mod tests {
                 .iter()
                 .filter(|declaration| declaration.kind == LibraryDeclarationKind::Theorem)
                 .count(),
-            6
+            7
+        );
+
+        let map_length_schema_receipt = core
+            .theorem_receipt(installed.map_length_schema)
+            .expect("registered map_length source template receipt");
+        assert_eq!(
+            map_length_schema_receipt.proof().statement_fragment(),
+            StatementFragment::HigherOrder
+        );
+        assert_eq!(
+            registry
+                .receipt_name(map_length_schema_receipt.id())
+                .as_deref(),
+            Some("std/hol/cardinality@1::map_length_schema")
+        );
+        let map_length_schema_dependencies = map_length_schema_receipt
+            .proof()
+            .direct_dependencies()
+            .iter()
+            .map(|dependency| {
+                registry
+                    .receipt_name(*dependency)
+                    .expect("every map_length template dependency belongs to a package")
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            map_length_schema_dependencies,
+            BTreeSet::from([
+                "std/hol/cardinality@1::map".to_string(),
+                "std/hol/cardinality@1::map_length".to_string(),
+                "std/hol/list@1::length".to_string(),
+            ])
         );
 
         let final_receipt = core

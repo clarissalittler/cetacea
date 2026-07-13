@@ -99,7 +99,9 @@ security model, and result fields.
 Package dependency closures are allowlisted explicitly. For example, a
 submission importing `std/hol/finite@1` reports both that package and its
 `std/hol/list@1` dependency, so an assignment using finite enumeration lists
-both exact IDs in `allowed_imports`.
+both exact IDs in `allowed_imports`. The same rule applies to
+`std/hol/cardinality@1`; its current `map` surface is genuinely higher-order,
+so assignments using it also select the `hol` profile.
 
 Start the full-screen terminal TUI with:
 
@@ -170,13 +172,16 @@ The browser build embeds the standard library for virtual imports, so tutorial
 sources can still use imports such as `import std/prelude.ctea`,
 `import std/qualified_prelude.ctea`, or `import ../../../std/prelude.ctea`.
 It also accepts exact versioned logical imports such as
-`import std/hol/list@1 as L` and `import std/hol/finite@1 as F`. A browser check
+`import std/hol/list@1 as L`, `import std/hol/finite@1 as F`, and
+`import std/hol/cardinality@1 as C`. A browser check
 succeeds only when both the legacy teaching UI and the HOL replay accept every
 declaration; the status bar
 shows the exact imported package and theorem entries display their certified
 least fragment. Load “HOL List: length of append” for a complete generic List
 induction example, or “HOL Finite: cardinality of One” for a trust-free
 `fol+induction` proof using `HasCard` and its checked introduction theorem.
+Load “HOL Cardinality: map preserves length” for the checked higher-order
+`map_length` surface and its explicit List dependency.
 
 The browser UI also shows the current proof goals, rule-based tactic hints for
 each open goal, diagnostic repair suggestions, a searchable theorem-library

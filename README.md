@@ -76,12 +76,15 @@ cargo run -p cetacea_cli -- --strict --json path/to/submission.ctea
 when a course needs a different trust or logic boundary.
 
 Exact logical imports such as `import std/hol/list@1 as L` and
-`import std/hol/finite@1 as F` automatically select fail-closed dual checking
+`import std/hol/finite@1 as F` or `import std/hol/cardinality@1 as C`
+automatically select fail-closed dual checking
 in the native CLI. The file is accepted only when the teaching checker and HOL
 replay both succeed, including when the package import is reached through
 another source file. The finite package exposes its checked List dependency
 under the same alias. `--hol-shadow` remains available to force the same
-certification for package-free files.
+certification for package-free files. The cardinality package currently exposes
+checked `map` and `map_length`; because `map` consumes a function argument, its
+uses are honestly reported as `hol`.
 
 Run the full-screen terminal TUI with:
 

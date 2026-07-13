@@ -87,6 +87,11 @@ surface exposes that checked dependency under the same source alias. The JSON
 `hol_shadow.imported_packages` field supplies the exact set a manifest must
 authorize.
 
+Likewise, allowing `std/hol/cardinality@1` requires `std/hol/list@1`. The
+current cardinality surface exposes `map`, which consumes a function argument;
+its concrete uses are classified `hol`, so listing the package does not by
+itself raise a `fol+induction` assignment's profile.
+
 `allowed_axioms` contains checked, possibly alias-qualified declaration names.
 An entry must resolve to a trusted axiom from an imported file. A source-local
 axiom with the same name is not accepted. The axiom is authorized only by

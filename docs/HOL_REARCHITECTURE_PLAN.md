@@ -743,6 +743,18 @@ first-order data or enabling unrestricted lambdas. Concrete saturated Nat
 instances remain `fol+induction`; bare values and arity mismatches reject. This
 checkpoint measures 1,700,384 bytes natively and 1,197,428 bytes in raw Wasm.
 
+The first `std/hol/cardinality@1` source slice is now live. A transactional
+import exposes its checked List closure, `map`, and `map_length`; the theorem
+alias is backed by a new checked explicit-parameter specialization of the
+existing quantified theorem. Mixed rank-one validation infers `A` and `B` from
+a named function and List value, while collisions restore the entire source,
+sidecar, registry, and receipt state. End-to-end native/browser proofs retain
+`std/hol/cardinality@1::map_length_schema`. They are deliberately classified
+`hol`: a library operator that accepts a function remains higher-order even at
+a concrete named function, so the restricted source mode cannot launder it.
+This checkpoint measures 1,741,224 bytes natively and 1,234,290 bytes in raw
+Wasm.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -758,7 +770,9 @@ checkpoint measures 1,700,384 bytes natively and 1,197,428 bytes in raw Wasm.
   intentionally ambiguous rank-one instances, and the first-order Member/Nodup
   constructor laws are source-facing. `All` constructor laws now demonstrate
   instance-sensitive fragment enforcement. Rank-one function-symbol parameters
-  now cover the arrow-valued schema prerequisite for cardinality transport.
+  now cover the arrow-valued schema prerequisite for cardinality transport, and
+  the initial cardinality `map`/`map_length` surface is source- and
+  browser-facing with an honest HOL boundary.
   General generic source declarations and a decision about low-level core-API
   cutover remain; native and browser
   end-to-end acceptance are automatic. The finite package now exposes

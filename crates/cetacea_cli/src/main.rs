@@ -3724,6 +3724,36 @@ theorem finite_refl (xs : F.List Nat) (n : Nat) :
                 .is_empty()
         );
 
+        let cardinality_report = cetacea_core::check_file_with_hol_shadow(include_str!(
+            "../../../docs/hol/examples/cardinality_map_length.ctea"
+        ));
+        assert!(cardinality_report.is_match());
+        assert_eq!(
+            cardinality_report.imported_packages,
+            ["std/hol/cardinality@1", "std/hol/list@1"]
+        );
+        let mut cardinality_assignment = assignment.clone();
+        cardinality_assignment.allowed_package_imports =
+            BTreeSet::from(["std/hol/cardinality@1".to_string()]);
+        let higher_order_policy = hol_policy(TeachingProfile::HigherOrder);
+        let violations = check_hol_policy_violations(
+            &cardinality_report,
+            higher_order_policy,
+            Some(&cardinality_assignment),
+        );
+        assert!(violations.iter().any(|violation| {
+            violation.kind == "import" && violation.message.contains("std/hol/list@1")
+        }));
+        cardinality_assignment
+            .allowed_package_imports
+            .insert("std/hol/list@1".to_string());
+        assert!(check_hol_policy_violations(
+            &cardinality_report,
+            higher_order_policy,
+            Some(&cardinality_assignment),
+        )
+        .is_empty());
+
         fs::remove_dir_all(&dir).expect("remove package assignment fixture");
     }
 

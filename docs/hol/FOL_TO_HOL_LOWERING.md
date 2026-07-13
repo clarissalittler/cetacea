@@ -572,3 +572,15 @@ core context. A dual-checked theorem and concrete `inc` instance remain
 `fol+induction`, while arity mismatches, bare function values, partial
 application, and function lambdas fail closed. This checkpoint is 1,700,384
 bytes natively and 1,197,428 bytes in raw Wasm.
+
+The cardinality import now uses that schema end to end. `C.map` has a mixed
+rank-one descriptor whose first argument must resolve to a named `A -> B`
+function and whose second argument determines `C.List A`; `C.map_length` is
+bound to a checked theorem template with explicit `A`, `B`, `f`, and `xs`
+parameters. That template is proved by specializing the package's existing
+quantified theorem. Its stable receipt records the adapter rather than
+pretending source elaboration proved a new fact. Since the retained `map`
+constant has a function-valued argument, both the concrete statement and its
+proof are classified `hol`; this is the intended contrast with first-order
+function-symbol substitution. This checkpoint is 1,741,224 bytes natively and
+1,234,290 bytes in raw Wasm.

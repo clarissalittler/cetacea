@@ -50,6 +50,8 @@ impl CardinalityTransportNames {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CardinalityTransportLibrary {
+    pub domain_parameter: TypeParameter,
+    pub codomain_parameter: TypeParameter,
     pub map: ConstantId,
     pub map_length: TheoremId,
     pub member_map_forward: TheoremId,
@@ -818,6 +820,8 @@ fn install_cardinality_transport_into(
     )?;
 
     Ok(CardinalityTransportLibrary {
+        domain_parameter: a_parameter,
+        codomain_parameter: b_parameter,
         map,
         map_length,
         member_map_forward,
