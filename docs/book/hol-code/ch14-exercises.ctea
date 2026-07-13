@@ -1,0 +1,79 @@
+-- Proofs, Checked -- Chapter 14: exercises.
+-- Replace every `sorry` with a proof.  Early exercises isolate the
+-- three components that the generic transport proof later assembles.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch14-exercises.ctea
+
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+data Answer
+| no
+| yes
+
+data Bit
+| zero_bit
+| one_bit
+
+defrec encode_answer (answer : Answer) : Bit
+| no => zero_bit
+| yes => one_bit
+
+defrec decode_answer (bit : Bit) : Answer
+| zero_bit => no
+| one_bit => yes
+
+-- Exercises 14.1 and 14.2.  Prove the inverse laws by following each
+-- datatype's constructors.  These proofs remain fol+induction.
+theorem ex14_1 (answer : Answer) :
+  decode_answer(encode_answer(answer)) = answer := by
+  sorry
+
+theorem ex14_2 (bit : Bit) :
+  encode_answer(decode_answer(bit)) = bit := by
+  sorry
+
+-- Exercise 14.3.  The first genuinely HOL statement: map receives
+-- encode_answer as a value.
+theorem ex14_3 (xs : F.List Answer) :
+  F.length(F.map(encode_answer, xs)) = F.length(xs) := by
+  sorry
+
+-- Exercise 14.4.  A left inverse makes f injective, so mapping f
+-- cannot introduce a duplicate.
+theorem ex14_4
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A) (xs : F.List A) :
+  (forall x : A, g(f(x)) = x) ->
+  F.Nodup(xs) ->
+  F.Nodup(F.map(f, xs)) := by
+  sorry
+
+-- Exercise 14.5.  A right inverse makes f surjective, so mapping an
+-- exhaustive source list covers the target type.
+theorem ex14_5
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A) (xs : F.List A) :
+  (forall y : B, f(g(y)) = y) ->
+  (forall x : A, F.Member(x, xs)) ->
+  (forall y : B, F.Member(y, F.map(f, xs))) := by
+  sorry
+
+-- Exercise 14.6.  Assemble Nodup, length, and coverage into HasCard.
+theorem ex14_6
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  F.HasCard(F.map(f, xs), n) := by
+  sorry
+
+-- Exercise 14.7.  Specialize the generic result to the checked
+-- structural definitions above.  No function equations are axioms.
+theorem ex14_7 (xs : F.List Answer) (n : Nat) :
+  F.HasCard(xs, n) -> F.HasCard(F.map(encode_answer, xs), n) := by
+  sorry

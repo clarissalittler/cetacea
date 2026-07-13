@@ -10,6 +10,15 @@ pins the genuinely higher-order generic-map exercise. The
 [`pilot guide`](pilot/README.md) gives the corresponding starter and solution
 commands.
 
+The corresponding textbook sequence has solution policies alongside its code:
+[`ch13-solutions.ctea-assignment`](../book/hol-code/ch13-solutions.ctea-assignment)
+freezes the complete finite-enumeration exercise at `fol+induction`, while
+[`ch14-solutions.ctea-assignment`](../book/hol-code/ch14-solutions.ctea-assignment)
+permits the higher-order bijection/map sequence. An intentionally restrictive
+[`ch14-solutions-fol.ctea-assignment`](../book/hol-code/ch14-solutions-fol.ctea-assignment)
+is expected to reject only the mapped theorems; the book regression script
+checks that policy failure as a teaching artifact.
+
 An assignment manifest fixes the logical fragment and the capabilities available
 to a submission outside the theorem source itself. Invoke it with:
 

@@ -1,0 +1,17 @@
+version = 1
+profile = "fol+induction"
+
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+
+allowed_imports = [
+  "std/hol/cardinality@1",
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
+allowed_axioms = []
+
+required_theorem.ex14_7 = '(xs : F.List Answer) (n : Nat) : F.HasCard(xs, n) -> F.HasCard(F.map(encode_answer, xs), n)'

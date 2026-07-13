@@ -1,0 +1,31 @@
+-- Proofs, Checked -- Chapter 14: common mistakes.
+-- INTENDED TO FAIL.  The worked chapter is imported so these probes
+-- can fail at the precise mathematical step under discussion.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch14-mistakes.ctea
+
+import ch14-examples.ctea
+
+-- Mistake 1: a left inverse proves injectivity, but it cannot also
+-- supply the right inverse needed for target coverage.
+theorem one_sided_not_enough
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  (forall x : A, g(f(x)) = x) ->
+  F.HasCard(F.map(f, xs), n) := by
+  intro source_cardinality
+  intro left_inverse
+  apply has_card_map_bijection {
+    A := A; B := B; f := f; g := g; xs := xs; n := n
+  }
+  exact source_cardinality
+  exact left_inverse
+
+-- Mistake 2: equal lengths are only one component of cardinality.
+theorem length_is_not_cardinality (xs : F.List Coin) :
+  F.HasCard(F.map(encode, xs), F.length(xs)) := by
+  exact F.map_length {
+    A := Coin; B := Bit; f := encode; xs := xs
+  }

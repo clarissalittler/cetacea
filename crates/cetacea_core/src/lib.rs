@@ -10709,9 +10709,25 @@ fn predicate_signature<'a>(env: &'a Env, ctx: &'a Context, name: &str) -> Option
         .or_else(|| env.preds.get(name).map(Vec::as_slice))
 }
 
-fn function_signature<'a>(env: &'a Env, ctx: &'a Context, name: &str) -> Option<&'a FuncDecl> {
+fn function_signature(env: &Env, ctx: &Context, name: &str) -> Option<FuncDecl> {
     ctx.lookup_function_var(name)
-        .or_else(|| env.funcs.get(name))
+        .cloned()
+        .or_else(|| env.funcs.get(name).cloned())
+        .or_else(|| {
+            env.data_rec_def(name).map(|definition| {
+                let recursive_type = if definition.data_name == "Nat" {
+                    Type::Nat
+                } else {
+                    Type::Named(definition.data_name.clone())
+                };
+                let mut args = vec![recursive_type];
+                args.extend(definition.extra_params.iter().map(|(_, ty)| ty.clone()));
+                FuncDecl {
+                    args,
+                    result: definition.result_type.clone(),
+                }
+            })
+        })
 }
 
 fn canonicalize_function_arg(
@@ -10727,9 +10743,9 @@ fn canonicalize_function_arg(
     if ctx.lookup_function_var(name).is_some() {
         return Ok(name.clone());
     }
-    if let Some(name) =
-        resolve_top_level_name(ctx, name, |candidate| env.funcs.contains_key(candidate))
-    {
+    if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
+        env.funcs.contains_key(candidate) || env.data_rec_defs.contains_key(candidate)
+    }) {
         return Ok(name);
     }
     if let Some(matches) = env.ambiguous_function_names(name) {
@@ -21106,6 +21122,74 @@ theorem one_has_card :
             assert_eq!(
                 theorem.required_fragment,
                 hol::StatementFragment::HigherOrder
+            );
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn finite_textbook_extension_is_dual_checked_trust_free_and_fragment_honest() {
+        let finite =
+            check_file_at_path_with_hol_shadow(repo_path("docs/book/hol-code/ch13-solutions.ctea"));
+        assert!(
+            finite.legacy.diagnostics.is_empty(),
+            "unexpected Chapter 13 diagnostics: {:#?}",
+            finite.legacy.diagnostics
+        );
+        assert!(
+            finite.is_match(),
+            "Chapter 13 mismatches: {:#?}",
+            finite.mismatches
+        );
+        assert_eq!(
+            finite.imported_packages,
+            ["std/hol/finite@1", "std/hol/list@1"]
+        );
+        for theorem in &finite.theorems {
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive,
+                "unexpected Chapter 13 fragment for {}",
+                theorem.name
+            );
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+
+        let bijections =
+            check_file_at_path_with_hol_shadow(repo_path("docs/book/hol-code/ch14-solutions.ctea"));
+        assert!(
+            bijections.legacy.diagnostics.is_empty(),
+            "unexpected Chapter 14 diagnostics: {:#?}",
+            bijections.legacy.diagnostics
+        );
+        assert!(
+            bijections.is_match(),
+            "Chapter 14 mismatches: {:#?}",
+            bijections.mismatches
+        );
+        assert_eq!(
+            bijections.imported_packages,
+            [
+                "std/hol/cardinality@1",
+                "std/hol/finite@1",
+                "std/hol/list@1",
+            ]
+        );
+        for theorem in &bijections.theorems {
+            let expected = match theorem.name.as_str() {
+                "ex14_1" | "ex14_2" => hol::StatementFragment::FirstOrderInductive,
+                "ex14_3" | "ex14_4" | "ex14_5" | "ex14_6" | "ex14_7" => {
+                    hol::StatementFragment::HigherOrder
+                }
+                other => panic!("unexpected Chapter 14 theorem `{other}`"),
+            };
+            assert_eq!(
+                theorem.required_fragment, expected,
+                "unexpected Chapter 14 fragment for {}",
+                theorem.name
             );
             assert!(theorem.axiom_deps.is_empty());
             assert!(theorem.incomplete_deps.is_empty());

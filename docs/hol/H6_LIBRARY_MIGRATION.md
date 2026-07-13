@@ -282,10 +282,25 @@ requires `hol`, while the datatype exercise's manifest enforces
 [`pilot`](pilot/README.md). This checkpoint has 451 passing tests and measures
 1,793,096 bytes natively and 1,281,435 bytes in raw Wasm.
 
+The pilot is now integrated into the textbook as Chapters 13–14. Their
+companion suite adds twelve exercises plus examples, solutions, intended
+failures, and exact `fol+induction`/`hol` manifests. The bijection chapter found
+that a source `defrec encode` was registered as a checked HOL structural
+definition but was not considered a valid legacy-side function argument to
+`map`. Function-schema validation now derives the monomorphic arrow signature
+from that structural definition, after which compatibility lowering resolves
+the already-registered checked constant. Concrete inverse theorems remain
+trust-free `fol+induction`; mapped theorems remain `hol`. Native and browser
+tests run both complete chapter solutions. The expanded book checker validates
+82 `.ctea` files while the original 74-file baseline stays frozen. This
+453-test checkpoint measures 1,794,264 bytes natively and 1,282,208 bytes in
+raw Wasm.
+
 ## Remaining migration slices
 
-1. Extend the implemented function-symbol theorem schemas to the remaining
-   generic declaration forms and source surfaces, then decide when low-level
+1. Extend the implemented function-symbol theorem schemas beyond the now-
+   supported declared symbols and monomorphic structural definitions to the
+   remaining generic declaration forms and source surfaces, then decide when low-level
    legacy core APIs should select the sidecar automatically. Native CLI and
    browser acceptance are already fail-closed and automatic. Retain aliases
    for the current monomorphic list vocabulary for one release cycle. The
@@ -303,9 +318,10 @@ requires `hol`, while the datatype exercise's manifest enforces
    checked reusable support, then prove pigeonhole, finite-union-cardinality,
    and handshake targets through checked library theorems. Extend enumeration
    generation beyond nullary datatypes only when a course theorem requires it.
-5. Add the finite tree edge/vertex theorem and a pilot chapter sequence. Freeze
-   each assignment's profile, imports, trusted principles, and theorem
-   signatures with manifests.
+5. Chapters 13–14 now provide the first pilot sequence and freeze each
+   assignment's profile, imports, trusted principles, and theorem signatures.
+   Add the finite tree edge/vertex theorem and its chapter after the intervening
+   pigeonhole/counting surface is proved usable.
 
 ## Gates for each slice
 

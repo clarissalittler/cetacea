@@ -1,0 +1,88 @@
+-- Proofs, Checked -- Chapter 14: Bijections and the HOL Boundary
+-- Companion file for docs/book/14-bijections.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch14-examples.ctea
+
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+-- Section 14.2: two concrete encodings with no trusted equations.
+data Coin
+| heads
+| tails
+
+data Bit
+| zero_bit
+| one_bit
+
+defrec encode (c : Coin) : Bit
+| heads => zero_bit
+| tails => one_bit
+
+defrec decode (b : Bit) : Coin
+| zero_bit => heads
+| one_bit => tails
+
+theorem decode_encode (c : Coin) : decode(encode(c)) = c := by
+  induction c with
+  | heads =>
+      refl
+  | tails =>
+      refl
+
+theorem encode_decode (b : Bit) : encode(decode(b)) = b := by
+  induction b with
+  | zero_bit =>
+      refl
+  | one_bit =>
+      refl
+
+-- Section 14.4: a bijection transports a complete enumeration.
+-- The two inverse laws do three jobs: injectivity preserves Nodup,
+-- map_length preserves the count, and surjectivity preserves coverage.
+theorem has_card_map_bijection
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  F.HasCard(F.map(f, xs), n) := by
+  intro source_cardinality
+  intro left_inverse
+  intro right_inverse
+  apply F.has_card_intro {
+    A := B;
+    xs := F.map(f, xs);
+    n := n
+  }
+  exact F.nodup_map_injective {
+    A := A; B := B; f := f; g := g; xs := xs
+  } left_inverse (F.has_card_nodup {
+    A := A; xs := xs; n := n
+  } source_cardinality)
+  rewrite -> F.map_length {A := A; B := B; f := f; xs := xs}
+  exact F.has_card_length {A := A; xs := xs; n := n} source_cardinality
+  exact F.map_coverage_surjective {
+    A := A; B := B; f := f; g := g; xs := xs
+  } right_inverse (F.has_card_coverage {
+    A := A; xs := xs; n := n
+  } source_cardinality)
+
+-- Section 14.5: structural definitions can be passed to map without
+-- replacing their equations by axioms.  The inverse proofs above stay
+-- fol+induction; this theorem is HOL because map consumes encode as a value.
+theorem encoded_coin_has_same_cardinality
+  (xs : F.List Coin) (n : Nat) :
+  F.HasCard(xs, n) -> F.HasCard(F.map(encode, xs), n) := by
+  intro source_cardinality
+  apply has_card_map_bijection {
+    A := Coin; B := Bit; f := encode; g := decode; xs := xs; n := n
+  }
+  exact source_cardinality
+  intro x
+  exact decode_encode {c := x}
+  intro y
+  exact encode_decode {b := y}

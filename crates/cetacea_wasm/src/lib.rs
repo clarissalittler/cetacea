@@ -791,4 +791,58 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
             );
         }
     }
+
+    #[test]
+    fn browser_check_certifies_the_finite_textbook_extension() {
+        let finite = include_str!("../../../docs/book/hol-code/ch13-solutions.ctea");
+        let finite_report = check_file_with_imports_and_hol_shadow(finite, &standard_imports());
+        assert!(
+            finite_report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            finite_report.legacy.diagnostics
+        );
+        assert!(
+            finite_report.is_match(),
+            "mismatches: {:#?}",
+            finite_report.mismatches
+        );
+        let finite_json = hol_shadow_result_json(&finite_report);
+        for expected in [
+            r#""hol_certified":true"#,
+            r#""required_fragment":"fol+induction""#,
+            r#""name":"ex13_4""#,
+            r#""imported_packages":["std/hol/finite@1","std/hol/list@1"]"#,
+        ] {
+            assert!(
+                finite_json.contains(expected),
+                "missing {expected} in {finite_json}"
+            );
+        }
+
+        let bijections = include_str!("../../../docs/book/hol-code/ch14-solutions.ctea");
+        let bijection_report =
+            check_file_with_imports_and_hol_shadow(bijections, &standard_imports());
+        assert!(
+            bijection_report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            bijection_report.legacy.diagnostics
+        );
+        assert!(
+            bijection_report.is_match(),
+            "mismatches: {:#?}",
+            bijection_report.mismatches
+        );
+        let bijection_json = hol_shadow_result_json(&bijection_report);
+        for expected in [
+            r#""hol_certified":true"#,
+            r#""required_fragment":"hol""#,
+            r#""name":"ex14_7""#,
+            r#""imported_packages":["std/hol/cardinality@1","std/hol/finite@1","std/hol/list@1"]"#,
+        ] {
+            assert!(
+                bijection_json.contains(expected),
+                "missing {expected} in {bijection_json}"
+            );
+        }
+    }
 }

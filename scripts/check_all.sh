@@ -22,7 +22,7 @@ is_negative_file() {
 
 allows_incomplete() {
   case "$1" in
-    docs/book/code/*-exercises.ctea|docs/cs250/code/09_modular.ctea)
+    docs/book/code/*-exercises.ctea|docs/book/hol-code/*-exercises.ctea|docs/cs250/code/09_modular.ctea)
       return 0
       ;;
     *)
@@ -31,7 +31,7 @@ allows_incomplete() {
   esac
 }
 
-mapfile -t files < <(find std examples docs/cs250/code docs/book/code -type f -name '*.ctea' | sort)
+mapfile -t files < <(find std examples docs/cs250/code docs/book/code docs/book/hol-code -type f -name '*.ctea' | sort)
 
 status=0
 book_error_lines=""
@@ -53,7 +53,7 @@ for file in "${files[@]}"; do
   output="$("$checker" "$file" 2>&1)"
   code=$?
 
-  if [[ "$file" == docs/book/code/* ]]; then
+  if [[ "$file" == docs/book/code/* || "$file" == docs/book/hol-code/* ]]; then
     if is_negative_file "$file"; then
       while IFS= read -r line; do
         book_error_lines+="$line"$'\n'
@@ -98,14 +98,20 @@ for file in "${files[@]}"; do
       status=1
     fi
     for theorem in "${negative_theorems[@]}"; do
-      theorem_accepted=0
-      while IFS= read -r json_record; do
-        if [[ "$json_record" == *"\"name\":\"$theorem\""* ]] && \
-          [[ "$json_record" == *'"is_imported":false'* ]]; then
-          theorem_accepted=1
-          break
-        fi
-      done < <(printf '%s\n' "$json_output" | sed 's/},{/}\n{/g')
+      theorem_accepted="$(
+        printf '%s' "$json_output" | python3 -c '
+import json
+import sys
+
+name = sys.argv[1]
+result = json.load(sys.stdin)
+accepted = any(
+    entry.get("name") == name and not entry.get("is_imported", False)
+    for entry in result.get("theorems", [])
+)
+print(1 if accepted else 0)
+' "$theorem"
+      )"
       if [[ $theorem_accepted -eq 1 ]]; then
         printf 'error: theorem %s in %s passed, but every theorem in a negative file must fail\n' \
           "$theorem" "$file" >&2
@@ -126,6 +132,35 @@ for file in "${files[@]}"; do
 
   if [[ "$output" == *"incomplete theorem"* ]] && ! allows_incomplete "$file"; then
     printf 'error: %s checked with unexpected incomplete theorem(s)\n' "$file" >&2
+    printf '%s\n' "$output" >&2
+    status=1
+  fi
+done
+
+mapfile -t assignment_manifests < <(
+  find docs/book/hol-code -type f -name '*-solutions.ctea-assignment' | sort
+)
+for manifest in "${assignment_manifests[@]}"; do
+  submission="${manifest%.ctea-assignment}.ctea"
+  output="$("$checker" --assignment "$manifest" "$submission" 2>&1)"
+  code=$?
+  if [[ $code -ne 0 ]]; then
+    printf 'error: %s failed its assignment policy\n' "$submission" >&2
+    printf '%s\n' "$output" >&2
+    status=1
+  fi
+done
+
+mapfile -t restrictive_manifests < <(
+  find docs/book/hol-code -type f -name '*-solutions-fol.ctea-assignment' | sort
+)
+for manifest in "${restrictive_manifests[@]}"; do
+  submission="${manifest%-fol.ctea-assignment}.ctea"
+  output="$("$checker" --assignment "$manifest" "$submission" 2>&1)"
+  code=$?
+  if [[ $code -ne 1 || "$output" != *'exceeds profile maximum `fol+induction`'* ]]; then
+    printf 'error: %s did not produce its expected fragment-policy rejection\n' \
+      "$manifest" >&2
     printf '%s\n' "$output" >&2
     status=1
   fi

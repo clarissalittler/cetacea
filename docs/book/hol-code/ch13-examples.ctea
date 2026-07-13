@@ -1,0 +1,77 @@
+-- Proofs, Checked -- Chapter 13: Finite Types and Honest Counting
+-- Companion file for docs/book/13-finite-types.md.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch13-examples.ctea
+
+import std/hol/finite@1 as F
+
+mode constructive
+
+-- Section 13.3: the smallest finite type.  The enumeration is a
+-- polymorphic List specialized to One.
+data One
+| only
+
+-- HasCard packages three independently useful facts.  Proving them
+-- separately keeps the mathematical jobs visible.
+theorem one_nodup :
+  F.Nodup(F.cons(only, F.nil)) := by
+  apply (F.nodup_cons {
+    A := One;
+    h := only;
+    t := (F.nil : F.List One)
+  }).right
+  split
+  intro member
+  exact F.member_nil {A := One; x := only} member
+  exact F.nodup_nil {A := One}
+
+theorem one_length :
+  F.length(F.cons(only, F.nil)) = 1 := by
+  rewrite -> F.length_cons {
+    A := One;
+    h := only;
+    t := (F.nil : F.List One)
+  }
+  rewrite -> F.length_nil {A := One}
+  refl
+
+theorem one_coverage :
+  forall x : One, F.Member(x, F.cons(only, F.nil)) := by
+  intro x
+  induction x with
+  | only =>
+      apply (F.member_cons {
+        A := One;
+        x := only;
+        h := only;
+        t := (F.nil : F.List One)
+      }).right
+      left
+      trivial
+
+theorem one_has_card :
+  F.HasCard(F.cons(only, F.nil), 1) := by
+  apply F.has_card_intro {
+    A := One;
+    xs := F.cons(only, F.nil);
+    n := 1
+  }
+  exact one_nodup
+  exact one_length
+  exact one_coverage
+
+-- Section 13.5: later mathematics should consume HasCard as one
+-- hypothesis.  Its checked projections recover the implementation
+-- facts without unfolding the definition.
+theorem has_card_components
+  (A : Type) (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  F.Nodup(xs) /\
+    (F.length(xs) = n /\ (forall x : A, F.Member(x, xs))) := by
+  intro cardinality
+  split
+  exact F.has_card_nodup {A := A; xs := xs; n := n} cardinality
+  split
+  exact F.has_card_length {A := A; xs := xs; n := n} cardinality
+  exact F.has_card_coverage {A := A; xs := xs; n := n} cardinality

@@ -1,0 +1,51 @@
+-- Proofs, Checked -- Chapter 13: exercises.
+-- Replace every `sorry` with a proof.  These stepping stones combine
+-- into a checked cardinality witness for a three-constructor type.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch13-exercises.ctea
+
+import std/hol/finite@1 as F
+
+mode constructive
+
+data Traffic
+| red
+| yellow
+| green
+
+-- Exercise 13.1 (warm-up).  Compute the length of the proposed
+-- enumeration with length_cons and length_nil.
+theorem ex13_1 :
+  F.length(F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) = 3 := by
+  sorry
+
+-- Exercise 13.2.  Prove coverage by induction on a Traffic value.
+-- In each constructor arm, use member_cons to choose its position.
+theorem ex13_2 :
+  forall x : Traffic,
+    F.Member(x, F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) := by
+  sorry
+
+-- Exercise 13.3.  Prove that the enumeration has no duplicates.
+-- Peel one cons at a time with the right-to-left half of nodup_cons.
+theorem ex13_3 :
+  F.Nodup(F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) := by
+  sorry
+
+-- Exercise 13.4.  Package the previous three results.  This proof is
+-- short because the real mathematical work already has names.
+theorem ex13_4 :
+  F.HasCard(
+    F.cons(red, F.cons(yellow, F.cons(green, F.nil))),
+    3
+  ) := by
+  sorry
+
+-- Exercise 13.5.  Go the other direction: recover every component
+-- from an arbitrary HasCard witness using the checked projections.
+theorem ex13_5
+  (A : Type) (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  F.Nodup(xs) /\
+    (F.length(xs) = n /\ (forall x : A, F.Member(x, xs))) := by
+  sorry

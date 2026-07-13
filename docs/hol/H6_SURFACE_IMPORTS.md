@@ -267,6 +267,17 @@ definitional equality. Native and browser tests pin the datatype exercise to
 `fol+induction` and the genuine `map` exercise to `hol`. The checkpoint is
 1,793,096 bytes natively and 1,281,435 bytes in raw Wasm.
 
+The textbook bijection chapter now passes student-defined structural
+definitions to `map`. A monomorphic `defrec encode : Coin -> Bit` is accepted
+where the rank-one surface expects `Coin -> Bit`; compatibility replay lowers
+the name to the same checked structural definition already installed in the
+HOL environment. This closes a facade-only gap without introducing a lambda,
+an uninterpreted duplicate, or trusted equations. The inverse laws remain
+`fol+induction`, while propositions containing `map(encode, xs)` remain `hol`.
+Chapters 13–14, their twelve exercises, both manifests, and native/browser
+solution tests form the new curriculum checkpoint. It measures 1,794,264 bytes
+natively and 1,282,208 bytes in raw Wasm.
+
 Generated finite facts are not package aliases: `color_has_card` is owned by
 the importing file even though its statement uses builtin `HasCard`; the new
 `one_has_card` example follows that ownership rule. Likewise, graph packages

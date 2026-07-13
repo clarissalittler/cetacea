@@ -786,6 +786,22 @@ natively and 1,281,435 bytes in raw Wasm. The explicit enumeration proof is
 still too ceremonial for a polished chapter; shortening it with checked support
 is now a measured curriculum requirement rather than speculative surface work.
 
+That pilot now extends the actual book as Chapters 13 and 14, with worked
+examples, deliberate failures, twelve exercises, complete solutions, and exact
+assignment policies. Chapter 13 decomposes a three-constructor `HasCard` proof
+and remains trust-free `fol+induction`. Chapter 14 proves inverse laws for
+student-defined structural encoders, reconstructs cardinality transport, and
+marks only the `map` statements as `hol`. Writing the concrete specialization
+found a blocking facade gap: a checked `defrec` could be called but not passed
+as a function value. Monomorphic structural definitions now expose their
+existing checked arrow signature to rank-one function arguments; no trusted
+equations are introduced. The book checker covers 82 source files plus both
+successful and deliberately restrictive assignment outcomes, while the frozen
+74-file pre-HOL oracle remains unchanged. This 453-test checkpoint is 1,794,264
+bytes natively and 1,282,208 bytes in raw Wasm. The book's friction ledger now
+pins proposition-aware simplification, goal-directed package inference, and
+term-definition unfolding as measured follow-up work before pigeonhole.
+
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing
   registry, a symbol-specialized graph/path substrate, and the checked
@@ -810,13 +826,17 @@ is now a measured curriculum requirement rather than speculative surface work.
   `HasCard`, its List dependency, checked introduction and elimination, and
   real one- and three-constructor datatype proofs. A combined finite/cardinality
   namespace now supports a complete `HasCard`-under-bijection source proof.
+  Student-defined structural encoders can now occupy the same checked
+  function-valued package positions without being replaced by axioms, and two
+  executable book chapters exercise that path.
   Right append identity, append associativity, and length over append pass
   through both the package and student-facing routes.
 - Keep compatibility aliases for current monomorphic course names during one
   release cycle.
-- Add course chapters only after representative theorem targets pass: path
-  concatenation, pigeonhole, finite union cardinality, handshake, and a finite
-  tree edge/vertex theorem.
+- Add course chapters only after representative theorem targets pass. The
+  finite-enumeration and bijection chapters now pass; path concatenation,
+  pigeonhole, finite union cardinality, handshake, and a finite tree
+  edge/vertex theorem remain vertical targets.
 - Retain explicit path witnesses in FOL exercises even though HOL libraries can
   express closures more abstractly.
 

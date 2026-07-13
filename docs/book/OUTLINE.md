@@ -1,8 +1,10 @@
 # Proofs, Checked — Full Outline
 
-Twelve chapters, from "what is a proposition?" to strong induction, all
-drafted. Each entry lists the Cetacea features the chapter leans on, so
-no chapter requires features the reader hasn't met.
+Fourteen chapters, from "what is a proposition?" to finite cardinality and
+bijections, all drafted. Chapters 1–12 form the frozen first-order course;
+Chapters 13–14 are the executable HOL-branch extension. Each entry lists the
+Cetacea features the chapter leans on, so no chapter requires features the
+reader hasn't met.
 
 Constructive mode is the default from Chapter 1; classical reasoning is
 introduced deliberately in Chapter 3 and treated as an explicit,
@@ -194,13 +196,45 @@ arms.
 Sometimes the previous case isn't enough and you need *all* smaller
 cases — strong induction, provided by the library theorem
 `strong_induction` and applied with an explicit predicate lambda. After
-working an example, the chapter closes the course: what Cetacea
-deliberately leaves out (and where `docs/cs250/LIMITATIONS.md` says
-so), how the ideas here map onto full-scale assistants like Lean, Rocq,
-and Agda, and why "the proof is the program" is the idea to carry
-forward.
+working an example, the chapter closes the original first-order spine and
+points toward the now-implemented polymorphic List and finite-cardinality
+extension, as well as full-scale assistants like Lean, Rocq, and Agda.
 
 **Cetacea features:** `strong_induction` and
 `strong_induction_bounded` from `std/nat.ctea`, `apply` with explicit
 `{P := fun m : Nat => ...; n := n}` instantiation, `le` lemmas, review
 of the axiom/incomplete reporting model.
+
+## Chapter 13 — Finite Types and Honest Counting
+
+*Drafted: [13-finite-types.md](13-finite-types.md)*
+
+Counting is treated as evidence: a `HasCard(xs, n)` witness contains a
+duplicate-free enumeration, its length, and a coverage proof. The chapter
+introduces versioned logical packages and polymorphic `List A`, proves the
+one-value case in full, and then decomposes a three-constructor cardinality
+proof into length, coverage, and `Nodup` exercises. Its assignment manifest
+certifies the complete sequence as constructive, trust-free
+`fol+induction`.
+
+**Cetacea features:** `import std/hol/finite@1 as F`, rank-one type
+application (`F.List A`), contextual `nil` ascription, checked package theorem
+aliases, `HasCard` introduction/projections, datatype no-confusion, exact
+assignment package closures.
+
+## Chapter 14 — Bijections and the HOL Boundary
+
+*Drafted: [14-bijections.md](14-bijections.md)*
+
+Cardinality is transported along a pair of inverse functions. Concrete
+inverse proofs remain `fol+induction`; mapping an enumeration is honestly
+`hol` because `map` receives a function as a value. The chapter reconstructs
+the transport theorem from preservation of `Nodup`, length, and coverage,
+then specializes it to student-defined structural encoders without adding
+trusted equations. Correct and intentionally too-weak assignment manifests
+make the fragment boundary executable.
+
+**Cetacea features:** `std/hol/cardinality@1`, shared package namespaces,
+function-symbol schema parameters, structural definitions in function-valued
+positions, generic `map`, fragment classification, assignment-policy
+rejection.

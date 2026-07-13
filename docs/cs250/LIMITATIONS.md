@@ -4,6 +4,13 @@ This is a current list of friction points for using Cetacea with the CS
 250 tutorials. The most severe bugs from the first draft have been
 fixed; see the resolved section at the end for historical context.
 
+Scope note: this document describes the frozen first-order CS 250 corpus and
+its monomorphic `std/` library. On the `hol` branch, the experimental
+[`Proofs, Checked` Chapters 13–14](../book/README.md#chapters) add checked
+`List A`, finite-cardinality evidence, and bijection transport under explicit
+`fol+induction`/`hol` assignment policies. The limitations below remain
+accurate for the original tutorial files unless a section says otherwise.
+
 ## Current rough edges students may hit
 
 ### 1. Theorem instantiation still sometimes needs explicit arguments

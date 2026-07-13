@@ -271,29 +271,25 @@ with `func` and `axiom` like the chapter's bulbs — watch your
 
 Solutions: [`code/ch12-solutions.ctea`](code/ch12-solutions.ctea).
 
-## 12.7 Where to go next
+## 12.7 The end of the first-order spine
 
-That's the course. You can state claims with connectives and
+That's the original first-order course. You can state claims with connectives and
 quantifiers; prove them with introduction and elimination rules; tell
 constructive certainty from classical certainty and read the label;
 compute with equality; build sets, relations, and functions; define
 data and recursion; and climb every ladder from plain induction to
-strong. Three parting maps.
+strong. On Cetacea's `hol` branch, the book now continues for two chapters
+to test finite mathematics against the same teaching standard.
 
-**What Cetacea deliberately left out.** Cetacea is a teaching
-instrument, kept small enough to learn completely — you have now, in
-fact, seen essentially all of it. The honest inventory of edges is in
-[`docs/cs250/LIMITATIONS.md`](../cs250/LIMITATIONS.md); the three you
-will bump into first: data types are *monomorphic* (there is a
-`List` of `Nat`s, but no generic `List A` — a list of anything else
-is a separate declaration); there is no *cardinality* (you proved
-facts about sets in Chapter 6, but "how many elements" and the
-counting arguments built on it aren't expressible); and arithmetic
-stops short of *division* (no `div`, no `mod` — Chapter 10's `ModEq`
-worked around exactly this, and its one axiom marks the spot where
-the workaround ran out of library). None of these are conceptual
-walls. They are engineering left undone on purpose, so the kernel
-stays readable.
+**What changed after the first draft.** The original ending listed
+polymorphic data and cardinality as missing. Chapters 13 and 14 are the
+executable result of removing those two limits: `List A` is a checked,
+versioned library type; `HasCard` expresses finite enumeration; and assignment
+policies keep concrete first-order exercises separate from genuinely
+higher-order `map`. Arithmetic still stops short of division (`div` and `mod`),
+and the broader honest inventory remains in
+[`docs/cs250/LIMITATIONS.md`](../cs250/LIMITATIONS.md). Extending the book before
+declaring the redesign finished lets real exercises find the next edges.
 
 **The same ideas, at full scale.** Everything you learned transfers
 to the industrial-strength proof assistants — **Lean**, **Rocq**
@@ -326,10 +322,10 @@ tools above can double as programming languages. "The proof is the
 program" is arguably the deepest idea a first logic course can hand
 you — and you've been using it all term without being told.
 
-One last run of the checker, then. Every theorem in this book was
+One more run of the checker, then. Every theorem in this part of the book was
 rejected before it was accepted — that was the deal from Chapter 1,
 and it held: rejection is the normal state of a proof in progress.
-Wherever you take this next, that's the habit worth keeping. State
+As you continue into finite mathematics, that's the habit worth keeping. State
 the claim. Run the check. Read the error like a friend wrote it.
 
 ```text
@@ -338,5 +334,5 @@ accepted
 
 ---
 
-*Back to the [outline](OUTLINE.md) · [Chapter 1](01-propositions.md),
-if someone you know is just starting.*
+*Next: [Chapter 13 — Finite Types and Honest Counting](13-finite-types.md) ·
+back to the [outline](OUTLINE.md).*

@@ -1,0 +1,27 @@
+-- Proofs, Checked -- Chapter 13: common mistakes.
+-- INTENDED TO FAIL.  Each theorem contains one deliberate mistake.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch13-mistakes.ctea
+
+import std/hol/finite@1 as F
+
+mode constructive
+
+data One
+| only
+
+-- Mistake 1: HasCard is a proposition with evidence, not a computation.
+theorem count_by_refl :
+  F.HasCard(F.cons(only, F.nil), 1) := by
+  refl
+
+-- Mistake 2: nil alone does not determine its element type.
+theorem ambiguous_empty_length : F.length(F.nil) = 0 := by
+  rewrite -> F.length_nil {A := One}
+  refl
+
+-- Mistake 3: these package laws are constructive biconditionals, not
+-- term equalities, so today's simp cannot use them as rewrite rules.
+theorem simp_nodup :
+  F.Nodup(F.cons(only, F.nil)) := by
+  simp [F.nodup_cons, F.nodup_nil, F.member_nil]

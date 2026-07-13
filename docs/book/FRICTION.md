@@ -174,6 +174,49 @@ theorems check — but three things stood out.
     the native `| left ... => | right ... =>`, so Lean/Rocq muscle memory
     no longer trips on `expected \`left\` case arm`.
 
+## Surfaced writing the finite-mathematics extension
+
+Chapters 13–14 are the first book chapters written directly against the
+versioned HOL package surface. They confirm that restricted FOL profiles and
+HOL can coexist in one course, but they also found the following concrete
+edges.
+
+23. **Resolved: structural definitions can fill function-valued package
+    parameters.** A checked `defrec encode : Coin -> Bit` could be called and
+    its inverse could be proved, but `map(encode, xs)` was rejected as
+    “unknown function `encode`.” The only source workaround was an
+    uninterpreted `func` plus trusted computation axioms. Monomorphic
+    structural definitions now expose their checked arrow signature to
+    rank-one function-argument validation and lower to their existing HOL
+    definition. Chapter 14's concrete transport theorem is the regression
+    case; the inverse proofs stay `fol+induction` and the mapped theorem is
+    honestly `hol`.
+
+24. **Open, high impact: concrete finite enumeration is too ceremonial.**
+    Proving `HasCard([red, yellow, green], 3)` is mathematically routine but
+    takes well over a hundred source lines. `Member` and `Nodup` constructor
+    laws are constructive biconditionals, while `simp` accepts only term
+    equalities, so it cannot discharge the obvious constructor cases. Chapter
+    13 deliberately retains the explicit solution as an acceptance test for a
+    checked enumeration derivation, proposition-aware simplification, or a
+    better reusable theorem surface. Any fix must retain the trust-free
+    `fol+induction` receipt.
+
+25. **Open, medium impact: package theorem parameters are not inferred from
+    rewrite/apply goals.** Even with a goal visibly containing
+    `F.length(F.cons(red, tail))`, `rewrite -> F.length_cons` requests `A`,
+    `h`, and `t` explicitly. The same repetition affects `member_cons`,
+    `nodup_cons`, and the cardinality transport lemmas. Goal-directed schema
+    inference would substantially shorten both new chapters without changing
+    the kernel or logical fragment.
+
+26. **Open, lower impact: term abbreviations do not unfold through tactics.**
+    A term definition can name the nested enumeration and checks under `refl`,
+    but `unfold name`, `simp [name]`, and rewrite matching do not expose its
+    body inside a goal. Consequently a readable name cannot replace repeated
+    nested `cons` terms in the component proofs. This is separate from kernel
+    transparency: it is a proof-state and tactic-surface gap.
+
 ## Already fixed while writing the book
 
 - `le_trans` was missing from `std/nat.ctea` (chapter 7 needed it) —

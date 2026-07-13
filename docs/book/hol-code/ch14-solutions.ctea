@@ -1,0 +1,120 @@
+-- Proofs, Checked -- Chapter 14: exercise solutions.
+-- Spoilers! Try docs/book/hol-code/ch14-exercises.ctea first.
+--
+--   cargo run -p cetacea_cli -- docs/book/hol-code/ch14-solutions.ctea
+
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+data Answer
+| no
+| yes
+
+data Bit
+| zero_bit
+| one_bit
+
+defrec encode_answer (answer : Answer) : Bit
+| no => zero_bit
+| yes => one_bit
+
+defrec decode_answer (bit : Bit) : Answer
+| zero_bit => no
+| one_bit => yes
+
+-- Exercise 14.1
+theorem ex14_1 (answer : Answer) :
+  decode_answer(encode_answer(answer)) = answer := by
+  induction answer with
+  | no =>
+      refl
+  | yes =>
+      refl
+
+-- Exercise 14.2
+theorem ex14_2 (bit : Bit) :
+  encode_answer(decode_answer(bit)) = bit := by
+  induction bit with
+  | zero_bit =>
+      refl
+  | one_bit =>
+      refl
+
+-- Exercise 14.3
+theorem ex14_3 (xs : F.List Answer) :
+  F.length(F.map(encode_answer, xs)) = F.length(xs) := by
+  exact F.map_length {
+    A := Answer; B := Bit; f := encode_answer; xs := xs
+  }
+
+-- Exercise 14.4
+theorem ex14_4
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A) (xs : F.List A) :
+  (forall x : A, g(f(x)) = x) ->
+  F.Nodup(xs) ->
+  F.Nodup(F.map(f, xs)) := by
+  exact F.nodup_map_injective {
+    A := A; B := B; f := f; g := g; xs := xs
+  }
+
+-- Exercise 14.5
+theorem ex14_5
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A) (xs : F.List A) :
+  (forall y : B, f(g(y)) = y) ->
+  (forall x : A, F.Member(x, xs)) ->
+  (forall y : B, F.Member(y, F.map(f, xs))) := by
+  exact F.map_coverage_surjective {
+    A := A; B := B; f := f; g := g; xs := xs
+  }
+
+-- Exercise 14.6
+theorem ex14_6
+  (A : Type) (B : Type)
+  (f : A -> B) (g : B -> A)
+  (xs : F.List A) (n : Nat) :
+  F.HasCard(xs, n) ->
+  (forall x : A, g(f(x)) = x) ->
+  (forall y : B, f(g(y)) = y) ->
+  F.HasCard(F.map(f, xs), n) := by
+  intro source_cardinality
+  intro left_inverse
+  intro right_inverse
+  apply F.has_card_intro {
+    A := B;
+    xs := F.map(f, xs);
+    n := n
+  }
+  exact ex14_4 {
+    A := A; B := B; f := f; g := g; xs := xs
+  } left_inverse (F.has_card_nodup {
+    A := A; xs := xs; n := n
+  } source_cardinality)
+  rewrite -> F.map_length {A := A; B := B; f := f; xs := xs}
+  exact F.has_card_length {A := A; xs := xs; n := n} source_cardinality
+  exact ex14_5 {
+    A := A; B := B; f := f; g := g; xs := xs
+  } right_inverse (F.has_card_coverage {
+    A := A; xs := xs; n := n
+  } source_cardinality)
+
+-- Exercise 14.7
+theorem ex14_7 (xs : F.List Answer) (n : Nat) :
+  F.HasCard(xs, n) -> F.HasCard(F.map(encode_answer, xs), n) := by
+  intro source_cardinality
+  apply ex14_6 {
+    A := Answer;
+    B := Bit;
+    f := encode_answer;
+    g := decode_answer;
+    xs := xs;
+    n := n
+  }
+  exact source_cardinality
+  intro answer
+  exact ex14_1 {answer := answer}
+  intro bit
+  exact ex14_2 {bit := bit}

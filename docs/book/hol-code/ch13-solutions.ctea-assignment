@@ -1,0 +1,20 @@
+version = 1
+profile = "fol+induction"
+
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+
+allowed_imports = [
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
+allowed_axioms = []
+
+required_theorem.ex13_1 = 'F.length(F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) = 3'
+required_theorem.ex13_2 = 'forall x : Traffic, F.Member(x, F.cons(red, F.cons(yellow, F.cons(green, F.nil))))'
+required_theorem.ex13_3 = 'F.Nodup(F.cons(red, F.cons(yellow, F.cons(green, F.nil))))'
+required_theorem.ex13_4 = 'F.HasCard(F.cons(red, F.cons(yellow, F.cons(green, F.nil))), 3)'
+required_theorem.ex13_5 = '(A : Type) (xs : F.List A) (n : Nat) : F.HasCard(xs, n) -> F.Nodup(xs) /\ (F.length(xs) = n /\ (forall x : A, F.Member(x, xs)))'

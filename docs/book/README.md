@@ -42,8 +42,10 @@ worth trying once you are comfortable with the basics.
 
 ## How to use this book
 
-Each chapter comes with three (sometimes four) companion files in
-[`code/`](code/):
+Each chapter comes with three (sometimes four) companion files. Chapters 1–12
+live in the frozen first-order corpus under [`code/`](code/). The experimental
+finite-mathematics extension lives under [`hol-code/`](hol-code/) so its new
+HOL surface can evolve without weakening that regression oracle.
 
 | File | What it is |
 |---|---|
@@ -51,10 +53,13 @@ Each chapter comes with three (sometimes four) companion files in
 | `chNN-exercises.ctea` | The chapter's exercises with `sorry` placeholder proofs. It checks as-is, but every theorem is reported as an `incomplete theorem`. Your job is to complete them. |
 | `chNN-solutions.ctea` | Full solutions. Genuinely try the exercises first. |
 | `chNN-mistakes.ctea` / `ch02-fallacies.ctea` | **Intended to fail.** Deliberately wrong proofs whose error messages the chapter dissects. Run them; read the errors. |
+| `chNN-solutions.ctea-assignment` | For HOL-extension chapters, the policy fixing the fragment, imports, trust, and required signatures. |
 
 From the repository root, `./scripts/check_all.sh` verifies the companion files,
 requires each deliberately wrong theorem to fail independently, and checks the
 book's quoted error headlines and acceptance receipts against current output.
+For Chapters 13–14 it also runs the solution manifests and confirms that the
+intentionally first-order Chapter 14 policy rejects the mapped theorems.
 
 The rhythm for each chapter:
 
@@ -72,8 +77,9 @@ So `h : P /\ Q |- Q /\ P` reads "you have a hypothesis `h` proving
 
 ## Chapters
 
-All twelve chapters are drafted; [`OUTLINE.md`](OUTLINE.md) has a
-one-paragraph synopsis of each.
+The twelve-chapter first-order course and two experimental finite-mathematics
+chapters are drafted; [`OUTLINE.md`](OUTLINE.md) has a one-paragraph synopsis
+of each.
 
 | # | Chapter |
 |---|---|
@@ -89,6 +95,12 @@ one-paragraph synopsis of each.
 | 10 | [Recursion and Data: Building Your Own Worlds](10-recursion-data.md) |
 | 11 | [Structural Induction: Proofs That Follow the Data](11-structural-induction.md) |
 | 12 | [Strong Induction, and Where to Go Next](12-strong-induction.md) |
+| 13 | [Finite Types and Honest Counting](13-finite-types.md) |
+| 14 | [Bijections and the HOL Boundary](14-bijections.md) |
+
+Chapters 13–14 require the `hol` branch. Their assignment manifests distinguish
+concrete `fol+induction` work from the genuinely higher-order act of passing a
+function to generic `map`.
 
 ## A word of encouragement
 
