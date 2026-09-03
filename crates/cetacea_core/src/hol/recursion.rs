@@ -10,8 +10,8 @@ use std::fmt;
 
 use super::inductive::{InductiveError, InductiveSignature};
 use super::terms::{
-    infer_type, ConstantId, CoreTerm, StructuralReduction, StructuralReductionArm, TermContext,
-    TermError, TermSignature,
+    infer_type, validate_term_type_scheme, ConstantId, CoreTerm, StructuralReduction,
+    StructuralReductionArm, TermContext, TermError, TermSignature,
 };
 use super::types::{CoreType, TypeConstructorId, TypeError, TypeParameter, TypeSignature};
 
@@ -196,6 +196,19 @@ impl RecursionSignature {
                     spec.name
                 )));
             }
+            // Every type mentioned by the arm body must be closed under the
+            // definition's own type-parameter scheme. `infer_type` alone
+            // accepts any `CoreType::Parameter` id, so without this check an
+            // arm could smuggle in a free type parameter that later unifies
+            // with an unrelated theorem's parameter of the same id.
+            validate_term_type_scheme(types, &spec.type_parameters, &arm.body).map_err(
+                |error| {
+                    RecursionError::new(format!(
+                        "structural definition `{}` arm for constructor `{}` mentions a type outside its parameter scheme: {}",
+                        spec.name, constructor.name, error.message
+                    ))
+                },
+            )?;
 
             let instantiated = inductives.instantiate_constructor(
                 types,
@@ -854,6 +867,71 @@ mod tests {
                 CoreTerm::Constant(fixture.zero),
                 CoreTerm::Constant(fixture.zero),
             ))
+        );
+    }
+}
+
+#[cfg(test)]
+mod type_scheme_tests {
+    use super::*;
+    use crate::hol::inductive::{InductiveConstructorSpec, InductiveSpec};
+
+    /// Regression for the H7 kernel audit: a structural arm body that mentions
+    /// a type parameter the definition does not bind must be rejected. Before
+    /// the check, `f unit := forall y z : ?b. y = z` was accepted with an empty
+    /// scheme, and the free `?b` later unified with any theorem's own
+    /// parameter of the same id, which let `False` be derived.
+    #[test]
+    fn structural_arm_body_must_be_closed_under_the_definition_scheme() {
+        let mut types = TypeSignature::new();
+        let mut constants = TermSignature::new();
+        let mut inductives = InductiveSignature::new();
+        let unit = inductives
+            .declare(
+                &mut types,
+                &mut constants,
+                InductiveSpec::new(
+                    "Unit",
+                    Vec::new(),
+                    vec![InductiveConstructorSpec::new("unit", Vec::new())],
+                ),
+            )
+            .expect("Unit");
+        let unit_ctor = constants.resolve("unit").expect("unit");
+        let free = TypeParameter::any(7);
+        let body = CoreTerm::forall(
+            CoreType::Parameter(free),
+            CoreTerm::forall(
+                CoreType::Parameter(free),
+                CoreTerm::equality(
+                    CoreType::Parameter(free),
+                    CoreTerm::Bound(1),
+                    CoreTerm::Bound(0),
+                ),
+            ),
+        );
+        let mut recursion = RecursionSignature::new();
+        let error = recursion
+            .declare(
+                &types,
+                &mut constants,
+                &inductives,
+                StructuralDefinitionSpec {
+                    name: "f".to_string(),
+                    type_parameters: Vec::new(),
+                    datatype: unit,
+                    datatype_arguments: Vec::new(),
+                    fixed_parameter_types: Vec::new(),
+                    recursive_argument_index: 0,
+                    result_type: CoreType::Prop,
+                    arms: vec![StructuralArmSpec::new(unit_ctor, body)],
+                },
+            )
+            .expect_err("free type parameter in an arm body must be rejected");
+        assert!(
+            error.message.contains("outside its parameter scheme"),
+            "unexpected error: {}",
+            error.message
         );
     }
 }
