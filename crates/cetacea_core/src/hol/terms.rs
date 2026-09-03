@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
@@ -499,12 +500,81 @@ impl TermContext {
     }
 }
 
+/// Resource limits for the term layer.
+///
+/// Every traversal in this module is recursive, and definitional equality
+/// with beta reduction is non-elementary, so without limits a small hostile
+/// term can exhaust the native or Wasm stack (an abort, not an error) or run
+/// for an unbounded time. These counters turn both into ordinary `TermError`
+/// rejections. They bound resources only; they never change which terms are
+/// judged equal or well typed.
+///
+/// `MAX_TERM_DEPTH` must stay comfortably below what the host stack can
+/// carry: the CLI checks on a 256 MiB thread and the Wasm build links with a
+/// 16 MiB stack (see `.cargo/config.toml`). Numerals lower to unary
+/// successor towers, so the limit also bounds the largest literal a file can
+/// mention.
+const MAX_TERM_DEPTH: usize = 2048;
+const MAX_NORMALIZATION_STEPS: u64 = 4_000_000;
+
+thread_local! {
+    static TERM_DEPTH: Cell<usize> = const { Cell::new(0) };
+    static NORMALIZATION_STEPS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// RAII guard that counts one level of term recursion for the calling
+/// thread and rejects nesting beyond `MAX_TERM_DEPTH`.
+struct DepthGuard;
+
+impl DepthGuard {
+    fn enter(what: &str) -> Result<Self, TermError> {
+        TERM_DEPTH.with(|depth| {
+            let current = depth.get();
+            if current >= MAX_TERM_DEPTH {
+                return Err(TermError::new(format!(
+                    "{what} exceeds the maximum term nesting depth of {MAX_TERM_DEPTH}"
+                )));
+            }
+            depth.set(current + 1);
+            Ok(DepthGuard)
+        })
+    }
+}
+
+impl Drop for DepthGuard {
+    fn drop(&mut self) {
+        TERM_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Reset the normalization step budget at a public normalization entry
+/// point. Normalization never re-enters itself through a public entry, so
+/// the budget covers one complete normalization.
+fn reset_normalization_budget() {
+    NORMALIZATION_STEPS.with(|steps| steps.set(0));
+}
+
+fn spend_normalization_step() -> Result<(), TermError> {
+    NORMALIZATION_STEPS.with(|steps| {
+        let used = steps.get() + 1;
+        if used > MAX_NORMALIZATION_STEPS {
+            return Err(TermError::new(format!(
+                "normalization exceeded the budget of {MAX_NORMALIZATION_STEPS} reduction steps"
+            )));
+        }
+        steps.set(used);
+        Ok(())
+    })
+}
+
+
 pub fn infer_type(
     types: &TypeSignature,
     constants: &TermSignature,
     context: &TermContext,
     term: &CoreTerm,
 ) -> Result<CoreType, TermError> {
+    let _depth = DepthGuard::enter("term")?;
     match term {
         CoreTerm::Bound(index) => Ok(context.lookup(*index)?.clone()),
         CoreTerm::Constant(id) => constants.monomorphic_constant_type(*id),
@@ -721,6 +791,7 @@ pub fn normalize(
     term: &CoreTerm,
 ) -> Result<CoreTerm, TermError> {
     infer_type(types, constants, context, term)?;
+    reset_normalization_budget();
     normalize_typed(constants, term)
 }
 
@@ -736,6 +807,7 @@ pub fn definitionally_equal(
     if left_type != right_type {
         return Ok(false);
     }
+    reset_normalization_budget();
     Ok(normalize_typed(constants, left)? == normalize_typed(constants, right)?)
 }
 
@@ -768,6 +840,8 @@ pub fn instantiate_binder(
 }
 
 fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTerm, TermError> {
+    let _depth = DepthGuard::enter("normalization")?;
+    spend_normalization_step()?;
     match term {
         CoreTerm::Bound(_) | CoreTerm::Truth | CoreTerm::Falsity => Ok(term.clone()),
         CoreTerm::Constant(id) => {
@@ -1416,8 +1490,12 @@ fn instantiate_term_parameters_at_depth(
             let free_index = index.checked_sub(depth).expect("guarded by index >= depth");
             let free_index = usize::try_from(free_index)
                 .map_err(|_| TermError::new("term parameter index does not fit in memory"))?;
-            let declaration_index =
-                arguments.len().checked_sub(free_index + 1).ok_or_else(|| {
+            // `checked_add` keeps 32-bit targets from wrapping when
+            // `free_index` is near `usize::MAX`.
+            let declaration_index = free_index
+                .checked_add(1)
+                .and_then(|needed| arguments.len().checked_sub(needed))
+                .ok_or_else(|| {
                     TermError::new(format!(
                         "open theorem term references undeclared parameter index `{free_index}`"
                     ))
@@ -1594,6 +1672,7 @@ fn substitute_top(argument: &CoreTerm, body: &CoreTerm) -> Result<CoreTerm, Term
 }
 
 fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<CoreTerm, TermError> {
+    let _depth = DepthGuard::enter("substitution")?;
     match term {
         CoreTerm::Bound(index) if *index == target => Ok(replacement.clone()),
         CoreTerm::Bound(_)
@@ -1701,6 +1780,7 @@ fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<Co
 }
 
 fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermError> {
+    let _depth = DepthGuard::enter("shift")?;
     match term {
         CoreTerm::Bound(index) if *index >= cutoff => {
             let shifted = i64::from(*index) + i64::from(amount);
@@ -2484,5 +2564,104 @@ mod tests {
         )
         .expect_err("Prop is not a Nat witness");
         assert!(error.message.contains("binder argument has type"));
+    }
+}
+
+#[cfg(test)]
+mod resource_limit_tests {
+    use super::*;
+
+    fn nat_signatures() -> (TypeSignature, TermSignature, CoreType) {
+        let mut types = TypeSignature::new();
+        let nat_id = types.declare("Nat", 0, true).expect("Nat");
+        let nat = CoreType::constructor(nat_id, Vec::new());
+        let mut constants = TermSignature::new();
+        constants
+            .declare(&types, "zero", nat.clone())
+            .expect("zero");
+        constants
+            .declare(&types, "succ", CoreType::arrow(nat.clone(), nat.clone()))
+            .expect("succ");
+        (types, constants, nat)
+    }
+
+    /// Church numeral `two` at type `t`: `\\f. \\x. f (f x)`.
+    fn church_two(t: CoreType) -> CoreTerm {
+        CoreTerm::lambda(
+            CoreType::arrow(t.clone(), t.clone()),
+            CoreTerm::lambda(
+                t,
+                CoreTerm::apply(
+                    CoreTerm::Bound(1),
+                    CoreTerm::apply(CoreTerm::Bound(1), CoreTerm::Bound(0)),
+                ),
+            ),
+        )
+    }
+
+    /// Regression for the H7 kernel audit: a well-typed term of a few dozen
+    /// nodes normalizes to a Church numeral with 2^64 applications
+    /// (`two_{Nat->Nat}` squares its argument, applied six times to
+    /// `two_Nat`). Without a budget this aborted the process with a stack
+    /// overflow; it must be an ordinary error.
+    #[test]
+    fn normalization_blowup_is_rejected_not_aborted() {
+        std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn(|| {
+                let (types, constants, nat) = nat_signatures();
+                let squarer = church_two(CoreType::arrow(nat.clone(), nat.clone()));
+                let mut term = church_two(nat.clone());
+                for _ in 0..6 {
+                    term = CoreTerm::apply(squarer.clone(), term);
+                }
+                let context = TermContext::new();
+                infer_type(&types, &constants, &context, &term).expect("well typed");
+                let error = normalize(&types, &constants, &context, &term)
+                    .expect_err("normalization must run out of budget or depth");
+                assert!(
+                    error.message.contains("budget") || error.message.contains("nesting depth"),
+                    "{}",
+                    error.message
+                );
+            })
+            .expect("spawn")
+            .join()
+            .expect("blowup thread");
+    }
+
+    /// Regression for the H7 kernel audit: a proposition nested deeper than
+    /// the kernel's depth limit is rejected by type inference instead of
+    /// overflowing the stack.
+    #[test]
+    fn deeply_nested_terms_are_rejected_by_depth_limit() {
+        // Debug-build frames are large and the test thread's stack is
+        // small, so run on a thread sized like the CLI's checker thread.
+        std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn(|| {
+                let (types, constants, _nat) = nat_signatures();
+                let mut term = CoreTerm::Truth;
+                for _ in 0..(MAX_TERM_DEPTH + 8) {
+                    term = CoreTerm::and(term, CoreTerm::Truth);
+                }
+                let error = infer_type(&types, &constants, &TermContext::new(), &term)
+                    .expect_err("over-deep term must be rejected");
+                assert!(error.message.contains("nesting depth"), "{}", error.message);
+
+                // The guard unwinds on the error path, so a shallow term
+                // still checks afterwards on the same thread.
+                let shallow = CoreTerm::and(CoreTerm::Truth, CoreTerm::Falsity);
+                assert_eq!(
+                    infer_type(&types, &constants, &TermContext::new(), &shallow)
+                        .expect("shallow"),
+                    CoreType::Prop
+                );
+                // Dropping a deep term is itself recursive; do it here.
+                drop(term);
+            })
+            .expect("spawn")
+            .join()
+            .expect("deep-term thread");
     }
 }

@@ -1,0 +1,6 @@
+# The Wasm build gets a 16 MiB stack (the default is 1 MiB). The checker
+# recurses over terms and proofs, and Nat numerals lower to unary successor
+# towers, so realistic student files need more depth than the default
+# allows; the kernel's own depth limit is the backstop.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=16777216"]

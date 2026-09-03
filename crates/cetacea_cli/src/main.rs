@@ -6,6 +6,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
+use std::thread;
 
 use cetacea_core::hol::{
     run_linked_hol_smoke, DeclarationId, EvidenceStatus, LibraryPackageId,
@@ -25,7 +26,26 @@ use cetacea_core::{
 
 use assignment::{parse_manifest, AssignmentManifest};
 
+/// Stack reserved for the checking thread. Both engines walk terms and
+/// proofs recursively, and numerals lower to unary successor towers, so a
+/// deep-but-legitimate file needs far more than the default main-thread
+/// stack. The reservation is virtual; pages are committed only when used.
+const CHECKER_STACK_BYTES: usize = 256 * 1024 * 1024;
+
 fn main() {
+    // Run everything on a thread with a large stack so nesting depth is
+    // bounded by the kernel's own limits instead of by the platform stack.
+    let worker = thread::Builder::new()
+        .name("cetacea-checker".to_string())
+        .stack_size(CHECKER_STACK_BYTES)
+        .spawn(real_main)
+        .expect("spawn checker thread");
+    if worker.join().is_err() {
+        process::exit(101);
+    }
+}
+
+fn real_main() {
     let args: Vec<String> = env::args().skip(1).collect();
     if args == ["--hol-smoke"] {
         match run_linked_hol_smoke() {
