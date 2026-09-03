@@ -186,6 +186,21 @@ impl InductiveSignature {
             }
         }
 
+        // Opaque constants may be declared at any type, so every declared
+        // type must be inhabited. A datatype without a base constructor
+        // (one whose fields never mention the datatype) has no values, and
+        // an opaque constant at that type would let induction prove `False`.
+        if !spec
+            .constructors
+            .iter()
+            .any(|constructor| constructor.fields.iter().all(|field| !field.mentions_recursive()))
+        {
+            return Err(InductiveError::new(format!(
+                "inductive type `{}` has no base constructor, so it has no values",
+                spec.name
+            )));
+        }
+
         let mut preserves_first_order = true;
         for constructor in &spec.constructors {
             for field in &constructor.fields {
@@ -329,6 +344,18 @@ impl InductiveSignature {
             result_type,
             recursive_fields: constructor.recursive_fields.clone(),
         })
+    }
+}
+
+impl InductiveFieldType {
+    fn mentions_recursive(&self) -> bool {
+        match self {
+            InductiveFieldType::Existing(_) => false,
+            InductiveFieldType::Recursive => true,
+            InductiveFieldType::Arrow(left, right) | InductiveFieldType::Product(left, right) => {
+                left.mentions_recursive() || right.mentions_recursive()
+            }
+        }
     }
 }
 
@@ -609,6 +636,38 @@ mod tests {
         assert!(error.message.contains("nested recursive occurrences"));
         assert_eq!(fixture.types.resolve("Nested"), None);
         assert_eq!(fixture.constants.resolve("make_nested"), None);
+    }
+
+    /// Regression for the H7 kernel audit: opaque constants may be declared
+    /// at any type, so a datatype with no base constructor (empty, or with
+    /// zero constructors) must be rejected or `const e : Empty` plus
+    /// case-free induction would prove `False`.
+    #[test]
+    fn datatypes_without_a_base_constructor_are_rejected_atomically() {
+        let mut fixture = fixture();
+        let empty = InductiveSpec::new("Empty", Vec::new(), Vec::new());
+        let error = fixture
+            .inductives
+            .declare(&mut fixture.types, &mut fixture.constants, empty)
+            .expect_err("zero-constructor datatype must fail");
+        assert!(error.message.contains("no base constructor"), "{}", error.message);
+        assert_eq!(fixture.types.resolve("Empty"), None);
+
+        let loop_only = InductiveSpec::new(
+            "Loop",
+            Vec::new(),
+            vec![InductiveConstructorSpec::new(
+                "again",
+                vec![InductiveFieldType::Recursive],
+            )],
+        );
+        let error = fixture
+            .inductives
+            .declare(&mut fixture.types, &mut fixture.constants, loop_only)
+            .expect_err("datatype whose every constructor is recursive must fail");
+        assert!(error.message.contains("no base constructor"), "{}", error.message);
+        assert_eq!(fixture.types.resolve("Loop"), None);
+        assert_eq!(fixture.constants.resolve("again"), None);
     }
 
     #[test]

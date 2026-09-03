@@ -955,7 +955,33 @@ pub struct DataCtor {
     pub arg_types: Vec<Type>,
 }
 
+impl Type {
+    /// Whether this type mentions the named sort anywhere, including under
+    /// products, sets, and type-constructor applications.
+    fn mentions_sort(&self, sort: &str) -> bool {
+        match self {
+            Type::Named(name) => name == sort,
+            Type::App(name, arguments) => {
+                name == sort || arguments.iter().any(|ty| ty.mentions_sort(sort))
+            }
+            Type::Nat => sort == "Nat",
+            Type::Prod(left, right) => left.mentions_sort(sort) || right.mentions_sort(sort),
+            Type::Set(element) => element.mentions_sort(sort),
+        }
+    }
+}
+
 impl DataCtor {
+    /// A base constructor mentions the data type in none of its arguments,
+    /// so it witnesses that the type is inhabited without assuming any
+    /// earlier inhabitant.
+    fn is_base_constructor(&self, data_name: &str) -> bool {
+        !self
+            .arg_types
+            .iter()
+            .any(|ty| ty.mentions_sort(data_name))
+    }
+
     fn recursive_arg_indices(&self, data_name: &str) -> Vec<usize> {
         self.arg_types
             .iter()
@@ -5977,6 +6003,31 @@ impl FileChecker {
                         }
                     }
                     if !types_ok {
+                        continue;
+                    }
+                    // Every sort is assumed inhabited: `const c : T` is an
+                    // ordinary declaration, not an axiom. That is only sound
+                    // for a data type with a base constructor; without one
+                    // the type has no inhabitants and `const` would let
+                    // induction derive `False`.
+                    if !decl
+                        .ctors
+                        .iter()
+                        .any(|ctor| ctor.is_base_constructor(&decl.name))
+                    {
+                        self.result.diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "data type `{}` has no base constructor, so it has no values",
+                                    decl.name
+                                ),
+                            )
+                            .with_note(
+                                "every constructor takes an argument of the type being declared; add a constructor whose arguments do not mention it",
+                            ),
+                        );
                         continue;
                     }
                     for ctor in &decl.ctors {
@@ -20911,6 +20962,56 @@ theorem add_zero_right (n : Nat) : add(n, 0) = n := by
     /// peeled form, so an induction hypothesis still cannot close the
     /// `succ` case by itself (the ch09 mistake fixture behavior).
     #[cfg(feature = "hol-shadow")]
+    /// Regression for the H7 kernel audit. `const c : T` assumes `T` is
+    /// inhabited, which is only sound when every data type has a base
+    /// constructor; `data T | mk(T)` is empty, and this file used to prove
+    /// `False` through it in both engines.
+    #[test]
+    fn data_types_without_a_base_constructor_are_rejected() {
+        let source = r#"
+data T
+| mk(T)
+
+theorem boom (c : T) : False := by
+  induction c with
+  | mk t ih =>
+      exact ih
+
+const c : T
+
+theorem boom2 : False := by
+  exact boom c
+"#;
+        let result = check_file(source);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("data type `T` has no base constructor")
+            }),
+            "diagnostics: {:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .theorems
+                .iter()
+                .all(|theorem| theorem.status != DeclarationStatus::Accepted),
+            "no theorem may be accepted: {:#?}",
+            result.theorems
+        );
+
+        let source = r#"
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+const t : Tree
+"#;
+        let result = check_file(source);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
     #[test]
     fn closed_equality_refutation_matches_in_both_engines() {
         let source = r#"
