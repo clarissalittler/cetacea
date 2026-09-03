@@ -567,7 +567,6 @@ fn spend_normalization_step() -> Result<(), TermError> {
     })
 }
 
-
 pub fn infer_type(
     types: &TypeSignature,
     constants: &TermSignature,
@@ -1223,7 +1222,7 @@ fn substitute_core_type(
         CoreType::Parameter(parameter) => substitution
             .get(&parameter.id)
             .cloned()
-            .unwrap_or_else(|| CoreType::Parameter(*parameter)),
+            .unwrap_or(CoreType::Parameter(*parameter)),
         CoreType::Constructor { id, arguments } => CoreType::constructor(
             *id,
             arguments
@@ -2653,8 +2652,7 @@ mod resource_limit_tests {
                 // still checks afterwards on the same thread.
                 let shallow = CoreTerm::and(CoreTerm::Truth, CoreTerm::Falsity);
                 assert_eq!(
-                    infer_type(&types, &constants, &TermContext::new(), &shallow)
-                        .expect("shallow"),
+                    infer_type(&types, &constants, &TermContext::new(), &shallow).expect("shallow"),
                     CoreType::Prop
                 );
                 // Dropping a deep term is itself recursive; do it here.

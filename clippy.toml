@@ -1,0 +1,8 @@
+# Errors here carry a message, a target formula and suggestion lists, so
+# 128–136 bytes is their honest size; the default 128-byte threshold flags
+# every checker function without pointing at anything worth boxing.
+large-error-threshold = 192
+# The checker's internal entry points thread source path, line, alias and
+# policy through together; splitting them into structs is on the H7
+# follow-up list (with the `lib.rs` module split), not a lint fix.
+too-many-arguments-threshold = 10

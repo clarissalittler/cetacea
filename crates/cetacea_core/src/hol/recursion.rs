@@ -78,7 +78,7 @@ impl StructuralArmLayout {
     }
 
     pub fn field(self, index: usize) -> Option<CoreTerm> {
-        (index < self.field_count).then(|| CoreTerm::Bound(index as u32))
+        (index < self.field_count).then_some(CoreTerm::Bound(index as u32))
     }
 
     pub fn recursive_result(self, index: usize) -> Option<CoreTerm> {

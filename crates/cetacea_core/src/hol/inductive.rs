@@ -190,11 +190,12 @@ impl InductiveSignature {
         // type must be inhabited. A datatype without a base constructor
         // (one whose fields never mention the datatype) has no values, and
         // an opaque constant at that type would let induction prove `False`.
-        if !spec
-            .constructors
-            .iter()
-            .any(|constructor| constructor.fields.iter().all(|field| !field.mentions_recursive()))
-        {
+        if !spec.constructors.iter().any(|constructor| {
+            constructor
+                .fields
+                .iter()
+                .all(|field| !field.mentions_recursive())
+        }) {
             return Err(InductiveError::new(format!(
                 "inductive type `{}` has no base constructor, so it has no values",
                 spec.name
@@ -650,7 +651,11 @@ mod tests {
             .inductives
             .declare(&mut fixture.types, &mut fixture.constants, empty)
             .expect_err("zero-constructor datatype must fail");
-        assert!(error.message.contains("no base constructor"), "{}", error.message);
+        assert!(
+            error.message.contains("no base constructor"),
+            "{}",
+            error.message
+        );
         assert_eq!(fixture.types.resolve("Empty"), None);
 
         let loop_only = InductiveSpec::new(
@@ -665,7 +670,11 @@ mod tests {
             .inductives
             .declare(&mut fixture.types, &mut fixture.constants, loop_only)
             .expect_err("datatype whose every constructor is recursive must fail");
-        assert!(error.message.contains("no base constructor"), "{}", error.message);
+        assert!(
+            error.message.contains("no base constructor"),
+            "{}",
+            error.message
+        );
         assert_eq!(fixture.types.resolve("Loop"), None);
         assert_eq!(fixture.constants.resolve("again"), None);
     }

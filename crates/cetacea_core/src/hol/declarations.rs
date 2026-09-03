@@ -3371,14 +3371,9 @@ impl LegacyProofLowerer<'_> {
             (CoreTerm::Equality { .. }, CoreTerm::Truth) => {
                 Ok(Some(retain_result(HolDraftProof::TruthIntro)))
             }
-            (CoreTerm::Equality { left, right, .. }, CoreTerm::Falsity) => {
-                Ok(Some(constructor_falsity_proof(
-                    self.environment.core.inductives(),
-                    proof,
-                    left,
-                    right,
-                )))
-            }
+            (CoreTerm::Equality { left, right, .. }, CoreTerm::Falsity) => Ok(Some(
+                constructor_falsity_proof(self.environment.core.inductives(), proof, left, right),
+            )),
             (
                 CoreTerm::Implies(source_premise, source_conclusion),
                 CoreTerm::Implies(target_premise, target_conclusion),

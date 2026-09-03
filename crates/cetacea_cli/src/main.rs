@@ -365,7 +365,9 @@ fn load_assignment(path: &Path) -> Result<LoadedAssignment, String> {
         if let Some(package) = LibraryPackageId::from_logical_id(import) {
             let logical_id = package.to_string();
             if required_package_imports.contains(&logical_id) {
-                return Err(format!("required package import `{logical_id}` is repeated"));
+                return Err(format!(
+                    "required package import `{logical_id}` is repeated"
+                ));
             }
             allowed_package_imports.insert(logical_id.clone());
             required_package_imports.push(logical_id);
@@ -514,8 +516,7 @@ fn print_hol_certification(report: &HolShadowReport) {
     if report.is_match() {
         // A file that failed to parse has nothing to certify; the parse
         // error already says everything.
-        if report.attempted_declarations == 0
-            && diagnostics_have_errors(&report.legacy.diagnostics)
+        if report.attempted_declarations == 0 && diagnostics_have_errors(&report.legacy.diagnostics)
         {
             return;
         }
@@ -866,10 +867,7 @@ impl TerminalGuard {
             .stdin(Stdio::inherit())
             .status()?;
         if !status.success() {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to put terminal in raw mode",
-            ));
+            return Err(io::Error::other("failed to put terminal in raw mode"));
         }
         print!("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H");
         io::stdout().flush()?;
@@ -1491,10 +1489,8 @@ impl TuiApp {
         match key {
             Key::Ctrl('q') => self.request_quit(),
             Key::Esc | Key::Tab => self.focus = TuiFocus::Editor,
-            Key::Up => {
-                if self.menu_index > 0 {
-                    self.menu_index -= 1;
-                }
+            Key::Up if self.menu_index > 0 => {
+                self.menu_index -= 1;
             }
             Key::Down => {
                 self.menu_index = (self.menu_index + 1).min(MENU_ITEMS.len().saturating_sub(1));
@@ -2168,15 +2164,10 @@ fn push_wrapped(lines: &mut Vec<String>, text: &str, width: usize) {
     let mut remaining = text.trim_end();
     while remaining.chars().count() > wrap_width {
         let mut split_at = 0;
-        let mut count = 0;
-        for (idx, ch) in remaining.char_indices() {
-            if count >= wrap_width {
-                break;
-            }
+        for (idx, ch) in remaining.char_indices().take(wrap_width) {
             if ch.is_whitespace() {
                 split_at = idx;
             }
-            count += 1;
         }
         if split_at == 0 {
             split_at = char_to_byte_index(remaining, wrap_width);

@@ -2033,8 +2033,7 @@ pub(super) fn shift_proof_hypotheses(
     amount: u32,
     cutoff: u32,
 ) -> Result<HolDraftProof, ProofError> {
-    let recurse =
-        |proof: &HolDraftProof| shift_proof_hypotheses(inductives, proof, amount, cutoff);
+    let recurse = |proof: &HolDraftProof| shift_proof_hypotheses(inductives, proof, amount, cutoff);
     let under = |proof: &HolDraftProof, binders: u32| {
         shift_proof_hypotheses(inductives, proof, amount, cutoff + binders)
     };
@@ -2053,16 +2052,17 @@ pub(super) fn shift_proof_hypotheses(
         | HolDraftProof::EqualityRefl(_)
         | HolDraftProof::ExcludedMiddle { .. }
         | HolDraftProof::Sorry { .. } => proof.clone(),
-        HolDraftProof::FalseElim { proof_false, target } => HolDraftProof::FalseElim {
+        HolDraftProof::FalseElim {
+            proof_false,
+            target,
+        } => HolDraftProof::FalseElim {
             proof_false: Box::new(recurse(proof_false)?),
             target: target.clone(),
         },
         HolDraftProof::AndIntro(left, right) => {
             HolDraftProof::AndIntro(Box::new(recurse(left)?), Box::new(recurse(right)?))
         }
-        HolDraftProof::AndElimLeft(inner) => {
-            HolDraftProof::AndElimLeft(Box::new(recurse(inner)?))
-        }
+        HolDraftProof::AndElimLeft(inner) => HolDraftProof::AndElimLeft(Box::new(recurse(inner)?)),
         HolDraftProof::AndElimRight(inner) => {
             HolDraftProof::AndElimRight(Box::new(recurse(inner)?))
         }
@@ -2156,9 +2156,7 @@ pub(super) fn shift_proof_hypotheses(
             cases,
         } => {
             let declaration = inductives.declaration(*datatype).ok_or_else(|| {
-                ProofError::new(
-                    "hypothesis shifting requires the induction datatype declaration",
-                )
+                ProofError::new("hypothesis shifting requires the induction datatype declaration")
             })?;
             if declaration.constructors.len() != cases.len() {
                 return Err(ProofError::new(
@@ -2190,12 +2188,10 @@ pub(super) fn shift_proof_hypotheses(
             proposition: proposition.clone(),
             proof_not_not: Box::new(recurse(proof_not_not)?),
         },
-        HolDraftProof::ByContradiction { proposition, body } => {
-            HolDraftProof::ByContradiction {
-                proposition: proposition.clone(),
-                body: Box::new(under(body, 1)?),
-            }
-        }
+        HolDraftProof::ByContradiction { proposition, body } => HolDraftProof::ByContradiction {
+            proposition: proposition.clone(),
+            body: Box::new(under(body, 1)?),
+        },
     })
 }
 

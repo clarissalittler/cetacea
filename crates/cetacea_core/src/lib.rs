@@ -641,24 +641,19 @@ impl<'a> SignatureCanonicalizer<'a> {
             Formula::Eq(left, right) => {
                 Formula::Eq(self.rewrite_term(left), self.rewrite_term(right))
             }
-            Formula::In(elem, set) => {
-                Formula::In(self.rewrite_term(elem), self.rewrite_term(set))
-            }
+            Formula::In(elem, set) => Formula::In(self.rewrite_term(elem), self.rewrite_term(set)),
             Formula::Subset(left, right) => {
                 Formula::Subset(self.rewrite_term(left), self.rewrite_term(right))
             }
-            Formula::And(left, right) => Formula::and(
-                self.rewrite_formula(left),
-                self.rewrite_formula(right),
-            ),
-            Formula::Or(left, right) => Formula::or(
-                self.rewrite_formula(left),
-                self.rewrite_formula(right),
-            ),
-            Formula::Implies(left, right) => Formula::implies(
-                self.rewrite_formula(left),
-                self.rewrite_formula(right),
-            ),
+            Formula::And(left, right) => {
+                Formula::and(self.rewrite_formula(left), self.rewrite_formula(right))
+            }
+            Formula::Or(left, right) => {
+                Formula::or(self.rewrite_formula(left), self.rewrite_formula(right))
+            }
+            Formula::Implies(left, right) => {
+                Formula::implies(self.rewrite_formula(left), self.rewrite_formula(right))
+            }
             Formula::Forall {
                 var,
                 var_type,
@@ -976,10 +971,7 @@ impl DataCtor {
     /// so it witnesses that the type is inhabited without assuming any
     /// earlier inhabitant.
     fn is_base_constructor(&self, data_name: &str) -> bool {
-        !self
-            .arg_types
-            .iter()
-            .any(|ty| ty.mentions_sort(data_name))
+        !self.arg_types.iter().any(|ty| ty.mentions_sort(data_name))
     }
 
     fn recursive_arg_indices(&self, data_name: &str) -> Vec<usize> {
@@ -1294,6 +1286,7 @@ pub struct Env {
     package_names: HashSet<Name>,
     /// Alias-qualified package declaration names mapped to their stable
     /// package-qualified identity, such as `F.cons` -> `std/hol/list@1.cons`.
+    #[cfg(feature = "hol-shadow")]
     package_origins: HashMap<Name, Name>,
     consts: HashMap<Name, Type>,
     rank_one_consts: HashMap<Name, RankOneConstDecl>,
@@ -1367,6 +1360,13 @@ impl Env {
     #[cfg(feature = "hol-shadow")]
     fn package_origin(&self, name: &str) -> Option<&Name> {
         self.package_origins.get(name)
+    }
+
+    /// Without the HOL sidecar no logical package can be loaded, so no
+    /// name has a package origin.
+    #[cfg(not(feature = "hol-shadow"))]
+    fn package_origin(&self, _name: &str) -> Option<&Name> {
+        None
     }
 
     pub fn add_const(&mut self, name: Name, ty: Type) {
@@ -1646,17 +1646,16 @@ fn unknown_reference_message(env: &Env, ctx: &Context, name: &str) -> String {
         Some(suggestion) => {
             // Prefer the qualified spelling when the match was a leaf of an
             // aliased theorem, so the suggestion is usable as written.
-            let spelled = if env.theorems.contains_key(suggestion)
-                || ctx.lookup(suggestion).is_some()
-            {
-                suggestion.to_string()
-            } else {
-                env.theorems
-                    .keys()
-                    .find(|candidate| qualified_name_leaf(candidate) == Some(suggestion))
-                    .cloned()
-                    .unwrap_or_else(|| suggestion.to_string())
-            };
+            let spelled =
+                if env.theorems.contains_key(suggestion) || ctx.lookup(suggestion).is_some() {
+                    suggestion.to_string()
+                } else {
+                    env.theorems
+                        .keys()
+                        .find(|candidate| qualified_name_leaf(candidate) == Some(suggestion))
+                        .cloned()
+                        .unwrap_or_else(|| suggestion.to_string())
+                };
             format!("unknown hypothesis or theorem `{name}`; did you mean `{spelled}`?")
         }
         None => format!("unknown hypothesis or theorem `{name}`"),
@@ -2002,8 +2001,11 @@ fn tactic_error_suggestions(
             let example = laws
                 .iter()
                 .find(|law| {
-                    law.rsplit_once('_')
-                        .is_some_and(|(_, suffix)| mentioned.contains(&format!(".{suffix}(")) || mentioned.contains(&format!(".{suffix})")) || mentioned.contains(&format!(".{suffix},")))
+                    law.rsplit_once('_').is_some_and(|(_, suffix)| {
+                        mentioned.contains(&format!(".{suffix}("))
+                            || mentioned.contains(&format!(".{suffix})"))
+                            || mentioned.contains(&format!(".{suffix},"))
+                    })
                 })
                 .or(laws.first())
                 .cloned();
@@ -2012,7 +2014,11 @@ fn tactic_error_suggestions(
                 .map(|name| format!("`{name}`"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let plural = if package_functions.len() == 1 { "comes" } else { "come" };
+            let plural = if package_functions.len() == 1 {
+                "comes"
+            } else {
+                "come"
+            };
             let detail = match example {
                 None => format!("{functions} {plural} from a logical package, and `simp` does not compute package functions. Rewrite with the package's computation theorems, giving their parameters explicitly, then `refl`."),
                 Some(example) => format!(
@@ -3938,9 +3944,8 @@ impl FileChecker {
                     .iter()
                     .filter(|id| id.rsplit_once('@').map(|(m, _)| m) == Some(module))
                     .collect();
-                let mut diagnostic = Diagnostic::error(format!(
-                    "unknown logical package `{import_path}`"
-                ));
+                let mut diagnostic =
+                    Diagnostic::error(format!("unknown logical package `{import_path}`"));
                 diagnostic = if let [only] = same_module.as_slice() {
                     diagnostic.with_note(format!(
                         "version {version} of `{module}` is not registered; the registered version is `{only}`"
@@ -6844,11 +6849,9 @@ impl FileChecker {
                                     first_order_countermodel_note(&model)
                                 ));
                             }
-                            self.result
-                                .diagnostics
-                                .push(diagnostic.with_tactic_error_suggestions(
-                                    &self.env, &err, target,
-                                ));
+                            self.result.diagnostics.push(
+                                diagnostic.with_tactic_error_suggestions(&self.env, &err, target),
+                            );
                             continue;
                         }
                     };
@@ -7707,18 +7710,17 @@ fn goal_hints_with_eligibility(
                 "`trivial` closes a `True` goal.".to_string(),
             );
         }
-        Formula::False => {
-            if context_has_false(env, &goal.context)
-                || context_has_negation_pair(env, &goal.context)
-            {
-                push_goal_hint(
-                    &mut hints,
-                    "Find a contradiction",
-                    "contradiction".to_string(),
-                    "The context contains `False` or a proposition together with its negation."
-                        .to_string(),
-                );
-            }
+        Formula::False
+            if (context_has_false(env, &goal.context)
+                || context_has_negation_pair(env, &goal.context)) =>
+        {
+            push_goal_hint(
+                &mut hints,
+                "Find a contradiction",
+                "contradiction".to_string(),
+                "The context contains `False` or a proposition together with its negation."
+                    .to_string(),
+            );
         }
         Formula::Implies(_, _) => {
             let name = suggest_unused_name(&goal.context, "h");
@@ -10304,10 +10306,10 @@ pub fn proof_uses_sorry(env: &Env, proof: &DraftProof) -> bool {
     let mut found = false;
     visit_proof_nodes(proof, &mut |node| match node {
         DraftProof::Sorry { .. } => found = true,
-        DraftProof::TheoremRef { name, .. } => {
-            if env.theorem(name).is_some_and(|theorem| theorem.uses_sorry) {
-                found = true;
-            }
+        DraftProof::TheoremRef { name, .. }
+            if env.theorem(name).is_some_and(|theorem| theorem.uses_sorry) =>
+        {
+            found = true;
         }
         _ => {}
     });
@@ -11545,7 +11547,9 @@ fn canonicalize_function_arg(
             "function", name, &matches,
         )));
     }
-    Err(ValidationError::new(unknown_function_message(env, ctx, name)))
+    Err(ValidationError::new(unknown_function_message(
+        env, ctx, name,
+    )))
 }
 
 /// A predicate or formula definition passed where a data-valued function is
@@ -14396,7 +14400,8 @@ fn parse_diagnostic(path: Option<&Path>, err: ParseError, message: Option<String
     if has_context {
         diagnostic = diagnostic.with_note(err.message);
     }
-    let names_a_fix = |text: &str| text.contains("did you mean") || text.contains("needs its case arms");
+    let names_a_fix =
+        |text: &str| text.contains("did you mean") || text.contains("needs its case arms");
     if (diagnostic.message.contains("unknown tactic") && !names_a_fix(&diagnostic.message))
         || diagnostic
             .notes
@@ -15882,7 +15887,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                     name,
                     params,
                     statement,
-                    tactics: parse_tactic_lines(&tactic_lines, &namespace_stack)
+                    tactics: parse_tactic_lines(&tactic_lines)
                         .map_err(|err| err.with_line(command_line))?,
                 }),
             ));
@@ -16222,10 +16227,7 @@ fn parse_pred_decl(input: &str) -> Result<(Name, Vec<Type>), ParseError> {
     Ok((name, args))
 }
 
-fn parse_tactic_lines(
-    lines: &[RawTacticLine],
-    namespace_stack: &[Name],
-) -> Result<Vec<LocatedTactic>, ParseError> {
+fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, ParseError> {
     let mut tactics = Vec::new();
     let mut i = 0;
 
@@ -16264,7 +16266,7 @@ fn parse_tactic_lines(
                 {
                     return Err(error);
                 }
-                let body_tactics = parse_tactic_lines(&lines[i..body_end], namespace_stack)?;
+                let body_tactics = parse_tactic_lines(&lines[i..body_end])?;
                 i = body_end;
 
                 tactics.push(LocatedTactic {
@@ -16283,8 +16285,8 @@ fn parse_tactic_lines(
             let left_line = lines[i].line;
             let left_indent = line_indent(&lines[i].text);
             let left_arm_text = lines[i].text.trim().to_string();
-            let left_name = parse_case_arm(&left_arm_text, "left")
-                .map_err(|err| err.with_line(left_line))?;
+            let left_name =
+                parse_case_arm(&left_arm_text, "left").map_err(|err| err.with_line(left_line))?;
             i += 1;
             let left_start = i;
             let left_end = case_body_end(lines, i, left_indent);
@@ -16297,7 +16299,7 @@ fn parse_tactic_lines(
             {
                 return Err(error);
             }
-            let left_tactics = parse_tactic_lines(&lines[left_start..left_end], namespace_stack)?;
+            let left_tactics = parse_tactic_lines(&lines[left_start..left_end])?;
 
             let right_line = lines[i].line;
             let right_indent = line_indent(&lines[i].text);
@@ -16318,8 +16320,7 @@ fn parse_tactic_lines(
             ) {
                 return Err(error);
             }
-            let right_tactics =
-                parse_tactic_lines(&lines[right_start..right_end], namespace_stack)?;
+            let right_tactics = parse_tactic_lines(&lines[right_start..right_end])?;
             i = right_end;
 
             tactics.push(LocatedTactic {
@@ -16368,8 +16369,7 @@ fn parse_tactic_lines(
                 {
                     return Err(error);
                 }
-                let arm_tactics =
-                    parse_tactic_lines(&lines[body_start..body_end], namespace_stack)?;
+                let arm_tactics = parse_tactic_lines(&lines[body_start..body_end])?;
                 arms.push(TacticInductionArm {
                     ctor,
                     binders,
@@ -16422,7 +16422,7 @@ fn parse_tactic_lines(
                     parse_formula_str(formula_str.trim()).map_err(|err| err.with_line(line_no))?;
                 i += 1;
                 let body_end = case_body_end(lines, i, have_indent);
-                let block = parse_tactic_lines(&lines[i..body_end], namespace_stack)?;
+                let block = parse_tactic_lines(&lines[i..body_end])?;
                 i = body_end;
                 if block.is_empty() {
                     return Err(ParseError::new(
@@ -17168,7 +17168,8 @@ struct TacticError {
     target: Option<Box<Formula>>,
     hyps: Vec<Formula>,
     terms: Vec<TermBinding>,
-    context: Option<Context>,
+    /// Boxed: `Context` is large and errors travel through every `Result`.
+    context: Option<Box<Context>>,
     line: Option<usize>,
     suggestions: Vec<DiagnosticSuggestion>,
 }
@@ -17209,7 +17210,7 @@ impl TacticError {
 
     fn with_context(mut self, context: Context) -> Self {
         if self.context.is_none() {
-            self.context = Some(context);
+            self.context = Some(Box::new(context));
         }
         self
     }
@@ -21531,9 +21532,9 @@ theorem drop_me : True := by
         assert_eq!(names, vec!["keep"]);
         assert!(certified.diagnostics.iter().any(|diagnostic| {
             diagnostic.severity == DiagnosticSeverity::Error
-                && diagnostic
-                    .message
-                    .contains("theorem `drop_me` failed kernel certification: simulated kernel rejection")
+                && diagnostic.message.contains(
+                    "theorem `drop_me` failed kernel certification: simulated kernel rejection",
+                )
                 && diagnostic.location.as_ref().map(|location| location.line) == Some(5)
         }));
     }
@@ -28406,7 +28407,10 @@ mod diagnostics_batch_tests {
 
     /// Package imports are only checked with the kernel replay enabled.
     fn rendered_with_packages(source: &str) -> String {
-        format!("{:#?}", check_file_with_hol_shadow(source).legacy.diagnostics)
+        format!(
+            "{:#?}",
+            check_file_with_hol_shadow(source).legacy.diagnostics
+        )
     }
 
     fn rendered_with_nat_alias(source: &str) -> String {
@@ -28414,7 +28418,10 @@ mod diagnostics_batch_tests {
             path: "std/nat.ctea".to_string(),
             source: include_str!("../../../std/nat.ctea").to_string(),
         }];
-        format!("{:#?}", check_file_with_imports(source, &imports).diagnostics)
+        format!(
+            "{:#?}",
+            check_file_with_imports(source, &imports).diagnostics
+        )
     }
 
     #[test]
@@ -28422,35 +28429,57 @@ mod diagnostics_batch_tests {
         let rendered = rendered_diagnostics(
             "theorem t (P Q : Prop) : P \\/ Q -> Q \\/ P := by\n  intro h\n  cases h\n",
         );
-        assert!(rendered.contains("`cases h` needs its case arms"), "{rendered}");
+        assert!(
+            rendered.contains("`cases h` needs its case arms"),
+            "{rendered}"
+        );
         assert!(!rendered.contains("unknown tactic"), "{rendered}");
         let rendered =
             rendered_diagnostics("theorem t (n : Nat) : add(n, 0) = n := by\n  induction n\n");
-        assert!(rendered.contains("`induction n` needs its case arms"), "{rendered}");
+        assert!(
+            rendered.contains("`induction n` needs its case arms"),
+            "{rendered}"
+        );
     }
 
     #[test]
     fn c3_unknown_package_version_names_the_registry() {
         let rendered = rendered_diagnostics("import std/hol/list@2 as L\n");
-        assert!(rendered.contains("unknown logical package `std/hol/list@2`"), "{rendered}");
-        assert!(rendered.contains("the registered version is `std/hol/list@1`"), "{rendered}");
+        assert!(
+            rendered.contains("unknown logical package `std/hol/list@2`"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("the registered version is `std/hol/list@1`"),
+            "{rendered}"
+        );
         assert!(!rendered.contains("No such file"), "{rendered}");
         let rendered = rendered_diagnostics("import std/hol/graph@1 as G\n");
-        assert!(rendered.contains("registered packages are `std/hol/list@1`"), "{rendered}");
+        assert!(
+            rendered.contains("registered packages are `std/hol/list@1`"),
+            "{rendered}"
+        );
     }
 
     #[test]
     fn c4_typos_get_did_you_mean() {
-        let rendered = rendered_diagnostics("theorem t (P : Prop) : P -> P := by\n  intro h\n  exatc h\n");
-        assert!(rendered.contains("unknown tactic `exatc h`; did you mean `exact`?"), "{rendered}");
+        let rendered =
+            rendered_diagnostics("theorem t (P : Prop) : P -> P := by\n  intro h\n  exatc h\n");
+        assert!(
+            rendered.contains("unknown tactic `exatc h`; did you mean `exact`?"),
+            "{rendered}"
+        );
         let rendered = rendered_with_nat_alias(
             "import std/nat.ctea\ntheorem t (n : Nat) : add(n, 0) = n := by\n  exact add_zero_rigth n\n",
         );
         assert!(
-            rendered.contains("unknown hypothesis or theorem `add_zero_rigth`; did you mean `add_zero_right`?"),
+            rendered.contains(
+                "unknown hypothesis or theorem `add_zero_rigth`; did you mean `add_zero_right`?"
+            ),
             "{rendered}"
         );
-        let rendered = rendered_diagnostics("theorem t (P : Prop) : P -> P := by\n  intro hyp\n  exact hpy\n");
+        let rendered =
+            rendered_diagnostics("theorem t (P : Prop) : P -> P := by\n  intro hyp\n  exact hpy\n");
         assert!(rendered.contains("did you mean `hyp`?"), "{rendered}");
     }
 
@@ -28459,7 +28488,10 @@ mod diagnostics_batch_tests {
         let rendered = rendered_with_packages(
             "import std/hol/list@1 as L\nimport std/hol/cardinality@1 as H\ndef Even (n : Nat) : Prop := exists k : Nat, n = add(k, k)\ntheorem t (xs : L.List Nat) : True := by\n  have h : L.Member(2, H.map(Even, xs)) := by\n    sorry\n  trivial\n",
         );
-        assert!(rendered.contains("`Even` is a predicate, not a function"), "{rendered}");
+        assert!(
+            rendered.contains("`Even` is a predicate, not a function"),
+            "{rendered}"
+        );
         assert!(!rendered.contains("unknown function `Even`"), "{rendered}");
     }
 
@@ -28468,9 +28500,15 @@ mod diagnostics_batch_tests {
         let rendered = rendered_with_packages(
             "import std/hol/list@1 as F\ntheorem t : F.length(F.cons(0, F.nil)) = 1 := by\n  refl\n",
         );
-        assert!(rendered.contains("Rewrite with the package's computation theorems"), "{rendered}");
+        assert!(
+            rendered.contains("Rewrite with the package's computation theorems"),
+            "{rendered}"
+        );
         assert!(rendered.contains("rewrite -> F.length_cons"), "{rendered}");
-        assert!(!rendered.contains("Use equality simplification first"), "{rendered}");
+        assert!(
+            !rendered.contains("Use equality simplification first"),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -28481,7 +28519,10 @@ mod diagnostics_batch_tests {
         let rendered = rendered_diagnostics(
             "data Tree\n| leaf\n| node(Tree, Nat, Tree)\n\ndefrec size (t : Tree) : Nat :=\n| leaf => 0\n| node l v r recl recr => succ(add(recl, recr))\n",
         );
-        assert!(rendered.contains("`defrec` headers end after the result type"), "{rendered}");
+        assert!(
+            rendered.contains("`defrec` headers end after the result type"),
+            "{rendered}"
+        );
     }
 
     #[test]
@@ -28489,9 +28530,15 @@ mod diagnostics_batch_tests {
         let rendered = rendered_diagnostics(
             "theorem t (P Q : Prop) : P \\/ Q -> Q \\/ P := by\n  intro h\n  cases h with\n  | left hp =>\n  right\n  exact hp\n  | right hq =>\n      left\n      exact hq\n",
         );
-        assert!(rendered.contains("the body of case arm `| left hp =>` is empty"), "{rendered}");
+        assert!(
+            rendered.contains("the body of case arm `| left hp =>` is empty"),
+            "{rendered}"
+        );
         assert!(rendered.contains("not indented past the `|`"), "{rendered}");
-        assert!(!rendered.contains("expected `right` case arm"), "{rendered}");
+        assert!(
+            !rendered.contains("expected `right` case arm"),
+            "{rendered}"
+        );
     }
 
     #[test]

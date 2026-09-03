@@ -394,7 +394,7 @@ fn substitute_type_parameters(
         CoreType::Parameter(parameter) => substitution
             .get(&parameter.id)
             .cloned()
-            .unwrap_or_else(|| CoreType::Parameter(*parameter)),
+            .unwrap_or(CoreType::Parameter(*parameter)),
         CoreType::Constructor { id, arguments } => CoreType::constructor(
             *id,
             arguments

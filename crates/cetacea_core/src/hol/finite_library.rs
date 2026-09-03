@@ -350,18 +350,13 @@ impl FiniteEnumerationLibrary {
         HolDraftProof::AndIntro(
             Box::new(HolDraftProof::ImpIntro {
                 premise,
-                body: Box::new(self.not_member_case(element_type.clone(), *head, tail)),
+                body: Box::new(self.not_member_case(tail)),
             }),
             Box::new(self.nodup_proof(element_type, tail)),
         )
     }
 
-    fn not_member_case(
-        &self,
-        element_type: CoreType,
-        head: ConstantId,
-        tail: &[ConstantId],
-    ) -> HolDraftProof {
+    fn not_member_case(&self, tail: &[ConstantId]) -> HolDraftProof {
         let Some((_, rest)) = tail.split_first() else {
             return HolDraftProof::Hypothesis(0);
         };
@@ -370,7 +365,7 @@ impl FiniteEnumerationLibrary {
             left_case: Box::new(HolDraftProof::ConstructorDisjoint {
                 proof_equality: Box::new(HolDraftProof::Hypothesis(0)),
             }),
-            right_case: Box::new(self.not_member_case(element_type, head, rest)),
+            right_case: Box::new(self.not_member_case(rest)),
             target: CoreTerm::Falsity,
         }
     }
