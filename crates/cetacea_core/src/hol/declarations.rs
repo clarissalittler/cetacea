@@ -17,7 +17,7 @@ use crate::{
 };
 
 use super::inductive::{
-    InductiveConstructorSpec, InductiveFieldType, InductiveSignature, InductiveSpec,
+    InductiveConstructorSpec, InductiveError, InductiveFieldType, InductiveSignature, InductiveSpec,
 };
 use super::library_registry::{
     HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary, InstalledListLibrary,
@@ -69,6 +69,12 @@ impl From<SpikeError> for CompatibilityDeclarationError {
     }
 }
 
+impl From<InductiveError> for CompatibilityDeclarationError {
+    fn from(error: InductiveError) -> Self {
+        Self::new(error.message)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SymbolRegistration {
     name: String,
@@ -95,6 +101,21 @@ struct DataRegistration {
     source: DataDef,
     datatype: TypeConstructorId,
     constructors: Vec<ConstantId>,
+}
+
+/// One constructor of the datatype a structural definition recurses over,
+/// with field types already instantiated at the definition's type arguments.
+struct StructuralConstructorShape {
+    name: String,
+    constant: ConstantId,
+    field_types: Vec<CoreType>,
+    recursive_field_count: usize,
+}
+
+struct StructuralDatatypeShape {
+    datatype: TypeConstructorId,
+    datatype_arguments: Vec<CoreType>,
+    constructors: Vec<StructuralConstructorShape>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1844,21 +1865,12 @@ impl CompatibilityElaborator {
         definition: &DataRecDef,
     ) -> Result<ConstantId, CompatibilityDeclarationError> {
         self.ensure_name_free(&definition.name)?;
-        let data = self
-            .data
-            .get(&definition.data_name)
-            .cloned()
-            .ok_or_else(|| {
-                CompatibilityDeclarationError::new(format!(
-                    "recursive definition `{}` uses unknown data type `{}`",
-                    definition.name, definition.data_name
-                ))
-            })?;
-        if definition.arms.len() != data.source.ctors.len() {
+        let shape = self.structural_datatype_shape(definition)?;
+        if definition.arms.len() != shape.constructors.len() {
             return Err(CompatibilityDeclarationError::new(format!(
                 "recursive definition `{}` needs {} arm(s), but got {}",
                 definition.name,
-                data.source.ctors.len(),
+                shape.constructors.len(),
                 definition.arms.len()
             )));
         }
@@ -1885,22 +1897,15 @@ impl CompatibilityElaborator {
         drop(lowerer);
 
         let mut arms = Vec::with_capacity(definition.arms.len());
-        for (arm_index, (arm, constructor)) in
-            definition.arms.iter().zip(&data.source.ctors).enumerate()
-        {
+        for (arm, constructor) in definition.arms.iter().zip(&shape.constructors) {
             if arm.ctor != constructor.name {
                 return Err(CompatibilityDeclarationError::new(format!(
                     "recursive definition `{}` arm `{}` is out of order; expected `{}`",
                     definition.name, arm.ctor, constructor.name
                 )));
             }
-            let recursive_fields = constructor
-                .arg_types
-                .iter()
-                .filter(|ty| is_direct_recursive_type(ty, &definition.data_name))
-                .count();
-            if arm.arg_names.len() != constructor.arg_types.len()
-                || arm.rec_names.len() != recursive_fields
+            if arm.arg_names.len() != constructor.field_types.len()
+                || arm.rec_names.len() != constructor.recursive_field_count
             {
                 return Err(CompatibilityDeclarationError::new(format!(
                     "recursive definition `{}` arm `{}` has inconsistent binder metadata",
@@ -1930,23 +1935,22 @@ impl CompatibilityElaborator {
             for name in arm.rec_names.iter().rev() {
                 arm_lowerer.bind_term_parameter(name.clone(), result_type.clone())?;
             }
-            for (name, ty) in arm.arg_names.iter().zip(&constructor.arg_types).rev() {
-                let ty = arm_lowerer.lower_type(ty)?;
-                arm_lowerer.bind_term_parameter(name.clone(), ty)?;
+            for (name, ty) in arm.arg_names.iter().zip(&constructor.field_types).rev() {
+                arm_lowerer.bind_term_parameter(name.clone(), ty.clone())?;
             }
             let body = arm_lowerer.lower_term_at_type(&arm.body, &result_type)?;
-            arms.push(StructuralArmSpec::new(data.constructors[arm_index], body));
+            arms.push(StructuralArmSpec::new(constructor.constant, body));
         }
 
-        let datatype_type = CoreType::constructor(data.datatype, Vec::new());
+        let datatype_type = CoreType::constructor(shape.datatype, shape.datatype_arguments.clone());
         let mut staged = self.clone();
         let constant = staged
             .core
             .declare_structural_definition(StructuralDefinitionSpec {
                 name: definition.name.clone(),
                 type_parameters: Vec::new(),
-                datatype: data.datatype,
-                datatype_arguments: Vec::new(),
+                datatype: shape.datatype,
+                datatype_arguments: shape.datatype_arguments,
                 recursive_argument_index: 0,
                 fixed_parameter_types: fixed_parameter_types.clone(),
                 result_type: result_type.clone(),
@@ -1963,6 +1967,130 @@ impl CompatibilityElaborator {
         })?;
         *self = staged;
         Ok(constant)
+    }
+
+    /// Resolve the datatype a `defrec` recurses over into its checked
+    /// inductive, the concrete type arguments, and one constructor shape per
+    /// arm in declaration order.  Local data types (and the built-in `Nat`)
+    /// come from the compatibility data registry; an imported package
+    /// datatype applied to type arguments (`C.List Nat`) is resolved through
+    /// the registered type constructor and its constructor symbols, with field
+    /// types instantiated by the kernel's inductive signature.
+    fn structural_datatype_shape(
+        &self,
+        definition: &DataRecDef,
+    ) -> Result<StructuralDatatypeShape, CompatibilityDeclarationError> {
+        match &definition.param_type {
+            Type::Nat | Type::Named(_) => {
+                let data_name = match &definition.param_type {
+                    Type::Nat => "Nat",
+                    Type::Named(name) => name.as_str(),
+                    _ => unreachable!("matched above"),
+                };
+                let data = self.data.get(data_name).ok_or_else(|| {
+                    CompatibilityDeclarationError::new(format!(
+                        "recursive definition `{}` uses unknown data type `{data_name}`",
+                        definition.name
+                    ))
+                })?;
+                let lowerer = self.lowering_scope()?;
+                let constructors = data
+                    .source
+                    .ctors
+                    .iter()
+                    .zip(&data.constructors)
+                    .map(|(constructor, constant)| {
+                        let field_types = constructor
+                            .arg_types
+                            .iter()
+                            .map(|ty| lowerer.lower_type(ty))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let recursive_field_count = constructor
+                            .arg_types
+                            .iter()
+                            .filter(|ty| is_direct_recursive_type(ty, data_name))
+                            .count();
+                        Ok(StructuralConstructorShape {
+                            name: constructor.name.clone(),
+                            constant: *constant,
+                            field_types,
+                            recursive_field_count,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, CompatibilityDeclarationError>>()?;
+                Ok(StructuralDatatypeShape {
+                    datatype: data.datatype,
+                    datatype_arguments: Vec::new(),
+                    constructors,
+                })
+            }
+            Type::App(constructor_name, type_arguments) => {
+                let datatype = self
+                    .type_constructors
+                    .iter()
+                    .find(|registration| &registration.name == constructor_name)
+                    .map(|registration| registration.constructor)
+                    .ok_or_else(|| {
+                        CompatibilityDeclarationError::new(format!(
+                            "recursive definition `{}` uses unknown type constructor `{constructor_name}`",
+                            definition.name
+                        ))
+                    })?;
+                let lowerer = self.lowering_scope()?;
+                let datatype_arguments = type_arguments
+                    .iter()
+                    .map(|ty| lowerer.lower_type(ty))
+                    .collect::<Result<Vec<_>, _>>()?;
+                drop(lowerer);
+                let declaration = self
+                    .core
+                    .inductives()
+                    .declaration(datatype)
+                    .ok_or_else(|| {
+                        CompatibilityDeclarationError::new(format!(
+                            "recursive definition `{}` recurses over `{constructor_name}`, which is not a checked inductive datatype",
+                            definition.name
+                        ))
+                    })?;
+                let constructors = declaration
+                    .constructors
+                    .iter()
+                    .map(|constructor| {
+                        let name = self
+                            .symbols
+                            .iter()
+                            .find(|symbol| symbol.constant == constructor.constant)
+                            .map(|symbol| symbol.name.clone())
+                            .ok_or_else(|| {
+                                CompatibilityDeclarationError::new(format!(
+                                    "recursive definition `{}` recurses over `{constructor_name}`, whose constructor `{}` has no surface name",
+                                    definition.name, constructor.name
+                                ))
+                            })?;
+                        let instantiated = self.core.inductives().instantiate_constructor(
+                            self.core.types(),
+                            constructor.constant,
+                            &datatype_arguments,
+                        )?;
+                        Ok(StructuralConstructorShape {
+                            name,
+                            constant: constructor.constant,
+                            field_types: instantiated.field_types,
+                            recursive_field_count: instantiated.recursive_fields.len(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>, CompatibilityDeclarationError>>()?;
+                Ok(StructuralDatatypeShape {
+                    datatype,
+                    datatype_arguments,
+                    constructors,
+                })
+            }
+            other => Err(CompatibilityDeclarationError::new(format!(
+                "recursive definition `{}` cannot recurse over `{other}`",
+                definition.name
+            ))),
+        }
     }
 
     pub fn declare_trusted_axiom(
@@ -4663,7 +4791,7 @@ mod tests {
         let length = DataRecDef {
             name: "length".to_string(),
             param: "l".to_string(),
-            data_name: "List".to_string(),
+            param_type: Type::Named("List".to_string()),
             extra_params: Vec::new(),
             result_type: Type::Nat,
             arms: vec![
@@ -4688,7 +4816,7 @@ mod tests {
         let append = DataRecDef {
             name: "append".to_string(),
             param: "left".to_string(),
-            data_name: "List".to_string(),
+            param_type: Type::Named("List".to_string()),
             extra_params: vec![("right".to_string(), Type::Named("List".to_string()))],
             result_type: Type::Named("List".to_string()),
             arms: vec![

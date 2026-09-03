@@ -1028,7 +1028,10 @@ pub struct DataRecArm {
 pub struct DataRecDef {
     pub name: Name,
     pub param: Name,
-    pub data_name: Name,
+    /// Canonical type of the recursive parameter: `Nat`, a declared data
+    /// type, or an imported package datatype applied to concrete type
+    /// arguments such as `C.List Nat`.
+    pub param_type: Type,
     pub extra_params: Vec<(Name, Type)>,
     pub result_type: Type,
     pub arms: Vec<DataRecArm>,
@@ -1056,6 +1059,9 @@ fn data_def_for_type(env: &Env, ty: &Type) -> Option<DataDef> {
     match ty {
         Type::Nat => Some(builtin_nat_data_def()),
         Type::Named(name) => env.data_def(name).cloned(),
+        Type::App(name, type_arguments) => {
+            instantiate_rank_one_data_def(env, name, type_arguments).map(|(_, data)| data)
+        }
         _ => None,
     }
 }
@@ -6354,6 +6360,20 @@ impl FileChecker {
                             continue;
                         }
                     };
+                    if let Err(err) = validate_type(&self.env, &rec_ctx, &decl.param_type) {
+                        self.result.diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                line,
+                                format!(
+                                    "recursive definition `{}` has invalid parameter type",
+                                    decl.name
+                                ),
+                            )
+                            .with_note(err.message),
+                        );
+                        continue;
+                    }
                     let Some(data) = data_def_for_type(&self.env, &decl.param_type) else {
                         self.result.diagnostics.push(diagnostic_at(
                             source_path,
@@ -6500,7 +6520,12 @@ impl FileChecker {
                     let mut arms_ok = true;
                     for (arm, ctor) in decl.arms.iter().zip(data.ctors.iter()) {
                         let arm_ctor = resolve_data_ctor_label(&self.env, &rec_ctx, &arm.ctor);
-                        if arm_ctor != ctor.name {
+                        // Package constructors may be named by their alias-qualified
+                        // spelling (`C.cons`) or, as in `induction` arms, by the bare
+                        // leaf (`cons`).
+                        let leaf_matches = matches!(decl.param_type, Type::App(..))
+                            && qualified_name_leaf(&ctor.name).is_some_and(|leaf| leaf == arm.ctor);
+                        if arm_ctor != ctor.name && !leaf_matches {
                             self.result.diagnostics.push(
                                 diagnostic_at(
                                     source_path,
@@ -6518,7 +6543,7 @@ impl FileChecker {
                             arms_ok = false;
                             break;
                         }
-                        let rec_count = ctor.recursive_arg_indices(&data.name).len();
+                        let rec_count = ctor.recursive_arg_indices_for_type(&decl.param_type).len();
                         let expected_binders = ctor.arg_types.len() + rec_count;
                         if arm.binders.len() != expected_binders {
                             self.result.diagnostics.push(
@@ -6571,7 +6596,12 @@ impl FileChecker {
                                 break;
                             }
                         };
-                        match validate_term(&self.env, &arm_ctx, &body) {
+                        match validate_term_using_expected_type(
+                            &self.env,
+                            &arm_ctx,
+                            &body,
+                            &decl.result_type,
+                        ) {
                             Ok(actual) if actual == decl.result_type => {}
                             Ok(actual) => {
                                 self.result.diagnostics.push(
@@ -6620,7 +6650,7 @@ impl FileChecker {
                     let definition = DataRecDef {
                         name: decl.name,
                         param: decl.param,
-                        data_name: data.name.clone(),
+                        param_type: decl.param_type,
                         extra_params: decl.extra_params,
                         result_type: decl.result_type,
                         arms,
@@ -11321,16 +11351,11 @@ fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, Validati
                             args.len()
                         )));
                     }
-                    let recursive_type = if def.data_name == "Nat" {
-                        Type::Nat
-                    } else {
-                        Type::Named(def.data_name.clone())
-                    };
-                    let mut expected_types = vec![recursive_type];
+                    let mut expected_types = vec![def.param_type.clone()];
                     expected_types.extend(def.extra_params.iter().map(|(_, ty)| ty.clone()));
                     for (idx, (arg, expected)) in args.iter().zip(expected_types.iter()).enumerate()
                     {
-                        let actual = validate_term(env, ctx, arg)?;
+                        let actual = validate_term_using_expected_type(env, ctx, arg, expected)?;
                         if &actual != expected {
                             return Err(ValidationError::new(format!(
                                 "argument {} of `{name}` has type `{actual}`, but expected `{expected}`",
@@ -11509,12 +11534,7 @@ fn function_signature(env: &Env, ctx: &Context, name: &str) -> Option<FuncDecl> 
         .or_else(|| env.funcs.get(name).cloned())
         .or_else(|| {
             env.data_rec_def(name).map(|definition| {
-                let recursive_type = if definition.data_name == "Nat" {
-                    Type::Nat
-                } else {
-                    Type::Named(definition.data_name.clone())
-                };
-                let mut args = vec![recursive_type];
+                let mut args = vec![definition.param_type.clone()];
                 args.extend(definition.extra_params.iter().map(|(_, ty)| ty.clone()));
                 FuncDecl {
                     args,
@@ -13249,7 +13269,7 @@ fn normalize_data_rec_def(
     // Nat's constructors are the built-in `Zero`/`Succ` term forms; user data
     // constructors are consts (`Var`) or applications (`App`).
     let succ_arg;
-    let (ctor_name, ctor_args): (&str, &[Term]) = match &arg {
+    let (ctor_name, ctor_args): (&str, &[Term]) = match term_without_outer_ascriptions(&arg) {
         Term::Zero => ("zero", &[]),
         Term::Succ(inner) => {
             succ_arg = [(**inner).clone()];
@@ -13259,7 +13279,7 @@ fn normalize_data_rec_def(
         Term::App(name, args) => (name.as_str(), args.as_slice()),
         _ => return Ok(stuck(arg, &extras)),
     };
-    let Some(data) = data_def_for_name(env, &def.data_name) else {
+    let Some(data) = data_def_for_type(env, &def.param_type) else {
         return Ok(stuck(arg, &extras));
     };
     let Some(ctor) = data.ctors.iter().find(|ctor| ctor.name == ctor_name) else {
@@ -13282,21 +13302,23 @@ fn normalize_data_rec_def(
     for (rec_name, rec_idx) in arm
         .rec_names
         .iter()
-        .zip(ctor.recursive_arg_indices(&def.data_name))
+        .zip(ctor.recursive_arg_indices_for_type(&def.param_type))
     {
         let mut rec_args = vec![ctor_args[rec_idx].clone()];
         rec_args.extend(extras.iter().cloned());
         subst.insert(rec_name.clone(), Term::App(def.name.clone(), rec_args));
     }
     let body = subst_term_terms(&arm.body, &subst);
-    normalize_term(env, ctx, &body)
-}
-
-fn data_def_for_name(env: &Env, name: &str) -> Option<DataDef> {
-    if name == "Nat" {
-        Some(builtin_nat_data_def())
-    } else {
-        env.data_def(name).cloned()
+    let normalized = normalize_term(env, ctx, &body)?;
+    // A bare package constant such as `C.nil` only type-checks with an
+    // expected type; keep the definition's result type on it so the computed
+    // term stays well-typed wherever the application stood.
+    match &normalized {
+        Term::Var(name) if env.rank_one_consts.contains_key(name) => Ok(Term::Ascribed {
+            term: Box::new(normalized.clone()),
+            ty: def.result_type.clone(),
+        }),
+        _ => Ok(normalized),
     }
 }
 
@@ -16045,9 +16067,9 @@ fn parse_defrec_header(header: &str) -> Result<DefrecHeader, ParseError> {
     let param = tokens.expect_ident()?;
     tokens.expect_sym(":")?;
     let param_type = tokens.parse_type()?;
-    if !matches!(param_type, Type::Nat | Type::Named(_)) {
+    if !matches!(param_type, Type::Nat | Type::Named(_) | Type::App(..)) {
         return Err(ParseError::new(
-            "recursive definition must recurse over `Nat` or a declared data type (the first parameter)",
+            "recursive definition must recurse over `Nat`, a declared data type, or an imported package datatype applied to type arguments such as `C.List Nat` (the first parameter)",
         )
         .with_span(tokens.current_span()));
     }
@@ -22497,6 +22519,27 @@ theorem one_has_card :
 
     #[cfg(feature = "hol-shadow")]
     #[test]
+    fn list_fold_sum_example_is_dual_checked() {
+        let report =
+            check_file_at_path_with_hol_shadow(repo_path("docs/hol/examples/list_fold_sum.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(report.imported_packages, ["std/hol/list@1"]);
+        let names: Vec<&str> = report
+            .theorems
+            .iter()
+            .filter(|theorem| !theorem.is_imported)
+            .map(|theorem| theorem.name.as_str())
+            .collect();
+        assert_eq!(names, ["sum_two", "sum_cons", "sum_nil_right"]);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
     fn finite_vertical_pilot_examples_are_dual_checked_and_fragment_honest() {
         let traffic =
             check_file_at_path_with_hol_shadow(repo_path("docs/hol/examples/finite_traffic.ctea"));
@@ -27064,6 +27107,151 @@ defrec broken (l : NatList) : Nat
 | nil => 0
 "#,
             "needs one case per constructor",
+        );
+    }
+
+    /// Audit finding B1: `defrec` may recurse over an imported package
+    /// datatype applied to concrete type arguments, and the definition is
+    /// certified by the HOL kernel as a structural definition over the
+    /// package inductive instantiated at those arguments.
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn defrec_folds_over_an_imported_package_list_in_both_engines() {
+        let source = r#"
+import std/hol/list@1 as C
+
+defrec sum_list (l : C.List Nat) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+theorem sum_two : sum_list(C.cons(1, C.cons(2, C.nil))) = 3 := by
+  simp
+  refl
+"#;
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert!(report
+            .theorems
+            .iter()
+            .any(|theorem| theorem.name == "sum_two" && !theorem.is_imported));
+    }
+
+    /// Fixed parameters, alias-qualified arm constructors, a package-typed
+    /// result, and `induction` over the recursive parameter all compose with
+    /// a package-list `defrec`.
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn defrec_over_package_list_supports_fixed_params_and_package_results() {
+        let source = r#"
+import std/hol/list@1 as C
+
+defrec count_geq (l : C.List Nat) (k : Nat) : Nat
+| C.nil => 0
+| C.cons h t rec => add(rec, k)
+
+defrec double_all (l : C.List Nat) : C.List Nat
+| nil => C.nil
+| cons h t rec => C.cons(add(h, h), rec)
+
+theorem count_two : count_geq(C.cons(5, C.cons(7, C.nil)), 1) = 2 := by
+  simp
+  refl
+
+theorem double_two :
+  double_all(C.cons(1, C.cons(2, C.nil))) = C.cons(2, C.cons(4, C.nil)) := by
+  simp
+  refl
+
+theorem length_double (l : C.List Nat) : C.length(double_all(l)) = C.length(l) := by
+  induction l with
+  | nil =>
+      simp
+      refl
+  | cons h t ih =>
+      simp
+      rewrite -> C.length_cons {A := Nat; h := add(h, h); t := double_all(t)}
+      rewrite -> C.length_cons {A := Nat; h := h; t := t}
+      rewrite -> ih
+      refl
+"#;
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(report.theorems.len(), 3);
+    }
+
+    /// `simp` computes a package-list `defrec` on a closed list: a false
+    /// numeral claim reduces to `False` rather than sticking on `sum_list`.
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn simp_computes_a_package_list_defrec_on_a_concrete_list() {
+        let source = r#"
+import std/hol/list@1 as C
+
+defrec sum_list (l : C.List Nat) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+theorem wrong_sum : sum_list(C.cons(1, C.cons(2, C.nil))) = 4 := by
+  simp
+  refl
+"#;
+        let report = check_file_with_hol_shadow(source);
+        let rendered = format!("{:#?}", report.legacy.diagnostics);
+        assert!(
+            rendered.contains("target: False"),
+            "expected `simp` to compute `sum_list` to a numeral:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("sum_list("),
+            "`sum_list` application was left stuck:\n{rendered}"
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn defrec_over_package_list_requires_type_arguments() {
+        let source = r#"
+import std/hol/list@1 as C
+
+defrec sum_list (l : C.List) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+"#;
+        let report = check_file_with_hol_shadow(source);
+        let rendered = format!("{:#?}", report.legacy.diagnostics);
+        assert!(
+            rendered.contains("recursive definition `sum_list` has invalid parameter type")
+                && rendered.contains("type constructor `C.List` expects 1 argument(s), but got 0"),
+            "unexpected diagnostics:\n{rendered}"
+        );
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn defrec_over_package_list_rejects_non_constructor_arms() {
+        let source = r#"
+import std/hol/list@1 as C
+
+defrec sum_list (l : C.List Nat) : Nat
+| nil => 0
+| snoc h t rec => add(h, rec)
+"#;
+        let report = check_file_with_hol_shadow(source);
+        let rendered = format!("{:#?}", report.legacy.diagnostics);
+        assert!(
+            rendered
+                .contains("recursive definition case `snoc` does not match constructor `C.cons`"),
+            "unexpected diagnostics:\n{rendered}"
         );
     }
 

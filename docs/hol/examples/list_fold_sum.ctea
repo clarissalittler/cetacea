@@ -1,0 +1,27 @@
+-- A `defrec` that recurses over an imported package datatype applied to a
+-- concrete type argument (`C.List Nat`).  Arms may name the constructors by
+-- their bare leaf (`nil`, `cons`), as `induction` arms do, or by the alias-
+-- qualified spelling (`C.nil`, `C.cons`).  The definition is certified by the
+-- HOL kernel as a structural definition over the package inductive
+-- instantiated at `Nat`.
+import std/hol/list@1 as C
+
+mode constructive
+
+defrec sum_list (l : C.List Nat) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+theorem sum_two : sum_list(C.cons(1, C.cons(2, C.nil))) = 3 := by
+  simp
+  refl
+
+theorem sum_cons (h : Nat) (t : C.List Nat) :
+  sum_list(C.cons(h, t)) = add(h, sum_list(t)) := by
+  simp
+  refl
+
+theorem sum_nil_right (xs : C.List Nat) :
+  sum_list(C.append(xs, C.nil)) = sum_list(xs) := by
+  rewrite -> C.append_nil_right {A := Nat; xs := xs}
+  refl
