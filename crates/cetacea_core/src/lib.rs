@@ -15240,7 +15240,7 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 header.push_str(strip_comment(lines[i]).trim());
             }
 
-            let Some((header, _)) = header.split_once(":= by") else {
+            let Some((header, after_by)) = header.split_once(":= by") else {
                 return Err(ParseError::new("expected `:= by` in theorem declaration")
                     .with_line(command_line));
             };
@@ -15248,8 +15248,27 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                 parse_theorem_header(header).map_err(|err| err.with_line(command_line))?;
             let name = qualify_in_namespace(&namespace_stack, name);
 
-            i += 1;
+            // `theorem t : P := by tac` places its first tactic on the header
+            // line; treat that trailing text as the first line of the proof.
             let mut tactic_lines = Vec::new();
+            let inline_tactic = after_by.trim();
+            if !inline_tactic.is_empty() {
+                if !after_by.starts_with(char::is_whitespace) {
+                    return Err(ParseError::new(format!(
+                        "expected a space between `by` and the tactic `{inline_tactic}`"
+                    ))
+                    .with_line(i + 1));
+                }
+                // Reconstruct the tactic's column on its physical line so
+                // error spans and block indentation stay accurate.
+                let column = strip_comment(lines[i]).rfind(inline_tactic).unwrap_or(0);
+                tactic_lines.push(RawTacticLine {
+                    line: i + 1,
+                    text: format!("{}{inline_tactic}", " ".repeat(column)),
+                });
+            }
+
+            i += 1;
             while i < lines.len() {
                 let next = strip_comment(lines[i]).trim();
                 if is_command_start(next) {
@@ -26347,6 +26366,69 @@ theorem t (P Q : U -> Prop)
         exists x
         exact hx.left
   exact hp
+"#,
+        );
+    }
+
+    #[test]
+    fn theorem_accepts_inline_tactic_after_by() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem t : True := by trivial
+"#,
+        );
+    }
+
+    #[test]
+    fn theorem_inline_tactic_after_by_composes_with_continuation_lines() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem imp (P : Prop) : P -> P := by intro h
+  exact h
+"#,
+        );
+    }
+
+    #[test]
+    fn theorem_inline_tactic_after_by_is_checked_not_dropped() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem bad : True := by exact nope
+"#,
+            "unknown hypothesis `nope`",
+        );
+    }
+
+    #[test]
+    fn theorem_by_glued_to_tactic_is_rejected() {
+        check_err_contains(
+            r#"
+mode constructive
+
+theorem glued : True := bytrivial
+"#,
+            "expected a space between `by` and the tactic `trivial`",
+        );
+    }
+
+    #[test]
+    fn theorem_two_line_by_form_is_unchanged() {
+        check_ok(
+            r#"
+mode constructive
+
+theorem t2 : True := by
+  trivial
+
+theorem imp2 (P : Prop) : P -> P := by
+  intro h
+  exact h
 "#,
         );
     }
