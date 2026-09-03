@@ -19,6 +19,10 @@ KERNEL_PATHS = (
     CORE_SRC / "hol" / "inductive.rs",
     CORE_SRC / "hol" / "recursion.rs",
     CORE_SRC / "hol" / "theorems.rs",
+    # `SpikeElaborator` is the only bundle of the five signatures with private
+    # fields and no `&mut` escape, so it is what enforces that a proof is
+    # checked against the signatures it was declared in (H7 audit finding).
+    CORE_SRC / "hol" / "spike.rs",
 )
 
 # These names belong outside the trusted logical core. Patterns are purposely
