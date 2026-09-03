@@ -15,14 +15,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Pinned so a new stable release cannot break CI on its own; bump
+      # deliberately together with `rust-version` in the crate manifests.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
       - name: Run tests
         run: cargo test
+
+      - name: Build core without the HOL sidecar feature
+        run: cargo check -p cetacea_core --no-default-features
+
+      - name: Build the Wasm module
+        run: cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
 
       - name: Check Cetacea corpus
         run: scripts/check_all.sh
@@ -35,3 +53,6 @@ jobs:
 
       - name: Check kernel dependency boundary
         run: python3 scripts/check_kernel_boundary.py
+
+      - name: Verify bundled browser examples are current
+        run: python3 scripts/build_web_examples.py --check
