@@ -12,9 +12,12 @@ allowed_imports = [
   "../../../std/nat.ctea",
   "std/hol/list@1",
 ]
+required_imports = [
+  "std/hol/list@1",
+]
 allowed_axioms = []
 
-required_theorem.ex16_1 = '(A : Type) (S : Set A) (T : Set A) (xs : C.List A) (ys : C.List A) (m : Nat) (n : Nat) (x : A) : C.HasSize(S, xs, m) -> C.HasSize(T, ys, n) -> x in union(S, T) -> C.Member(x, C.append(xs, ys))'
-required_theorem.ex16_2 = '(A : Type) (xs : C.List A) : forall ys : C.List A, C.Nodup(xs) -> C.Nodup(ys) -> (forall x : A, C.Member(x, xs) -> not C.Member(x, ys)) -> C.Nodup(C.append(xs, ys))'
-required_theorem.ex16_3 = '(A : Type) (S : Set A) (T : Set A) (xs : C.List A) (ys : C.List A) (m : Nat) (n : Nat) : C.HasSize(S, xs, m) -> C.HasSize(T, ys, n) -> (forall x : A, x in S -> not x in T) -> C.HasSize(union(S, T), C.append(xs, ys), add(m, n))'
-required_theorem.ex16_4 = '(A : Type) (S : Set A) (T : Set A) (xs : C.List A) (ys : C.List A) (zs : C.List A) (m : Nat) (n : Nat) (k : Nat) : C.HasSize(S, xs, m) -> C.HasSize(T, ys, n) -> C.HasSize(union(S, T), zs, k) -> le(k, add(m, n))'
+required_theorem.ex16_1 = '(?0 : Type) (?1 : Set ?0) (?2 : Set ?0) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?0) (?5 : Nat) (?6 : Nat) (?7 : ?0) : C.HasSize(?1, ?3, ?5) -> C.HasSize(?2, ?4, ?6) -> ?7 in union(?1, ?2) -> std/hol/list@1.Member(?7, std/hol/list@1.append(?3, ?4))'
+required_theorem.ex16_2 = '(?0 : Type) (?1 : std/hol/list@1.List ?0) : forall ?2 : std/hol/list@1.List ?0, std/hol/list@1.Nodup(?1) -> std/hol/list@1.Nodup(?2) -> (forall ?3 : ?0, std/hol/list@1.Member(?3, ?1) -> not std/hol/list@1.Member(?3, ?2)) -> std/hol/list@1.Nodup(std/hol/list@1.append(?1, ?2))'
+required_theorem.ex16_3 = '(?0 : Type) (?1 : Set ?0) (?2 : Set ?0) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?0) (?5 : Nat) (?6 : Nat) : C.HasSize(?1, ?3, ?5) -> C.HasSize(?2, ?4, ?6) -> (forall ?7 : ?0, ?7 in ?1 -> not ?7 in ?2) -> C.HasSize(union(?1, ?2), std/hol/list@1.append(?3, ?4), add(?5, ?6))'
+required_theorem.ex16_4 = '(?0 : Type) (?1 : Set ?0) (?2 : Set ?0) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?0) (?6 : Nat) (?7 : Nat) (?8 : Nat) : C.HasSize(?1, ?3, ?6) -> C.HasSize(?2, ?4, ?7) -> C.HasSize(union(?1, ?2), ?5, ?8) -> le(?8, add(?6, ?7))'

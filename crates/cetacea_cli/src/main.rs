@@ -148,6 +148,8 @@ struct LoadedAssignment {
     manifest: AssignmentManifest,
     allowed_imports: BTreeSet<PathBuf>,
     allowed_package_imports: BTreeSet<String>,
+    required_imports: Vec<(String, PathBuf)>,
+    required_package_imports: Vec<String>,
 }
 
 impl LoadedAssignment {
@@ -316,29 +318,62 @@ fn load_assignment(path: &Path) -> Result<LoadedAssignment, String> {
             }
             continue;
         }
-        let raw = Path::new(import);
-        let candidate = if raw.is_absolute() {
-            raw.to_path_buf()
-        } else {
-            base.join(raw)
-        };
-        let resolved = candidate.canonicalize().map_err(|error| {
-            format!(
-                "allowed import `{import}` could not be resolved relative to `{}`: {error}",
-                base.display()
-            )
-        })?;
+        let resolved = resolve_manifest_import(base, "allowed", import)?;
         if !allowed_imports.insert(resolved) {
             return Err(format!(
                 "allowed import `{import}` resolves to the same file as another entry"
             ));
         }
     }
+    // Required imports are a lower bound: the submission must actually load
+    // them. A required import is implicitly allowed, so manifests do not have
+    // to list an entry twice.
+    let mut required_imports = Vec::new();
+    let mut required_package_imports = Vec::new();
+    for import in &manifest.required_imports {
+        if let Some(package) = LibraryPackageId::from_logical_id(import) {
+            let logical_id = package.to_string();
+            if required_package_imports.contains(&logical_id) {
+                return Err(format!("required package import `{logical_id}` is repeated"));
+            }
+            allowed_package_imports.insert(logical_id.clone());
+            required_package_imports.push(logical_id);
+            continue;
+        }
+        let resolved = resolve_manifest_import(base, "required", import)?;
+        if required_imports
+            .iter()
+            .any(|(_, existing)| *existing == resolved)
+        {
+            return Err(format!(
+                "required import `{import}` resolves to the same file as another entry"
+            ));
+        }
+        allowed_imports.insert(resolved.clone());
+        required_imports.push((import.clone(), resolved));
+    }
     Ok(LoadedAssignment {
         path: canonical_path,
         manifest,
         allowed_imports,
         allowed_package_imports,
+        required_imports,
+        required_package_imports,
+    })
+}
+
+fn resolve_manifest_import(base: &Path, role: &str, import: &str) -> Result<PathBuf, String> {
+    let raw = Path::new(import);
+    let candidate = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        base.join(raw)
+    };
+    candidate.canonicalize().map_err(|error| {
+        format!(
+            "{role} import `{import}` could not be resolved relative to `{}`: {error}",
+            base.display()
+        )
     })
 }
 
@@ -556,6 +591,27 @@ fn check_hol_policy_violations(
                     declaration: package.clone(),
                     kind: "import",
                     message: format!("logical package import `{package}` is not allowed"),
+                });
+            }
+        }
+        for package in &assignment.required_package_imports {
+            if !report.imported_packages.contains(package) {
+                violations.push(HolPolicyViolation {
+                    declaration: package.clone(),
+                    kind: "required_import",
+                    message: format!(
+                        "required logical package `{package}` was not imported; the graded \
+                         statement must be built from that package's declarations"
+                    ),
+                });
+            }
+        }
+        for (written, resolved) in &assignment.required_imports {
+            if !report.imported_files.contains(resolved) {
+                violations.push(HolPolicyViolation {
+                    declaration: written.clone(),
+                    kind: "required_import",
+                    message: format!("required import `{written}` was not loaded"),
                 });
             }
         }
@@ -2784,6 +2840,13 @@ fn assignment_manifest_json(assignment: &LoadedAssignment) -> String {
         .map(|path| json_string(path))
         .collect::<Vec<_>>()
         .join(",");
+    let required_imports = assignment
+        .manifest
+        .required_imports
+        .iter()
+        .map(|path| json_string(path))
+        .collect::<Vec<_>>()
+        .join(",");
     let axioms = assignment
         .manifest
         .allowed_axioms
@@ -2806,10 +2869,11 @@ fn assignment_manifest_json(assignment: &LoadedAssignment) -> String {
         .join(",");
     let path = display_diagnostic_path(&assignment.path.to_string_lossy());
     format!(
-        r#"{{"path":{},"version":{},"allowed_imports":[{}],"allowed_axioms":[{}],"required_theorems":[{}]}}"#,
+        r#"{{"path":{},"version":{},"allowed_imports":[{}],"required_imports":[{}],"allowed_axioms":[{}],"required_theorems":[{}]}}"#,
         json_string(&path),
         assignment.manifest.version,
         imports,
+        required_imports,
         axioms,
         required,
     )
@@ -3580,7 +3644,7 @@ allow_new_axioms = false
 allowed_imports = ["library.ctea"]
 allowed_axioms = ["imported_trust"]
 required_theorem.exercise_3 = "True"
-required_theorem.typed_refl = "(x : Person) : x = x"
+required_theorem.typed_refl = "(?0 : Person) : ?0 = ?0"
 "#,
         )
         .expect("write assignment manifest");
@@ -3597,7 +3661,7 @@ required_theorem.typed_refl = "(x : Person) : x = x"
             .theorems
             .iter()
             .any(|theorem| theorem.name == "typed_refl"
-                && theorem.signature == "(x : Person) : x = x"));
+                && theorem.signature == "(?0 : Person) : ?0 = ?0"));
         let accepted = check_hol_policy_violations(&report, policy, Some(&assignment));
         assert!(accepted.is_empty(), "{accepted:?}");
 
@@ -3782,6 +3846,8 @@ allowed_axioms = ["local_trust"]
             manifest,
             allowed_imports: BTreeSet::new(),
             allowed_package_imports: BTreeSet::new(),
+            required_imports: Vec::new(),
+            required_package_imports: Vec::new(),
         };
         let violations =
             check_hol_policy_violations(&report, assignment.teaching_policy(), Some(&assignment));
@@ -3792,6 +3858,83 @@ allowed_axioms = ["local_trust"]
         assert!(violations
             .iter()
             .any(|violation| violation.kind == "trusted_axiom"));
+    }
+
+    /// A submission that never imports the graded package cannot satisfy a
+    /// required theorem by rebuilding the alias spelling with source-local
+    /// declarations, and an honest submission is graded independently of the
+    /// alias it chose. Regression for the July 2026 audit bypass.
+    #[test]
+    fn assignment_manifest_rejects_predicate_redefinition_bypass() {
+        let unique = format!(
+            "cetacea-bypass-assignment-{}-{:?}",
+            process::id(),
+            std::thread::current().id()
+        );
+        let dir = env::temp_dir().join(unique);
+        fs::create_dir_all(&dir).expect("create bypass assignment fixture");
+        let manifest_path = dir.join("enumerate.ctea-assignment");
+        fs::write(
+            &manifest_path,
+            r#"
+version = 1
+profile = "fol+induction"
+allowed_imports = ["std/hol/list@1"]
+required_imports = ["std/hol/list@1"]
+allowed_axioms = []
+required_theorem.nil_length = '(?0 : Type) : std/hol/list@1.length((std/hol/list@1.nil : std/hol/list@1.List ?0)) = 0'
+"#,
+        )
+        .expect("write bypass assignment manifest");
+        let assignment = load_assignment(&manifest_path).expect("load bypass manifest");
+        assert_eq!(assignment.required_package_imports, ["std/hol/list@1"]);
+        let policy = assignment.teaching_policy();
+
+        let honest = cetacea_core::check_file_with_hol_shadow(
+            r#"
+import std/hol/list@1 as G
+
+mode constructive
+
+theorem nil_length (A : Type) : G.length((G.nil : G.List A)) = 0 := by
+  exact G.length_nil {A := A}
+"#,
+        );
+        assert!(honest.is_match());
+        let honest_violations = check_hol_policy_violations(&honest, policy, Some(&assignment));
+        assert!(honest_violations.is_empty(), "{honest_violations:?}");
+
+        let bypass = cetacea_core::check_file_with_hol_shadow(
+            r#"
+mode constructive
+
+namespace F
+
+sort List
+
+const nil : List
+
+func length : List -> Nat
+
+axiom fake_length : length(nil) = 0
+
+end
+
+theorem nil_length (A : Type) : F.length(F.nil) = 0 := by
+  exact F.fake_length
+"#,
+        );
+        assert!(bypass.is_match());
+        let bypass_violations = check_hol_policy_violations(&bypass, policy, Some(&assignment));
+        assert!(bypass_violations
+            .iter()
+            .any(|violation| violation.kind == "required_import"
+                && violation.message.contains("std/hol/list@1")));
+        assert!(bypass_violations
+            .iter()
+            .any(|violation| violation.kind == "theorem_signature"));
+
+        fs::remove_dir_all(&dir).expect("remove bypass assignment fixture");
     }
 
     #[test]

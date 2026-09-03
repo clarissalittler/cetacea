@@ -450,6 +450,243 @@ fn canonical_theorem_signature(params: &[Param], statement: &Formula) -> String 
     format!("{params} : {statement}")
 }
 
+/// Alias- and alpha-invariant theorem signature.
+///
+/// Binders (theorem parameters, quantifier variables, set-builder variables,
+/// and relation-lambda parameters) are renamed positionally to `?0`, `?1`,
+/// ..., and every reference to a logical-package declaration is replaced by
+/// its stable package-qualified identity, such as `std/hol/list@1.cons`
+/// instead of the import-alias spelling `F.cons`. Assignment manifests
+/// compare this form, so a required theorem cannot be satisfied by a
+/// source-local redeclaration that merely imitates the alias spelling, and
+/// an honest submission cannot fail for choosing a different alias or
+/// different bound-variable names.
+#[cfg(feature = "hol-shadow")]
+fn resolved_theorem_signature(env: &Env, params: &[Param], statement: &Formula) -> String {
+    let mut canonicalizer = SignatureCanonicalizer::new(env);
+    let params = canonicalizer.rewrite_params(params);
+    let statement = canonicalizer.rewrite_formula(statement);
+    canonical_theorem_signature(&params, &statement)
+}
+
+#[cfg(feature = "hol-shadow")]
+struct SignatureCanonicalizer<'a> {
+    env: &'a Env,
+    scopes: Vec<(Name, Name)>,
+    next_binder: usize,
+}
+
+#[cfg(feature = "hol-shadow")]
+impl<'a> SignatureCanonicalizer<'a> {
+    fn new(env: &'a Env) -> Self {
+        Self {
+            env,
+            scopes: Vec::new(),
+            next_binder: 0,
+        }
+    }
+
+    fn bind(&mut self, original: &Name) -> Name {
+        let fresh = format!("?{}", self.next_binder);
+        self.next_binder += 1;
+        self.scopes.push((original.clone(), fresh.clone()));
+        fresh
+    }
+
+    fn resolve(&self, name: &Name) -> Name {
+        for (original, fresh) in self.scopes.iter().rev() {
+            if original == name {
+                return fresh.clone();
+            }
+        }
+        match self.env.package_origin(name) {
+            Some(origin) => origin.clone(),
+            None => name.clone(),
+        }
+    }
+
+    fn rewrite_params(&mut self, params: &[Param]) -> Vec<Param> {
+        params
+            .iter()
+            .map(|param| {
+                let kind = match &param.kind {
+                    ParamKind::Prop => ParamKind::Prop,
+                    ParamKind::Predicate(arguments) => ParamKind::Predicate(
+                        arguments.iter().map(|ty| self.rewrite_type(ty)).collect(),
+                    ),
+                    ParamKind::Function { arguments, result } => ParamKind::Function {
+                        arguments: arguments.iter().map(|ty| self.rewrite_type(ty)).collect(),
+                        result: self.rewrite_type(result),
+                    },
+                    ParamKind::Type => ParamKind::Type,
+                    ParamKind::Term(ty) => ParamKind::Term(self.rewrite_type(ty)),
+                };
+                Param {
+                    name: self.bind(&param.name),
+                    kind,
+                }
+            })
+            .collect()
+    }
+
+    fn rewrite_type(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::Named(name) => Type::Named(self.resolve(name)),
+            Type::App(name, arguments) => Type::App(
+                self.resolve(name),
+                arguments.iter().map(|ty| self.rewrite_type(ty)).collect(),
+            ),
+            Type::Nat => Type::Nat,
+            Type::Prod(left, right) => Type::Prod(
+                Box::new(self.rewrite_type(left)),
+                Box::new(self.rewrite_type(right)),
+            ),
+            Type::Set(elem) => Type::Set(Box::new(self.rewrite_type(elem))),
+        }
+    }
+
+    fn rewrite_term(&mut self, term: &Term) -> Term {
+        match term {
+            Term::Var(name) => Term::Var(self.resolve(name)),
+            Term::App(name, args) => Term::App(
+                self.resolve(name),
+                args.iter().map(|arg| self.rewrite_term(arg)).collect(),
+            ),
+            Term::Ascribed { term, ty } => Term::Ascribed {
+                term: Box::new(self.rewrite_term(term)),
+                ty: self.rewrite_type(ty),
+            },
+            Term::PredLambda { params, body } => {
+                let depth = self.scopes.len();
+                let params = params
+                    .iter()
+                    .map(|param| LambdaParam {
+                        ty: param.ty.as_ref().map(|ty| self.rewrite_type(ty)),
+                        name: self.bind(&param.name),
+                    })
+                    .collect();
+                let body = Box::new(self.rewrite_formula(body));
+                self.scopes.truncate(depth);
+                Term::PredLambda { params, body }
+            }
+            Term::Zero => Term::Zero,
+            Term::Succ(inner) => Term::Succ(Box::new(self.rewrite_term(inner))),
+            Term::Add(left, right) => Term::Add(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Mul(left, right) => Term::Mul(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Sub(left, right) => Term::Sub(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Pair(left, right) => Term::Pair(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Fst(inner) => Term::Fst(Box::new(self.rewrite_term(inner))),
+            Term::Snd(inner) => Term::Snd(Box::new(self.rewrite_term(inner))),
+            Term::EmptySet(ty) => Term::EmptySet(self.rewrite_type(ty)),
+            Term::Universe(ty) => Term::Universe(self.rewrite_type(ty)),
+            Term::Singleton(inner) => Term::Singleton(Box::new(self.rewrite_term(inner))),
+            Term::Union(left, right) => Term::Union(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Inter(left, right) => Term::Inter(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Diff(left, right) => Term::Diff(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Complement(inner) => Term::Complement(Box::new(self.rewrite_term(inner))),
+            Term::CartProd(left, right) => Term::CartProd(
+                Box::new(self.rewrite_term(left)),
+                Box::new(self.rewrite_term(right)),
+            ),
+            Term::Powerset(inner) => Term::Powerset(Box::new(self.rewrite_term(inner))),
+            Term::SetBuilder {
+                var,
+                var_type,
+                body,
+            } => {
+                let depth = self.scopes.len();
+                let var_type = self.rewrite_type(var_type);
+                let var = self.bind(var);
+                let body = Box::new(self.rewrite_formula(body));
+                self.scopes.truncate(depth);
+                Term::SetBuilder {
+                    var,
+                    var_type,
+                    body,
+                }
+            }
+        }
+    }
+
+    fn rewrite_formula(&mut self, formula: &Formula) -> Formula {
+        match formula {
+            Formula::True => Formula::True,
+            Formula::False => Formula::False,
+            Formula::Atom(name) => Formula::Atom(self.resolve(name)),
+            Formula::PredApp(name, args) => Formula::PredApp(
+                self.resolve(name),
+                args.iter().map(|arg| self.rewrite_term(arg)).collect(),
+            ),
+            Formula::Eq(left, right) => {
+                Formula::Eq(self.rewrite_term(left), self.rewrite_term(right))
+            }
+            Formula::In(elem, set) => {
+                Formula::In(self.rewrite_term(elem), self.rewrite_term(set))
+            }
+            Formula::Subset(left, right) => {
+                Formula::Subset(self.rewrite_term(left), self.rewrite_term(right))
+            }
+            Formula::And(left, right) => Formula::and(
+                self.rewrite_formula(left),
+                self.rewrite_formula(right),
+            ),
+            Formula::Or(left, right) => Formula::or(
+                self.rewrite_formula(left),
+                self.rewrite_formula(right),
+            ),
+            Formula::Implies(left, right) => Formula::implies(
+                self.rewrite_formula(left),
+                self.rewrite_formula(right),
+            ),
+            Formula::Forall {
+                var,
+                var_type,
+                body,
+            } => {
+                let depth = self.scopes.len();
+                let var_type = self.rewrite_type(var_type);
+                let var = self.bind(var);
+                let body = self.rewrite_formula(body);
+                self.scopes.truncate(depth);
+                Formula::forall(var, var_type, body)
+            }
+            Formula::Exists {
+                var,
+                var_type,
+                body,
+            } => {
+                let depth = self.scopes.len();
+                let var_type = self.rewrite_type(var_type);
+                let var = self.bind(var);
+                let body = self.rewrite_formula(body);
+                self.scopes.truncate(depth);
+                Formula::exists(var, var_type, body)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SchemaSubst {
     pub type_args: HashMap<Name, Type>,
@@ -1029,6 +1266,9 @@ pub struct Env {
     sorts: HashMap<Name, Type>,
     type_constructor_arities: HashMap<Name, usize>,
     package_names: HashSet<Name>,
+    /// Alias-qualified package declaration names mapped to their stable
+    /// package-qualified identity, such as `F.cons` -> `std/hol/list@1.cons`.
+    package_origins: HashMap<Name, Name>,
     consts: HashMap<Name, Type>,
     rank_one_consts: HashMap<Name, RankOneConstDecl>,
     funcs: HashMap<Name, FuncDecl>,
@@ -1084,8 +1324,23 @@ impl Env {
     }
 
     #[cfg(feature = "hol-shadow")]
-    fn reserve_package_name(&mut self, name: Name) {
+    fn reserve_package_name(&mut self, name: Name, logical_id: &str) {
+        self.record_package_origin(name.clone(), logical_id);
         self.package_names.insert(name);
+    }
+
+    /// Record the stable package identity of an alias-qualified package
+    /// declaration or datatype name without reserving it as a value name.
+    #[cfg(feature = "hol-shadow")]
+    fn record_package_origin(&mut self, name: Name, logical_id: &str) {
+        let leaf = name.rsplit('.').next().unwrap_or(&name).to_string();
+        self.package_origins
+            .insert(name, format!("{logical_id}.{leaf}"));
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn package_origin(&self, name: &str) -> Option<&Name> {
+        self.package_origins.get(name)
     }
 
     pub fn add_const(&mut self, name: Name, ty: Type) {
@@ -2229,7 +2484,7 @@ fn certify_editor_proof(
             DeclarationStatus::Accepted
         },
     };
-    let signature = canonical_theorem_signature(parameters, statement);
+    let signature = resolved_theorem_signature(&checker.env, parameters, statement);
     checker.shadow_theorem(&checked, &signature, line, source_path, |shadow| {
         if uses_sorry {
             shadow.declare_legacy_incomplete_theorem(name, parameters, statement, proof)
@@ -3330,7 +3585,7 @@ impl FileChecker {
                     .statement_classifications
                     .push(HolShadowStatementClassification {
                         name: name.to_string(),
-                        signature: canonical_theorem_signature(parameters, statement),
+                        signature: resolved_theorem_signature(&self.env, parameters, statement),
                         fragment,
                         line,
                         source_path: source_path.map(Path::to_path_buf),
@@ -3662,8 +3917,9 @@ impl FileChecker {
             }
             let mut staged_env = self.env.clone();
             staged_env.add_type_constructor(datatype_name.clone(), 1);
+            staged_env.record_package_origin(datatype_name.clone(), logical_id);
             for name in symbol_names {
-                staged_env.reserve_package_name(name.clone());
+                staged_env.reserve_package_name(name.clone(), logical_id);
             }
             let element_parameter = "A".to_string();
             let element_type = Type::Named(element_parameter.clone());
@@ -4503,15 +4759,15 @@ impl FileChecker {
         let source_list_type = Type::App(qualify("List"), vec![domain_type.clone()]);
         let target_list_type = Type::App(qualify("List"), vec![codomain_type.clone()]);
         let mut staged_env = self.env.clone();
-        staged_env.reserve_package_name(map_name.clone());
-        staged_env.reserve_package_name(map_nil_name.clone());
-        staged_env.reserve_package_name(map_cons_name.clone());
-        staged_env.reserve_package_name(map_length_name.clone());
-        staged_env.reserve_package_name(member_map_forward_name.clone());
-        staged_env.reserve_package_name(member_map_reverse_name.clone());
-        staged_env.reserve_package_name(nodup_map_injective_name.clone());
-        staged_env.reserve_package_name(map_coverage_surjective_name.clone());
-        staged_env.reserve_package_name(cardinality_transport_name.clone());
+        staged_env.reserve_package_name(map_name.clone(), logical_id);
+        staged_env.reserve_package_name(map_nil_name.clone(), logical_id);
+        staged_env.reserve_package_name(map_cons_name.clone(), logical_id);
+        staged_env.reserve_package_name(map_length_name.clone(), logical_id);
+        staged_env.reserve_package_name(member_map_forward_name.clone(), logical_id);
+        staged_env.reserve_package_name(member_map_reverse_name.clone(), logical_id);
+        staged_env.reserve_package_name(nodup_map_injective_name.clone(), logical_id);
+        staged_env.reserve_package_name(map_coverage_surjective_name.clone(), logical_id);
+        staged_env.reserve_package_name(cardinality_transport_name.clone(), logical_id);
         staged_env.add_rank_one_mixed_func(
             map_name.clone(),
             vec![domain_parameter.clone(), codomain_parameter.clone()],
@@ -5104,11 +5360,11 @@ impl FileChecker {
             vec![Type::Named(element_parameter.clone())],
         );
         let mut staged_env = self.env.clone();
-        staged_env.reserve_package_name(has_card_name.clone());
-        staged_env.reserve_package_name(has_card_intro_name.clone());
-        staged_env.reserve_package_name(has_card_nodup_name.clone());
-        staged_env.reserve_package_name(has_card_length_name.clone());
-        staged_env.reserve_package_name(has_card_coverage_name.clone());
+        staged_env.reserve_package_name(has_card_name.clone(), logical_id);
+        staged_env.reserve_package_name(has_card_intro_name.clone(), logical_id);
+        staged_env.reserve_package_name(has_card_nodup_name.clone(), logical_id);
+        staged_env.reserve_package_name(has_card_length_name.clone(), logical_id);
+        staged_env.reserve_package_name(has_card_coverage_name.clone(), logical_id);
         staged_env.add_rank_one_pred(
             has_card_name.clone(),
             vec![element_parameter],
@@ -6132,7 +6388,7 @@ impl FileChecker {
                         status: DeclarationStatus::TrustedAxiom,
                     };
                     #[cfg(feature = "hol-shadow")]
-                    let signature = canonical_theorem_signature(&params, &statement);
+                    let signature = resolved_theorem_signature(&self.env, &params, &statement);
                     #[cfg(feature = "hol-shadow")]
                     self.shadow_theorem(&checked, &signature, line, source_path, |shadow| {
                         shadow.declare_trusted_axiom(decl.name.clone(), &params, &statement)
@@ -6352,7 +6608,7 @@ impl FileChecker {
                         },
                     };
                     #[cfg(feature = "hol-shadow")]
-                    let signature = canonical_theorem_signature(&params, &statement);
+                    let signature = resolved_theorem_signature(&self.env, &params, &statement);
                     #[cfg(feature = "hol-shadow")]
                     self.shadow_theorem(&checked, &signature, line, source_path, |shadow| {
                         if uses_sorry {

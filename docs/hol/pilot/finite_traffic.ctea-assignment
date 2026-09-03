@@ -11,6 +11,10 @@ allowed_imports = [
   "std/hol/finite@1",
   "std/hol/list@1",
 ]
+required_imports = [
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
 allowed_axioms = []
 
-required_theorem.traffic_has_card_three = 'F.HasCard(F.cons(red, F.cons(yellow, F.cons(green, F.nil))), 3)'
+required_theorem.traffic_has_card_three = 'std/hol/finite@1.HasCard(std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil))), 3)'

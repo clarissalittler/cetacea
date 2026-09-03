@@ -11,10 +11,14 @@ allowed_imports = [
   "std/hol/finite@1",
   "std/hol/list@1",
 ]
+required_imports = [
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
 allowed_axioms = []
 
-required_theorem.ex13_1 = 'F.length(F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) = 3'
-required_theorem.ex13_2 = 'forall x : Traffic, F.Member(x, F.cons(red, F.cons(yellow, F.cons(green, F.nil))))'
-required_theorem.ex13_3 = 'F.Nodup(F.cons(red, F.cons(yellow, F.cons(green, F.nil))))'
-required_theorem.ex13_4 = 'F.HasCard(F.cons(red, F.cons(yellow, F.cons(green, F.nil))), 3)'
-required_theorem.ex13_5 = '(A : Type) (xs : F.List A) (n : Nat) : F.HasCard(xs, n) -> F.Nodup(xs) /\ (F.length(xs) = n /\ (forall x : A, F.Member(x, xs)))'
+required_theorem.ex13_1 = 'std/hol/list@1.length(std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil)))) = 3'
+required_theorem.ex13_2 = 'forall ?0 : Traffic, std/hol/list@1.Member(?0, std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil))))'
+required_theorem.ex13_3 = 'std/hol/list@1.Nodup(std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil))))'
+required_theorem.ex13_4 = 'std/hol/finite@1.HasCard(std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil))), 3)'
+required_theorem.ex13_5 = '(?0 : Type) (?1 : std/hol/list@1.List ?0) (?2 : Nat) : std/hol/finite@1.HasCard(?1, ?2) -> std/hol/list@1.Nodup(?1) /\ (std/hol/list@1.length(?1) = ?2 /\ (forall ?3 : ?0, std/hol/list@1.Member(?3, ?1)))'

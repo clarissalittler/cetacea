@@ -67,10 +67,13 @@ allowed_imports = [
   "../../std/nat.ctea",
   "std/hol/list@1",
 ]
+required_imports = [
+  "std/hol/list@1",
+]
 allowed_axioms = []
 
-required_theorem.exercise_3 = '(n : Nat) : add(n, 0) = n'
-required_theorem.exercise_4 = 'forall n : Nat, n = n'
+required_theorem.exercise_3 = '(?0 : Nat) : add(?0, 0) = ?0'
+required_theorem.exercise_4 = 'forall ?0 : Nat, ?0 = ?0'
 ```
 
 `version` and `profile` are required. All permission booleans default to
@@ -97,6 +100,13 @@ transitive proof receipt. The other permissions are independent:
   source. This is deliberately stronger than `allowed_axioms`.
 - `allow_incomplete` permits `sorry`, directly or through a dependency.
 
+`allow_extensionality` and `allow_choice` are forward-compatibility switches:
+no current elaboration or kernel path can emit the extensionality or choice
+proof features, so no proof a student can write today is affected by either
+key in either direction. They exist so the manifest format will not change
+when those principles are introduced, and they are fail-closed until then. Do
+not design a course around enabling them.
+
 Permission does not raise the profile. For example, extensionality explicitly
 allowed by a `fol` manifest is still rejected because that feature requires
 HOL.
@@ -121,6 +131,17 @@ current cardinality surface exposes `map`, which consumes a function argument;
 its concrete uses are classified `hol`, so listing the package does not by
 itself raise a `fol+induction` assignment's profile.
 
+`allowed_imports` is an upper bound; it never requires that a permitted
+library actually be loaded. `required_imports` is the corresponding lower
+bound: every listed logical package must be imported by the submission, and
+every listed file must be transitively loaded, or the check reports a
+`required_import` violation. A required import is implicitly allowed, so an
+entry does not have to appear in both arrays. Manifests whose required
+theorems mention package declarations should require those packages; combined
+with package-qualified signature comparison below, this closes the July 2026
+audit bypass in which a submission rebuilt the required statement's spelling
+from source-local declarations without importing the graded package at all.
+
 `allowed_axioms` contains checked, possibly alias-qualified declaration names.
 An entry must resolve to a trusted axiom from an imported file. A source-local
 axiom with the same name is not accepted. The axiom is authorized only by
@@ -142,26 +163,47 @@ The checks compose:
 
 A `required_theorem.NAME` entry requires a root declaration with exactly that
 name and canonical signature. The signature contains the complete canonical
-parameter telescope and proposition body, not merely the body:
+parameter telescope and proposition body, not merely the body. The canonical
+form is deliberately invariant under the two spelling choices a correct
+submission is free to make:
+
+- **Binders are positional.** Theorem parameters, quantifier variables,
+  set-builder variables, and relation-lambda parameters print as `?0`, `?1`,
+  ... in traversal order, so renaming a bound variable or parameter cannot
+  fail a submission (and cannot be used to disguise a different statement).
+- **Package references are package-qualified.** A reference to a logical
+  package declaration prints as its stable identity, such as
+  `std/hol/list@1.cons`, regardless of the import alias the source chose. A
+  source-local declaration that merely imitates an alias spelling therefore
+  cannot match a required signature built from package declarations.
 
 ```text
-(A : Type) (x : A) : x = x
-(P : Prop) (Q : Prop) : P -> Q -> P
+(?0 : Type) (?1 : ?0) : ?1 = ?1
+(?0 : Prop) (?1 : Prop) : ?0 -> ?1 -> ?0
+std/hol/finite@1.HasCard(std/hol/list@1.cons(red, std/hol/list@1.nil), 1)
 True
 ```
 
 Cetacea expands grouped source parameters into one canonical binder apiece.
-Changing a parameter type, dropping a parameter, renaming a parameter, or
-weakening the proposition therefore fails the signature check. The exact
-signatures are available as `hol_shadow.theorems[].signature`:
+Changing a parameter type, dropping a parameter, or weakening the proposition
+fails the signature check; renaming parameters or choosing another import
+alias does not. Names that resolve to declarations in the submission or its
+allowed source-file imports (such as the student-declared `red` above) print
+as their declared qualified names, so a manifest still pins those exact
+names — source-module aliases, unlike package aliases, remain part of the
+signature for now.
+
+Do not hand-write signatures. The exact canonical values are available as
+`hol_shadow.theorems[].signature`:
 
 ```sh
 cargo run -p cetacea_cli -- --hol-shadow --json starter.ctea
 ```
 
-Copy those machine-produced values into the manifest. Signature text is
-versioned with this experimental format; a future manifest version may replace
-it with a structural fingerprint.
+Copy those machine-produced values into the manifest (a `sorry`-stubbed
+starter emits them too). Signature text is versioned with this experimental
+format; a future manifest version may replace it with a structural
+fingerprint.
 
 ## Results and exit status
 
@@ -170,9 +212,10 @@ With `--json`, the normal shadow receipt is supplemented by:
 
 - `hol_policy`, including all independent permission dimensions;
 - `hol_policy_violations`, with stable kinds such as `import`,
-  `allowed_axiom`, `required_theorem`, and `theorem_signature`;
+  `required_import`, `allowed_axiom`, `required_theorem`, and
+  `theorem_signature`;
 - `assignment_manifest`, recording the manifest path, version, declared
-  imports and axioms, and frozen signatures.
+  imports (allowed and required) and axioms, and frozen signatures.
 
 Exit status is 0 only when ordinary checking, exact HOL shadow replay, the
 teaching profile, and all manifest constraints succeed. A source or policy

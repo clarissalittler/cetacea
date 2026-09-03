@@ -209,9 +209,19 @@ The CLI now provides machine-readable strict checking with controls to:
 - fail on root axioms or classical reasoning; and
 - emit declaration, diagnostic, and policy JSON suitable for an autograder.
 
-Restricting allowed imports and freezing expected theorem signatures remain
-outstanding; without those controls, a student can still change an assigned
-statement or import a stronger library than intended.
+Restricting allowed imports and freezing expected theorem signatures are now
+implemented by `--assignment` manifests
+(`crates/cetacea_cli/src/assignment.rs`): every transitively loaded import
+must appear in the manifest, and each `required_theorem` entry pins a root
+declaration's canonical signature, so a student can no longer change an
+assigned statement or import a library outside the manifest. Signature comparison is alias- and alpha-invariant: binders are normalized
+positionally and package references compare by their stable
+package-qualified identity, so an honest submission cannot fail for
+renaming a parameter or choosing another import alias, and a source-local
+redeclaration cannot imitate a package declaration. `required_imports`
+provides the matching lower bound, so a manifest can require that the graded
+package actually be loaded. Logically equivalent but structurally different
+restatements still fail the frozen signature by design.
 
 ## Phase 1: stabilize the existing book and tutorials
 

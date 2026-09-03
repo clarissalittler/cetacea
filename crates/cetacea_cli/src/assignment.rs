@@ -19,6 +19,7 @@ pub(crate) struct AssignmentManifest {
     pub allow_new_axioms: bool,
     pub allow_incomplete: bool,
     pub allowed_imports: Vec<String>,
+    pub required_imports: Vec<String>,
     pub allowed_axioms: Vec<String>,
     pub required_theorems: Vec<RequiredTheorem>,
 }
@@ -67,6 +68,7 @@ pub(crate) fn parse_manifest(source: &str) -> Result<AssignmentManifest, Manifes
     let mut allow_new_axioms = false;
     let mut allow_incomplete = false;
     let mut allowed_imports = Vec::new();
+    let mut required_imports = Vec::new();
     let mut allowed_axioms = Vec::new();
     let mut required_theorems = Vec::new();
 
@@ -145,6 +147,11 @@ pub(crate) fn parse_manifest(source: &str) -> Result<AssignmentManifest, Manifes
                     .map_err(|message| ManifestError::at(line, format!("{key}: {message}")))?;
                 reject_empty_or_duplicate(line, key, &allowed_imports)?;
             }
+            "required_imports" => {
+                required_imports = parse_string_array(value)
+                    .map_err(|message| ManifestError::at(line, format!("{key}: {message}")))?;
+                reject_empty_or_duplicate(line, key, &required_imports)?;
+            }
             "allowed_axioms" => {
                 allowed_axioms = parse_string_array(value)
                     .map_err(|message| ManifestError::at(line, format!("{key}: {message}")))?;
@@ -173,6 +180,7 @@ pub(crate) fn parse_manifest(source: &str) -> Result<AssignmentManifest, Manifes
         allow_new_axioms,
         allow_incomplete,
         allowed_imports,
+        required_imports,
         allowed_axioms,
         required_theorems,
     })

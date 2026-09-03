@@ -12,6 +12,11 @@ allowed_imports = [
   "std/hol/finite@1",
   "std/hol/list@1",
 ]
+required_imports = [
+  "std/hol/cardinality@1",
+  "std/hol/finite@1",
+  "std/hol/list@1",
+]
 allowed_axioms = []
 
-required_theorem.ex14_7 = '(xs : F.List Answer) (n : Nat) : F.HasCard(xs, n) -> F.HasCard(F.map(encode_answer, xs), n)'
+required_theorem.ex14_7 = '(?0 : std/hol/list@1.List Answer) (?1 : Nat) : std/hol/finite@1.HasCard(?0, ?1) -> std/hol/finite@1.HasCard(std/hol/cardinality@1.map(encode_answer, ?0), ?1)'
