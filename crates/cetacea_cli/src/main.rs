@@ -21,7 +21,7 @@ use cetacea_core::{
     outline, run_tactic_at_path, run_tactic_at_path_with_hol_shadow, CheckResult, CheckedTheorem,
     DeclarationStatus, Diagnostic, DiagnosticSeverity, ExplanationResult, GoalSnapshot,
     GoalStepResult, HolShadowMismatch, HolShadowReport, HolShadowStatementClassification,
-    HolShadowTheorem, Position, SourceLocation, SourceOutline,
+    HolShadowTheorem, Position, SourceOutline,
 };
 
 use assignment::{parse_manifest, AssignmentManifest};
@@ -207,7 +207,10 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
     let mut path = None;
     let mut policy = CheckPolicy::default();
     let mut output_format = OutputFormat::Text;
-    let mut hol_shadow = false;
+    // Since the H7 cutover the HOL kernel certifies every check. The flag
+    // stays accepted for scripts; `--legacy-only` is the debugging opt-out.
+    let mut hol_shadow = true;
+    let mut legacy_only = false;
     let mut hol_profile = None;
     let mut allow_classical = false;
     let mut allow_axioms = false;
@@ -229,6 +232,7 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
             "--deny-classical" => policy.deny_classical = true,
             "--json" => output_format = OutputFormat::Json,
             "--hol-shadow" => hol_shadow = true,
+            "--legacy-only" => legacy_only = true,
             "--allow-classical" => allow_classical = true,
             "--allow-axioms" => allow_axioms = true,
             "--allow-incomplete" => allow_incomplete = true,
@@ -291,6 +295,13 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
         allow_incomplete,
     });
     hol_shadow |= hol_policy.is_some() || assignment_path.is_some();
+    if legacy_only {
+        // A policy or manifest needs kernel receipts; it cannot opt out.
+        if hol_policy.is_some() || assignment_path.is_some() {
+            return None;
+        }
+        hol_shadow = false;
+    }
 
     if mode != RunMode::Check
         && (!policy.is_empty()
@@ -314,7 +325,7 @@ fn parse_args(args: &[String]) -> Option<CliConfig> {
 
 fn print_usage() {
     eprintln!(
-        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] [--hol-shadow] [--hol-profile prop|fol|fol+induction|hol [--allow-classical] [--allow-axioms] [--allow-incomplete] | --assignment manifest.ctea-assignment] <file.ctea>\n       cetacea --hol-smoke"
+        "usage: cetacea [--tui|--interactive|-i|--line] [--strict|--deny-sorry|--deny-axioms|--deny-classical] [--json] [--legacy-only] [--hol-profile prop|fol|fol+induction|hol [--allow-classical] [--allow-axioms] [--allow-incomplete] | --assignment manifest.ctea-assignment] <file.ctea>\n       cetacea --hol-smoke\n\nEvery check is certified by the HOL kernel; `--legacy-only` runs the teaching checker alone for debugging and never certifies a file."
     );
 }
 
@@ -433,28 +444,28 @@ fn run_check(
     let hol_policy =
         cli_hol_policy.or_else(|| assignment.as_ref().map(LoadedAssignment::teaching_policy));
     let requested_hol = run_hol_shadow || hol_policy.is_some();
-    let mut automatic_hol = false;
-    let mut standalone = None;
+    let mut legacy_only_result = None;
     let shadow = if requested_hol {
         Some(check_file_at_path_with_hol_shadow(path))
     } else {
         let checked = check_file_at_path(path);
         if checked.requires_hol_shadow {
-            automatic_hol = true;
+            // Exact logical package imports cannot be checked by the
+            // teaching engine alone, even under `--legacy-only`.
             Some(check_file_at_path_with_hol_shadow(path))
         } else {
-            standalone = Some(checked);
+            legacy_only_result = Some(checked);
             None
         }
     };
-    let result = if let Some(shadow) = &shadow {
-        &shadow.legacy
-    } else {
-        standalone
-            .as_ref()
-            .expect("a non-HOL check retains its standalone result")
-    };
-    let violations = check_policy_violations(&result, policy);
+    // The kernel decides acceptance: a declaration the teaching checker
+    // accepted but the HOL replay rejected is reported as a failure.
+    let certified = shadow.as_ref().map(HolShadowReport::certified);
+    let result = certified
+        .as_ref()
+        .or(legacy_only_result.as_ref())
+        .expect("every check produces a result");
+    let violations = check_policy_violations(result, policy);
     let hol_violations = shadow
         .as_ref()
         .zip(hol_policy)
@@ -462,13 +473,16 @@ fn run_check(
         .unwrap_or_default();
     match output_format {
         OutputFormat::Text => {
-            print_accepted(&result);
+            print_accepted(result);
             if !result.diagnostics.is_empty() {
                 print_diagnostics(&result.diagnostics);
             }
             print_policy_violations(&violations);
-            if let Some(shadow) = &shadow {
-                print_hol_shadow(shadow, automatic_hol);
+            match &shadow {
+                Some(shadow) => print_hol_certification(shadow),
+                None => println!(
+                    "Not certified: `--legacy-only` ran the teaching checker without the HOL kernel."
+                ),
             }
             print_hol_policy_violations(&hol_violations, hol_policy);
         }
@@ -496,35 +510,24 @@ fn run_check(
     }
 }
 
-fn print_hol_shadow(report: &HolShadowReport, automatic: bool) {
-    let label = if automatic {
-        "HOL package check"
-    } else {
-        "HOL shadow"
-    };
+fn print_hol_certification(report: &HolShadowReport) {
     if report.is_match() {
         println!(
-            "{label} matched {} accepted declarations ({} theorem receipts).",
+            "HOL kernel certified {} declarations ({} theorem receipts).",
             report.checked_declarations.len(),
             report.theorems.len()
         );
-        return;
-    }
-    eprintln!(
-        "error: {label} disagreed on {} of {} accepted declaration attempts",
-        report.mismatches.len(),
-        report.attempted_declarations
-    );
-    for mismatch in &report.mismatches {
-        let path = mismatch
-            .source_path
-            .as_ref()
-            .map(|path| display_diagnostic_path(&path.to_string_lossy()))
-            .map(|path| format!("{path}:{}: ", mismatch.line))
-            .unwrap_or_else(|| format!("line {}: ", mismatch.line));
+    } else {
+        // The individual failures were already printed as diagnostics by
+        // `HolShadowReport::certified`.
+        let declarations: BTreeSet<&str> = report
+            .mismatches
+            .iter()
+            .map(|mismatch| mismatch.declaration.as_str())
+            .collect();
         eprintln!(
-            "  {path}{} `{}`: {}",
-            mismatch.kind, mismatch.declaration, mismatch.message
+            "error: HOL kernel certification failed: {} declaration(s) could not be replayed; the file is not certified",
+            declarations.len()
         );
     }
 }
@@ -3197,46 +3200,15 @@ fn diagnostic_label(diagnostic: &Diagnostic) -> &'static str {
 }
 
 fn fail_closed_hol_result(report: HolShadowReport) -> CheckResult {
-    let matches = report.is_match();
-    let attempted = report.attempted_declarations;
-    let checked = report.checked_declarations.len();
-    let mut result = report.legacy;
-    for mismatch in report.mismatches {
-        result.diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Error,
-            span: None,
-            location: Some(SourceLocation {
-                path: mismatch
-                    .source_path
-                    .as_ref()
-                    .map(|path| path.display().to_string()),
-                line: mismatch.line,
-            }),
-            message: format!(
-                "HOL replay rejected {} `{}`: {}",
-                mismatch.kind, mismatch.declaration, mismatch.message
-            ),
-            notes: Vec::new(),
-            suggestions: Vec::new(),
-        });
-    }
-    if !matches && result.diagnostics.is_empty() {
-        result.diagnostics.push(Diagnostic {
-            severity: DiagnosticSeverity::Error,
-            span: None,
-            location: None,
-            message: format!(
-                "HOL replay checked {checked} of {attempted} accepted declaration attempts"
-            ),
-            notes: Vec::new(),
-            suggestions: Vec::new(),
-        });
-    }
-    result
+    report.certified()
 }
 
-fn check_editor_path(path: &Path, force_hol: bool) -> (CheckResult, bool) {
-    if force_hol {
+/// Check a file for the editor modes. `use_hol` is the default since the
+/// H7 cutover; `false` (from `--legacy-only`) runs the teaching checker
+/// alone unless the file imports a logical package, which only the kernel
+/// can check. Returns the result and whether the kernel certified it.
+fn check_editor_path(path: &Path, use_hol: bool) -> (CheckResult, bool) {
+    if use_hol {
         return (
             fail_closed_hol_result(check_file_at_path_with_hol_shadow(path)),
             true,
@@ -3253,8 +3225,8 @@ fn check_editor_path(path: &Path, force_hol: bool) -> (CheckResult, bool) {
     }
 }
 
-fn check_editor_source(source: &str, path: &Path, force_hol: bool) -> (CheckResult, bool) {
-    if force_hol {
+fn check_editor_source(source: &str, path: &Path, use_hol: bool) -> (CheckResult, bool) {
+    if use_hol {
         return (
             fail_closed_hol_result(check_source_at_path_with_hol_shadow(source, path)),
             true,
@@ -3304,7 +3276,8 @@ mod tests {
         assert_eq!(config.mode, RunMode::Check);
         assert_eq!(config.path, PathBuf::from("submission.ctea"));
         assert_eq!(config.output_format, OutputFormat::Json);
-        assert!(!config.hol_shadow);
+        // Since the H7 cutover every check is kernel-certified by default.
+        assert!(config.hol_shadow);
         assert!(config.hol_policy.is_none());
         assert!(config.assignment_path.is_none());
         assert_eq!(
@@ -3318,6 +3291,27 @@ mod tests {
         let reversed = parse_args(&args(&["--deny-classical", "--strict", "submission.ctea"]))
             .expect("policy flags should compose in any order");
         assert_eq!(reversed.policy, config.policy);
+    }
+
+    #[test]
+    fn legacy_only_opts_out_of_certification_but_not_of_policies() {
+        let config = parse_args(&args(&["--legacy-only", "submission.ctea"]))
+            .expect("legacy-only should parse");
+        assert!(!config.hol_shadow);
+        assert!(parse_args(&args(&[
+            "--legacy-only",
+            "--hol-profile",
+            "fol",
+            "submission.ctea"
+        ]))
+        .is_none());
+        assert!(parse_args(&args(&[
+            "--legacy-only",
+            "--assignment",
+            "hw.ctea-assignment",
+            "submission.ctea"
+        ]))
+        .is_none());
     }
 
     #[test]

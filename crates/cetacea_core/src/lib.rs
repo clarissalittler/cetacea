@@ -2112,6 +2112,60 @@ impl HolShadowReport {
     pub fn is_match(&self) -> bool {
         self.mismatches.is_empty() && self.attempted_declarations == self.checked_declarations.len()
     }
+
+    /// The certified result: the elaborator's result with every declaration
+    /// the HOL kernel did not certify reported as an error and removed from
+    /// the accepted list.
+    ///
+    /// This is the H7 cutover semantics. The legacy checker elaborates and
+    /// explains; the HOL replay decides acceptance, so a declaration the
+    /// legacy engine accepted but the kernel rejected is a failed
+    /// declaration, not an accepted one with a footnote.
+    pub fn certified(&self) -> CheckResult {
+        let mut result = self.legacy.clone();
+        if self.is_match() {
+            return result;
+        }
+        let mut rejected: Vec<(Name, bool)> = Vec::new();
+        for mismatch in &self.mismatches {
+            let what = match mismatch.kind {
+                HolShadowDeclarationKind::Theorem => "theorem",
+                HolShadowDeclarationKind::Axiom => "axiom",
+                _ => "declaration",
+            };
+            result.diagnostics.push(
+                diagnostic_at(
+                    mismatch.source_path.as_deref(),
+                    mismatch.line,
+                    format!(
+                        "{what} `{}` failed kernel certification: {}",
+                        mismatch.declaration, mismatch.message
+                    ),
+                )
+                .with_note(
+                    "the teaching checker accepted this declaration but the HOL kernel could not replay it; the file is not certified",
+                ),
+            );
+            rejected.push((mismatch.declaration.clone(), mismatch.is_imported));
+        }
+        // Every replay failure records a mismatch, so a count gap with no
+        // mismatch at all means a declaration was never replayed.
+        if self.mismatches.is_empty()
+            && self.attempted_declarations != self.checked_declarations.len()
+        {
+            result.diagnostics.push(Diagnostic::error(format!(
+                "kernel certification is incomplete: {} of {} accepted declarations were replayed",
+                self.checked_declarations.len(),
+                self.attempted_declarations
+            )));
+        }
+        result.theorems.retain(|theorem| {
+            !rejected
+                .iter()
+                .any(|(name, imported)| *name == theorem.name && *imported == theorem.is_imported)
+        });
+        result
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21010,6 +21064,46 @@ const t : Tree
 "#;
         let result = check_file(source);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    /// H7 cutover semantics: a declaration the teaching checker accepted but
+    /// the kernel did not replay is a failed declaration in the certified
+    /// result, and a clean report certifies unchanged.
+    #[test]
+    fn certified_result_demotes_kernel_rejections_to_errors() {
+        let source = r#"
+theorem keep : True := by
+  trivial
+
+theorem drop_me : True := by
+  trivial
+"#;
+        let mut report = check_file_with_hol_shadow(source);
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(report.certified(), report.legacy);
+
+        report.mismatches.push(HolShadowMismatch {
+            declaration: "drop_me".to_string(),
+            kind: HolShadowDeclarationKind::Theorem,
+            line: 5,
+            source_path: None,
+            is_imported: false,
+            message: "simulated kernel rejection".to_string(),
+        });
+        let certified = report.certified();
+        let names: Vec<&str> = certified
+            .theorems
+            .iter()
+            .map(|theorem| theorem.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["keep"]);
+        assert!(certified.diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Error
+                && diagnostic
+                    .message
+                    .contains("theorem `drop_me` failed kernel certification: simulated kernel rejection")
+                && diagnostic.location.as_ref().map(|location| location.line) == Some(5)
+        }));
     }
 
     #[test]
