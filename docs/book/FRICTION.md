@@ -402,7 +402,21 @@ below. Several were fixed the same day; the fixes are noted inline.
     (exit 134, empty JSON on stdout), so batch graders need per-file
     resource limits.
 
-45. **Open, medium impact: diagnostics misdirection batch.** Bare
+45. **Resolved 2026-09-03 (diagnostics misdirection batch).** Bare `cases h`
+    and `induction n` now explain the `with` arm skeleton; an unregistered
+    package version names the registered packages; tactic, hypothesis and
+    theorem typos get a "did you mean" (Damerau-Levenshtein, bounded by
+    name length) and bare names of aliased imports point at the alias; a
+    predicate passed as a function argument is named as a predicate with
+    the `Prop`-versus-data explanation; the `refl` hint on package-function
+    goals names the package's computation theorems instead of `simp`;
+    `defrec` arms accept `| node(l, v, r) recl recr =>` and a `:=` on the
+    header is explained; an empty arm body followed by an unindented line
+    is reported at the arm as an indentation mistake; and editor search
+    ANDs whitespace-separated words. Regression tests:
+    `diagnostics_batch_tests` in `lib.rs` and
+    `search_ands_whitespace_separated_words` in the CLI. Original entry:
+    Bare
     `cases h` reports ``unknown tactic `cases h` `` while the help lists
     `cases` as valid; `import std/hol/list@2` falls through to a raw
     filesystem error instead of naming the three registered packages; no

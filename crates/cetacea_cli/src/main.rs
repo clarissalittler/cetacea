@@ -512,6 +512,13 @@ fn run_check(
 
 fn print_hol_certification(report: &HolShadowReport) {
     if report.is_match() {
+        // A file that failed to parse has nothing to certify; the parse
+        // error already says everything.
+        if report.attempted_declarations == 0
+            && diagnostics_have_errors(&report.legacy.diagnostics)
+        {
+            return;
+        }
         println!(
             "HOL kernel certified {} declarations ({} theorem receipts).",
             report.checked_declarations.len(),
@@ -1655,16 +1662,11 @@ impl TuiApp {
     }
 
     fn search_results(&self) -> Vec<&cetacea_core::CheckedTheorem> {
-        let query = self.search_query.to_lowercase();
         let mut matches = self
             .check_result
             .theorems
             .iter()
-            .filter(|theorem| {
-                query.is_empty()
-                    || theorem.name.to_lowercase().contains(&query)
-                    || theorem.statement.to_lowercase().contains(&query)
-            })
+            .filter(|theorem| theorem_matches_search(theorem, &self.search_query))
             .collect::<Vec<_>>();
         matches.sort_by_key(|theorem| (theorem.is_imported, theorem.name.clone()));
         matches
@@ -2625,6 +2627,18 @@ fn print_current_hints(state: &InteractiveState) {
     }
 }
 
+/// Every whitespace-separated word of the query must occur in the theorem's
+/// name or statement, so `search add succ` finds `add_succ` the way a
+/// student who thinks in words expects; an empty query matches everything.
+fn theorem_matches_search(theorem: &CheckedTheorem, query: &str) -> bool {
+    let name = theorem.name.to_lowercase();
+    let statement = theorem.statement.to_lowercase();
+    query
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .all(|word| name.contains(&word) || statement.contains(&word))
+}
+
 fn search_theorems(state: &mut InteractiveState, query: &str) {
     if query.is_empty() {
         println!("usage: search <text>");
@@ -2633,15 +2647,11 @@ fn search_theorems(state: &mut InteractiveState, query: &str) {
     if diagnostics_have_errors(&state.last_check.diagnostics) {
         println!("The last check had diagnostics; search results may be incomplete.");
     }
-    let query = query.to_lowercase();
     let mut matches = state
         .last_check
         .theorems
         .iter()
-        .filter(|theorem| {
-            theorem.name.to_lowercase().contains(&query)
-                || theorem.statement.to_lowercase().contains(&query)
-        })
+        .filter(|theorem| theorem_matches_search(theorem, query))
         .collect::<Vec<_>>();
     matches.sort_by_key(|theorem| (theorem.is_imported, theorem.name.clone()));
 
@@ -3291,6 +3301,25 @@ mod tests {
         let reversed = parse_args(&args(&["--deny-classical", "--strict", "submission.ctea"]))
             .expect("policy flags should compose in any order");
         assert_eq!(reversed.policy, config.policy);
+    }
+
+    #[test]
+    fn search_ands_whitespace_separated_words() {
+        let theorem = CheckedTheorem {
+            name: "nat.add_succ".to_string(),
+            statement: "(n m : Nat) : add(n, succ(m)) = succ(add(n, m))".to_string(),
+            mode_used: cetacea_core::LogicMode::Constructive,
+            is_axiom: false,
+            is_imported: true,
+            uses_sorry: false,
+            axiom_deps: Vec::new(),
+            status: DeclarationStatus::Accepted,
+        };
+        assert!(theorem_matches_search(&theorem, "add succ"));
+        assert!(theorem_matches_search(&theorem, "SUCC add"));
+        assert!(theorem_matches_search(&theorem, "add_succ"));
+        assert!(theorem_matches_search(&theorem, ""));
+        assert!(!theorem_matches_search(&theorem, "add mul"));
     }
 
     #[test]

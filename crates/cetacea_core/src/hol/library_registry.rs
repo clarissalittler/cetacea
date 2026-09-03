@@ -104,6 +104,9 @@ pub enum LibraryPackageId {
 }
 
 impl LibraryPackageId {
+    /// Every registered package, in a stable order for diagnostics.
+    pub const ALL: [Self; 3] = [Self::ListV1, Self::CardinalityV1, Self::FiniteV1];
+
     pub fn from_logical_id(logical_id: &str) -> Option<Self> {
         match logical_id {
             "std/hol/list@1" => Some(Self::ListV1),

@@ -1619,6 +1619,126 @@ fn ambiguous_leaf_names<'a>(
     Some(matches)
 }
 
+/// Message for a proof reference that is neither a hypothesis in scope nor a
+/// theorem: names the aliased import that owns the leaf when there is
+/// exactly one, otherwise offers the closest hypothesis or theorem name.
+fn unknown_reference_message(env: &Env, ctx: &Context, name: &str) -> String {
+    if !name.contains('.') {
+        let mut owners: Vec<&Name> = env
+            .theorems
+            .keys()
+            .filter(|candidate| qualified_name_leaf(candidate) == Some(name))
+            .collect();
+        owners.sort();
+        if let [owner] = owners.as_slice() {
+            return format!(
+                "unknown hypothesis or theorem `{name}`; it is available as `{owner}` through its import alias"
+            );
+        }
+    }
+    let hypotheses = ctx.proof_vars.iter().map(|binding| binding.name.as_str());
+    let theorems = env.theorems.keys().map(String::as_str);
+    let leaves = env
+        .theorems
+        .keys()
+        .filter_map(|candidate| qualified_name_leaf(candidate));
+    match closest_name(name, hypotheses.chain(theorems).chain(leaves)) {
+        Some(suggestion) => {
+            // Prefer the qualified spelling when the match was a leaf of an
+            // aliased theorem, so the suggestion is usable as written.
+            let spelled = if env.theorems.contains_key(suggestion)
+                || ctx.lookup(suggestion).is_some()
+            {
+                suggestion.to_string()
+            } else {
+                env.theorems
+                    .keys()
+                    .find(|candidate| qualified_name_leaf(candidate) == Some(suggestion))
+                    .cloned()
+                    .unwrap_or_else(|| suggestion.to_string())
+            };
+            format!("unknown hypothesis or theorem `{name}`; did you mean `{spelled}`?")
+        }
+        None => format!("unknown hypothesis or theorem `{name}`"),
+    }
+}
+
+/// Function symbols in `formula` that belong to a logical package, in
+/// first-occurrence order without duplicates.
+fn package_functions_in_formula(env: &Env, formula: &Formula) -> Vec<Name> {
+    fn is_package_constructor(env: &Env, name: &str) -> bool {
+        is_data_constructor_name(env, name)
+            || env
+                .rank_one_data_defs
+                .values()
+                .any(|data| data.data.ctors.iter().any(|ctor| ctor.name == name))
+    }
+    fn visit_term(env: &Env, term: &Term, out: &mut Vec<Name>) {
+        match term {
+            Term::App(name, args) => {
+                if env.package_origin(name).is_some()
+                    && env.has_func(name)
+                    && !is_package_constructor(env, name)
+                    && !out.contains(name)
+                {
+                    out.push(name.clone());
+                }
+                for arg in args {
+                    visit_term(env, arg, out);
+                }
+            }
+            Term::Ascribed { term, .. } => visit_term(env, term, out),
+            Term::PredLambda { body, .. } | Term::SetBuilder { body, .. } => {
+                visit_formula(env, body, out)
+            }
+            Term::Succ(inner)
+            | Term::Fst(inner)
+            | Term::Snd(inner)
+            | Term::Singleton(inner)
+            | Term::Complement(inner)
+            | Term::Powerset(inner) => visit_term(env, inner, out),
+            Term::Add(left, right)
+            | Term::Mul(left, right)
+            | Term::Sub(left, right)
+            | Term::Pair(left, right)
+            | Term::Union(left, right)
+            | Term::Inter(left, right)
+            | Term::Diff(left, right)
+            | Term::CartProd(left, right) => {
+                visit_term(env, left, out);
+                visit_term(env, right, out);
+            }
+            Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => {}
+        }
+    }
+    fn visit_formula(env: &Env, formula: &Formula, out: &mut Vec<Name>) {
+        match formula {
+            Formula::True | Formula::False | Formula::Atom(_) => {}
+            Formula::PredApp(_, args) => {
+                for arg in args {
+                    visit_term(env, arg, out);
+                }
+            }
+            Formula::Eq(left, right) | Formula::In(left, right) | Formula::Subset(left, right) => {
+                visit_term(env, left, out);
+                visit_term(env, right, out);
+            }
+            Formula::And(left, right)
+            | Formula::Or(left, right)
+            | Formula::Implies(left, right) => {
+                visit_formula(env, left, out);
+                visit_formula(env, right, out);
+            }
+            Formula::Forall { body, .. } | Formula::Exists { body, .. } => {
+                visit_formula(env, body, out)
+            }
+        }
+    }
+    let mut out = Vec::new();
+    visit_formula(env, formula, &mut out);
+    out
+}
+
 fn ambiguous_reference_message(kind: &str, name: &str, matches: &[Name]) -> String {
     format!(
         "ambiguous {kind} `{name}`; use {}",
@@ -1745,11 +1865,16 @@ impl Diagnostic {
         self
     }
 
-    fn with_tactic_error_suggestions(mut self, err: &TacticError, target: &Formula) -> Self {
+    fn with_tactic_error_suggestions(
+        mut self,
+        env: &Env,
+        err: &TacticError,
+        target: &Formula,
+    ) -> Self {
         for suggestion in &err.suggestions {
             self.suggestions.push(suggestion.clone());
         }
-        for suggestion in tactic_error_suggestions(&err.message, target) {
+        for suggestion in tactic_error_suggestions(env, &err.message, target) {
             self.suggestions.push(suggestion);
         }
         self
@@ -1762,7 +1887,11 @@ fn diagnostics_have_errors(diagnostics: &[Diagnostic]) -> bool {
         .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
 }
 
-fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSuggestion> {
+fn tactic_error_suggestions(
+    env: &Env,
+    message: &str,
+    target: &Formula,
+) -> Vec<DiagnosticSuggestion> {
     let mut suggestions = Vec::new();
     let target_text = target.to_string();
 
@@ -1845,12 +1974,59 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
             None,
         );
     } else if message.contains("refl expects") || message.contains("refl cannot prove") {
-        push(
-            &mut suggestions,
-            "Use equality simplification first",
-            "`refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.".to_string(),
-            Some("simp\nrefl"),
-        );
+        let package_functions = package_functions_in_formula(env, target);
+        if package_functions.is_empty() {
+            push(
+                &mut suggestions,
+                "Use equality simplification first",
+                "`refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.".to_string(),
+                Some("simp\nrefl"),
+            );
+        } else {
+            // `simp` does not compute package functions; their computation
+            // theorems have to be rewritten with explicit parameters.
+            let mentioned = target_text.clone();
+            let mut laws: Vec<Name> = Vec::new();
+            for function in &package_functions {
+                let prefix = format!("{function}_");
+                let mut named: Vec<&Name> = env
+                    .theorems
+                    .keys()
+                    .filter(|name| name.starts_with(&prefix))
+                    .collect();
+                named.sort();
+                laws.extend(named.into_iter().cloned());
+            }
+            // Lead with the law whose constructor suffix actually appears in
+            // the goal (`length_cons` for `length(cons(...))`).
+            let example = laws
+                .iter()
+                .find(|law| {
+                    law.rsplit_once('_')
+                        .is_some_and(|(_, suffix)| mentioned.contains(&format!(".{suffix}(")) || mentioned.contains(&format!(".{suffix})")) || mentioned.contains(&format!(".{suffix},")))
+                })
+                .or(laws.first())
+                .cloned();
+            let functions = package_functions
+                .iter()
+                .map(|name| format!("`{name}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let plural = if package_functions.len() == 1 { "comes" } else { "come" };
+            let detail = match example {
+                None => format!("{functions} {plural} from a logical package, and `simp` does not compute package functions. Rewrite with the package's computation theorems, giving their parameters explicitly, then `refl`."),
+                Some(example) => format!(
+                    "{functions} {plural} from a logical package, and `simp` does not compute package functions. Rewrite with the package's computation theorems ({}) with explicit parameters, for example `rewrite -> {example} {{A := Nat; ...}}`, then `refl`.",
+                    laws.iter().map(|law| format!("`{law}`")).collect::<Vec<_>>().join(", ")
+                ),
+            };
+            push(
+                &mut suggestions,
+                "Rewrite with the package's computation theorems",
+                detail,
+                None,
+            );
+        }
     }
     if message.contains("no matching assumption found") {
         push(
@@ -3747,6 +3923,39 @@ impl FileChecker {
             match candidate.canonicalize() {
                 Ok(path) => return Ok(ResolvedImport::File(path)),
                 Err(err) => last_error = Some((candidate, err)),
+            }
+        }
+
+        // `name@version` is package syntax: an unregistered package should
+        // name the registry rather than fall through to a filesystem error.
+        if let Some((module, version)) = import_path.rsplit_once('@') {
+            if !version.is_empty() && version.chars().all(|c| c.is_ascii_digit()) {
+                let registered: Vec<String> = hol::LibraryPackageId::ALL
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
+                let same_module: Vec<&String> = registered
+                    .iter()
+                    .filter(|id| id.rsplit_once('@').map(|(m, _)| m) == Some(module))
+                    .collect();
+                let mut diagnostic = Diagnostic::error(format!(
+                    "unknown logical package `{import_path}`"
+                ));
+                diagnostic = if let [only] = same_module.as_slice() {
+                    diagnostic.with_note(format!(
+                        "version {version} of `{module}` is not registered; the registered version is `{only}`"
+                    ))
+                } else {
+                    diagnostic.with_note(format!(
+                        "registered packages are {}",
+                        registered
+                            .iter()
+                            .map(|id| format!("`{id}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ))
+                };
+                return Err(diagnostic);
             }
         }
 
@@ -6637,7 +6846,9 @@ impl FileChecker {
                             }
                             self.result
                                 .diagnostics
-                                .push(diagnostic.with_tactic_error_suggestions(&err, target));
+                                .push(diagnostic.with_tactic_error_suggestions(
+                                    &self.env, &err, target,
+                                ));
                             continue;
                         }
                     };
@@ -6997,7 +7208,7 @@ fn goals_for_theorem_prefix(
                     format!("theorem `{}` failed: {}", decl.name, err.message),
                 )
                 .with_note(format!("target: {target}"))
-                .with_tactic_error_suggestions(&err, target)],
+                .with_tactic_error_suggestions(&checker.env, &err, target)],
             };
         }
     }
@@ -7267,7 +7478,7 @@ fn explain_theorem_at_index(
                     format!("theorem `{}` failed: {}", decl.name, err.message),
                 )
                 .with_note(format!("target: {target}"))
-                .with_tactic_error_suggestions(&err, target)],
+                .with_tactic_error_suggestions(&checker.env, &err, target)],
                 ..ExplanationResult::default()
             };
         }
@@ -11334,7 +11545,24 @@ fn canonicalize_function_arg(
             "function", name, &matches,
         )));
     }
-    Err(ValidationError::new(format!("unknown function `{name}`")))
+    Err(ValidationError::new(unknown_function_message(env, ctx, name)))
+}
+
+/// A predicate or formula definition passed where a data-valued function is
+/// expected is the mistake chapters 14–16 teach about; name it instead of
+/// calling the predicate unknown.
+fn unknown_function_message(env: &Env, ctx: &Context, name: &str) -> String {
+    let is_predicate = resolve_top_level_name(ctx, name, |candidate| {
+        env.has_pred(candidate) || env.formula_def(candidate).is_some()
+    })
+    .is_some()
+        || ctx.lookup_predicate_var(name).is_some();
+    if is_predicate {
+        return format!(
+            "`{name}` is a predicate, not a function: it returns a proposition (`Prop`), but a function argument must return data such as `Nat` or a data type; define a data-valued function (for example with `def` or `defrec`) or use the predicate in a formula instead"
+        );
+    }
+    format!("unknown function `{name}`")
 }
 
 fn validate_function_schema_arg(
@@ -14168,11 +14396,12 @@ fn parse_diagnostic(path: Option<&Path>, err: ParseError, message: Option<String
     if has_context {
         diagnostic = diagnostic.with_note(err.message);
     }
-    if diagnostic.message.contains("unknown tactic")
+    let names_a_fix = |text: &str| text.contains("did you mean") || text.contains("needs its case arms");
+    if (diagnostic.message.contains("unknown tactic") && !names_a_fix(&diagnostic.message))
         || diagnostic
             .notes
             .iter()
-            .any(|note| note.contains("unknown tactic"))
+            .any(|note| note.contains("unknown tactic") && !names_a_fix(note))
     {
         diagnostic = diagnostic.with_suggestion(
             "Check the tactic name",
@@ -14297,6 +14526,11 @@ impl ProofExpr {
                 if let Some(matches) = env.ambiguous_theorem_names(&self.base) {
                     return Err(TacticError::new(ambiguous_reference_message(
                         "theorem", &self.base, &matches,
+                    )));
+                }
+                if env.theorem_scoped(ctx, &self.base).is_none() {
+                    return Err(TacticError::new(unknown_reference_message(
+                        env, ctx, &self.base,
                     )));
                 }
             }
@@ -15825,6 +16059,12 @@ fn parse_defrec_header(header: &str) -> Result<DefrecHeader, ParseError> {
     }
     tokens.expect_sym(":")?;
     let result_type = tokens.parse_type()?;
+    if tokens.eat_sym(":=") {
+        return Err(ParseError::new(
+            "`defrec` headers end after the result type; the `| constructor binders => term` cases follow on the next lines without `:=`",
+        )
+        .with_span(tokens.current_span()));
+    }
     tokens.expect_eof()?;
     Ok((name, param, param_type, extra_params, result_type))
 }
@@ -15860,13 +16100,42 @@ fn parse_data_rec_arm(line: &str, line_no: usize) -> Result<DataRecArmDecl, Pars
     let Some((binders, body)) = rest.split_once("=>") else {
         return Err(ParseError::new(expect_message));
     };
-    let mut parts = binders.split_whitespace();
-    let Some(ctor) = parts.next() else {
-        return Err(ParseError::new(
-            "recursive definition case needs a constructor name",
-        ));
+    // Accept both the binder spelling `| node l v r recl recr => ...` and
+    // the term spelling `| node(l, v, r) recl recr => ...`, since students
+    // write constructors with parentheses everywhere else.
+    let binders = binders.trim();
+    let (ctor, binders): (String, Vec<Name>) = match binders.split_once('(') {
+        Some((ctor, rest)) if !ctor.contains(char::is_whitespace) => {
+            let Some((fields, after)) = rest.split_once(')') else {
+                return Err(ParseError::new(
+                    "recursive definition case has an unclosed `(` in its constructor pattern",
+                ));
+            };
+            let mut names: Vec<Name> = fields
+                .split(',')
+                .map(str::trim)
+                .filter(|field| !field.is_empty())
+                .map(str::to_string)
+                .collect();
+            if names.iter().any(|name| name.contains(char::is_whitespace)) {
+                return Err(ParseError::new(
+                    "recursive definition case pattern `ctor(a, b)` lists one binder per field, separated by commas",
+                ));
+            }
+            names.extend(after.split_whitespace().map(str::to_string));
+            (ctor.trim().to_string(), names)
+        }
+        _ => {
+            let mut parts = binders.split_whitespace();
+            let Some(ctor) = parts.next() else {
+                return Err(ParseError::new(
+                    "recursive definition case needs a constructor name",
+                ));
+            };
+            (ctor.to_string(), parts.map(str::to_string).collect())
+        }
     };
-    let binders: Vec<Name> = parts.map(str::to_string).collect();
+    let ctor = ctor.as_str();
     for (idx, binder) in binders.iter().enumerate() {
         if binders[..idx].contains(binder) {
             return Err(ParseError::new(
@@ -15984,10 +16253,17 @@ fn parse_tactic_lines(
             if lines[i].text.trim().starts_with("| intro ") {
                 let arm_line = lines[i].line;
                 let arm_indent = line_indent(&lines[i].text);
-                let (witness_name, hyp_name) = parse_exists_case_arm(lines[i].text.trim())
-                    .map_err(|err| err.with_line(arm_line))?;
+                let arm_text = lines[i].text.trim().to_string();
+                let (witness_name, hyp_name) =
+                    parse_exists_case_arm(&arm_text).map_err(|err| err.with_line(arm_line))?;
                 i += 1;
                 let body_end = case_body_end(lines, i, arm_indent);
+                let after = skip_empty_tactic_lines(lines, body_end);
+                if let Some(error) =
+                    misindented_arm_body(lines, &arm_text, arm_line, i, body_end, after)
+                {
+                    return Err(error);
+                }
                 let body_tactics = parse_tactic_lines(&lines[i..body_end], namespace_stack)?;
                 i = body_end;
 
@@ -16006,7 +16282,8 @@ fn parse_tactic_lines(
 
             let left_line = lines[i].line;
             let left_indent = line_indent(&lines[i].text);
-            let left_name = parse_case_arm(lines[i].text.trim(), "left")
+            let left_arm_text = lines[i].text.trim().to_string();
+            let left_name = parse_case_arm(&left_arm_text, "left")
                 .map_err(|err| err.with_line(left_line))?;
             i += 1;
             let left_start = i;
@@ -16015,15 +16292,32 @@ fn parse_tactic_lines(
             if i >= lines.len() {
                 return Err(ParseError::new("expected right case arm").with_line(left_line));
             }
+            if let Some(error) =
+                misindented_arm_body(lines, &left_arm_text, left_line, left_start, left_end, i)
+            {
+                return Err(error);
+            }
             let left_tactics = parse_tactic_lines(&lines[left_start..left_end], namespace_stack)?;
 
             let right_line = lines[i].line;
             let right_indent = line_indent(&lines[i].text);
-            let right_name = parse_case_arm(lines[i].text.trim(), "right")
+            let right_arm_text = lines[i].text.trim().to_string();
+            let right_name = parse_case_arm(&right_arm_text, "right")
                 .map_err(|err| err.with_line(right_line))?;
             i += 1;
             let right_start = i;
             let right_end = case_body_end(lines, i, right_indent);
+            let after_right = skip_empty_tactic_lines(lines, right_end);
+            if let Some(error) = misindented_arm_body(
+                lines,
+                &right_arm_text,
+                right_line,
+                right_start,
+                right_end,
+                after_right,
+            ) {
+                return Err(error);
+            }
             let right_tactics =
                 parse_tactic_lines(&lines[right_start..right_end], namespace_stack)?;
             i = right_end;
@@ -16062,11 +16356,18 @@ fn parse_tactic_lines(
                 i = next;
                 let arm_line = lines[i].line;
                 let arm_indent = line_indent(&lines[i].text);
-                let (ctor, binders) = parse_induction_arm(lines[i].text.trim())
-                    .map_err(|err| err.with_line(arm_line))?;
+                let arm_text = lines[i].text.trim().to_string();
+                let (ctor, binders) =
+                    parse_induction_arm(&arm_text).map_err(|err| err.with_line(arm_line))?;
                 i += 1;
                 let body_start = i;
                 let body_end = case_body_end(lines, i, arm_indent);
+                let after = skip_empty_tactic_lines(lines, body_end);
+                if let Some(error) =
+                    misindented_arm_body(lines, &arm_text, arm_line, body_start, body_end, after)
+                {
+                    return Err(error);
+                }
                 let arm_tactics =
                     parse_tactic_lines(&lines[body_start..body_end], namespace_stack)?;
                 arms.push(TacticInductionArm {
@@ -16195,6 +16496,33 @@ fn skip_empty_tactic_lines(lines: &[RawTacticLine], mut i: usize) -> usize {
         i += 1;
     }
     i
+}
+
+/// An arm whose body came out empty because the following line sits at or
+/// left of the `|` is almost always an indentation mistake; say so at the
+/// arm instead of failing later at the student's own tactic.
+fn misindented_arm_body(
+    lines: &[RawTacticLine],
+    arm_text: &str,
+    arm_line: usize,
+    body_start: usize,
+    body_end: usize,
+    next: usize,
+) -> Option<ParseError> {
+    if body_end != body_start || next >= lines.len() {
+        return None;
+    }
+    let following = lines[next].text.trim();
+    if following.starts_with('|') {
+        return None;
+    }
+    Some(
+        ParseError::new(format!(
+            "the body of case arm `{arm_text}` is empty: the next line `{following}` (line {}) is not indented past the `|`; indent every tactic of the arm further than its `|`",
+            lines[next].line
+        ))
+        .with_line(arm_line),
+    )
 }
 
 fn case_body_end(lines: &[RawTacticLine], mut i: usize, arm_indent: usize) -> usize {
@@ -16429,7 +16757,111 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         });
     }
 
-    Err(ParseError::new(format!("unknown tactic `{line}`")))
+    Err(unknown_tactic_error(line))
+}
+
+/// Tactic names the line parser understands, for "did you mean" hints.
+const KNOWN_TACTICS: &[&str] = &[
+    "intro",
+    "revert",
+    "exact",
+    "trivial",
+    "assumption",
+    "apply",
+    "exists",
+    "refl",
+    "rewrite",
+    "unfold",
+    "simp",
+    "split",
+    "left",
+    "right",
+    "exfalso",
+    "contradiction",
+    "by_cases",
+    "by_contra",
+    "show_goal",
+    "sorry",
+    "admit",
+    "have",
+    "cases",
+    "induction",
+];
+
+/// Block tactics are handled by the block parser, so reaching the line
+/// parser with one of them means the `with` and its arms are missing.
+fn unknown_tactic_error(line: &str) -> ParseError {
+    let head = line.split_whitespace().next().unwrap_or(line);
+    match head {
+        "cases" => {
+            let subject = line.strip_prefix("cases").unwrap_or("").trim();
+            let subject = if subject.is_empty() { "h" } else { subject };
+            return ParseError::new(format!(
+                "`cases {subject}` needs its case arms: write `cases {subject} with` and then one indented `| left name =>` and `| right name =>` arm (or `| intro x hx =>` for an existential)"
+            ));
+        }
+        "induction" => {
+            let subject = line.strip_prefix("induction").unwrap_or("").trim();
+            let subject = if subject.is_empty() { "n" } else { subject };
+            return ParseError::new(format!(
+                "`induction {subject}` needs its case arms: write `induction {subject} with` and then one indented `| zero =>` and `| succ k ih =>` arm (or one arm per constructor of a data type)"
+            ));
+        }
+        _ => {}
+    }
+    match closest_name(head, KNOWN_TACTICS.iter().copied()) {
+        Some(suggestion) => ParseError::new(format!(
+            "unknown tactic `{line}`; did you mean `{suggestion}`?"
+        )),
+        None => ParseError::new(format!("unknown tactic `{line}`")),
+    }
+}
+
+/// The candidate closest to `name` by edit distance, when it is close enough
+/// to be a plausible typo rather than a different word.
+fn closest_name<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let name_lower = name.to_ascii_lowercase();
+    let limit = match name.chars().count() {
+        0..=3 => 1,
+        4..=7 => 2,
+        _ => 3,
+    };
+    let mut best: Option<(usize, &'a str)> = None;
+    for candidate in candidates {
+        if candidate == name {
+            return None;
+        }
+        let distance = edit_distance(&name_lower, &candidate.to_ascii_lowercase());
+        if distance <= limit && best.is_none_or(|(best_distance, _)| distance < best_distance) {
+            best = Some((distance, candidate));
+        }
+    }
+    best.map(|(_, candidate)| candidate)
+}
+
+/// Damerau-Levenshtein distance (with adjacent transpositions), so the
+/// commonest typos — one letter off or two letters swapped — count as one.
+fn edit_distance(left: &str, right: &str) -> usize {
+    let left: Vec<char> = left.chars().collect();
+    let right: Vec<char> = right.chars().collect();
+    let mut previous_previous: Vec<usize> = vec![0; right.len() + 1];
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    let mut current: Vec<usize> = vec![0; right.len() + 1];
+    for i in 1..=left.len() {
+        current[0] = i;
+        for j in 1..=right.len() {
+            let cost = usize::from(left[i - 1] != right[j - 1]);
+            current[j] = (previous[j] + 1)
+                .min(current[j - 1] + 1)
+                .min(previous[j - 1] + cost);
+            if i > 1 && j > 1 && left[i - 1] == right[j - 2] && left[i - 2] == right[j - 1] {
+                current[j] = current[j].min(previous_previous[j - 2] + 1);
+            }
+        }
+        std::mem::swap(&mut previous_previous, &mut previous);
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[right.len()]
 }
 
 fn parse_simp_tactic(line: &str) -> Result<Option<Tactic>, ParseError> {
@@ -26852,7 +27284,7 @@ mode constructive
 
 theorem bad : True := by exact nope
 "#,
-            "unknown hypothesis `nope`",
+            "unknown hypothesis or theorem `nope`",
         );
     }
 
@@ -27957,6 +28389,119 @@ theorem bad : mother(alice) = alice := by
   refl
 "#,
             "the sides are not identical",
+        );
+    }
+}
+
+/// Regression tests for the July 2026 audit's diagnostics batch (C2–C9,
+/// friction ledger item 45). Each reproduces the original misdirection and
+/// pins the wording that replaced it.
+#[cfg(test)]
+mod diagnostics_batch_tests {
+    use super::*;
+
+    fn rendered_diagnostics(source: &str) -> String {
+        format!("{:#?}", check_file(source).diagnostics)
+    }
+
+    /// Package imports are only checked with the kernel replay enabled.
+    fn rendered_with_packages(source: &str) -> String {
+        format!("{:#?}", check_file_with_hol_shadow(source).legacy.diagnostics)
+    }
+
+    fn rendered_with_nat_alias(source: &str) -> String {
+        let imports = vec![VirtualFile {
+            path: "std/nat.ctea".to_string(),
+            source: include_str!("../../../std/nat.ctea").to_string(),
+        }];
+        format!("{:#?}", check_file_with_imports(source, &imports).diagnostics)
+    }
+
+    #[test]
+    fn c2_bare_cases_explains_the_arm_skeleton() {
+        let rendered = rendered_diagnostics(
+            "theorem t (P Q : Prop) : P \\/ Q -> Q \\/ P := by\n  intro h\n  cases h\n",
+        );
+        assert!(rendered.contains("`cases h` needs its case arms"), "{rendered}");
+        assert!(!rendered.contains("unknown tactic"), "{rendered}");
+        let rendered =
+            rendered_diagnostics("theorem t (n : Nat) : add(n, 0) = n := by\n  induction n\n");
+        assert!(rendered.contains("`induction n` needs its case arms"), "{rendered}");
+    }
+
+    #[test]
+    fn c3_unknown_package_version_names_the_registry() {
+        let rendered = rendered_diagnostics("import std/hol/list@2 as L\n");
+        assert!(rendered.contains("unknown logical package `std/hol/list@2`"), "{rendered}");
+        assert!(rendered.contains("the registered version is `std/hol/list@1`"), "{rendered}");
+        assert!(!rendered.contains("No such file"), "{rendered}");
+        let rendered = rendered_diagnostics("import std/hol/graph@1 as G\n");
+        assert!(rendered.contains("registered packages are `std/hol/list@1`"), "{rendered}");
+    }
+
+    #[test]
+    fn c4_typos_get_did_you_mean() {
+        let rendered = rendered_diagnostics("theorem t (P : Prop) : P -> P := by\n  intro h\n  exatc h\n");
+        assert!(rendered.contains("unknown tactic `exatc h`; did you mean `exact`?"), "{rendered}");
+        let rendered = rendered_with_nat_alias(
+            "import std/nat.ctea\ntheorem t (n : Nat) : add(n, 0) = n := by\n  exact add_zero_rigth n\n",
+        );
+        assert!(
+            rendered.contains("unknown hypothesis or theorem `add_zero_rigth`; did you mean `add_zero_right`?"),
+            "{rendered}"
+        );
+        let rendered = rendered_diagnostics("theorem t (P : Prop) : P -> P := by\n  intro hyp\n  exact hpy\n");
+        assert!(rendered.contains("did you mean `hyp`?"), "{rendered}");
+    }
+
+    #[test]
+    fn c5_predicate_as_function_argument_is_named() {
+        let rendered = rendered_with_packages(
+            "import std/hol/list@1 as L\nimport std/hol/cardinality@1 as H\ndef Even (n : Nat) : Prop := exists k : Nat, n = add(k, k)\ntheorem t (xs : L.List Nat) : True := by\n  have h : L.Member(2, H.map(Even, xs)) := by\n    sorry\n  trivial\n",
+        );
+        assert!(rendered.contains("`Even` is a predicate, not a function"), "{rendered}");
+        assert!(!rendered.contains("unknown function `Even`"), "{rendered}");
+    }
+
+    #[test]
+    fn c6_refl_on_package_functions_names_the_computation_theorems() {
+        let rendered = rendered_with_packages(
+            "import std/hol/list@1 as F\ntheorem t : F.length(F.cons(0, F.nil)) = 1 := by\n  refl\n",
+        );
+        assert!(rendered.contains("Rewrite with the package's computation theorems"), "{rendered}");
+        assert!(rendered.contains("rewrite -> F.length_cons"), "{rendered}");
+        assert!(!rendered.contains("Use equality simplification first"), "{rendered}");
+    }
+
+    #[test]
+    fn c7_defrec_arms_accept_term_syntax_and_reject_header_assignment() {
+        let source = "data Tree\n| leaf\n| node(Tree, Nat, Tree)\n\ndefrec size (t : Tree) : Nat\n| leaf => 0\n| node(l, v, r) recl recr => succ(add(recl, recr))\n\ntheorem two : size(node(leaf, 5, leaf)) = 1 := by\n  simp\n  refl\n";
+        let result = check_file(source);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let rendered = rendered_diagnostics(
+            "data Tree\n| leaf\n| node(Tree, Nat, Tree)\n\ndefrec size (t : Tree) : Nat :=\n| leaf => 0\n| node l v r recl recr => succ(add(recl, recr))\n",
+        );
+        assert!(rendered.contains("`defrec` headers end after the result type"), "{rendered}");
+    }
+
+    #[test]
+    fn c8_misindented_arm_body_is_reported_at_the_arm() {
+        let rendered = rendered_diagnostics(
+            "theorem t (P Q : Prop) : P \\/ Q -> Q \\/ P := by\n  intro h\n  cases h with\n  | left hp =>\n  right\n  exact hp\n  | right hq =>\n      left\n      exact hq\n",
+        );
+        assert!(rendered.contains("the body of case arm `| left hp =>` is empty"), "{rendered}");
+        assert!(rendered.contains("not indented past the `|`"), "{rendered}");
+        assert!(!rendered.contains("expected `right` case arm"), "{rendered}");
+    }
+
+    #[test]
+    fn c9_bare_name_of_aliased_import_points_at_the_alias() {
+        let rendered = rendered_with_nat_alias(
+            "import std/nat.ctea as nat\ntheorem t (n m : Nat) : add(n, m) = add(m, n) := by\n  exact add_comm n m\n",
+        );
+        assert!(
+            rendered.contains("it is available as `nat.add_comm` through its import alias"),
+            "{rendered}"
         );
     }
 }
