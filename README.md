@@ -177,7 +177,9 @@ loaded once.
   including one induction hypothesis per recursive constructor argument
 - checked datatype no-confusion: distinct constructors are disjoint and
   equal applications of one constructor expose equality of corresponding
-  arguments
+  arguments; built-in Nat numerals get the same treatment, so
+  `contradiction` and `simp` refute decided-false closed equalities such
+  as `1 = 2` and `succ(n) = 0` in both engines
 - primitive recursive `defrec` definitions over `Nat` and over declared data
   types, computed by `simp` and `refl`; additional fixed parameters after the
   recursive one support binary operations such as

@@ -394,24 +394,20 @@ sides and compares. If the equation is false, no tactic can help, and
 the error shows you the computation-eye view:
 
 ```text
-error: docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides are not identical
+error: docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides compute to the different numbers 4 and 5
   note: target: add(2, 2) = 5
   note: the arithmetic statement is false when it is false outright. No proof can close it; check the statement itself.
-  help: Use equality simplification first
-    `refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.
-    try:
-      simp
-      refl
+  help: The equation is false
+    Both sides are closed numerals that compute to different values, so no tactic can prove this equality. Fix the statement rather than the proof.
 ```
 
-The goal now prints with the same decimals you wrote: `add(2, 2)` on
-the left, `5` on the right, and no way to make them equal. Two lessons.
-First, numerals still have successor structure underneath. Second, note
-that the `help:` block suggests `simp` before
-`refl` — good advice when the sides *should* compute to the same term
-and you're one simplification away, but no rescue for an equation
-that's simply false. The checker flags the failed step; deciding
-whether the statement was ever true remains your job.
+The checker did the arithmetic for you: `add(2, 2)` computes to `4`,
+the right side is `5`, and the `help:` block says exactly the thing a
+tactic error usually cannot say — the statement itself is false, so no
+sequence of tactics will ever rescue it. When you see this message,
+stop editing the proof and reread the theorem. The checker flags the
+failed step; deciding what the statement should have said remains your
+job.
 
 **Mistake 3: `have` says one thing, the proof says another.** The
 `:=` form of `have` checks the expression against the formula you

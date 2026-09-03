@@ -1345,7 +1345,7 @@
             "line": 26,
             "path": "docs/book/code/ch05-mistakes.ctea"
           },
-          "message": "theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides are not identical",
+          "message": "theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides compute to the different numbers 4 and 5",
           "notes": [
             "target: add(2, 2) = 5",
             "the arithmetic statement is false when it is false outright. No proof can close it; check the statement itself."

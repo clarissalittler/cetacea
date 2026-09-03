@@ -1555,6 +1555,14 @@ fn tactic_error_suggestions(message: &str, target: &Formula) -> Vec<DiagnosticSu
                 .to_string(),
             None,
         );
+    } else if message.contains("compute to the different numbers") {
+        push(
+            &mut suggestions,
+            "The equation is false",
+            "Both sides are closed numerals that compute to different values, so no tactic can prove this equality. Fix the statement rather than the proof."
+                .to_string(),
+            None,
+        );
     } else if message.contains("refl expects") || message.contains("refl cannot prove") {
         push(
             &mut suggestions,
@@ -11764,6 +11772,36 @@ fn normalize_formula_for_kernel(
 fn expand_data_constructor_equalities(env: &Env, ctx: &Context, formula: Formula) -> Formula {
     match formula {
         Formula::Eq(left, right) => {
+            // Built-in Nat gets the same no-confusion conversion as declared
+            // datatypes: `zero` and `succ` are disjoint, and `succ` is
+            // injective, so a false closed numeral equality such as `1 = 2`
+            // converts to `False` and `contradiction` can consume it.
+            //
+            // `succ` towers are peeled only when the comparison bottoms out
+            // at a decided `True`/`False`. An open equality such as
+            // `succ(add(k, m)) = succ(add(m, k))` is deliberately NOT
+            // identified with its peeled form: induction exercises require
+            // the student to lift an induction hypothesis through `succ`
+            // explicitly, and the ch09 mistake fixtures pin that behavior.
+            match (&left, &right) {
+                (Term::Zero, Term::Zero) => return Formula::True,
+                (Term::Zero, Term::Succ(_)) | (Term::Succ(_), Term::Zero) => {
+                    return Formula::False;
+                }
+                (Term::Succ(left_inner), Term::Succ(right_inner)) => {
+                    let expanded = expand_data_constructor_equalities(
+                        env,
+                        ctx,
+                        Formula::eq((**left_inner).clone(), (**right_inner).clone()),
+                    );
+                    return match expanded {
+                        Formula::True => Formula::True,
+                        Formula::False => Formula::False,
+                        _ => Formula::eq(left, right),
+                    };
+                }
+                _ => {}
+            }
             let Some((left_data, left_ctor, left_args)) =
                 data_constructor_application(env, ctx, &left)
             else {
@@ -12256,6 +12294,25 @@ fn simplify_data_constructor_equality(
     left: Term,
     right: Term,
 ) -> Formula {
+    // Built-in Nat mirrors datatype no-confusion: a decided-false closed
+    // numeral disagreement simplifies to `False`, while open `succ`-lifted
+    // equalities stay visible (the ch09 mistake fixtures pin that).
+    match (&left, &right) {
+        (Term::Zero, Term::Succ(_)) | (Term::Succ(_), Term::Zero) => return Formula::False,
+        (Term::Succ(left_inner), Term::Succ(right_inner)) => {
+            let peeled = simplify_data_constructor_equality(
+                env,
+                ctx,
+                (**left_inner).clone(),
+                (**right_inner).clone(),
+            );
+            if matches!(peeled, Formula::False) {
+                return Formula::False;
+            }
+            return Formula::eq(left, right);
+        }
+        _ => {}
+    }
     let Some((left_data, left_ctor, _left_args)) = data_constructor_application(env, ctx, &left)
     else {
         return Formula::eq(left, right);
@@ -17301,6 +17358,16 @@ fn run_tactic_step_inner(
                     ),
                     Formula::False
                 ) {
+                    // Closed numerals get arithmetic wording; leave the
+                    // datatype wording for genuine constructor confusion.
+                    if let (Some(left_value), Some(right_value)) = (
+                        term_decimal_value(&norm_left),
+                        term_decimal_value(&norm_right),
+                    ) {
+                        return Err(TacticError::new(format!(
+                            "refl cannot prove `{left} = {right}` because the sides compute to the different numbers {left_value} and {right_value}"
+                        )));
+                    }
                     return Err(TacticError::new(format!(
                         "refl cannot prove `{left} = {right}` because they use distinct datatype constructors"
                     )));
@@ -20560,6 +20627,68 @@ theorem add_zero_right (n : Nat) : add(n, 0) = n := by
         assert_eq!(report.attempted_declarations, 1);
         assert_eq!(report.checked_declarations.len(), 1);
         assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+    }
+
+    /// Closed constructor and numeral disequalities convert to `False` in
+    /// both engines, so `contradiction` (and a direct `exact`) can refute
+    /// `1 = 2`, `succ(n) = 0`, and datatype constructor confusion — while an
+    /// OPEN `succ`-lifted equality is deliberately NOT identified with its
+    /// peeled form, so an induction hypothesis still cannot close the
+    /// `succ` case by itself (the ch09 mistake fixture behavior).
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn closed_equality_refutation_matches_in_both_engines() {
+        let source = r#"
+mode constructive
+
+theorem one_ne_two : 1 = 2 -> False := by
+  intro h
+  contradiction
+
+theorem one_ne_two_exact : 1 = 2 -> False := by
+  intro h
+  exact h
+
+theorem open_succ_zero (n : Nat) : succ(n) = 0 -> False := by
+  intro h
+  contradiction
+
+data Signal
+| stop_signal
+| go_signal
+
+theorem signal_confusion : stop_signal = go_signal -> False := by
+  intro h
+  contradiction
+"#;
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "unexpected diagnostics: {:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
+        assert_eq!(report.theorems.len(), 4);
+
+        let open_lift = check_file(
+            r#"
+mode constructive
+
+theorem ih_cannot_close_succ_case (n m : Nat) :
+  add(n, m) = add(m, n) -> succ(add(n, m)) = add(m, succ(n)) := by
+  intro ih
+  exact ih
+"#,
+        );
+        assert!(
+            open_lift
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("does not solve the goal")),
+            "open succ-lifted equality must not be closed by the unlifted \
+             hypothesis: {:#?}",
+            open_lift.diagnostics
+        );
     }
 
     #[cfg(feature = "hol-shadow")]

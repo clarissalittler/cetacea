@@ -16,14 +16,16 @@ use crate::{
     ParamKind, PredicateArg, SchemaSubst, Term, TermDef, Type,
 };
 
-use super::inductive::{InductiveConstructorSpec, InductiveFieldType, InductiveSpec};
+use super::inductive::{
+    InductiveConstructorSpec, InductiveFieldType, InductiveSignature, InductiveSpec,
+};
 use super::library_registry::{
     HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary, InstalledListLibrary,
     LibraryPackageId,
 };
 use super::lowering::{CompatibilityLowerer, LoweringError};
 use super::prelude::CompatibilityPrelude;
-use super::proofs::HolDraftProof;
+use super::proofs::{shift_proof_hypotheses, HolDraftProof};
 use super::recursion::{StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
 use super::terms::{
@@ -2479,12 +2481,21 @@ impl LegacyProofLowerer<'_> {
                 let proof_false = match normalized_false {
                     CoreTerm::Falsity => proof_false.proof,
                     // The legacy kernel treats equality between distinct
-                    // constructors as conversion to `False`. HOL keeps
-                    // no-confusion explicit, so replay that conversion with
-                    // the checked constructor-disjointness rule.
-                    CoreTerm::Equality { .. } => HolDraftProof::ConstructorDisjoint {
-                        proof_equality: Box::new(proof_false.proof),
-                    },
+                    // constructors as conversion to `False`, peeling
+                    // matching single-field constructor layers (Nat `succ`
+                    // towers in particular) first. HOL keeps no-confusion
+                    // explicit, so replay that chain with the checked
+                    // injectivity and constructor-disjointness rules.
+                    CoreTerm::Equality {
+                        ref left,
+                        ref right,
+                        ..
+                    } => constructor_falsity_proof(
+                        self.environment.core.inductives(),
+                        proof_false.proof.clone(),
+                        left,
+                        right,
+                    ),
                     _ => {
                         return Err(LoweringError::new(
                             "false elimination needs a proof of falsity",
@@ -3360,9 +3371,51 @@ impl LegacyProofLowerer<'_> {
             (CoreTerm::Equality { .. }, CoreTerm::Truth) => {
                 Ok(Some(retain_result(HolDraftProof::TruthIntro)))
             }
-            (CoreTerm::Equality { .. }, CoreTerm::Falsity) => {
-                Ok(Some(HolDraftProof::ConstructorDisjoint {
-                    proof_equality: Box::new(proof),
+            (CoreTerm::Equality { left, right, .. }, CoreTerm::Falsity) => {
+                Ok(Some(constructor_falsity_proof(
+                    self.environment.core.inductives(),
+                    proof,
+                    left,
+                    right,
+                )))
+            }
+            (
+                CoreTerm::Implies(source_premise, source_conclusion),
+                CoreTerm::Implies(target_premise, target_conclusion),
+            ) => {
+                // Legacy normalization also converts below implications
+                // (for example `1 = 2 -> False` against a proof of
+                // `1 = 2 -> 1 = 2`). Reconstruct with an eta-expansion:
+                // convert the target premise back to the source premise,
+                // apply the original implication, and convert its
+                // conclusion forward. The original proof moves under one
+                // new hypothesis binder, so its free hypothesis indices
+                // shift up by one.
+                let Some(argument) = self.lower_no_confusion_conversion(
+                    HolDraftProof::Hypothesis(0),
+                    target_premise,
+                    source_premise,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let shifted =
+                    shift_proof_hypotheses(self.environment.core.inductives(), &proof, 1, 0)
+                        .map_err(|error| LoweringError::new(error.to_string()))?;
+                let Some(body) = self.lower_no_confusion_conversion(
+                    HolDraftProof::ImpElim {
+                        proof_implication: Box::new(shifted),
+                        proof_argument: Box::new(argument),
+                    },
+                    source_conclusion,
+                    target_conclusion,
+                )?
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(HolDraftProof::ImpIntro {
+                    premise: (**target_premise).clone(),
+                    body: Box::new(body),
                 }))
             }
             (CoreTerm::Falsity, _) => Ok(Some(HolDraftProof::FalseElim {
@@ -4082,6 +4135,62 @@ fn collect_unbound_core_terms_postorder(term: &CoreTerm, terms: &mut Vec<CoreTer
         }
     }
     terms.push(term.clone());
+}
+
+/// Replay the legacy kernel's conversion of a constructor equality to
+/// `False`: peel matching single-field constructor layers with the checked
+/// injectivity rule, then finish with constructor disjointness on the first
+/// disagreeing heads.
+fn constructor_falsity_proof(
+    inductives: &InductiveSignature,
+    proof: HolDraftProof,
+    left: &CoreTerm,
+    right: &CoreTerm,
+) -> HolDraftProof {
+    let mut proof = proof;
+    let mut left = left.clone();
+    let mut right = right.clone();
+    while let (Some((left_ctor, left_field)), Some((right_ctor, right_field))) = (
+        single_field_constructor_application(inductives, &left),
+        single_field_constructor_application(inductives, &right),
+    ) {
+        if left_ctor != right_ctor {
+            break;
+        }
+        proof = HolDraftProof::ConstructorInjective {
+            proof_equality: Box::new(proof),
+            field: 0,
+        };
+        left = left_field;
+        right = right_field;
+    }
+    HolDraftProof::ConstructorDisjoint {
+        proof_equality: Box::new(proof),
+    }
+}
+
+/// View a core term as a fully applied single-field inductive constructor,
+/// returning the constructor and its one field. Used to replay the legacy
+/// kernel's injectivity peeling (Nat `succ` towers in particular) when a
+/// constructor-equality conversion ends in `False`.
+fn single_field_constructor_application(
+    inductives: &InductiveSignature,
+    term: &CoreTerm,
+) -> Option<(ConstantId, CoreTerm)> {
+    let (head, argument) = match term {
+        CoreTerm::Apply { function, argument } => (function.as_ref(), argument.as_ref()),
+        _ => return None,
+    };
+    let constructor = match head {
+        CoreTerm::Constant(id) => *id,
+        CoreTerm::TypeApplication { constant, .. } => *constant,
+        _ => return None,
+    };
+    let (_, metadata) = inductives.constructor_declaration(constructor)?;
+    if metadata.field_types.len() != 1 {
+        return None;
+    }
+    Some((constructor, argument.clone()))
 }
 
 #[cfg(test)]

@@ -2016,6 +2016,189 @@ pub(crate) fn validate_draft_proof_type_scheme(
     }
 }
 
+/// Shift every free proof-hypothesis index at or above `cutoff` up by
+/// `amount`, so an already-lowered proof can be embedded under new
+/// hypothesis binders (compatibility conversions wrap proofs in
+/// `ImpIntro` when reconstructing implication conversions).
+///
+/// Hypothesis binders follow the checker exactly: `ImpIntro` and
+/// `ByContradiction` bind one assumption in their body, `OrElim` binds one
+/// in each case, `ExistsElim` binds one in its body, and an `Induction`
+/// case binds one induction hypothesis per recursive field of its
+/// constructor (cases are in declaration order). Term binders do not affect
+/// hypothesis indices.
+pub(super) fn shift_proof_hypotheses(
+    inductives: &InductiveSignature,
+    proof: &HolDraftProof,
+    amount: u32,
+    cutoff: u32,
+) -> Result<HolDraftProof, ProofError> {
+    let recurse =
+        |proof: &HolDraftProof| shift_proof_hypotheses(inductives, proof, amount, cutoff);
+    let under = |proof: &HolDraftProof, binders: u32| {
+        shift_proof_hypotheses(inductives, proof, amount, cutoff + binders)
+    };
+    Ok(match proof {
+        HolDraftProof::Hypothesis(index) => {
+            if *index >= cutoff {
+                HolDraftProof::Hypothesis(index.checked_add(amount).ok_or_else(|| {
+                    ProofError::new("proof hypothesis index overflow during shifting")
+                })?)
+            } else {
+                HolDraftProof::Hypothesis(*index)
+            }
+        }
+        HolDraftProof::TheoremRef { .. }
+        | HolDraftProof::TruthIntro
+        | HolDraftProof::EqualityRefl(_)
+        | HolDraftProof::ExcludedMiddle { .. }
+        | HolDraftProof::Sorry { .. } => proof.clone(),
+        HolDraftProof::FalseElim { proof_false, target } => HolDraftProof::FalseElim {
+            proof_false: Box::new(recurse(proof_false)?),
+            target: target.clone(),
+        },
+        HolDraftProof::AndIntro(left, right) => {
+            HolDraftProof::AndIntro(Box::new(recurse(left)?), Box::new(recurse(right)?))
+        }
+        HolDraftProof::AndElimLeft(inner) => {
+            HolDraftProof::AndElimLeft(Box::new(recurse(inner)?))
+        }
+        HolDraftProof::AndElimRight(inner) => {
+            HolDraftProof::AndElimRight(Box::new(recurse(inner)?))
+        }
+        HolDraftProof::OrIntroLeft { proof_left, right } => HolDraftProof::OrIntroLeft {
+            proof_left: Box::new(recurse(proof_left)?),
+            right: right.clone(),
+        },
+        HolDraftProof::OrIntroRight { left, proof_right } => HolDraftProof::OrIntroRight {
+            left: left.clone(),
+            proof_right: Box::new(recurse(proof_right)?),
+        },
+        HolDraftProof::OrElim {
+            proof_or,
+            left_case,
+            right_case,
+            target,
+        } => HolDraftProof::OrElim {
+            proof_or: Box::new(recurse(proof_or)?),
+            left_case: Box::new(under(left_case, 1)?),
+            right_case: Box::new(under(right_case, 1)?),
+            target: target.clone(),
+        },
+        HolDraftProof::ImpIntro { premise, body } => HolDraftProof::ImpIntro {
+            premise: premise.clone(),
+            body: Box::new(under(body, 1)?),
+        },
+        HolDraftProof::ImpElim {
+            proof_implication,
+            proof_argument,
+        } => HolDraftProof::ImpElim {
+            proof_implication: Box::new(recurse(proof_implication)?),
+            proof_argument: Box::new(recurse(proof_argument)?),
+        },
+        HolDraftProof::EqualityElim {
+            proof_equality,
+            motive,
+            proof_left,
+        } => HolDraftProof::EqualityElim {
+            proof_equality: Box::new(recurse(proof_equality)?),
+            motive: motive.clone(),
+            proof_left: Box::new(recurse(proof_left)?),
+        },
+        HolDraftProof::ConstructorDisjoint { proof_equality } => {
+            HolDraftProof::ConstructorDisjoint {
+                proof_equality: Box::new(recurse(proof_equality)?),
+            }
+        }
+        HolDraftProof::ConstructorInjective {
+            proof_equality,
+            field,
+        } => HolDraftProof::ConstructorInjective {
+            proof_equality: Box::new(recurse(proof_equality)?),
+            field: *field,
+        },
+        HolDraftProof::ForallIntro { domain, body } => HolDraftProof::ForallIntro {
+            domain: domain.clone(),
+            body: Box::new(recurse(body)?),
+        },
+        HolDraftProof::ForallElim {
+            proof_forall,
+            argument,
+        } => HolDraftProof::ForallElim {
+            proof_forall: Box::new(recurse(proof_forall)?),
+            argument: argument.clone(),
+        },
+        HolDraftProof::ExistsIntro {
+            domain,
+            body,
+            witness,
+            proof_body,
+        } => HolDraftProof::ExistsIntro {
+            domain: domain.clone(),
+            body: body.clone(),
+            witness: witness.clone(),
+            proof_body: Box::new(recurse(proof_body)?),
+        },
+        HolDraftProof::ExistsElim {
+            proof_exists,
+            body,
+            target,
+        } => HolDraftProof::ExistsElim {
+            proof_exists: Box::new(recurse(proof_exists)?),
+            body: Box::new(under(body, 1)?),
+            target: target.clone(),
+        },
+        HolDraftProof::Induction {
+            datatype,
+            type_arguments,
+            motive,
+            scrutinee,
+            cases,
+        } => {
+            let declaration = inductives.declaration(*datatype).ok_or_else(|| {
+                ProofError::new(
+                    "hypothesis shifting requires the induction datatype declaration",
+                )
+            })?;
+            if declaration.constructors.len() != cases.len() {
+                return Err(ProofError::new(
+                    "hypothesis shifting found an induction case count mismatch",
+                ));
+            }
+            let cases = declaration
+                .constructors
+                .iter()
+                .zip(cases)
+                .map(|(constructor, case)| {
+                    let binders = u32::try_from(constructor.recursive_fields.len())
+                        .map_err(|_| ProofError::new("too many recursive fields"))?;
+                    under(case, binders)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            HolDraftProof::Induction {
+                datatype: *datatype,
+                type_arguments: type_arguments.clone(),
+                motive: motive.clone(),
+                scrutinee: scrutinee.clone(),
+                cases,
+            }
+        }
+        HolDraftProof::DoubleNegationElim {
+            proposition,
+            proof_not_not,
+        } => HolDraftProof::DoubleNegationElim {
+            proposition: proposition.clone(),
+            proof_not_not: Box::new(recurse(proof_not_not)?),
+        },
+        HolDraftProof::ByContradiction { proposition, body } => {
+            HolDraftProof::ByContradiction {
+                proposition: proposition.clone(),
+                body: Box::new(under(body, 1)?),
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
