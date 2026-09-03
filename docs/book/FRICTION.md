@@ -363,8 +363,17 @@ below. Several were fixed the same day; the fixes are noted inline.
     preserved for error spans), and glued forms like `bytrivial` are
     rejected at parse time instead of parsing as an empty proof.
 
-41. **Open, high impact: no user recursion over the imported generic
-    `List`, and no fold/sum in any package.** `defrec sum_list (l :
+41. **Resolved 2026-09-03.** `defrec` now recurses over an imported
+    package datatype applied to concrete type arguments (`C.List Nat`),
+    with bare-leaf or alias-qualified constructor arms, fixed parameters,
+    and package-typed results; the definition is certified by the HOL
+    kernel as a structural definition over the package inductive. A user
+    `sum_list` fold and `sum_list(append(xs, ys)) = add(sum_list(xs),
+    sum_list(ys))` by induction both check (`docs/hol/examples/
+    list_fold_sum.ctea`; tests `defrec_*_package_list_*` in `lib.rs`), so a
+    package-level fold/sum export is no longer needed for the handshake
+    vertical. Original entry: no user recursion over the imported generic
+    `List`, and no fold/sum in any package. `defrec sum_list (l :
     C.List Nat) : Nat` is rejected (recursion is limited to `Nat` and
     locally declared `data` types), so degree sums and edge counts — the
     roadmap's own handshake vertical — cannot be expressed against the
