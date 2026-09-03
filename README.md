@@ -37,7 +37,10 @@ compatibility, and argument type compatibility.
   `Injective`, `Surjective`, identity-function theorems, and composition
   theorems.
 - `std/hol/counting.ctea`: checked set-relative finite-size evidence and
-  reusable List counting lemmas over the versioned logical List package.
+  reusable List counting lemmas over the versioned logical List package,
+  including disjoint-union addition and the union upper bound.
+- `std/hol/pigeonhole.ctea`: the checked constructive pigeonhole principle
+  and its propositional-injectivity map lemmas over `HasCard`.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
 - `examples/fol_advanced.ctea`: harder first-order examples — quantifier

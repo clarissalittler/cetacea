@@ -6074,6 +6074,15 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
+          "name": "succ_not_le_self",
+          "statement": "not le(succ(n), n)",
+          "status": "accepted",
+          "uses_sorry": false
+        },
+        {
+          "axiom_deps": [],
+          "is_axiom": false,
+          "mode": "constructive",
           "name": "le_refl",
           "statement": "le(n, n)",
           "status": "accepted",
@@ -6125,7 +6134,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "ad76c82598e0072ef6918cebff42ea37bc3b8b29eee2a1b02e10e7d33b7c5e68"
+      "source_sha256": "31fa8b10b5dc1128e0edc99cdefd44e97dda125c1ada4b1b2e08919a69bca14d"
     },
     {
       "diagnostics": [],
@@ -6676,7 +6685,7 @@
   "format_version": 1,
   "summary": {
     "declaration_statuses": {
-      "accepted": 483,
+      "accepted": 484,
       "incomplete": 81,
       "trusted_axiom": 24
     },
@@ -6685,6 +6694,6 @@
     "negative_files": 13,
     "negative_theorems": 38,
     "positive_files": 61,
-    "root_declarations": 588
+    "root_declarations": 589
   }
 }

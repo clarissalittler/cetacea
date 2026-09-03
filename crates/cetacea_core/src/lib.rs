@@ -20720,8 +20720,8 @@ theorem ih_cannot_close_succ_case (n m : Nat) :
             report.legacy.diagnostics
         );
         assert!(report.is_match(), "mismatches: {:#?}", report.mismatches);
-        assert_eq!(report.attempted_declarations, 31);
-        assert_eq!(report.theorems.len(), 30);
+        assert_eq!(report.attempted_declarations, 32);
+        assert_eq!(report.theorems.len(), 31);
         assert!(report.theorems.iter().any(|theorem| {
             theorem.name == "mul_succ_right"
                 && theorem.features.contains(&hol::ProofFeature::Induction)

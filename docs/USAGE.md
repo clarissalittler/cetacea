@@ -175,7 +175,8 @@ http://localhost:8000/web/
 The browser build embeds the standard library for virtual imports, so tutorial
 sources can still use imports such as `import std/prelude.ctea`,
 `import std/qualified_prelude.ctea`, or `import ../../../std/prelude.ctea`.
-The checked `std/hol/counting.ctea` source module is embedded too.
+The checked `std/hol/counting.ctea` and `std/hol/pigeonhole.ctea` source
+modules are embedded too.
 It also accepts exact versioned logical imports such as
 `import std/hol/list@1 as L`, `import std/hol/finite@1 as F`, and
 `import std/hol/cardinality@1 as C`. A browser check

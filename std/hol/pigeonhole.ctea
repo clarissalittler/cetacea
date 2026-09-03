@@ -1,0 +1,134 @@
+-- Checked constructive pigeonhole principle over the versioned logical
+-- packages.
+--
+-- This source module is the staging surface for a future versioned
+-- pigeonhole package.  It reuses the counting module's inclusion bound and
+-- the finite/cardinality packages' `HasCard` and `map` interfaces, adding
+-- only the propositional-injectivity lemmas the packages do not export.
+
+import ../nat.ctea
+import counting.ctea as F
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as F
+
+mode constructive
+
+-- A member of a mapped list has a preimage in the source list.  Unlike
+-- `F.member_map_reverse`, no inverse function witness is required.
+theorem member_map_preimage
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (y : B) :
+  F.Member(y, F.map(f, xs)) ->
+  exists x : A, F.Member(x, xs) /\ f(x) = y := by
+  induction xs with
+  | nil =>
+      intro member_y
+      exfalso
+      apply F.member_nil {A := B; x := y}
+      rewrite <- F.map_nil {A := A; B := B; f := f}
+      exact member_y
+  | cons h t ih =>
+      intro member_y
+      have member_cases : y = f(h) \/ F.Member(y, F.map(f, t)) := by
+        apply (F.member_cons {
+          A := B; x := y; h := f(h); t := F.map(f, t)
+        }).left
+        rewrite <- F.map_cons {
+          A := A; B := B; f := f; h := h; t := t
+        }
+        exact member_y
+      cases member_cases with
+      | left y_fh =>
+          exists h
+          split
+          apply (F.member_cons {A := A; x := h; h := h; t := t}).right
+          left
+          refl
+          rewrite -> y_fh
+          refl
+      | right y_in_map_t =>
+          cases ih y_in_map_t with
+          | intro x witness =>
+              exists x
+              split
+              apply (F.member_cons {A := A; x := x; h := h; t := t}).right
+              right
+              exact witness.left
+              exact witness.right
+
+-- Mapping by a propositionally injective function preserves
+-- duplicate-freedom.  Unlike `F.nodup_map_injective`, injectivity is a
+-- premise rather than a left-inverse function witness.
+theorem nodup_map_of_injective
+  (A : Type) (B : Type) (f : A -> B) (xs : F.List A) :
+  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->
+  F.Nodup(xs) ->
+  F.Nodup(F.map(f, xs)) := by
+  induction xs with
+  | nil =>
+      intro injective
+      intro nodup_xs
+      rewrite -> F.map_nil {A := A; B := B; f := f}
+      exact F.nodup_nil {A := B}
+  | cons h t ih =>
+      intro injective
+      intro nodup_xs
+      have nodup_parts : (F.Member(h, t) -> False) /\ F.Nodup(t) := by
+        apply (F.nodup_cons {A := A; h := h; t := t}).left
+        exact nodup_xs
+      rewrite -> F.map_cons {A := A; B := B; f := f; h := h; t := t}
+      apply (F.nodup_cons {
+        A := B; h := f(h); t := F.map(f, t)
+      }).right
+      split
+      intro fh_in_tail
+      have preimage : exists x : A, F.Member(x, t) /\ f(x) = f(h) := by
+        exact member_map_preimage {
+          A := A; B := B; f := f; xs := t; y := f(h)
+        } fh_in_tail
+      cases preimage with
+      | intro x witness =>
+          apply nodup_parts.left
+          have x_h : x = h := injective x h witness.right
+          rewrite <- x_h
+          exact witness.left
+      apply ih injective
+      exact nodup_parts.right
+
+-- The pigeonhole principle: succ(n) pigeons cannot map injectively into n
+-- holes.  Consuming the function argument keeps this in the `hol` fragment.
+theorem pigeonhole
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (ys : F.List B) (n : Nat) :
+  F.HasCard(xs, succ(n)) ->
+  F.HasCard(ys, n) ->
+  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->
+  False := by
+  intro source_cardinality
+  intro target_cardinality
+  intro injective
+  have mapped_nodup : F.Nodup(F.map(f, xs)) := by
+    apply nodup_map_of_injective {A := A; B := B; f := f; xs := xs}
+    exact injective
+    exact F.has_card_nodup {
+      A := A; xs := xs; n := succ(n)
+    } source_cardinality
+  have mapped_in_target : forall y : B, F.Member(y, F.map(f, xs)) -> F.Member(y, ys) := by
+    intro y
+    intro y_in_map
+    exact F.has_card_coverage {
+      A := B; xs := ys; n := n
+    } target_cardinality y
+  have bad_order : le(F.length(F.map(f, xs)), F.length(ys)) := by
+    apply F.nodup_inclusion_length_le {A := B; xs := F.map(f, xs)} ys
+    exact mapped_nodup
+    exact mapped_in_target
+  apply succ_not_le_self n
+  rewrite <- F.has_card_length {
+    A := A; xs := xs; n := succ(n)
+  } source_cardinality
+  rewrite <- F.has_card_length {
+    A := B; xs := ys; n := n
+  } target_cardinality
+  rewrite <- F.map_length {A := A; B := B; f := f; xs := xs}
+  exact bad_order

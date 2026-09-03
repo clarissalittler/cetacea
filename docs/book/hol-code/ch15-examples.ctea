@@ -210,14 +210,8 @@ theorem nodup_map_of_injective
       apply ih injective
       exact nodup_parts.right
 
-theorem succ_not_le_self (n : Nat) : le(succ(n), n) -> False := by
-  induction n with
-  | zero =>
-      exact succ_not_le_zero 0
-  | succ k ih =>
-      intro bad_order
-      apply ih
-      exact le_succ_succ {n := succ(k); m := k} bad_order
+-- The small impossibility lemma `succ_not_le_self` is imported from
+-- std/nat.ctea at the top of this file.
 
 -- The generic pigeonhole principle in constructive negative form: an
 -- injection from n+1 enumerated values into n enumerated values is impossible.

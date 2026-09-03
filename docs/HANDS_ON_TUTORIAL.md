@@ -452,9 +452,12 @@ The exact packages currently exposed are:
   membership support, and cardinality transport.
 
 The counting source module adds set-relative `HasSize`, member removal,
-inclusion bounds, and append membership. It remains source-visible while the
-decidable-overlap interface and source-to-`@1` publication mechanism are still
-being designed.
+inclusion bounds, append membership, disjoint-union size addition
+(`has_size_union_disjoint`), and the union upper bound (`has_size_union_le`).
+It remains source-visible while the decidable-overlap interface and
+source-to-`@1` publication mechanism are still being designed. The pigeonhole
+source module (`std/hol/pigeonhole.ctea`) builds the checked `pigeonhole`
+theorem over `HasCard` in the same style.
 
 Namespaces qualify declarations written in one file:
 

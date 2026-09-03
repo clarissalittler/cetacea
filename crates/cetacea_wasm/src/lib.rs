@@ -190,6 +190,10 @@ fn standard_imports() -> Vec<VirtualFile> {
             include_str!("../../../std/hol/counting.ctea"),
         ),
         (
+            "std/hol/pigeonhole.ctea",
+            include_str!("../../../std/hol/pigeonhole.ctea"),
+        ),
+        (
             "std/modular.ctea",
             include_str!("../../../std/modular.ctea"),
         ),
