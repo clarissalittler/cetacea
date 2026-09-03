@@ -421,9 +421,11 @@ fragment-receipt ideas.
 
 ### Phase H4 — compatibility elaborator
 
-Status: **H4 shadow exit gate passed; default cutover is not yet authorized.**
-The production command/import driver now has an opt-in, non-authoritative HOL
-sidecar. It receives the same canonical declarations that the legacy checker
+Status: **H4 shadow exit gate passed; superseded by the H7 cutover on
+2026-09-03** (see [`hol/H7_DECISION.md`](hol/H7_DECISION.md)), under which the
+HOL replay decides acceptance for every check. The description below records
+the H4 checkpoint as it stood. The production command/import driver gained an
+opt-in, non-authoritative HOL sidecar. It receives the same canonical declarations that the legacy checker
 has accepted, preserves aliases and declaration order, and reports any lowering
 or receipt disagreement separately. `python3 scripts/hol_shadow.py check`
 currently matches all 74 corpus files and all 588 root theorem/axiom receipts,
@@ -892,7 +894,13 @@ machinery in FOL units.
 
 ### Phase H7 — cutover or coexistence
 
-After a pilot, choose one:
+Status: **decided 2026-09-03 — the HOL core is the kernel; the legacy checker
+is the untrusted elaborator.** Native and browser checks are accepted only when
+the HOL replay certifies them, `--legacy-only` is a debugging opt-out that never
+certifies, and no new semantics are to be added to the legacy kernel. The
+record, the audit that preceded it, and the remaining steps (stop adding
+legacy semantics; delete `check_kernel_proof_node` and the shadow twins) are in
+[`hol/H7_DECISION.md`](hol/H7_DECISION.md). The original options:
 
 - replace the old kernel once semantic and performance parity is demonstrated;
 - keep the FOL checker as a small independent engine if it remains materially

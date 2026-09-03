@@ -86,14 +86,19 @@ cargo run -p cetacea_cli -- --strict --json path/to/submission.ctea
 `--deny-sorry`, `--deny-axioms`, and `--deny-classical` policies can be composed
 when a course needs a different trust or logic boundary.
 
-Exact logical imports such as `import std/hol/list@1 as L` and
-`import std/hol/finite@1 as F` or `import std/hol/cardinality@1 as C`
-automatically select fail-closed dual checking
-in the native CLI. The file is accepted only when the teaching checker and HOL
-replay both succeed, including when the package import is reached through
-another source file. The finite package exposes its checked List dependency
-under the same alias. `--hol-shadow` remains available to force the same
-certification for package-free files. The cardinality package exposes checked
+Every check is certified by the HOL kernel (the H7 cutover, see
+[`docs/hol/H7_DECISION.md`](docs/hol/H7_DECISION.md)): the teaching checker
+elaborates proofs, explains goals, and produces diagnostics, and the HOL
+replay decides acceptance. A declaration the teaching checker accepts but the
+kernel cannot replay is reported as a failed declaration and the file is not
+certified. `--legacy-only` runs the teaching checker alone for debugging and
+never certifies a file; it is refused together with `--hol-profile` or
+`--assignment`, which need kernel receipts. Exact logical imports such as
+`import std/hol/list@1 as L`, `import std/hol/finite@1 as F`, or
+`import std/hol/cardinality@1 as C` are checked by the kernel even under
+`--legacy-only`, including when the package import is reached through another
+source file. The finite package exposes its checked List dependency under the
+same alias. The cardinality package exposes checked
 `map`, `map_nil`, `map_cons`, `map_length`, membership transport,
 injective-Nodup, surjective coverage, and the final `cardinality_transport`
 theorem. Because `map` consumes a function argument, its uses are honestly

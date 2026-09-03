@@ -1,10 +1,12 @@
-//! Experimental constructive HOL core.
+//! Constructive HOL core: the kernel since the H7 cutover.
 //!
-//! This module is developed in parallel with the legacy checker. The production
-//! command/import driver can now replay every legacy-accepted declaration into
-//! this core through the opt-in HOL shadow API. The exact H4 corpus gate passes,
-//! but the legacy checker remains authoritative until an explicit cutover
-//! decision; a shadow mismatch never changes legacy acceptance.
+//! The legacy checker in the crate root elaborates surface proofs, produces
+//! goals, diagnostics and countermodels, and is not trusted. Every declaration
+//! it accepts is replayed into this core through the `*_with_hol_shadow`
+//! entry points, and [`crate::HolShadowReport::certified`] turns any replay
+//! failure into a rejected declaration. The trusted modules are the ones
+//! listed in `scripts/check_kernel_boundary.py`; see
+//! `docs/hol/H7_DECISION.md` for the decision record and what remains.
 
 pub mod declarations;
 pub mod finite_library;

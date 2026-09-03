@@ -76,13 +76,17 @@ and dependency; `--json` adds `hol_policy` and `hol_policy_violations`. Ordinary
 package-free checking without `--hol-profile` is unchanged, and this migration
 policy is not yet exposed by the browser build.
 
-An exact logical import such as `import std/hol/list@1 as L` automatically
-selects fail-closed dual checking in native check mode, including when the
-logical import occurs in a transitively imported file. No `--hol-shadow` flag
-is required: the result succeeds only if ordinary checking and every HOL replay
-agree. `--json` then includes the same package, receipt, fragment, feature, and
-dependency metadata as an explicitly requested shadow check. The flag remains
-useful to force this analysis for a package-free file.
+Every native check is certified by the HOL kernel: the teaching checker
+elaborates and explains, the HOL replay decides acceptance, and the result
+succeeds only if ordinary checking and every HOL replay agree. A declaration
+the teaching checker accepted but the kernel could not replay is reported as
+`failed kernel certification` and the file is not certified. `--json` always
+includes the package, receipt, fragment, feature, and dependency metadata.
+`--legacy-only` runs the teaching checker alone for debugging; it prints a
+`Not certified` line, cannot be combined with `--hol-profile` or
+`--assignment`, and still hands files with an exact logical import such as
+`import std/hol/list@1 as L` to the kernel, since only the kernel can check
+them. `--hol-shadow` is accepted for older scripts and is now the default.
 
 For grading, `--assignment PATH` loads a versioned instructor manifest instead
 of accepting policy permissions on the command line. It can fix the profile,
@@ -122,13 +126,13 @@ Use `m` to open the command menu, `F2` for the theorem outline, `F3` for
 theorem search, `F4` for proof explanations, `F5` for diagnostics, `Ctrl-S` to
 save, `Ctrl-R` to reload from disk, and `Ctrl-Q` to quit.
 
-The native TUI and line shell automatically use HOL-certified editor analysis
-for a root or transitive logical package import. TUI buffer refreshes can enter
-or leave that mode as imports are edited. Both editors can also opt a
-package-free file into that analysis with `--hol-shadow`:
+The native TUI and line shell use HOL-certified editor analysis by default;
+under `--legacy-only` they fall back to the teaching checker alone except for
+files with a root or transitive logical package import, and TUI buffer
+refreshes can enter or leave kernel analysis as such imports are edited:
 
 ```sh
-cargo run -p cetacea_cli -- --hol-shadow --tui examples/prop.ctea
+cargo run -p cetacea_cli -- --tui examples/prop.ctea
 ```
 
 When enabled, each goal or explanation analysis classifies the theorem's full
@@ -136,8 +140,7 @@ signature before stepping its proof, displays the certified `prop`, `fol`,
 `fol+induction`, or `hol` fragment, and offers bounded countermodel hints only
 when that fragment licenses the corresponding search. This is an experimental
 analysis aid, not assignment enforcement: `--hol-profile`, `--assignment`, and
-the policy flags remain check-mode options. Without either a logical import or
-`--hol-shadow`, native editor behavior is unchanged. The browser editor always
+the policy flags remain check-mode options. The browser editor always
 uses the fail-closed dual-checking sidecar for full-file checks and
 package-aware goal analysis; browser assignment-manifest enforcement remains
 separate work.
