@@ -298,6 +298,16 @@ files, including expected negative declarations and quoted documentation.
 
 ### Phase H1 — extract the current kernel boundary
 
+Status: **deferred; this paragraph records that decision retroactively (July
+2026 audit).** The module extraction below was never performed, and H2–H6
+proceeded against the unsplit legacy checker. `crates/cetacea_core/src/lib.rs`
+still holds the parser, tactic engine, and legacy kernel together (27,300
+lines as of 2026-07), while `kernel.rs` is a 41-line facade over it.
+`scripts/check_kernel_boundary.py` guards only that facade plus the six
+trusted `hol/` modules; the legacy kernel that remains authoritative for every
+package-free file is not boundary-guarded. This phase's exit gate has not been
+met.
+
 - Split modules along the target dependency direction without changing the old
   `Type`, `Term`, `Formula`, or proof semantics.
 - Replace broad `&Env` access in kernel code with a minimal read-only
@@ -831,7 +841,10 @@ tutorial, now covers 92 `.ctea` files. The next theorem-sized pressure test is
 the handshake lemma, preceded by an explicit decidable equality/membership
 decision for constructive finite-set operations. All 453 workspace tests pass;
 release artifacts measure 1,815,032 bytes natively and 1,309,239 bytes in raw
-Wasm.
+Wasm. As of 2026-07, the six boundary-guarded trusted HOL modules total about
+5,484 pre-test lines, up from the roughly 3,713 that made H3's “trusted core
+remains auditable” criterion only a conditional pass; that judgment has not
+been revisited against the larger figure.
 
 - Introduce parameterized `List A`, finite enumeration, generic relation and
   graph libraries. The checked list substrate and versioned production-facing

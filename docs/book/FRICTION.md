@@ -298,6 +298,125 @@ edges.
     projected proofs would remove incidental formatting work from otherwise
     routine counting arguments.
 
+## Surfaced by the July 2026 audit
+
+A hands-on audit (fresh student-style proving, adversarial diagnostics
+probes, a grading-surface review, and a design-doc cross-check; full record
+in [`../hol/AUDIT_2026-07.md`](../hol/AUDIT_2026-07.md)) added the entries
+below. Several were fixed the same day; the fixes are noted inline.
+
+36. **Resolved: assignment manifests compared signatures as surface text,
+    so a submission could fake the alias spelling.** A file that never
+    imported the graded package could declare `namespace F`, a fake
+    `HasCard := True`, and earn full credit from
+    `finite_traffic.ctea-assignment` with `trivial`. Required-theorem
+    signatures are now canonical: binders print positionally (`?0`, `?1`,
+    ...) and package references print as stable package-qualified
+    identities (`std/hol/list@1.cons`), so source-local imitations cannot
+    match. A `required_imports` manifest key adds the lower bound: the
+    graded packages must actually be imported. Shipped manifests were
+    regenerated; `--json`'s `hol_shadow.theorems[].signature` remains the
+    authoring source of truth.
+
+37. **Resolved: correct submissions failed the signature check for alias
+    or parameter renaming.** `import std/hol/finite@1 as G` instead of
+    `as F`, or renaming `(P : Prop)` to `(Q : Prop)`, failed every
+    required theorem. The canonical form above is alias- and
+    alpha-invariant, so those choices no longer affect grading; logically
+    equivalent but structurally different restatements still fail by
+    design.
+
+38. **Resolved: false closed numeral equalities were effectively
+    unrefutable.** `contradiction` closed `red = yellow` via datatype
+    no-confusion but not `1 = 2`; `simp` computed closed `le(2, 1)` to
+    `False` but left closed `=` untouched; `std/nat.ctea` had `succ_inj`
+    but no `succ_ne_zero`. The only route was a five-line rewrite detour
+    through `le`. Built-in Nat now gets the same no-confusion treatment as
+    declared datatypes in both engines: `zero`/`succ` are disjoint and
+    `succ` towers peel when the comparison bottoms out at a decided
+    truth value, so `contradiction` and `simp` refute `1 = 2` and
+    `succ(n) = 0` directly, dual-checked. Open `succ`-lifted equalities
+    are deliberately not identified with their peeled forms, so induction
+    exercises still require the explicit lift (the ch09 mistake fixture
+    pins this). `refl` on a decided-false numeral equation now reports
+    "the sides compute to the different numbers 4 and 5" with an
+    "equation is false" help instead of suggesting a useless `simp`.
+
+39. **Resolved: chapter-proven reusable theorems were stranded in
+    solutions files.** Pigeonhole (`ex15_6`), `le(succ(n), n) -> False`
+    (`ex15_5`), disjoint-append `Nodup` (`ex16_2`), and exact
+    disjoint-union size (`ex16_3`) existed only in
+    `docs/book/hol-code/*-solutions.ctea`, so composing past a chapter
+    meant importing solutions or re-proving. `std/nat.ctea` gained
+    `succ_not_le_self`; `std/hol/counting.ctea` gained
+    `has_size_union_member_append`, `nodup_append_disjoint`,
+    `has_size_union_disjoint`, and `has_size_union_le`; the new
+    `std/hol/pigeonhole.ctea` module exports `member_map_preimage`,
+    `nodup_map_of_injective`, and `pigeonhole`. A three-way disjoint-union
+    theorem now composes from library exports alone.
+
+40. **Resolved: tactics written on the `by` line were silently
+    discarded.** `theorem t : True := by trivial` dropped `trivial` and
+    reported ``unsolved goal `True` `` — the worst diagnostic failure mode
+    found, and the first thing every Lean-trained student types. Trailing
+    text after `:= by` is now parsed as the first tactic line (columns
+    preserved for error spans), and glued forms like `bytrivial` are
+    rejected at parse time instead of parsing as an empty proof.
+
+41. **Open, high impact: no user recursion over the imported generic
+    `List`, and no fold/sum in any package.** `defrec sum_list (l :
+    C.List Nat) : Nat` is rejected (recursion is limited to `Nat` and
+    locally declared `data` types), so degree sums and edge counts — the
+    roadmap's own handshake vertical — cannot be expressed against the
+    counting library. The workaround (a private monomorphic list) forfeits
+    every package theorem. Either `defrec` over package datatypes or a
+    checked fold/sum surface in the List package unblocks the vertical.
+
+42. **Open, medium impact: one package under two aliases yields
+    non-unifiable types.** `C.List Nat` (via `counting.ctea`) and
+    `F.List Nat` (via `list@1`) are the same package datatype but do not
+    unify, while two different packages merge under one alias (chapter 15
+    imports `finite@1` and `cardinality@1` both as `F`). Mixing chapter
+    13-15 style with chapter 16 style produces type errors that never
+    mention the shared identity, theorem search lists the same theorem
+    once per alias route, and the new pigeonhole module had to share its
+    counting alias with its package alias to state its theorem at all.
+
+43. **Open, medium impact: import ergonomics.** Two innocent unaliased
+    imports (`std/prelude.ctea` plus `std/hol/counting.ctea`) produce an
+    error cascade blamed inside the standard library after a one-line
+    alias-collision root cause; students read it as "the library is
+    broken". Import resolution is cwd-dependent, so a homework file checks
+    only from the repository root, with no search-path mechanism — the
+    browser embeds `std/` as virtual files and the native CLI could do the
+    same. Follow-on errors after a failed import misdescribe unknown
+    theorem references as named-argument misuse.
+
+44. **Open, medium impact: grading-surface gaps.** A manifest that must
+    sanction one HOL library theorem (pigeonhole's `map` dependency) can
+    only do so by opening the whole `hol` profile; an `allowed_theorems`
+    grant mirroring `allowed_axioms` would keep such assignments at
+    `fol+induction` otherwise. In `--json`, a failed theorem is absent
+    from `theorems[]` entirely rather than reported with a failed status.
+    Roughly a thousand nested parentheses abort with a stack overflow
+    (exit 134, empty JSON on stdout), so batch graders need per-file
+    resource limits.
+
+45. **Open, medium impact: diagnostics misdirection batch.** Bare
+    `cases h` reports ``unknown tactic `cases h` `` while the help lists
+    `cases` as valid; `import std/hol/list@2` falls through to a raw
+    filesystem error instead of naming the three registered packages; no
+    "did you mean" exists anywhere (typo'd theorem references are called
+    unknown *hypotheses* and steered toward projections); a declared
+    predicate passed as a function argument is called "unknown function";
+    `defrec` arms reject the term-syntax spelling `node(l, v, r)` with an
+    irrelevant note about declaration order (arms want space-separated
+    binders); a misindented case-arm body surfaces as ``expected `right`
+    case arm`` at the student's own tactic; aliased imports give no
+    short-name hint (`add_comm` after `import std/nat.ctea as nat` should
+    suggest `nat.add_comm`); multi-word theorem search (`search add
+    succ`) matches nothing where `add_succ` finds six theorems.
+
 ## Already fixed while writing the book
 
 - `le_trans` was missing from `std/nat.ctea` (chapter 7 needed it) —

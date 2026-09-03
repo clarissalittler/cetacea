@@ -4,7 +4,14 @@ This report fixes the observable starting point for the `hol` branch. The
 machine-readable oracle is [`fol-baseline.json`](fol-baseline.json); it is
 generated and verified by [`scripts/hol_baseline.py`](../../scripts/hol_baseline.py).
 
+The sections below span two eras and each is labeled: the semantic corpus is
+the frozen pre-HOL baseline, while the shadow gate, implementation, and timing
+sections describe the moving `hol` branch and carry their own dates.
+
 ## Semantic corpus
+
+Era: frozen pre-HOL baseline; these numbers are fixed at the baseline commit
+and do not track the `hol` branch.
 
 Baseline commit: `52736d878942ff7aceeb42be8a739919f6ad5efd`
 
@@ -52,6 +59,9 @@ CI runs the verification command. A baseline change must therefore be reviewed
 as a semantic change, not accepted as an incidental regenerated artifact.
 
 ## HOL shadow gate
+
+Era: current `hol`-branch gate state; the table below was last verified
+2026-07-14 by running the check command.
 
 The frozen oracle above protects legacy behavior. A separate, opt-in gate
 replays every declaration that legacy checking accepted through the HOL
@@ -114,17 +124,24 @@ least fragment and receipt fields directly.
 
 ## Implementation and artifacts
 
+Era: current `hol`-branch state, as of 2026-07-14. The frozen pre-HOL baseline
+for comparison is 252 unit tests and a 2,162,328-byte native release CLI, per
+[`H3_DECISION_REPORT.md`](H3_DECISION_REPORT.md).
+
 | Measurement | Value |
 |---|---:|
-| `cetacea_core/src/lib.rs` | 25,773 lines |
-| Rust unit tests | 446 (22 CLI + 421 core + 3 Wasm) |
-| Native release CLI | 1,700,384 bytes |
-| Wasm release module | 1,197,428 bytes |
+| `cetacea_core/src/lib.rs` | 27,300 lines |
+| Rust unit tests | 453 (22 CLI + 425 core + 6 Wasm) |
+| Native release CLI | 1,815,032 bytes |
+| Wasm release module | 1,309,239 bytes |
 
 Artifact sizes are raw filesystem sizes before transport compression or Wasm
 optimization. They are comparison signals, not release limits.
 
 ## Timing observation
+
+Era: `hol` branch as of the observation date below; these timings are not the
+pre-HOL baseline.
 
 Observed on 2026-07-10 with Linux 6.17 x86-64, an Intel i9-14900HX, 32 logical
 CPUs, `rustc 1.95.0`, and `cargo 1.95.0`:
