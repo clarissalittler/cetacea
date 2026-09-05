@@ -5,8 +5,12 @@ ground-up rewrite of Cetacea on a higher-order-logic kernel, with a
 front-end that presents three logic tiers (first-order logic;
 first-order logic with natural-number induction; full HOL with
 datatypes). The decisions in section 12 were settled with the
-instructor on the same day. It is a plan, not a changelog. Nothing
-here is implemented yet.
+instructor on the same day. It is a plan, not a changelog.
+
+Progress: M0 (the kernel, `crates/hol_kernel`) landed on 5 September
+2026 with the primitive rules, tags, definitional principles, the
+datatype and recursive-function packages, and an adversarial test
+suite. Later milestones are not started.
 
 ## 1. Why rewrite, and why HOL
 
@@ -403,10 +407,12 @@ Added:
 Each milestone ends with something a student can use in a browser.
 Sizes are relative to one another, not calendar estimates.
 
-- M0 Kernel (small). Types, terms, `Thm`, all primitive rules,
+- M0 Kernel (small). Done. Types, terms, `Thm`, all primitive rules,
   definitional principles, tag propagation, and an adversarial test
   suite: capture, eigenvariable violations, ill-typed instantiation,
-  non-positive datatypes, non-structural recursion.
+  non-positive datatypes, non-structural recursion. Nested datatypes
+  (a `Rose` tree holding a `List Rose`) and lexicographic descent are
+  deferred; the package rejects them with a message that says so.
 - M1 Tier 1 end to end (medium). Parser with spans, elaborator, tier-1
   tactics, session API, CLI with `--json`. Acceptance: `std/prop`,
   `std/fol`, `std/eq`, `std/set`, book chapters 1 to 8 and CS 250

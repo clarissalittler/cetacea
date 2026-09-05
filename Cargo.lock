@@ -19,3 +19,7 @@ version = "0.1.0"
 dependencies = [
  "cetacea_core",
 ]
+
+[[package]]
+name = "hol_kernel"
+version = "0.1.0"
