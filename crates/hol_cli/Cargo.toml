@@ -1,0 +1,12 @@
+    [package]
+    name = "hol_cli"
+    version = "0.1.0"
+    edition = "2021"
+
+    [[bin]]
+name = "cetacea2"
+path = "src/main.rs"
+
+[dependencies]
+hol_kernel = { path = "../hol_kernel" }
+hol_session = { path = "../hol_session" }

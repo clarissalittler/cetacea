@@ -21,5 +21,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "hol_cli"
+version = "0.1.0"
+dependencies = [
+ "hol_kernel",
+ "hol_session",
+]
+
+[[package]]
+name = "hol_elab"
+version = "0.1.0"
+dependencies = [
+ "hol_kernel",
+ "hol_syntax",
+]
+
+[[package]]
 name = "hol_kernel"
 version = "0.1.0"
+
+[[package]]
+name = "hol_session"
+version = "0.1.0"
+dependencies = [
+ "hol_elab",
+ "hol_kernel",
+ "hol_syntax",
+ "hol_tactics",
+]
+
+[[package]]
+name = "hol_syntax"
+version = "0.1.0"
+
+[[package]]
+name = "hol_tactics"
+version = "0.1.0"
+dependencies = [
+ "hol_elab",
+ "hol_kernel",
+ "hol_syntax",
+]

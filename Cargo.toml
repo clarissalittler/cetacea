@@ -4,5 +4,10 @@ members = [
     "crates/cetacea_cli",
     "crates/cetacea_wasm",
     "crates/hol_kernel",
+    "crates/hol_syntax",
+    "crates/hol_elab",
+    "crates/hol_tactics",
+    "crates/hol_session",
+    "crates/hol_cli",
 ]
 resolver = "2"
