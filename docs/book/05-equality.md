@@ -187,8 +187,8 @@ library has already proved them (in `std/eq.ctea`, a few lines each —
 go look):
 
 ```text
-eq_symm  : x = y -> y = x
-eq_trans : x = y -> y = z -> x = z
+eq.eq_symm  : x = y -> y = x
+eq.eq_trans : x = y -> y = z -> x = z
 ```
 
 Using them is Chapter 4's library skill:
@@ -196,13 +196,13 @@ Using them is Chapter 4's library skill:
 ```text
 theorem identity_symm : clark = superman -> superman = clark := by
   intro h
-  exact eq_symm h
+  exact eq.eq_symm h
 
 theorem identity_chain
   : clark = superman -> superman = kal_el -> clark = kal_el := by
   intro h1
   intro h2
-  exact eq_trans h1 h2
+  exact eq.eq_trans h1 h2
 ```
 
 (`kal_el` is the third name — Superman's birth name, for the
@@ -218,11 +218,11 @@ theorem rewrite_symm_inline
   : superman = clark -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hc
-  rewrite <- eq_symm h
+  rewrite <- eq.eq_symm h
   exact hc
 ```
 
-`eq_symm h` is a proof of `clark = superman`, built on the fly, and
+`eq.eq_symm h` is a proof of `clark = superman`, built on the fly, and
 `rewrite` uses it directly. No need to `have` it into a named
 hypothesis first — though, speaking of which:
 
@@ -244,12 +244,12 @@ theorem fly_by_stages
   intro h1
   intro h2
   intro hf
-  have h3 : clark = kal_el := eq_trans h1 h2
+  have h3 : clark = kal_el := eq.eq_trans h1 h2
   rewrite -> h3
   exact hf
 ```
 
-The line `have h3 : clark = kal_el := eq_trans h1 h2` checks that the
+The line `have h3 : clark = kal_el := eq.eq_trans h1 h2` checks that the
 expression really proves the stated formula, then adds
 `h3 : clark = kal_el` to your hypotheses. The proof reads exactly like
 the paper version: *first establish Clark is Kal-El (by chaining the
@@ -267,7 +267,7 @@ theorem have_subgoal_demo
   intro h2
   intro hf
   have hck : clark = kal_el
-  exact eq_trans h1 h2.left
+  exact eq.eq_trans h1 h2.left
   rewrite -> hck
   exact hf
 ```
@@ -311,7 +311,7 @@ which is `refl`'s favorite kind of goal. This two-line pattern —
 and you will type it a hundred times before the course is done.
 
 The library also packages substitution as a theorem you can invoke,
-under the name `congr_pred` (for *congruence*): if `x = y` then
+under the name `eq.congr_pred` (for *congruence*): if `x = y` then
 `P(x) -> P(y)`, for any predicate `P` whatsoever. Philosophers call
 this Leibniz's law — *identical things have identical properties*:
 
@@ -319,11 +319,11 @@ this Leibniz's law — *identical things have identical properties*:
 theorem leibniz_demo : clark = superman -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hf
-  exact congr_pred {A := Person; P := Flies; x := clark; y := superman} h hf
+  exact eq.congr_pred {A := Person; P := Flies; x := clark; y := superman} h hf
 ```
 
 Mostly you'll just `rewrite`, which does the same job with less
-ceremony. But `congr_pred` earns its keep when you need to hand
+ceremony. But `eq.congr_pred` earns its keep when you need to hand
 "substitution itself" to another theorem as an argument — it turns a
 *tactic* into a *thing* — and it will quietly star in a clever proof
 in Chapter 8.
@@ -420,7 +420,7 @@ error: docs/book/code/ch05-mistakes.ctea:31: theorem `have_backwards` failed: ha
 ```
 
 `clark = superman` and `superman = clark` are interchangeable *in
-truth* — that's `eq_symm` — but they are different formulas, and
+truth* — that's `eq.eq_symm` — but they are different formulas, and
 `have`'s contract is exact. The fix is one lemma: `have h2 :
 superman = clark := eq_symm h`.
 
@@ -453,7 +453,7 @@ the `sorry` flags.
   or, if you're feeling tactile, a `rewrite` and a `refl`.
 - **Exercise 5.4** `clark = superman -> superman = kal_el ->
   clark = kal_el` — chain the equations; use the `have ... :=` form
-  with `eq_trans`, even though a shorter route exists, just to have
+  with `eq.eq_trans`, even though a shorter route exists, just to have
   written one.
 - **Exercise 5.5** `clark = superman -> Reporter(superman) ->
   Reporter(clark)` — substitution into a predicate. Check which side

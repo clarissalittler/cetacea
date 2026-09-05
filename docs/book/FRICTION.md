@@ -94,12 +94,12 @@ stay meaningful.
     of `succ(succ(succ(succ(succ(0)))))`), while mixed terms such as
     `succ(n)` remain symbolic.
 
-15. **Parked: aggressive goal computation surprises.** `apply h 0 1`
-    can leave the goal `True` (premise computed away) - delightful once
-    understood, disorienting the first time; conversely goals sometimes
-    normalize to `False` making a planned `rewrite` miss. This is now
-    narrated explicitly in chapters 7-8, and folded matching has softened
-    the worst surprises.
+15. **Resolved: computation has an explicit goal preview.** Specialized
+    applications retain their written premises: `apply h 0 1` leaves
+    `le(0, 1)`, with a separate `Computes to: True` preview. Browser and
+    terminal goal displays expose definitional computation without replacing
+    the written goal, and browser explanations show the same preview before
+    and after steps. Computation to `False` remains a proof obligation.
 
 16. **Resolved: axioms print as trusted.** Accepted axioms now display
     `trusted axiom foo`, keeping proof-mode labels for proved
@@ -113,22 +113,14 @@ stay meaningful.
     to the tactic line; `rewrite all` remains available when every
     occurrence should change.
 
-18. **Partially resolved: namespace foundations.** Dot-qualified top-level
-    names now parse and resolve, `namespace` / `end` blocks can prefix
-    declaration names, and proof/tactic references inside a namespace can
-    resolve sibling theorems and formula definitions by short name.
-    Declaration bodies, theorem statements, data constructor types, `defrec`
-    arms, and tactic arguments are canonicalized through the current
-    namespace; ambiguous short top-level leaves ask for qualified names, and
-    `import path.ctea as alias` exposes imported declarations under an alias
-    namespace. `std/qualified_prelude.ctea` now exposes the standard library
-    as aliases such as `nat.add_comm` and `list.length_append` while leaving
-    the legacy prelude unchanged. The book and course files still need a
-    migration away from the legacy prelude before students can routinely prove
-    `add_comm` or `length_append` under their real names without colliding;
-    hence the current `_demo` suffix convention. The design note in
-    [`docs/NAMESPACE_DESIGN.md`](../NAMESPACE_DESIGN.md) scopes the
-    remaining environment, import, and proof-projection work.
+18. **Resolved: the classroom sources use qualified library names.** Book,
+    course, and tutorial sources import `std/qualified_prelude.ctea`; library
+    calls use names such as `nat.add_comm`, `list.length_append`, and
+    `fun.Total`. Student declarations can use `add_comm` and `length_append`
+    without collision suffixes. Qualified prefixes that are also keywords,
+    such as `fun.Total`, coexist with lambda syntax. The legacy prelude remains
+    available for compatibility. The migration preserves 398 root receipts;
+    see [CLASSROOM_NAMESPACE_MIGRATION.md](../CLASSROOM_NAMESPACE_MIGRATION.md).
 
 ## Surfaced writing the advanced FOL examples
 
@@ -192,30 +184,33 @@ edges.
     case; the inverse proofs stay `fol+induction` and the mapped theorem is
     honestly `hol`.
 
-24. **Open, high impact: concrete finite enumeration is too ceremonial.**
-    Proving `HasCard([red, yellow, green], 3)` is mathematically routine but
-    takes well over a hundred source lines. `Member` and `Nodup` constructor
-    laws are constructive biconditionals, while `simp` accepts only term
-    equalities, so it cannot discharge the obvious constructor cases. Chapter
-    13 deliberately retains the explicit solution as an acceptance test for a
-    checked enumeration derivation, proposition-aware simplification, or a
-    better reusable theorem surface. Any fix must retain the trust-free
-    `fol+induction` receipt.
+24. **Resolved: routine finite enumeration has a checked derivation tactic.**
+    `finite` constructs proofs of concrete constructor-list `HasCard`, `Nodup`,
+    length, membership, and coverage claims. Chapter 13's named three-colour
+    enumeration now has a one-tactic proof, with a trust-free constructive
+    `fol+induction` receipt. The explicit component proofs remain as exercises.
+    Regression tests reject duplicates, omitted constructors, wrong lengths,
+    infinite-type coverage, and spoofed helper names. Coverage currently supports
+    datatypes with nullary constructors; general proposition-aware `simp` remains
+    outside this tactic's scope.
 
-25. **Open, medium impact: package theorem parameters are not inferred from
-    rewrite/apply goals.** Even with a goal visibly containing
-    `F.length(F.cons(red, tail))`, `rewrite -> F.length_cons` requests `A`,
-    `h`, and `t` explicitly. The same repetition affects `member_cons`,
-    `nodup_cons`, and the cardinality transport lemmas. Goal-directed schema
-    inference would substantially shorten both new chapters without changing
-    the kernel or logical fragment.
+25. **Resolved: package theorem parameters are inferred from rewrite/apply
+    goals.** `rewrite -> F.length_cons` infers the type, head, and tail from
+    the selected occurrence. Projected `apply F.member_cons.right` and
+    `apply F.nodup_cons.right` infer from the goal; function parameters in
+    cardinality lemmas are inferred from named functions. Explicit arguments
+    remain constraints, and parameters absent from the selected conclusion or
+    rewrite side still require input. Chapter 13 examples and solutions now
+    use this inference, with unchanged checked receipts.
 
-26. **Open, lower impact: term abbreviations do not unfold through tactics.**
-    A term definition can name the nested enumeration and checks under `refl`,
-    but `unfold name`, `simp [name]`, and rewrite matching do not expose its
-    body inside a goal. Consequently a readable name cannot replace repeated
-    nested `cons` terms in the component proofs. This is separate from kernel
-    transparency: it is a proof-state and tactic-surface gap.
+26. **Resolved: term abbreviations work through unfolding and rewriting.**
+    `unfold name` now expands a named term inside the goal, including beneath
+    quantifiers, and `simp [name]` accepts transparent definition names.
+    `docs/hol/examples/term_abbreviations.ctea` checks parameterized terms,
+    membership, imported abbreviations, and rewriting through both kernels.
+    Single rewrites expose terms when direct matching fails; `rewrite all`
+    exposes terms before matching in goals and named hypotheses. Binder-capture
+    negatives and saved-hypothesis evidence are regression-tested.
 
 27. **Resolved: direct induction now recognizes imported polymorphic
     datatypes.** `induction xs` rejected `xs : F.List A` even though the List
@@ -253,23 +248,24 @@ edges.
     decidable-overlap API is unsettled; freezing a builtin package ID is a
     separate publication step, not a prerequisite for checked reuse.
 
-31. **Open, medium impact: proof-state generalization and local rewriting are
-    too narrow.** The inclusion induction needs an induction hypothesis
-    quantified over a changing container list. `revert` moves proof
-    hypotheses but not a term variable such as `ys`, so the theorem statement
-    must place `forall ys` below the `xs` parameter in advance. Likewise
-    `rewrite ... at h` is unavailable; Chapter 15 has to reshape goals and use
-    hypotheses afterward. Generalizing term variables and equality rewriting
-    in named hypotheses would make standard induction invariants much easier
-    to discover interactively.
+31. **Resolved 2026-09-04: local rewriting and term generalization.**
+    `rewrite -> e at h`, `rewrite <- e at h`, and `rewrite all -> e at h`
+    preserve checked evidence for a replacement hypothesis without changing
+    the target. `revert ys` now generalizes a term variable and its dependent
+    hypotheses before induction. The counting inclusion proof is tested with
+    `ys` as an ordinary theorem parameter, reverted inside the proof; students
+    no longer need to choose the universal quantifier's placement in advance.
+    Independent facts remain available. Dependency tracking includes rewritten
+    formulas and their evidence, and HOL regressions prevent variable capture.
 
-32. **Open design choice: positive constructive collision witnesses need more
-    data.** The generic cardinality proof constructively establishes
-    `not Injective(f)`, but intuitionistic logic does not turn that negated
-    universal into `exists x1 x2, x1 != x2 /\ f(x1) = f(x2)`. A later API can
-    offer a classical corollary, or finite evidence can grow a decidable/search
-    interface that computes the pair. Do not silently add classical reasoning
-    to the base pigeonhole theorem.
+32. **Resolved with an explicit classical witness API.** The base pigeonhole
+    theorem remains constructive. `std/hol/pigeonhole_classical.ctea` exports
+    `pigeonhole_collision`, proving `exists x1 x2, x1 != x2 /\ f(x1) = f(x2)`.
+    The checked receipt records classical reasoning and its HOL dependency,
+    with no axioms or holes. A companion example also exhibits a concrete pair
+    constructively. Assignment grants do not waive the classical restriction.
+    Computing a pair for an arbitrary finite function would require a separate
+    decidable/search interface; the generic API establishes existence.
 
 33. **Resolved: subset cardinality is no longer forced through whole-type
     `HasCard`.** `HasCard(xs,n)` says every value of the carrier type occurs in
@@ -289,14 +285,15 @@ edges.
     design that publication boundary after the source API survives another
     consumer.
 
-35. **Open, medium impact: definition and proof-expression parsing exposes
-    avoidable line-oriented seams.** The `HasSize` formula definition had to
-    place its whole body on one physical line. Nested expressions such as
-    `(has_size_members ... x).left member_x` were rejected even though the
-    equivalent two-step `apply ...left` followed by `exact member_x` works.
-    Multiline definition bodies and ordinary left-associative application of
-    projected proofs would remove incidental formatting work from otherwise
-    routine counting arguments.
+35. **Resolved 2026-09-04: multiline definitions and projected application.**
+    Definition bodies now continue until the next declaration, preserving
+    comments and physical error locations. The elaborator advances its
+    proposition cursor when processing `.left` or `.right`, so an expression
+    such as `(has_size_members ... x).left member_x` applies to the selected
+    implication. Native regression tests include the real counting expression,
+    folded definitions, both projections, and rejected wrong-premise and
+    wrong-target applications. Parser depth, token, size, and biconditional
+    expansion limits also reject excessive input before it exhausts resources.
 
 ## Surfaced by the July 2026 audit
 
@@ -381,35 +378,56 @@ below. Several were fixed the same day; the fixes are noted inline.
     every package theorem. Either `defrec` over package datatypes or a
     checked fold/sum surface in the List package unblocks the vertical.
 
-42. **Open, medium impact: one package under two aliases yields
-    non-unifiable types.** `C.List Nat` (via `counting.ctea`) and
-    `F.List Nat` (via `list@1`) are the same package datatype but do not
-    unify, while two different packages merge under one alias (chapter 15
-    imports `finite@1` and `cardinality@1` both as `F`). Mixing chapter
-    13-15 style with chapter 16 style produces type errors that never
-    mention the shared identity, theorem search lists the same theorem
-    once per alias route, and the new pigeonhole module had to share its
-    counting alias with its package alias to state its theorem at all.
+42. **Resolved 2026-09-04: package identity and theorem-search aliases.**
+    Independent aliases of the same logical package now share the first
+    loaded surface representative, selected by stable package declaration
+    identity. List, finite, and cardinality aliases compose with the counting
+    source module, including theorem application, rewriting, induction,
+    `defrec`, and map receipts. Local binders retain their meaning: alias
+    resolution does not capture a package reference into a local variable.
+    `docs/hol/examples/package_aliases.ctea` is checked by native and Wasm
+    interface regressions; adversarial tests keep unrelated datatypes and
+    element types distinct. Original failure: `C.List Nat` and `F.List Nat`
+    from the same package did not unify. Browser search now includes logical
+    package exports, groups aliases by checked receipt identity, and retains
+    lookup/insertion by each alias. The real-editor browser harness verifies
+    this path. Terminal and line-mode search also include package exports and
+    group by receipt identity, retaining each alias as a usable search query.
+    Search catalogs remain separate from the accepted source-declaration list.
 
-43. **Open, medium impact: import ergonomics.** Two innocent unaliased
-    imports (`std/prelude.ctea` plus `std/hol/counting.ctea`) produce an
-    error cascade blamed inside the standard library after a one-line
-    alias-collision root cause; students read it as "the library is
-    broken". Import resolution is cwd-dependent, so a homework file checks
-    only from the repository root, with no search-path mechanism — the
-    browser embeds `std/` as virtual files and the native CLI could do the
-    same. Follow-on errors after a failed import misdescribe unknown
-    theorem references as named-argument misuse.
+43. **Resolved 2026-09-04: import cascades and portable standard imports.**
+    The prelude/counting collision now produces one diagnostic at the caller's
+    import line, with an explicit source-module alias suggestion. Their two
+    List types remain distinct; `docs/hol/examples/prelude_counting.ctea`
+    checks their coexistence under an alias in both import orders. Imports
+    publish atomically: a failed source module rolls back its declarations,
+    newly loaded dependencies, and HOL receipts. The checker stops at a failed
+    import instead of emitting dependent unknown-name errors. Earlier root
+    declarations and successful imports remain available. Native and virtual
+    import tests cover rollback, retry, kernel-only rejection, and preservation
+    of the legacy driver's logical-package retry flag; Wasm-interface tests
+    cover checking, stepping, and explanations. Exact `std/...` imports now
+    fall back to the shipped library outside a checkout; `builtin:std/...`
+    selects it explicitly. Subprocess tests verify external homework and
+    manifests, filesystem precedence, dependency isolation, and rejection of
+    substituted or unauthorized libraries.
 
-44. **Open, medium impact: grading-surface gaps.** A manifest that must
-    sanction one HOL library theorem (pigeonhole's `map` dependency) can
-    only do so by opening the whole `hol` profile; an `allowed_theorems`
-    grant mirroring `allowed_axioms` would keep such assignments at
-    `fol+induction` otherwise. In `--json`, a failed theorem is absent
-    from `theorems[]` entirely rather than reported with a failed status.
-    Roughly a thousand nested parentheses abort with a stack overflow
-    (exit 134, empty JSON on stdout), so batch graders need per-file
-    resource limits.
+44. **Resolved 2026-09-04: native grading-surface gaps.** Native manifests
+    now accept `allowed_theorems` with exact public logical-package identities,
+    such as `std/hol/cardinality@1::map_length`. Grants preserve the client's
+    own statement/proof limits and transitive trust restrictions. Canonical
+    source-library export identities are supported too. The checked
+    `docs/hol/pilot/pigeonhole_client.ctea` and accompanying manifest demonstrate
+    the supplied-library workflow at fol+induction, with the full dependency
+    receipt preserved. The chapter-15 solutions themselves contain higher-order
+    helper statements and still require the HOL profile. Structured outcomes are resolved 2026-09-04:
+    CLI and Wasm JSON now provide `theorem_outcomes[]` for every parsed theorem
+    or axiom occurrence, including failures, skipped work, and import rollback.
+    The accepted-only `theorems[]` remains available for compatibility.
+    Excessive parsing now returns JSON diagnostics under explicit resource
+    limits, including the former thousand- and fifty-thousand-parenthesis
+    failure cases. Browser worker isolation and external batch execution
+    limits are implemented; complete in-process budgets remain readiness work.
 
 45. **Resolved 2026-09-03 (diagnostics misdirection batch).** Bare `cases h`
     and `induction n` now explain the `with` arm skeleton; an unregistered

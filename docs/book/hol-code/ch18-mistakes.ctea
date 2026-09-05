@@ -1,0 +1,22 @@
+-- Three false general claims. Each proof must be rejected.
+import std/hol/graph@1 as G
+mode constructive
+
+-- An empty path cannot change the endpoint.
+theorem empty_teleport (A : Type) (E : A -> A -> Prop) (a b : A) :
+  G.ValidPath(E, G.nil, a, b) := by
+  apply (G.path_nil {A := A; E := E; a := a; b := b}).right
+  refl
+
+-- Removing a head changes the start to h, not a.
+theorem tail_keeps_start (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :
+  G.ValidPath(E, G.cons(h, t), a, b) -> G.ValidPath(E, t, a, b) := by
+  intro path
+  have parts : E(a, h) /\ G.ValidPath(E, t, h, b) := (G.path_cons {A := A; E := E; h := h; t := t; a := a; b := b}).left path
+  exact parts.right
+
+-- A directed path need not be a path in the opposite direction.
+theorem reverse_without_roads (A : Type) (E : A -> A -> Prop) (xs : G.List A) (a b : A) :
+  G.ValidPath(E, xs, a, b) -> G.ValidPath(E, xs, b, a) := by
+  intro path
+  exact path

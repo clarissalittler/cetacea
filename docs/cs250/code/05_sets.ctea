@@ -1,6 +1,6 @@
 -- Companion file for docs/cs250/05_sets.md.
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -42,7 +42,7 @@ theorem alice_in_tall_set : Tall(alice) -> alice in TallSet := by
   simp
   exact h
 
-theorem subset_refl_demo
+theorem subset_refl
   (T : Type)
   (A : Set T)
   : A subset A := by
@@ -51,11 +51,11 @@ theorem subset_refl_demo
   intro hx
   exact hx
 
-theorem inter_comm_demo
+theorem inter_comm
   (T : Type)
   (A B : Set T)
   : inter(A, B) = inter(B, A) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -73,7 +73,7 @@ theorem inter_union_distrib
   (T : Type)
   (A B C : Set T)
   : inter(A, union(B, C)) = union(inter(A, B), inter(A, C)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -110,11 +110,11 @@ theorem subsets_carry
   : A subset B -> C subset A -> C subset B := by
   intro hAB
   intro hCA
-  apply subset_trans
+  apply set.subset_trans
   exact hCA
   exact hAB
 
-theorem powerset_mono_demo
+theorem powerset_mono
   (A B : Set Person)
   : A subset B -> powerset(A) subset powerset(B) := by
   intro hAB

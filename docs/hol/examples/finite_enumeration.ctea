@@ -1,0 +1,21 @@
+import std/hol/finite@1 as F
+mode constructive
+
+data Traffic
+| red
+| yellow
+| green
+
+def colours : F.List Traffic := F.cons(red, F.cons(yellow, F.cons(green, F.nil)))
+
+theorem colours_nodup : F.Nodup(colours) := by
+  finite
+
+theorem colours_length : F.length(colours) = 3 := by
+  finite
+
+theorem colours_coverage : forall x : Traffic, F.Member(x, colours) := by
+  finite
+
+theorem three_colours : F.HasCard(colours, 3) := by
+  finite

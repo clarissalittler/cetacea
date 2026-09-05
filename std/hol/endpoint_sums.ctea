@@ -1,0 +1,85 @@
+-- A single edge has two endpoint incidences, including when it is a loop.
+import weighted_enumerations.ctea as E
+import weighted_sums.ctea as W
+import std/hol/cardinality@1 as C
+import sums.ctea as S
+mode constructive
+
+-- One listed point carries weight one; every other listed point carries zero.
+theorem sum_single_support
+  (A : Type) (f : A -> Nat) (a : A) (xs : C.List A) :
+  C.Nodup(xs) -> C.Member(a, xs) -> f(a) = 1 ->
+  (forall x : A, C.Member(x, xs) -> not x = a -> f(x) = 0) ->
+  S.sum(C.map(f, xs)) = 1 := by
+  intro nodup
+  intro listed
+  intro at_a
+  intro elsewhere
+  cases E.remove_weighted_member {A := A; f := f; a := a; ys := xs} nodup listed with
+  | intro zs removed =>
+      have remaining_zero : S.sum(C.map(f, zs)) = mul(C.length(zs), 0) := by
+        apply W.sum_map_constant_on {A := A; f := f; xs := zs; k := 0}
+        intro x
+        intro in_zs
+        have in_xs : C.Member(x, xs) := by
+          apply (removed.right.right.left x).right
+          right
+          exact in_zs
+        have different : not x = a := by
+          intro same
+          apply removed.right.left
+          rewrite <- same
+          exact in_zs
+        exact elsewhere x in_xs different
+      rewrite -> removed.right.right.right
+      rewrite -> at_a
+      rewrite -> remaining_zero
+      refl
+
+-- The contribution is zero if the supported point is outside this list.
+theorem sum_absent_support
+  (A : Type) (f : A -> Nat) (a : A) (xs : C.List A) :
+  not C.Member(a, xs) ->
+  (forall x : A, C.Member(x, xs) -> not x = a -> f(x) = 0) ->
+  S.sum(C.map(f, xs)) = 0 := by
+  intro absent
+  intro elsewhere
+  have total : S.sum(C.map(f, xs)) = mul(C.length(xs), 0) := by
+    apply W.sum_map_constant_on {A := A; f := f; xs := xs; k := 0}
+    intro x
+    intro member
+    have different : not x = a := by
+      intro same
+      apply absent
+      rewrite <- same
+      exact member
+    exact elsewhere x member different
+  simp at total
+  exact total
+
+-- left_end and right_end describe the two endpoint indicator functions.
+-- a and b need not differ: a loop contributes twice at the same vertex.
+theorem sum_endpoint_pair
+  (A : Type) (left_end right_end incidence : A -> Nat)
+  (a b : A) (vertices : C.List A) :
+  C.Nodup(vertices) -> C.Member(a, vertices) -> C.Member(b, vertices) ->
+  left_end(a) = 1 -> right_end(b) = 1 ->
+  (forall v : A, C.Member(v, vertices) -> not v = a -> left_end(v) = 0) ->
+  (forall v : A, C.Member(v, vertices) -> not v = b -> right_end(v) = 0) ->
+  (forall v : A, C.Member(v, vertices) -> incidence(v) = add(left_end(v), right_end(v))) ->
+  S.sum(C.map(incidence, vertices)) = 2 := by
+  intro nodup
+  intro a_listed
+  intro b_listed
+  intro at_a
+  intro at_b
+  intro away_a
+  intro away_b
+  intro endpoints
+  have left_total : S.sum(C.map(left_end, vertices)) = 1 := sum_single_support {A := A; f := left_end; a := a; xs := vertices} nodup a_listed at_a away_a
+  have right_total : S.sum(C.map(right_end, vertices)) = 1 := sum_single_support {A := A; f := right_end; a := b; xs := vertices} nodup b_listed at_b away_b
+  have split_total : S.sum(C.map(incidence, vertices)) = add(S.sum(C.map(left_end, vertices)), S.sum(C.map(right_end, vertices))) := W.sum_map_add_on {A := A; f := left_end; g := right_end; h := incidence; xs := vertices} endpoints
+  rewrite -> split_total
+  rewrite -> left_total
+  rewrite -> right_total
+  refl

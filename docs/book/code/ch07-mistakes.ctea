@@ -4,7 +4,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch07-mistakes.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -13,10 +13,10 @@ def Reflexive (T : Type) (R : T -> T -> Prop) : Prop := forall x : T, R(x, x)
 def Symmetric (T : Type) (R : T -> T -> Prop) : Prop := forall x y : T, R(x, y) -> R(y, x)
 
 -- Mistake 1: unfolding the wrong definition.
-theorem wrong_property (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
+theorem wrong_property (m : Nat) : Reflexive(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Symmetric
   intro x
-  exact modeq_refl
+  exact modular.modeq_refl
 
 -- Mistake 2: wishful thinking — le is not symmetric, and the proof
 -- runs aground exactly where the two sides trade places.

@@ -1,0 +1,35 @@
+-- Chapter 17 solutions. Try ch17-exercises.ctea before reading these proofs.
+import builtin:std/hol/sums.ctea as S
+import std/hol/list@1 as L
+import builtin:std/nat.ctea as N
+
+mode constructive
+
+theorem ex17_1 : S.sum(L.cons(3, L.cons(0, L.cons(3, L.nil)))) = 6 := by
+  simp
+  refl
+
+theorem ex17_2 (xs : L.List Nat) (n : Nat) :
+  S.sum(xs) = n -> S.sum(L.cons(4, xs)) = add(4, n) := by
+  intro total
+  rewrite -> S.sum_cons
+  rewrite -> total
+  refl
+
+theorem ex17_3 (xs ys : L.List Nat) (m n : Nat) :
+  S.sum(xs) = m -> S.sum(ys) = n ->
+  S.sum(L.append(xs, ys)) = add(m, n) := by
+  intro first
+  intro second
+  rewrite -> S.sum_append
+  rewrite -> first
+  rewrite -> second
+  refl
+
+theorem ex17_4 (xs ys zs : L.List Nat) :
+  S.sum(L.append(L.append(xs, ys), zs)) =
+  add(S.sum(xs), add(S.sum(ys), S.sum(zs))) := by
+  rewrite -> S.sum_append
+  rewrite -> S.sum_append
+  rewrite -> N.add_assoc
+  refl

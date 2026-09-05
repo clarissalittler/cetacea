@@ -2,6 +2,17 @@
 
 Status: experimental, native CLI only, on the `hol` migration branch.
 
+The manifest parser and teaching-policy builder now live in
+`cetacea_core::assignment`; the CLI uses that shared implementation. Manifests
+are limited to 64 KiB of UTF-8 text. Syntax errors retain their physical source
+line, and classical reasoning, axioms, and incomplete proofs remain independent
+permissions. Grant validation, allowed imported axioms, required root signatures
+and receipt restrictions now also use the shared core implementation. Browser
+enforcement now has a core VirtualAssignment context for pinned libraries and
+combined acceptance, with native parity tests; transport and assignment-result
+presentation are still pending. Parsing a manifest or passing receipt restrictions alone does not
+authorize a submission or its dependencies.
+
 The finite-mathematics pilot contains two executable manifests:
 [`finite_traffic.ctea-assignment`](pilot/finite_traffic.ctea-assignment) pins a
 constructive `fol+induction` enumeration exercise, while
@@ -159,6 +170,32 @@ The checks compose:
 - unused imports are nevertheless rejected when they are outside the manifest,
   keeping the available checking environment fixed.
 
+## Bundled standard-library sources
+
+Native checkers ship the same standard-library sources as the browser. An
+exact source import such as `std/nat.ctea` uses a filesystem copy when found,
+and otherwise loads `builtin:std/nat.ctea`. Explicit source syntax
+`import builtin:std/nat.ctea as nat` always uses the shipped copy. Its relative
+dependencies also resolve within the bundle, without consulting student files.
+
+Authorize these copies by their reserved identities:
+
+```toml
+version = 1
+profile = 'fol+induction'
+required_imports = ['builtin:std/nat.ctea']
+required_theorem.homework = '(?0 : Nat) : add(?0, 0) = ?0'
+```
+
+Filesystem and bundled identities remain separate. Replacing a local
+`std/nat.ctea` cannot satisfy a required bundled import. Unknown bundled names
+are manifest errors. Every transitive bundled source and logical package must
+be authorized: for example, bundled counting needs
+`builtin:std/hol/counting.ctea`, `builtin:std/nat.ctea`, and
+`std/hol/list@1`. Ordinary virtual files remain unauthorized by native
+manifests. Bundled source contents are tied to the checker build; use the same
+checker version for students and grading.
+
 ## Frozen theorem signatures
 
 A `required_theorem.NAME` entry requires a root declaration with exactly that
@@ -225,3 +262,69 @@ This layer consumes the fail-closed compatibility path: ordinary checking and
 complete HOL replay must both succeed. It is suitable for native grading
 experiments, but assignment enforcement is not yet exposed in the browser or
 TUI.
+
+
+## Exact checked-theorem grants
+
+`allowed_theorems` grants a specific public export of a versioned logical
+package, independently of the student's import alias:
+
+```toml
+allowed_theorems = ["std/hol/cardinality@1::map_length"]
+```
+
+The package and its dependencies must still be authorized by `allowed_imports`.
+The named export must be an imported, checked theorem without axiom or
+incomplete dependencies. Unknown exports, function definitions, local
+lookalikes, wildcard names, and unversioned names are rejected. Grants use the
+public export name, not an internal schema or kernel name.
+
+A grant exempts that supplied lemma's inherited fragment requirements when
+checking a client proof. It does not change any receipt or reported required
+fragment, exempt the client's own statement or proof features, or authorize
+classical reasoning, extensionality, choice, axioms, or incomplete proofs.
+Those restrictions remain independent and transitive. For example, a
+first-order client can use the generic `map_length` lemma under a
+`fol+induction` policy with this grant, but a root theorem whose own statement
+is higher-order is still rejected.
+
+Source-library exports use the same syntax:
+
+```toml
+allowed_theorems = [
+  "helpers.ctea::lemma",
+  "builtin:std/hol/pigeonhole.ctea::pigeonhole",
+]
+```
+
+Filesystem paths resolve relative to the manifest and are canonicalized. Bundled
+identities select the shipped source, not a same-named local file. Export names
+are the names declared in that library, including any declared namespace but
+excluding the caller's import alias. Grants do not authorize imports implicitly:
+keep the library and its transitive imports in `allowed_imports`. Multiple
+aliases of the same export receive the same permission; another file's
+same-named theorem does not. A missing, rolled-back, untrusted, or incomplete
+export makes the grant invalid.
+
+The checked client and manifest in `docs/hol/pilot/pigeonhole_client.ctea` and
+`pigeonhole_client.ctea-assignment` demonstrate a `fol+induction` submission
+using the supplied constructive pigeonhole theorem. Run:
+
+```sh
+cargo run -p cetacea_cli -- --assignment docs/hol/pilot/pigeonhole_client.ctea-assignment docs/hol/pilot/pigeonhole_client.ctea
+```
+
+The client fails the dependency-fragment policy without its exact grant. Its
+receipt still records the higher-order dependencies. The chapter-15 solutions
+file itself contains higher-order helper statements, so checking that entire
+file under a first-order profile is still correctly rejected. Use the client
+workflow when the helper library is instructor-supplied; use the HOL profile
+when students are proving those higher-order helpers themselves.
+
+The positive witness example in
+[`pigeonhole_collision.ctea`](examples/pigeonhole_collision.ctea) has a
+[companion policy](examples/pigeonhole_collision.ctea-assignment) granting
+`builtin:std/hol/pigeonhole_classical.ctea::pigeonhole_collision` and setting
+`allow_classical = true`. The same policy with `allow_classical = false`
+rejects `some_collision` for its classical proof feature, even though the
+library theorem is granted. Its explicit concrete pair remains constructive.

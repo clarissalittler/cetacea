@@ -1,0 +1,79 @@
+-- A machine starts with two tokens and gains three tokens each tick.
+import builtin:std/hol/recurrences.ctea as R
+mode constructive
+
+defrec tokens (n : Nat) : Nat
+| zero => 2
+| succ k rec => add(3, rec)
+
+theorem tokens_closed (n : Nat) : tokens(n) = add(2, mul(n, 3)) := by
+  have all_ticks : forall k : Nat, tokens(k) = add(2, mul(k, 3)) := by
+    apply R.constant_step_closed {f := tokens; a := 2; d := 3}
+    refl
+    intro k
+    simp
+    refl
+  exact all_ticks n
+
+theorem after_four_ticks : tokens(4) = 14 := by
+  rewrite -> tokens_closed
+  refl
+
+-- An independently written formula describes the same sequence.
+def formula (n : Nat) : Nat := add(2, mul(n, 3))
+def advance (n previous : Nat) : Nat := add(3, previous)
+
+theorem two_descriptions (n : Nat) : tokens(n) = formula(n) := by
+  have all_ticks : forall k : Nat, tokens(k) = formula(k) := by
+    apply R.recurrence_unique {A := Nat; f := tokens; g := formula; step := advance}
+    refl
+    intro k
+    simp
+    refl
+    intro k
+    exact R.constant_step_successor {a := 2; d := 3; n := k}
+  exact all_ticks n
+
+-- Uniqueness also applies when the states are not numbers.
+data State
+| ready
+| busy
+
+defrec toggle (s : State) : State
+| ready => busy
+| busy => ready
+
+defrec machine (n : Nat) : State
+| zero => ready
+| succ k rec => toggle(rec)
+
+def transition (n : Nat) (s : State) : State := toggle(s)
+
+theorem state_sequence_unique (other : Nat -> State) :
+  other(0) = ready ->
+  (forall k : Nat, other(succ(k)) = toggle(other(k))) ->
+  forall n : Nat, machine(n) = other(n) := by
+  intro initial
+  intro next
+  apply R.recurrence_unique {A := State; f := machine; g := other; step := transition}
+  rewrite -> initial
+  refl
+  intro k
+  simp
+  refl
+  intro k
+  exact next k
+
+-- Agreement on a short prefix does not determine the remaining values.
+defrec delayed (n : Nat) : Nat
+| zero => 0
+| succ k rec => k
+
+theorem first_value : delayed(0) = 0 := by
+  refl
+
+theorem second_value : delayed(1) = 0 := by
+  refl
+
+theorem third_value : delayed(2) = 1 := by
+  refl

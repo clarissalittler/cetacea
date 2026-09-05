@@ -549,6 +549,7 @@ fn infer_proof(
     proof_context: &HolProofContext,
     proof: &HolDraftProof,
 ) -> Result<CoreTerm, ProofError> {
+    crate::work_budget::spend().map_err(ProofError::new)?;
     match proof {
         HolDraftProof::Hypothesis(index) => Ok(proof_context.lookup(*index)?.clone()),
         HolDraftProof::TheoremRef {

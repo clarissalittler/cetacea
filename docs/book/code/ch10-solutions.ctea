@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch10-solutions.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -19,9 +19,9 @@ defrec sumto (n : Nat) : Nat
 | zero => 0
 | succ k rec => add(succ(k), rec)
 
-defrec replicate (n : Nat) (x : Nat) : List
-| zero => nil
-| succ k rec => cons(x, rec)
+defrec replicate (n : Nat) (x : Nat) : list.List
+| zero => list.nil
+| succ k rec => list.cons(x, rec)
 
 -- Exercise 10.1
 theorem ex10_1 : sumto(5) = 15 := by
@@ -43,7 +43,7 @@ theorem ex10_3 (n : Nat) : triple(n) = add(n, double(n)) := by
 
 -- Exercise 10.4. Induction on n -- replicate recurses on its first
 -- argument, so that is where the computation unfolds.
-theorem ex10_4 (n : Nat) (x : Nat) : length(replicate(n, x)) = n := by
+theorem ex10_4 (n : Nat) (x : Nat) : list.length(replicate(n, x)) = n := by
   induction n with
   | zero =>
       refl
@@ -53,17 +53,17 @@ theorem ex10_4 (n : Nat) (x : Nat) : length(replicate(n, x)) = n := by
       refl
 
 -- Exercise 10.5. No axioms: the accepted line is bare.
-theorem ex10_5 : Divides(3, 12) := by
-  unfold Divides
+theorem ex10_5 : modular.Divides(3, 12) := by
+  unfold modular.Divides
   exists 4
   refl
 
 -- Exercise 10.6. Same statement, but the accepted line now reads
 -- (constructive; axioms: modeq_zero_to_divides) -- this proof leans
 -- on the library's one trusted-not-proved statement.
-theorem ex10_6 : Divides(3, 12) := by
-  apply modeq_zero_to_divides {m := 3; x := 12}
-  unfold ModEq
+theorem ex10_6 : modular.Divides(3, 12) := by
+  apply modular.modeq_zero_to_divides {m := 3; x := 12}
+  unfold modular.ModEq
   exists 0
   exists 4
   refl

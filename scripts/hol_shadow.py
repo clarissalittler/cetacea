@@ -32,7 +32,8 @@ class ShadowError(RuntimeError):
 
 def run_one(checker: Path, path: Path) -> dict[str, Any]:
     completed = subprocess.run(
-        [str(checker), "--hol-shadow", "--json", hol_baseline.relative(path)],
+        [sys.executable, str(ROOT / "scripts" / "run_limited.py"), "--",
+         str(checker), "--hol-shadow", "--json", hol_baseline.relative(path)],
         cwd=ROOT,
         check=False,
         text=True,

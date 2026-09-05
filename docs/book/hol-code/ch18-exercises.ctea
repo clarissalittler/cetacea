@@ -1,0 +1,27 @@
+-- Replace each sorry. Keep the theorem names and statements.
+-- Chapter 18: explicit directed paths.
+import std/hol/graph@1 as G
+
+mode constructive
+
+-- Staying at a vertex requires no edge.
+theorem ex18_1 (A : Type) (E : A -> A -> Prop) (a : A) :
+  G.ValidPath(E, G.nil, a, a) := by
+  sorry
+
+-- Prepend one edge to an already checked tail path.
+theorem ex18_2 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :
+  E(a, h) -> G.ValidPath(E, t, h, b) -> G.ValidPath(E, G.cons(h, t), a, b) := by
+  sorry
+
+-- Removing the first visited vertex changes the start of the remaining path.
+theorem ex18_3 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :
+  G.ValidPath(E, G.cons(h, t), a, b) -> G.ValidPath(E, t, h, b) := by
+  sorry
+
+-- Join two paths at a common endpoint. Keep endpoints general during induction.
+theorem ex18_4 (A : Type) (E : A -> A -> Prop) (xs ys : G.List A) :
+  forall a b c : A,
+  G.ValidPath(E, xs, a, b) -> G.ValidPath(E, ys, b, c) ->
+  G.ValidPath(E, G.append(xs, ys), a, c) := by
+  sorry

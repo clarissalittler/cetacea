@@ -3,8 +3,16 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub mod assignment;
+mod finite_tactic;
 pub mod hol;
 mod kernel;
+pub mod stdlib;
+#[cfg(feature = "hol-shadow")]
+mod virtual_project;
+mod work_budget;
+#[cfg(feature = "hol-shadow")]
+pub use virtual_project::VirtualProject;
 
 pub use kernel::{check_proof, KernelSignature};
 
@@ -474,6 +482,7 @@ struct SignatureCanonicalizer<'a> {
     env: &'a Env,
     scopes: Vec<(Name, Name)>,
     next_binder: usize,
+    surface_names: bool,
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -483,11 +492,23 @@ impl<'a> SignatureCanonicalizer<'a> {
             env,
             scopes: Vec::new(),
             next_binder: 0,
+            surface_names: false,
+        }
+    }
+
+    fn for_package_surface(env: &'a Env) -> Self {
+        Self {
+            surface_names: true,
+            ..Self::new(env)
         }
     }
 
     fn bind(&mut self, original: &Name) -> Name {
-        let fresh = format!("?{}", self.next_binder);
+        let fresh = if self.surface_names {
+            original.clone()
+        } else {
+            format!("?{}", self.next_binder)
+        };
         self.next_binder += 1;
         self.scopes.push((original.clone(), fresh.clone()));
         fresh
@@ -498,6 +519,14 @@ impl<'a> SignatureCanonicalizer<'a> {
             if original == name {
                 return fresh.clone();
             }
+        }
+        if self.surface_names {
+            let surface = self.env.package_surface_name(name);
+            // A qualified package reference must not become a bound variable.
+            if surface != *name && self.scopes.iter().any(|(_, bound)| bound == &surface) {
+                return name.clone();
+            }
+            return surface;
         }
         match self.env.package_origin(name) {
             Some(origin) => origin.clone(),
@@ -1294,6 +1323,10 @@ pub struct Env {
     /// package-qualified identity, such as `F.cons` -> `std/hol/list@1.cons`.
     #[cfg(feature = "hol-shadow")]
     package_origins: HashMap<Name, Name>,
+    /// First loaded surface spelling for each stable package declaration.
+    /// Later aliases resolve here; existing statements keep their spelling.
+    #[cfg(feature = "hol-shadow")]
+    package_surface_names: HashMap<Name, Name>,
     consts: HashMap<Name, Type>,
     rank_one_consts: HashMap<Name, RankOneConstDecl>,
     funcs: HashMap<Name, FuncDecl>,
@@ -1359,8 +1392,11 @@ impl Env {
     #[cfg(feature = "hol-shadow")]
     fn record_package_origin(&mut self, name: Name, logical_id: &str) {
         let leaf = name.rsplit('.').next().unwrap_or(&name).to_string();
-        self.package_origins
-            .insert(name, format!("{logical_id}.{leaf}"));
+        let origin = format!("{logical_id}.{leaf}");
+        self.package_surface_names
+            .entry(origin.clone())
+            .or_insert_with(|| name.clone());
+        self.package_origins.insert(name, origin);
     }
 
     #[cfg(feature = "hol-shadow")]
@@ -1373,6 +1409,85 @@ impl Env {
     #[cfg(not(feature = "hol-shadow"))]
     fn package_origin(&self, _name: &str) -> Option<&Name> {
         None
+    }
+
+    /// Keep a qualified spelling when its representative is locally bound;
+    /// changing it would capture the package reference and alter the statement.
+    fn package_surface_name_in_context(&self, ctx: &Context, name: &str) -> Name {
+        let surface = self.package_surface_name(name);
+        if surface != name && ctx.has_schema_name(&surface) {
+            name.to_string()
+        } else {
+            surface
+        }
+    }
+
+    fn package_surface_name(&self, name: &str) -> Name {
+        #[cfg(feature = "hol-shadow")]
+        if let Some(origin) = self.package_origin(name) {
+            if let Some(surface) = self.package_surface_names.get(origin) {
+                return surface.clone();
+            }
+        }
+        name.to_string()
+    }
+
+    /// Canonicalize newly installed package signatures and theorem bodies,
+    /// leaving alias lookup keys and certified receipt identities intact.
+    #[cfg(feature = "hol-shadow")]
+    fn canonicalize_package_surface(&mut self) {
+        if self.package_origins.len() == self.package_surface_names.len() {
+            return;
+        }
+        let snapshot = self.clone();
+        for (name, decl) in &mut self.rank_one_consts {
+            if snapshot.package_origin(name).is_some() {
+                decl.result = SignatureCanonicalizer::for_package_surface(&snapshot)
+                    .rewrite_type(&decl.result);
+            }
+        }
+        for (name, decl) in &mut self.rank_one_funcs {
+            if snapshot.package_origin(name).is_none() {
+                continue;
+            }
+            let mut rewrite = SignatureCanonicalizer::for_package_surface(&snapshot);
+            decl.result = rewrite.rewrite_type(&decl.result);
+            for arg in &mut decl.args {
+                match arg {
+                    RankOneFunctionArgument::Term(ty) => *ty = rewrite.rewrite_type(ty),
+                    RankOneFunctionArgument::Function { arguments, result } => {
+                        for ty in arguments {
+                            *ty = rewrite.rewrite_type(ty);
+                        }
+                        *result = rewrite.rewrite_type(result);
+                    }
+                }
+            }
+        }
+        for (name, decl) in &mut self.rank_one_preds {
+            if snapshot.package_origin(name).is_none() {
+                continue;
+            }
+            let mut rewrite = SignatureCanonicalizer::for_package_surface(&snapshot);
+            for arg in &mut decl.args {
+                match arg {
+                    RankOnePredicateArgument::Term(ty) => *ty = rewrite.rewrite_type(ty),
+                    RankOnePredicateArgument::Predicate(types) => {
+                        for ty in types {
+                            *ty = rewrite.rewrite_type(ty);
+                        }
+                    }
+                }
+            }
+        }
+        for (name, theorem) in &mut self.theorems {
+            if snapshot.package_origin(name).is_none() {
+                continue;
+            }
+            let mut rewrite = SignatureCanonicalizer::for_package_surface(&snapshot);
+            theorem.params = rewrite.rewrite_params(&theorem.params);
+            theorem.statement = rewrite.rewrite_formula(&theorem.statement);
+        }
     }
 
     pub fn add_const(&mut self, name: Name, ty: Type) {
@@ -1493,12 +1608,14 @@ impl Env {
         self.formula_def(name)
     }
 
-    fn ambiguous_formula_def_names(&self, name: &str) -> Option<Vec<Name>> {
-        ambiguous_leaf_names(self.defs.keys(), name)
-    }
-
     fn term_def(&self, name: &str) -> Option<&TermDef> {
         self.term_defs.get(name)
+    }
+
+    fn term_def_scoped<'a>(&'a self, ctx: &Context, name: &str) -> Option<&'a TermDef> {
+        scoped_top_level_name(ctx, name)
+            .and_then(|scoped| self.term_def(&scoped))
+            .or_else(|| self.term_def(name))
     }
 
     fn has_sort(&self, name: &str) -> bool {
@@ -2168,8 +2285,21 @@ pub struct CheckedTheorem {
     pub status: DeclarationStatus,
 }
 
+/// One parsed theorem/axiom occurrence, including attempts that do not enter
+/// the environment. Status is independent of assignment-policy acceptance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TheoremOutcome {
+    pub name: Name,
+    pub statement: String,
+    pub line: usize,
+    pub source_path: Option<PathBuf>,
+    pub is_imported: bool,
+    pub status: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CheckResult {
+    pub theorem_outcomes: Vec<TheoremOutcome>,
     pub theorems: Vec<CheckedTheorem>,
     pub diagnostics: Vec<Diagnostic>,
     /// The legacy checker encountered an exact logical package import that
@@ -2241,6 +2371,8 @@ pub struct HolShadowStatementClassification {
 #[cfg(feature = "hol-shadow")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HolShadowTheorem {
+    /// Stable public package export identity, independent of local aliases.
+    pub library_identity: Option<String>,
     pub name: Name,
     pub statement: String,
     /// Canonical parameter telescope followed by the proposition body.
@@ -2285,6 +2417,8 @@ pub struct HolShadowReport {
     pub checked_declarations: Vec<HolShadowDeclaration>,
     pub statement_classifications: Vec<HolShadowStatementClassification>,
     pub theorems: Vec<HolShadowTheorem>,
+    /// Searchable package exports; these are not root/source declarations.
+    pub package_theorems: Vec<HolShadowTheorem>,
     pub mismatches: Vec<HolShadowMismatch>,
     pub receipt_names: BTreeMap<hol::DeclarationId, Name>,
     /// Canonical filesystem identities of every transitively loaded import.
@@ -2334,6 +2468,15 @@ impl HolShadowReport {
                     "the teaching checker accepted this declaration but the HOL kernel could not replay it; the file is not certified",
                 ),
             );
+            for outcome in &mut result.theorem_outcomes {
+                if outcome.name == mismatch.declaration
+                    && outcome.line == mismatch.line
+                    && outcome.source_path == mismatch.source_path
+                    && outcome.is_imported == mismatch.is_imported
+                {
+                    outcome.status = "failed".to_string();
+                }
+            }
             rejected.push((mismatch.declaration.clone(), mismatch.is_imported));
         }
         // Every replay failure records a mismatch, so a count gap with no
@@ -2341,6 +2484,14 @@ impl HolShadowReport {
         if self.mismatches.is_empty()
             && self.attempted_declarations != self.checked_declarations.len()
         {
+            for outcome in &mut result.theorem_outcomes {
+                if matches!(
+                    outcome.status.as_str(),
+                    "accepted" | "incomplete" | "trusted_axiom"
+                ) {
+                    outcome.status = "failed".to_string();
+                }
+            }
             result.diagnostics.push(Diagnostic::error(format!(
                 "kernel certification is incomplete: {} of {} accepted declarations were replayed",
                 self.checked_declarations.len(),
@@ -2394,6 +2545,8 @@ pub struct GoalSnapshot {
     pub id: usize,
     pub context: Vec<String>,
     pub target: String,
+    /// Definitional computation preview, separate from the written goal.
+    pub computed_target: Option<String>,
     pub hints: Vec<GoalHint>,
 }
 
@@ -2454,6 +2607,7 @@ pub fn check_file_at_path(path: impl AsRef<Path>) -> CheckResult {
 }
 
 pub fn check_source_at_path(source: &str, path: impl AsRef<Path>) -> CheckResult {
+    let _work_budget = work_budget::Scope::enter();
     let path = path.as_ref();
     let (source_path, base_dir) = editor_source_context(path);
     let file = match parse_file(source) {
@@ -2523,6 +2677,7 @@ pub fn check_source_at_path_with_hol_shadow(
     source: &str,
     path: impl AsRef<Path>,
 ) -> HolShadowReport {
+    let _work_budget = work_budget::Scope::enter();
     let path = path.as_ref();
     let (source_path, base_dir) = editor_source_context(path);
     let file = match parse_file(source) {
@@ -2542,6 +2697,7 @@ pub fn check_source_at_path_with_hol_shadow(
                 statement_classifications: Vec::new(),
                 theorems: Vec::new(),
                 mismatches: Vec::new(),
+                package_theorems: Vec::new(),
                 receipt_names: BTreeMap::new(),
                 imported_files: Vec::new(),
                 imported_virtual_files: Vec::new(),
@@ -2600,6 +2756,7 @@ fn unavailable_hol_shadow(
             is_imported: false,
             message: format!("could not initialize HOL shadow: {error}"),
         }],
+        package_theorems: Vec::new(),
         receipt_names: BTreeMap::new(),
         imported_files: Vec::new(),
         imported_virtual_files: Vec::new(),
@@ -2643,6 +2800,13 @@ pub fn outline(source: &str) -> SourceOutline {
             diagnostics: vec![parse_diagnostic(None, err, None)],
         },
     }
+}
+
+#[derive(Clone, Copy, Default)]
+struct EditorLocation<'a> {
+    base_dir: Option<&'a Path>,
+    source_path: Option<&'a Path>,
+    virtual_path: Option<&'a str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2781,6 +2945,7 @@ fn goals_at_path_in_mode(
     position: Position,
     analysis_mode: EditorAnalysisMode,
 ) -> GoalStepResult {
+    let _work_budget = work_budget::Scope::enter();
     let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
@@ -2816,8 +2981,11 @@ fn goals_at_path_in_mode(
         theorem_index,
         tactic_count,
         &[],
-        base_dir.as_deref(),
-        Some(canonical_path.as_path()),
+        EditorLocation {
+            base_dir: base_dir.as_deref(),
+            source_path: Some(canonical_path.as_path()),
+            virtual_path: None,
+        },
         analysis_mode,
     )
 }
@@ -2850,6 +3018,7 @@ fn goals_at_source_path_in_mode(
     position: Position,
     analysis_mode: EditorAnalysisMode,
 ) -> GoalStepResult {
+    let _work_budget = work_budget::Scope::enter();
     let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
@@ -2885,8 +3054,11 @@ fn goals_at_source_path_in_mode(
         theorem_index,
         tactic_count,
         &[],
-        base_dir.as_deref(),
-        Some(source_path.as_path()),
+        EditorLocation {
+            base_dir: base_dir.as_deref(),
+            source_path: Some(source_path.as_path()),
+            virtual_path: None,
+        },
         analysis_mode,
     )
 }
@@ -2896,7 +3068,13 @@ pub fn goals_at_with_imports(
     position: Position,
     imports: &[VirtualFile],
 ) -> GoalStepResult {
-    goals_at_with_imports_in_mode(source, position, imports, EditorAnalysisMode::Legacy)
+    goals_at_with_imports_in_mode(
+        source,
+        position,
+        imports,
+        EditorAnalysisMode::Legacy,
+        EditorLocation::default(),
+    )
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -2905,7 +3083,13 @@ pub fn goals_at_with_imports_and_hol_shadow(
     position: Position,
     imports: &[VirtualFile],
 ) -> GoalStepResult {
-    goals_at_with_imports_in_mode(source, position, imports, EditorAnalysisMode::HolShadow)
+    goals_at_with_imports_in_mode(
+        source,
+        position,
+        imports,
+        EditorAnalysisMode::HolShadow,
+        EditorLocation::default(),
+    )
 }
 
 fn goals_at_with_imports_in_mode(
@@ -2913,7 +3097,9 @@ fn goals_at_with_imports_in_mode(
     position: Position,
     imports: &[VirtualFile],
     analysis_mode: EditorAnalysisMode,
+    location: EditorLocation<'_>,
 ) -> GoalStepResult {
+    let _work_budget = work_budget::Scope::enter();
     let source_lines: Vec<_> = source.lines().collect();
     let file = match parse_file(source) {
         Ok(file) => file,
@@ -2949,8 +3135,7 @@ fn goals_at_with_imports_in_mode(
         theorem_index,
         tactic_count,
         imports,
-        None,
-        None,
+        location,
         analysis_mode,
     )
 }
@@ -2992,6 +3177,7 @@ fn run_tactic_at_path_in_mode(
     tactic_index: usize,
     analysis_mode: EditorAnalysisMode,
 ) -> GoalStepResult {
+    let _work_budget = work_budget::Scope::enter();
     let (file, _source, canonical_path, base_dir) = match parse_editor_file_at_path(path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
@@ -3035,8 +3221,11 @@ fn run_tactic_at_path_in_mode(
         theorem_index,
         tactic_index + 1,
         &[],
-        base_dir.as_deref(),
-        Some(canonical_path.as_path()),
+        EditorLocation {
+            base_dir: base_dir.as_deref(),
+            source_path: Some(canonical_path.as_path()),
+            virtual_path: None,
+        },
         analysis_mode,
     )
 }
@@ -3079,6 +3268,7 @@ fn run_tactic_in_source_at_path_in_mode(
     tactic_index: usize,
     analysis_mode: EditorAnalysisMode,
 ) -> GoalStepResult {
+    let _work_budget = work_budget::Scope::enter();
     let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
@@ -3122,8 +3312,11 @@ fn run_tactic_in_source_at_path_in_mode(
         theorem_index,
         tactic_index + 1,
         &[],
-        base_dir.as_deref(),
-        Some(source_path.as_path()),
+        EditorLocation {
+            base_dir: base_dir.as_deref(),
+            source_path: Some(source_path.as_path()),
+            virtual_path: None,
+        },
         analysis_mode,
     )
 }
@@ -3140,6 +3333,7 @@ pub fn run_tactic_with_imports(
         tactic_index,
         imports,
         EditorAnalysisMode::Legacy,
+        EditorLocation::default(),
     )
 }
 
@@ -3156,6 +3350,7 @@ pub fn run_tactic_with_imports_and_hol_shadow(
         tactic_index,
         imports,
         EditorAnalysisMode::HolShadow,
+        EditorLocation::default(),
     )
 }
 
@@ -3165,7 +3360,9 @@ fn run_tactic_with_imports_in_mode(
     tactic_index: usize,
     imports: &[VirtualFile],
     analysis_mode: EditorAnalysisMode,
+    location: EditorLocation<'_>,
 ) -> GoalStepResult {
+    let _work_budget = work_budget::Scope::enter();
     let file = match parse_file(source) {
         Ok(file) => file,
         Err(err) => {
@@ -3209,8 +3406,7 @@ fn run_tactic_with_imports_in_mode(
         theorem_index,
         tactic_index + 1,
         imports,
-        None,
-        None,
+        location,
         analysis_mode,
     )
 }
@@ -3236,6 +3432,7 @@ fn explain_theorem_at_path_in_mode(
     theorem_name: &str,
     analysis_mode: EditorAnalysisMode,
 ) -> ExplanationResult {
+    let _work_budget = work_budget::Scope::enter();
     let (file, source, canonical_path, base_dir) = match parse_editor_file_at_path(path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
@@ -3262,8 +3459,11 @@ fn explain_theorem_at_path_in_mode(
         theorem_index,
         &source_lines,
         &[],
-        base_dir.as_deref(),
-        Some(canonical_path.as_path()),
+        EditorLocation {
+            base_dir: base_dir.as_deref(),
+            source_path: Some(canonical_path.as_path()),
+            virtual_path: None,
+        },
         analysis_mode,
     )
 }
@@ -3301,6 +3501,7 @@ fn explain_theorem_in_source_at_path_in_mode(
     theorem_name: &str,
     analysis_mode: EditorAnalysisMode,
 ) -> ExplanationResult {
+    let _work_budget = work_budget::Scope::enter();
     let (file, source_path, base_dir) = match parse_editor_source_at_path(source, path) {
         Ok(parsed) => parsed,
         Err(diagnostic) => {
@@ -3327,8 +3528,11 @@ fn explain_theorem_in_source_at_path_in_mode(
         theorem_index,
         &source_lines,
         &[],
-        base_dir.as_deref(),
-        Some(source_path.as_path()),
+        EditorLocation {
+            base_dir: base_dir.as_deref(),
+            source_path: Some(source_path.as_path()),
+            virtual_path: None,
+        },
         analysis_mode,
     )
 }
@@ -3338,7 +3542,13 @@ pub fn explain_theorem_with_imports(
     theorem_name: &str,
     imports: &[VirtualFile],
 ) -> ExplanationResult {
-    explain_theorem_with_imports_in_mode(source, theorem_name, imports, EditorAnalysisMode::Legacy)
+    explain_theorem_with_imports_in_mode(
+        source,
+        theorem_name,
+        imports,
+        EditorAnalysisMode::Legacy,
+        EditorLocation::default(),
+    )
 }
 
 #[cfg(feature = "hol-shadow")]
@@ -3352,6 +3562,7 @@ pub fn explain_theorem_with_imports_and_hol_shadow(
         theorem_name,
         imports,
         EditorAnalysisMode::HolShadow,
+        EditorLocation::default(),
     )
 }
 
@@ -3360,7 +3571,9 @@ fn explain_theorem_with_imports_in_mode(
     theorem_name: &str,
     imports: &[VirtualFile],
     analysis_mode: EditorAnalysisMode,
+    location: EditorLocation<'_>,
 ) -> ExplanationResult {
+    let _work_budget = work_budget::Scope::enter();
     let source_lines: Vec<_> = source.lines().collect();
     let file = match parse_file(source) {
         Ok(file) => file,
@@ -3387,8 +3600,7 @@ fn explain_theorem_with_imports_in_mode(
         theorem_index,
         &source_lines,
         imports,
-        None,
-        None,
+        location,
         analysis_mode,
     )
 }
@@ -3439,6 +3651,7 @@ fn editor_source_context(path: &Path) -> (PathBuf, Option<PathBuf>) {
 }
 
 struct FileChecker {
+    _work_budget: work_budget::Scope,
     env: Env,
     result: CheckResult,
     #[cfg(feature = "hol-shadow")]
@@ -3446,6 +3659,7 @@ struct FileChecker {
     loaded_files: HashSet<(PathBuf, Option<Name>)>,
     import_stack: Vec<PathBuf>,
     virtual_files: HashMap<String, String>,
+    virtual_project: bool,
     loaded_virtual_files: HashSet<(String, Option<Name>)>,
     virtual_import_stack: Vec<String>,
     #[cfg(feature = "hol-shadow")]
@@ -3622,6 +3836,7 @@ fn qualify_imported_command(command: Command, namespace_stack: &[Name]) -> Comma
 impl FileChecker {
     fn new() -> Self {
         Self {
+            _work_budget: work_budget::Scope::enter(),
             env: Env::new(),
             result: CheckResult::default(),
             #[cfg(feature = "hol-shadow")]
@@ -3629,6 +3844,7 @@ impl FileChecker {
             loaded_files: HashSet::new(),
             import_stack: Vec::new(),
             virtual_files: HashMap::new(),
+            virtual_project: false,
             loaded_virtual_files: HashSet::new(),
             virtual_import_stack: Vec::new(),
             #[cfg(feature = "hol-shadow")]
@@ -3675,7 +3891,60 @@ impl FileChecker {
         let shadow = self
             .hol_shadow
             .expect("HOL shadow checker must retain its sidecar state");
+        let mut package_theorems = Vec::new();
+        for theorem in self.env.theorems.values() {
+            let TheoremEvidence::HolPackage(evidence) = &theorem.evidence else {
+                continue;
+            };
+            let (_, declaration) = shadow
+                .elaborator
+                .libraries()
+                .declaration_by_receipt(evidence.receipt())
+                .expect("installed package declaration");
+            let core = shadow.elaborator.core();
+            let id = core
+                .theorems()
+                .resolve(&declaration.core_name)
+                .expect("installed package theorem");
+            let receipt = core
+                .theorem_receipt(id)
+                .expect("checked package receipt")
+                .clone();
+            package_theorems.push(HolShadowTheorem {
+                library_identity: self
+                    .env
+                    .package_origin(&theorem.name)
+                    .and_then(|origin| origin.rsplit_once('.'))
+                    .map(|(package, name)| format!("{package}::{name}")),
+                name: theorem.name.clone(),
+                statement: theorem.statement.to_string(),
+                signature: resolved_theorem_signature(
+                    &self.env,
+                    &theorem.params,
+                    &theorem.statement,
+                ),
+                legacy_status: DeclarationStatus::Accepted,
+                hol_status: receipt.status(),
+                legacy_mode_used: theorem.mode_used,
+                hol_mode_used: theorem.mode_used,
+                statement_fragment: receipt.proof().statement_fragment(),
+                required_fragment: receipt.proof().required_fragment(),
+                axiom_deps: shadow.named_dependencies(receipt.proof().axiom_dependencies()),
+                incomplete_deps: shadow
+                    .named_dependencies(receipt.proof().incomplete_dependencies()),
+                features: receipt
+                    .proof()
+                    .transitive_features()
+                    .iter()
+                    .copied()
+                    .collect(),
+                is_imported: true,
+                receipt,
+            });
+        }
+        package_theorems.sort_by(|a, b| a.name.cmp(&b.name));
         HolShadowReport {
+            package_theorems,
             legacy: self.result,
             attempted_declarations: shadow.attempted_declarations,
             checked_declarations: shadow.checked_declarations,
@@ -3814,6 +4083,7 @@ impl FileChecker {
             .copied()
             .collect();
         shadow.theorems.push(HolShadowTheorem {
+            library_identity: None,
             name: checked.name.clone(),
             statement: checked.statement.clone(),
             signature: signature.to_string(),
@@ -3913,6 +4183,55 @@ impl FileChecker {
         base_dir: Option<&Path>,
         virtual_base: Option<&str>,
     ) -> Result<ResolvedImport, Diagnostic> {
+        // Reserved bundled imports never read caller-supplied virtual files or
+        // the filesystem, including their relative source dependencies.
+        if import_path.starts_with("builtin:")
+            || virtual_base.is_some_and(|base| base.starts_with("builtin:"))
+        {
+            let identity = if import_path.starts_with("builtin:") {
+                import_path.to_string()
+            } else if import_path.starts_with("std/") {
+                format!("builtin:{import_path}")
+            } else {
+                normalize_virtual_path(&format!(
+                    "{}/{import_path}",
+                    virtual_base.unwrap_or_default()
+                ))
+            };
+            return if stdlib::bundled_source(&identity).is_some() {
+                Ok(ResolvedImport::Virtual(identity))
+            } else {
+                Err(Diagnostic::error(format!(
+                    "unknown bundled standard-library import `{identity}`"
+                )))
+            };
+        }
+        #[cfg(feature = "hol-shadow")]
+        if self.virtual_project {
+            if import_path.starts_with("std/") {
+                let bundled = format!("builtin:{import_path}");
+                if stdlib::bundled_source(&bundled).is_some() {
+                    return Ok(ResolvedImport::Virtual(bundled));
+                }
+            }
+            let candidate = virtual_project::project_import_path(virtual_base, import_path)
+                .ok_or_else(|| {
+                    Diagnostic::error(format!(
+                        "import `{import_path}` escapes the project or uses an invalid path"
+                    ))
+                })?;
+            let bundled = format!("builtin:{candidate}");
+            if candidate.starts_with("std/") && stdlib::bundled_source(&bundled).is_some() {
+                return Ok(ResolvedImport::Virtual(bundled));
+            }
+            return if self.virtual_files.contains_key(&candidate) {
+                Ok(ResolvedImport::Virtual(candidate))
+            } else {
+                Err(Diagnostic::error(format!(
+                    "project source `{candidate}` is missing"
+                )))
+            };
+        }
         for candidate in virtual_import_candidates(import_path, virtual_base) {
             if self.virtual_files.contains_key(&candidate) {
                 return Ok(ResolvedImport::Virtual(candidate));
@@ -3936,6 +4255,13 @@ impl FileChecker {
                 Ok(path) => return Ok(ResolvedImport::File(path)),
                 Err(err) => last_error = Some((candidate, err)),
             }
+        }
+
+        // Keep filesystem imports authoritative when present. Outside a
+        // checkout, exact std/... names fall back to the shipped library.
+        let bundled = format!("builtin:{import_path}");
+        if stdlib::bundled_source(&bundled).is_some() {
+            return Ok(ResolvedImport::Virtual(bundled));
         }
 
         // `name@version` is package syntax: an unregistered package should
@@ -3975,6 +4301,141 @@ impl FileChecker {
             diagnostic = diagnostic.with_note(format!("{}: {err}", candidate.display()));
         }
         Err(diagnostic)
+    }
+
+    fn kernel_mismatch_count(&self) -> usize {
+        #[cfg(feature = "hol-shadow")]
+        if let Some(shadow) = &self.hol_shadow {
+            return shadow.mismatches.len();
+        }
+        0
+    }
+
+    /// An import publishes its declarations, dependencies and receipts together.
+    /// Retain the failure diagnostic, but never expose a partly checked module.
+    fn check_import_command(
+        &mut self,
+        decl: ImportDecl,
+        base_dir: Option<&Path>,
+        virtual_base: Option<&str>,
+        source_path: Option<&Path>,
+        line: usize,
+        inherited_alias: Option<&str>,
+    ) -> bool {
+        let env_before = self.env.clone();
+        let theorem_count = self.result.theorems.len();
+        let outcome_count = self.result.theorem_outcomes.len();
+        let diagnostic_count = self.result.diagnostics.len();
+        let loaded_files_before = self.loaded_files.clone();
+        let loaded_virtual_before = self.loaded_virtual_files.clone();
+        #[cfg(feature = "hol-shadow")]
+        let shadow_before = self.hol_shadow.clone();
+        #[cfg(feature = "hol-shadow")]
+        let packages_before = self.loaded_library_packages.clone();
+        let mismatch_count = self.kernel_mismatch_count();
+        let alias = decl
+            .alias
+            .clone()
+            .or_else(|| inherited_alias.map(str::to_string));
+        let mut imported_source = false;
+        if let Some(package) = hol::LibraryPackageId::from_logical_id(&decl.path) {
+            self.check_logical_library_import(package, &decl.path, alias, line, source_path);
+        } else {
+            match self.resolve_import_path(&decl.path, base_dir, virtual_base) {
+                Ok(path) => {
+                    imported_source = true;
+                    self.check_resolved_import(path, true, alias);
+                }
+                Err(diagnostic) => self
+                    .result
+                    .diagnostics
+                    .push(diagnostic.with_location(source_path, line)),
+            }
+        }
+
+        #[cfg(feature = "hol-shadow")]
+        if let Some(shadow) = &self.hol_shadow {
+            for mismatch in &shadow.mismatches[mismatch_count..] {
+                self.result.diagnostics.push(
+                    diagnostic_at(
+                        mismatch.source_path.as_deref(),
+                        mismatch.line,
+                        format!(
+                            "imported declaration `{}` failed kernel certification",
+                            mismatch.declaration
+                        ),
+                    )
+                    .with_note(mismatch.message.clone()),
+                );
+            }
+        }
+        if !diagnostics_have_errors(&self.result.diagnostics[diagnostic_count..])
+            && self.kernel_mismatch_count() == mismatch_count
+        {
+            return true;
+        }
+
+        self.env = env_before;
+        self.result.theorems.truncate(theorem_count);
+        for outcome in &mut self.result.theorem_outcomes[outcome_count..] {
+            if matches!(
+                outcome.status.as_str(),
+                "accepted" | "incomplete" | "trusted_axiom"
+            ) {
+                outcome.status = "rolled_back".to_string();
+            }
+        }
+        self.loaded_files = loaded_files_before;
+        self.loaded_virtual_files = loaded_virtual_before;
+        #[cfg(feature = "hol-shadow")]
+        {
+            self.hol_shadow = shadow_before;
+            self.loaded_library_packages = packages_before;
+        }
+        // Keep requires_hol_shadow: the legacy-only driver must still retry
+        // an import that encountered a logical package, even after rollback.
+        let failures = self.result.diagnostics.split_off(diagnostic_count);
+        for mut diagnostic in failures
+            .into_iter()
+            .filter(|d| d.severity == DiagnosticSeverity::Error)
+        {
+            if let Some(location) = &diagnostic.location {
+                if imported_source {
+                    diagnostic.notes.push(format!(
+                        "in imported file `{}` at line {}",
+                        location.path.as_deref().unwrap_or(&decl.path),
+                        location.line,
+                    ));
+                }
+            }
+            if diagnostic.message.contains("already declared")
+                || diagnostic.message.contains("cannot redeclare")
+            {
+                // The actionable edit belongs to this caller's import, not
+                // to an implementation-detail import inside the library.
+                diagnostic.suggestions.retain(|suggestion| {
+                    suggestion.title != "Keep the imports in separate namespaces"
+                });
+                let suggested_alias = if decl.path.ends_with("counting.ctea") {
+                    "Counting"
+                } else {
+                    "Library"
+                };
+                diagnostic = diagnostic.with_suggestion(
+                    "Keep the imports in separate namespaces",
+                    "Give this import a fresh alias and refer to its declarations with qualified names. Distinct declarations cannot share an unqualified name.",
+                    Some(format!("import {} as {suggested_alias}", decl.path)),
+                );
+            }
+            diagnostic = diagnostic.with_location(source_path, line);
+            diagnostic.span = None; // The old token span belongs to the imported source.
+            diagnostic.notes.push(format!(
+                "import `{}` was not loaded; remaining declarations in this file were not checked",
+                decl.path
+            ));
+            self.result.diagnostics.push(diagnostic);
+        }
+        false
     }
 
     fn check_resolved_import(
@@ -4067,7 +4528,12 @@ impl FileChecker {
             return;
         }
 
-        let Some(source) = self.virtual_files.get(path).cloned() else {
+        let source = if path.starts_with("builtin:") {
+            stdlib::bundled_source(path).map(str::to_string)
+        } else {
+            self.virtual_files.get(path).cloned()
+        };
+        let Some(source) = source else {
             self.result
                 .diagnostics
                 .push(Diagnostic::error(format!("could not read import `{path}`")));
@@ -4143,6 +4609,14 @@ impl FileChecker {
             }
             if package == hol::LibraryPackageId::FiniteV1 {
                 self.check_logical_finite_import(logical_id, alias, line, source_path, key);
+                return;
+            }
+            if package == hol::LibraryPackageId::MatrixV1 {
+                self.check_logical_matrix_import(logical_id, alias, line, source_path, key);
+                return;
+            }
+            if package == hol::LibraryPackageId::GraphV1 {
+                self.check_logical_graph_import(logical_id, alias, line, source_path, key);
                 return;
             }
             if package != hol::LibraryPackageId::ListV1 {
@@ -4986,6 +5460,7 @@ impl FileChecker {
                 axiom_deps: Vec::new(),
             });
             shadow.imported_packages.insert(logical_id.to_string());
+            staged_env.canonicalize_package_surface();
             self.env = staged_env;
             self.loaded_library_packages.insert(key);
         }
@@ -5597,6 +6072,7 @@ impl FileChecker {
             shadow.receipt_names.insert(receipt, stable_name);
         }
         shadow.imported_packages.insert(logical_id.to_string());
+        staged_env.canonicalize_package_surface();
         self.env = staged_env;
         self.loaded_library_packages.insert(key);
     }
@@ -5797,6 +6273,285 @@ impl FileChecker {
             shadow.receipt_names.insert(receipt, stable_name);
         }
         shadow.imported_packages.insert(logical_id.to_string());
+        staged_env.canonicalize_package_surface();
+        self.env = staged_env;
+        self.loaded_library_packages.insert(key);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn check_logical_graph_import(
+        &mut self,
+        logical_id: &str,
+        alias: Option<String>,
+        line: usize,
+        source_path: Option<&Path>,
+        key: (hol::LibraryPackageId, Option<String>),
+    ) {
+        let qualify = |name: &str| {
+            alias
+                .as_ref()
+                .map_or_else(|| name.to_string(), |ns| format!("{ns}.{name}"))
+        };
+        for name in ["ValidPath", "path_nil", "path_cons"] {
+            let name = qualify(name);
+            if self.env.has_top_level_name(&name) {
+                self.result.diagnostics.push(diagnostic_at(
+                    source_path,
+                    line,
+                    format!("logical package alias `{name}` is already declared"),
+                ));
+                return;
+            }
+        }
+        let env_before = self.env.clone();
+        let shadow_before = self.hol_shadow.clone();
+        let loaded_before = self.loaded_library_packages.clone();
+        let diagnostics_before = self.result.diagnostics.len();
+        self.check_logical_library_import(
+            hol::LibraryPackageId::ListV1,
+            "std/hol/list@1",
+            alias.clone(),
+            line,
+            source_path,
+        );
+        if self.result.diagnostics.len() != diagnostics_before {
+            self.env = env_before;
+            self.hol_shadow = shadow_before;
+            self.loaded_library_packages = loaded_before;
+            return;
+        }
+        let installed = match self
+            .hol_shadow
+            .as_mut()
+            .expect("HOL package sidecar")
+            .elaborator
+            .import_builtin_graph_v1(alias.as_deref())
+        {
+            Ok(installed) => installed,
+            Err(error) => {
+                self.env = env_before;
+                self.hol_shadow = shadow_before;
+                self.loaded_library_packages = loaded_before;
+                self.result.diagnostics.push(
+                    diagnostic_at(
+                        source_path,
+                        line,
+                        format!("could not import logical HOL package `{logical_id}`"),
+                    )
+                    .with_note(error.message),
+                );
+                return;
+            }
+        };
+        let mut staged_env = self.env.clone();
+        for name in ["ValidPath", "path_nil", "path_cons"] {
+            staged_env.reserve_package_name(qualify(name), logical_id);
+        }
+        let element = Type::Named("A".into());
+        staged_env.add_rank_one_mixed_pred(
+            qualify("ValidPath"),
+            vec!["A".into()],
+            vec![
+                RankOnePredicateArgument::Predicate(vec![element.clone(), element.clone()]),
+                RankOnePredicateArgument::Term(Type::App(qualify("List"), vec![element.clone()])),
+                RankOnePredicateArgument::Term(element.clone()),
+                RankOnePredicateArgument::Term(element),
+            ],
+        );
+        for (name, params, statement) in hol::graph_surface::path_surface_schemas(alias.as_deref())
+        {
+            let receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|decl| decl.logical_name == name)
+                .and_then(|decl| decl.receipt)
+                .expect("checked graph law receipt");
+            staged_env.add_theorem(Theorem {
+                name: qualify(name),
+                params,
+                statement,
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    hol::LibraryPackageId::GraphV1,
+                    receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: vec![],
+            });
+        }
+        let shadow = self.hol_shadow.as_mut().expect("HOL package sidecar");
+        for declaration in &installed.record.declarations {
+            if let Some(receipt) = declaration.receipt {
+                let name = shadow
+                    .elaborator
+                    .libraries()
+                    .receipt_name(receipt)
+                    .expect("stable graph receipt name");
+                shadow.receipt_names.insert(receipt, name);
+            }
+        }
+        shadow.imported_packages.insert(logical_id.to_string());
+        staged_env.canonicalize_package_surface();
+        self.env = staged_env;
+        self.loaded_library_packages.insert(key);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    fn check_logical_matrix_import(
+        &mut self,
+        logical_id: &str,
+        alias: Option<String>,
+        line: usize,
+        source_path: Option<&Path>,
+        key: (hol::LibraryPackageId, Option<String>),
+    ) {
+        let qualify = |name: &str| {
+            alias
+                .as_ref()
+                .map_or_else(|| name.to_string(), |ns| format!("{ns}.{name}"))
+        };
+        for name in hol::matrix_library::MatrixLibrary::EXPORTS
+            .into_iter()
+            .chain([
+                "row_sum_nil",
+                "row_sum_cons",
+                "column_sum_nil",
+                "column_sum_cons",
+                "rows_total_nil",
+                "rows_total_cons",
+                "columns_total_nil",
+                "columns_total_cons",
+            ])
+        {
+            let name = qualify(name);
+            if self.env.has_top_level_name(&name) {
+                self.result.diagnostics.push(diagnostic_at(
+                    source_path,
+                    line,
+                    format!("logical package alias `{name}` is already declared"),
+                ));
+                return;
+            }
+        }
+        let env_before = self.env.clone();
+        let shadow_before = self.hol_shadow.clone();
+        let loaded_before = self.loaded_library_packages.clone();
+        let diagnostics_before = self.result.diagnostics.len();
+        self.check_logical_library_import(
+            hol::LibraryPackageId::ListV1,
+            "std/hol/list@1",
+            alias.clone(),
+            line,
+            source_path,
+        );
+        if self.result.diagnostics.len() != diagnostics_before {
+            self.env = env_before;
+            self.hol_shadow = shadow_before;
+            self.loaded_library_packages = loaded_before;
+            return;
+        }
+        let installed = match self
+            .hol_shadow
+            .as_mut()
+            .expect("HOL package sidecar")
+            .elaborator
+            .import_builtin_matrix_v1(alias.as_deref())
+        {
+            Ok(installed) => installed,
+            Err(error) => {
+                self.env = env_before;
+                self.hol_shadow = shadow_before;
+                self.loaded_library_packages = loaded_before;
+                self.result.diagnostics.push(
+                    diagnostic_at(
+                        source_path,
+                        line,
+                        format!("could not import logical HOL package `{logical_id}`"),
+                    )
+                    .with_note(error.message),
+                );
+                return;
+            }
+        };
+        let mut staged_env = self.env.clone();
+        for name in hol::matrix_library::MatrixLibrary::EXPORTS
+            .into_iter()
+            .chain([
+                "row_sum_nil",
+                "row_sum_cons",
+                "column_sum_nil",
+                "column_sum_cons",
+                "rows_total_nil",
+                "rows_total_cons",
+                "columns_total_nil",
+                "columns_total_cons",
+            ])
+        {
+            staged_env.reserve_package_name(qualify(name), logical_id);
+        }
+        let a = Type::Named("A".into());
+        let b = Type::Named("B".into());
+        let la = Type::App(qualify("List"), vec![a.clone()]);
+        let lb = Type::App(qualify("List"), vec![b.clone()]);
+        for (name, first, second) in [
+            ("row_sum", a.clone(), lb.clone()),
+            ("column_sum", la.clone(), b.clone()),
+            ("rows_total", la.clone(), lb.clone()),
+            ("columns_total", la, lb),
+        ] {
+            staged_env.add_rank_one_mixed_func(
+                qualify(name),
+                vec!["A".into(), "B".into()],
+                vec![
+                    RankOneFunctionArgument::Function {
+                        arguments: vec![a.clone(), b.clone()],
+                        result: Type::Nat,
+                    },
+                    RankOneFunctionArgument::Term(first),
+                    RankOneFunctionArgument::Term(second),
+                ],
+                Type::Nat,
+            );
+        }
+        for (name, params, statement) in
+            hol::matrix_surface::matrix_surface_schemas(alias.as_deref())
+        {
+            let receipt = installed
+                .record
+                .declarations
+                .iter()
+                .find(|decl| decl.logical_name == name)
+                .and_then(|decl| decl.receipt)
+                .expect("checked matrix law receipt");
+            staged_env.add_theorem(Theorem {
+                name: qualify(name),
+                params,
+                statement,
+                evidence: TheoremEvidence::HolPackage(HolPackageEvidence::new(
+                    hol::LibraryPackageId::MatrixV1,
+                    receipt,
+                )),
+                mode_used: LogicMode::Constructive,
+                is_axiom: false,
+                uses_sorry: false,
+                axiom_deps: vec![],
+            });
+        }
+        let shadow = self.hol_shadow.as_mut().expect("HOL package sidecar");
+        for declaration in &installed.record.declarations {
+            if let Some(receipt) = declaration.receipt {
+                let name = shadow
+                    .elaborator
+                    .libraries()
+                    .receipt_name(receipt)
+                    .expect("stable matrix receipt name");
+                shadow.receipt_names.insert(receipt, name);
+            }
+        }
+        shadow.imported_packages.insert(logical_id.to_string());
+        staged_env.canonicalize_package_surface();
         self.env = staged_env;
         self.loaded_library_packages.insert(key);
     }
@@ -5811,33 +6566,59 @@ impl FileChecker {
         inherited_alias: Option<&str>,
     ) {
         let mut mode = LogicMode::Constructive;
+        let diagnostic_start = self.result.diagnostics.len();
+        let mismatch_start = self.kernel_mismatch_count();
 
-        for located in commands {
+        let outcome_indices = commands
+            .iter()
+            .map(|located| {
+                let (name, statement) = match &located.command {
+                    Command::Theorem(decl) => (&decl.name, &decl.statement),
+                    Command::Axiom(decl) => (&decl.name, &decl.statement),
+                    _ => return None,
+                };
+                let index = self.result.theorem_outcomes.len();
+                self.result.theorem_outcomes.push(TheoremOutcome {
+                    name: name.clone(),
+                    statement: statement.to_string(),
+                    line: located.line,
+                    source_path: source_path.map(Path::to_path_buf),
+                    is_imported,
+                    status: "not_checked".to_string(),
+                });
+                Some(index)
+            })
+            .collect::<Vec<_>>();
+        for (located, outcome_index) in commands.into_iter().zip(outcome_indices) {
+            if let Err(message) = work_budget::spend() {
+                self.result
+                    .diagnostics
+                    .push(diagnostic_at(source_path, located.line, message));
+                return;
+            }
+            if is_imported
+                && (diagnostics_have_errors(&self.result.diagnostics[diagnostic_start..])
+                    || self.kernel_mismatch_count() != mismatch_start)
+            {
+                return;
+            }
+            if let Some(index) = outcome_index {
+                self.result.theorem_outcomes[index].status = "failed".to_string();
+            }
             let line = located.line;
             let command = located.command;
             match command {
                 Command::Import(decl) => {
-                    let alias = decl.alias.or_else(|| inherited_alias.map(str::to_string));
-                    if let Some(package) = hol::LibraryPackageId::from_logical_id(&decl.path) {
-                        self.check_logical_library_import(
-                            package,
-                            &decl.path,
-                            alias,
-                            line,
-                            source_path,
-                        );
-                        continue;
+                    if !self.check_import_command(
+                        decl,
+                        base_dir,
+                        virtual_base,
+                        source_path,
+                        line,
+                        inherited_alias,
+                    ) {
+                        return;
                     }
-                    let resolved_path =
-                        match self.resolve_import_path(&decl.path, base_dir, virtual_base) {
-                            Ok(path) => path,
-                            Err(mut diagnostic) => {
-                                diagnostic = diagnostic.with_location(source_path, line);
-                                self.result.diagnostics.push(diagnostic);
-                                continue;
-                            }
-                        };
-                    self.check_resolved_import(resolved_path, true, alias);
                 }
                 Command::Mode(next_mode) => mode = next_mode,
                 Command::Sort(name) => {
@@ -6752,6 +7533,29 @@ impl FileChecker {
                         uses_sorry: false,
                         axiom_deps: vec![decl.name.clone()],
                     });
+                    if let Some(index) = outcome_index {
+                        self.result.theorem_outcomes[index].status = checked.status.to_string();
+                    }
+                    #[cfg(feature = "hol-shadow")]
+                    if is_imported {
+                        let origin = source_path
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .or_else(|| self.virtual_import_stack.last().cloned());
+                        if let (Some(origin), Some(shadow)) = (origin, &mut self.hol_shadow) {
+                            if let Some(theorem) = shadow
+                                .theorems
+                                .last_mut()
+                                .filter(|t| t.name == checked.name)
+                            {
+                                let export = inherited_alias
+                                    .and_then(|alias| {
+                                        checked.name.strip_prefix(&format!("{alias}."))
+                                    })
+                                    .unwrap_or(&checked.name);
+                                theorem.library_identity = Some(format!("{origin}::{export}"));
+                            }
+                        }
+                    }
                     self.result.theorems.push(checked);
                 }
                 Command::Theorem(decl) => {
@@ -6994,6 +7798,29 @@ impl FileChecker {
                         uses_sorry,
                         axiom_deps: axiom_deps.clone(),
                     });
+                    if let Some(index) = outcome_index {
+                        self.result.theorem_outcomes[index].status = checked.status.to_string();
+                    }
+                    #[cfg(feature = "hol-shadow")]
+                    if is_imported {
+                        let origin = source_path
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .or_else(|| self.virtual_import_stack.last().cloned());
+                        if let (Some(origin), Some(shadow)) = (origin, &mut self.hol_shadow) {
+                            if let Some(theorem) = shadow
+                                .theorems
+                                .last_mut()
+                                .filter(|t| t.name == checked.name)
+                            {
+                                let export = inherited_alias
+                                    .and_then(|alias| {
+                                        checked.name.strip_prefix(&format!("{alias}."))
+                                    })
+                                    .unwrap_or(&checked.name);
+                                theorem.library_identity = Some(format!("{origin}::{export}"));
+                            }
+                        }
+                    }
                     self.result.theorems.push(checked);
                 }
             }
@@ -7071,10 +7898,14 @@ fn goals_for_theorem_prefix(
     theorem_index: usize,
     tactic_count: usize,
     imports: &[VirtualFile],
-    base_dir: Option<&Path>,
-    source_path: Option<&Path>,
+    location: EditorLocation<'_>,
     analysis_mode: EditorAnalysisMode,
 ) -> GoalStepResult {
+    let EditorLocation {
+        base_dir,
+        source_path,
+        virtual_path,
+    } = location;
     let located = file.commands[theorem_index].clone();
     let Command::Theorem(decl) = located.command else {
         unreachable!("goal stepping is only available for theorem commands");
@@ -7105,10 +7936,15 @@ fn goals_for_theorem_prefix(
             }
         }
     };
+    checker.virtual_project = virtual_path.is_some();
+    if let Some(path) = virtual_path {
+        checker.virtual_import_stack.push(path.to_string());
+    }
+    let virtual_base = virtual_path.and_then(virtual_parent);
     checker.check_commands(
         file.commands[..theorem_index].to_vec(),
         base_dir,
-        None,
+        virtual_base.as_deref(),
         false,
         source_path,
         None,
@@ -7222,7 +8058,7 @@ fn goals_for_theorem_prefix(
                 statement_fragment,
                 next_tactic_index: tactic_count,
                 tactic_count: decl.tactics.len(),
-                completed: session.goals.is_empty(),
+                completed: false,
                 goals: session
                     .goals
                     .iter()
@@ -7263,6 +8099,19 @@ fn goals_for_theorem_prefix(
                     check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
                 };
                 match mode_used {
+                    Ok(LogicMode::Classical) if mode == LogicMode::Constructive => {
+                        diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                located.line,
+                                format!(
+                                    "theorem `{}` uses classical reasoning in constructive mode",
+                                    decl.name
+                                ),
+                            )
+                            .with_note("change to `mode classical` or use a constructive proof"),
+                        );
+                    }
                     Ok(mode_used) => {
                         #[cfg(not(feature = "hol-shadow"))]
                         let _ = mode_used;
@@ -7330,10 +8179,14 @@ fn explain_theorem_at_index(
     theorem_index: usize,
     source_lines: &[&str],
     imports: &[VirtualFile],
-    base_dir: Option<&Path>,
-    source_path: Option<&Path>,
+    location: EditorLocation<'_>,
     analysis_mode: EditorAnalysisMode,
 ) -> ExplanationResult {
+    let EditorLocation {
+        base_dir,
+        source_path,
+        virtual_path,
+    } = location;
     let located = file.commands[theorem_index].clone();
     let Command::Theorem(decl) = located.command else {
         unreachable!("explanations are only available for theorem commands");
@@ -7363,10 +8216,15 @@ fn explain_theorem_at_index(
             }
         }
     };
+    checker.virtual_project = virtual_path.is_some();
+    if let Some(path) = virtual_path {
+        checker.virtual_import_stack.push(path.to_string());
+    }
+    let virtual_base = virtual_path.and_then(virtual_parent);
     checker.check_commands(
         file.commands[..theorem_index].to_vec(),
         base_dir,
-        None,
+        virtual_base.as_deref(),
         false,
         source_path,
         None,
@@ -7557,6 +8415,19 @@ fn explain_theorem_at_index(
                     check_completed_draft(&checker.env, &theorem_ctx, &proof, &statement, mode)
                 };
                 match mode_used {
+                    Ok(LogicMode::Classical) if mode == LogicMode::Constructive => {
+                        diagnostics.push(
+                            diagnostic_at(
+                                source_path,
+                                located.line,
+                                format!(
+                                    "theorem `{}` uses classical reasoning in constructive mode",
+                                    decl.name
+                                ),
+                            )
+                            .with_note("change to `mode classical` or use a constructive proof"),
+                        );
+                    }
                     Ok(mode_used) => {
                         #[cfg(not(feature = "hol-shadow"))]
                         let _ = mode_used;
@@ -7640,14 +8511,26 @@ fn snapshot_goal_with_eligibility(
     for binding in &goal.context.term_vars {
         context.push(format!("{} : {}", binding.name, binding.ty));
     }
-    for binding in &goal.context.proof_vars {
-        context.push(format!("{} : {}", binding.name, binding.formula));
-    }
+    let mut visible_names = HashSet::new();
+    let mut visible_proofs = goal
+        .context
+        .proof_vars
+        .iter()
+        .rev()
+        .filter(|binding| visible_names.insert(binding.name.as_str()))
+        .map(|binding| format!("{} : {}", binding.name, binding.formula))
+        .collect::<Vec<_>>();
+    visible_proofs.reverse();
+    context.extend(visible_proofs);
 
     GoalSnapshot {
         id: goal.id,
         context,
         target: goal.target.to_string(),
+        computed_target: normalize_formula_defs(env, &goal.context, &goal.target)
+            .ok()
+            .filter(|computed| computed != &goal.target)
+            .map(|computed| computed.to_string()),
         hints: goal_hints_with_eligibility(env, goal, mode, countermodel_eligibility),
     }
 }
@@ -8031,7 +8914,8 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
                     Formula::implies(formula.clone(), goal.target.clone())
                 ),
             ],
-            None => vec![format!("No local hypothesis named `{name}` can be reverted.")],
+            None if goal.context.lookup_term(name).is_some() => vec![format!("Generalize `{name}` with its dependent hypotheses. Prove the new universal goal; the resulting proof is then applied to the original variable and hypotheses.")],
+            None => vec![format!("No local hypothesis or term variable named `{name}` can be reverted.")],
         },
         Tactic::Exact(expr) => vec![
             format!(
@@ -8041,6 +8925,7 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
             "`exact` closes the goal only when that expression has exactly the target formula."
                 .to_string(),
         ],
+        Tactic::Finite => vec!["Construct a finite-enumeration proof from checked list laws and constructor cases.".into()],
         Tactic::Trivial => vec![
             "Use truth introduction.".to_string(),
             "`trivial` closes a goal whose target is `True`.".to_string(),
@@ -8125,10 +9010,12 @@ fn explain_tactic_step(tactic: &Tactic, goal: &Goal) -> Vec<String> {
             expr,
             direction,
             all,
+            hypothesis,
         } => vec![
             format!(
-                "Use the equality proof `{}` to rewrite the target {}.",
+                "Use the equality proof `{}` to rewrite {} {}.",
                 proof_expr_label(expr),
+                hypothesis.as_ref().map(|name| format!("hypothesis `{name}`")).unwrap_or_else(|| "the target".to_string()),
                 rewrite_direction_label(*direction)
             ),
             if *all {
@@ -8257,6 +9144,7 @@ fn tactic_label(tactic: &Tactic) -> String {
             (None, None) => format!("have {name}"),
         },
         Tactic::Exact(expr) => format!("exact {}", proof_expr_label(expr)),
+        Tactic::Finite => "finite".to_string(),
         Tactic::Trivial => "trivial".to_string(),
         Tactic::Assumption => "assumption".to_string(),
         Tactic::Apply(expr) => format!("apply {}", proof_expr_label(expr)),
@@ -8272,13 +9160,18 @@ fn tactic_label(tactic: &Tactic) -> String {
             expr,
             direction,
             all,
+            hypothesis,
         } => {
             let all = if *all { "all " } else { "" };
             let direction = match direction {
                 RewriteDirection::Backward => "<- ",
                 RewriteDirection::Forward => "-> ",
             };
-            format!("rewrite {all}{direction}{}", proof_expr_label(expr))
+            let at = hypothesis
+                .as_ref()
+                .map(|name| format!(" at {name}"))
+                .unwrap_or_default();
+            format!("rewrite {all}{direction}{}{at}", proof_expr_label(expr))
         }
         Tactic::Unfold(name) => format!("unfold {name}"),
         Tactic::Simp => "simp".to_string(),
@@ -8353,7 +9246,11 @@ fn simp_target_label(target: &SimpTarget) -> String {
 fn build_theorem_context(env: &Env, params: &[Param]) -> Result<Context, ValidationError> {
     let mut ctx = Context::new();
     for param in params {
-        if env.has_top_level_name(&param.name) || ctx.has_schema_name(&param.name) {
+        // These are an already declared theorem's schema binders, rebuilt at
+        // its call site. Later client declarations must not invalidate their
+        // names (for example `vertices := vertices`). Declaration-time name
+        // checks remain in canonicalize_params.
+        if ctx.has_schema_name(&param.name) {
             return Err(ValidationError::new(format!(
                 "parameter `{}` is already declared",
                 param.name
@@ -8407,6 +9304,7 @@ fn resolve_top_level_name(
 
 fn resolve_data_ctor_label(env: &Env, ctx: &Context, name: &str) -> Name {
     resolve_top_level_name(ctx, name, |candidate| env.has_top_level_name(candidate))
+        .map(|name| env.package_surface_name(&name))
         .unwrap_or_else(|| name.to_string())
 }
 
@@ -8465,6 +9363,7 @@ fn canonicalize_params(
 }
 
 fn canonicalize_type(env: &Env, ctx: &Context, ty: &Type) -> Result<Type, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     match ty {
         Type::Nat => Ok(Type::Nat),
         Type::Prod(left, right) => Ok(Type::Prod(
@@ -8491,7 +9390,7 @@ fn canonicalize_type(env: &Env, ctx: &Context, ty: &Type) -> Result<Type, Valida
                 )));
             };
             Ok(Type::App(
-                name,
+                env.package_surface_name_in_context(ctx, &name),
                 arguments
                     .iter()
                     .map(|argument| canonicalize_type(env, ctx, argument))
@@ -8503,7 +9402,7 @@ fn canonicalize_type(env: &Env, ctx: &Context, ty: &Type) -> Result<Type, Valida
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.has_sort(candidate))
             {
-                return Ok(Type::Named(name));
+                return Ok(Type::Named(env.package_surface_name_in_context(ctx, &name)));
             }
             if let Some(matches) = env.ambiguous_sort_names(name) {
                 return Err(ValidationError::new(ambiguous_reference_message(
@@ -8516,6 +9415,7 @@ fn canonicalize_type(env: &Env, ctx: &Context, ty: &Type) -> Result<Type, Valida
 }
 
 fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     match term {
         Term::Var(name) => {
             if ctx.lookup_term(name).is_some() {
@@ -8524,7 +9424,7 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
             if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
                 env.consts.contains_key(candidate) || env.rank_one_consts.contains_key(candidate)
             }) {
-                return Ok(Term::Var(name));
+                return Ok(Term::Var(env.package_surface_name_in_context(ctx, &name)));
             }
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.term_def(candidate).is_some())
@@ -8532,7 +9432,7 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
                 let def = env.term_def(&name).expect("resolved term def");
                 let expected = term_def_expected_args(def);
                 if expected == 0 {
-                    return Ok(Term::Var(name));
+                    return Ok(Term::Var(env.package_surface_name_in_context(ctx, &name)));
                 }
                 return Err(ValidationError::new(format!(
                     "definition `{name}` expects {expected} argument(s), but got 0"
@@ -8579,14 +9479,20 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
                         .map(|arg| canonicalize_term(env, ctx, arg))
                         .collect::<Result<Vec<_>, _>>()?
                 };
-                return Ok(Term::App(name, args));
+                return Ok(Term::App(
+                    env.package_surface_name_in_context(ctx, &name),
+                    args,
+                ));
             }
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.term_def(candidate).is_some())
             {
                 let def = env.term_def(&name).expect("resolved term def");
                 let args = canonicalize_term_def_args(env, ctx, def, args)?;
-                return Ok(Term::App(name, args));
+                return Ok(Term::App(
+                    env.package_surface_name_in_context(ctx, &name),
+                    args,
+                ));
             }
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.data_rec_def(candidate).is_some())
@@ -8595,7 +9501,10 @@ fn canonicalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Vali
                     .iter()
                     .map(|arg| canonicalize_term(env, ctx, arg))
                     .collect::<Result<Vec<_>, _>>()?;
-                return Ok(Term::App(name, args));
+                return Ok(Term::App(
+                    env.package_surface_name_in_context(ctx, &name),
+                    args,
+                ));
             }
             if let Some(matches) = env.ambiguous_function_names(name) {
                 return Err(ValidationError::new(ambiguous_reference_message(
@@ -8802,6 +9711,7 @@ fn canonicalize_formula(
     ctx: &Context,
     formula: &Formula,
 ) -> Result<Formula, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     match formula {
         Formula::True => Ok(Formula::True),
         Formula::False => Ok(Formula::False),
@@ -8814,12 +9724,16 @@ fn canonicalize_formula(
             if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
                 env.preds.contains_key(candidate) || env.rank_one_preds.contains_key(candidate)
             }) {
-                return Ok(Formula::Atom(name));
+                return Ok(Formula::Atom(
+                    env.package_surface_name_in_context(ctx, &name),
+                ));
             }
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.formula_def(candidate).is_some())
             {
-                return Ok(Formula::Atom(name));
+                return Ok(Formula::Atom(
+                    env.package_surface_name_in_context(ctx, &name),
+                ));
             }
             if let Some(matches) = env.ambiguous_predicate_names(name) {
                 return Err(ValidationError::new(ambiguous_reference_message(
@@ -8857,14 +9771,20 @@ fn canonicalize_formula(
                         .map(|arg| canonicalize_term(env, ctx, arg))
                         .collect::<Result<Vec<_>, _>>()?
                 };
-                return Ok(Formula::PredApp(name, args));
+                return Ok(Formula::PredApp(
+                    env.package_surface_name_in_context(ctx, &name),
+                    args,
+                ));
             }
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.formula_def(candidate).is_some())
             {
                 let def = env.formula_def(&name).expect("resolved formula def");
                 let args = canonicalize_formula_def_args(env, ctx, def, args)?;
-                return Ok(Formula::PredApp(name, args));
+                return Ok(Formula::PredApp(
+                    env.package_surface_name_in_context(ctx, &name),
+                    args,
+                ));
             }
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.package_names.contains(candidate))
@@ -8950,12 +9870,16 @@ fn canonicalize_predicate_arg(
             if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
                 env.preds.contains_key(candidate) || env.rank_one_preds.contains_key(candidate)
             }) {
-                return Ok(PredicateArg::Named(name));
+                return Ok(PredicateArg::Named(
+                    env.package_surface_name_in_context(ctx, &name),
+                ));
             }
             if let Some(name) =
                 resolve_top_level_name(ctx, name, |candidate| env.formula_def(candidate).is_some())
             {
-                return Ok(PredicateArg::Named(name));
+                return Ok(PredicateArg::Named(
+                    env.package_surface_name_in_context(ctx, &name),
+                ));
             }
             if let Some(matches) = env.ambiguous_predicate_names(name) {
                 return Err(ValidationError::new(ambiguous_reference_message(
@@ -9355,6 +10279,9 @@ fn statement_countermodel_note(
 /// formula is not purely propositional (quantifiers, equality, membership,
 /// predicates, ...), in which case truth-table reasoning does not apply.
 fn collect_propositional_atoms(formula: &Formula, atoms: &mut BTreeSet<Name>) -> bool {
+    if work_budget::spend().is_err() {
+        return false;
+    }
     match formula {
         Formula::True | Formula::False => true,
         Formula::Atom(name) => {
@@ -9368,26 +10295,26 @@ fn collect_propositional_atoms(formula: &Formula, atoms: &mut BTreeSet<Name>) ->
     }
 }
 
-fn eval_propositional(formula: &Formula, atoms: &[Name], bits: u32) -> bool {
-    match formula {
+fn eval_propositional(formula: &Formula, atoms: &[Name], bits: u32) -> Option<bool> {
+    work_budget::spend().ok()?;
+    Some(match formula {
         Formula::True => true,
         Formula::False => false,
         Formula::Atom(name) => atoms
             .iter()
             .position(|atom| atom == name)
-            .map(|idx| bits & (1 << idx) != 0)
-            .unwrap_or(false),
+            .map(|idx| bits & (1 << idx) != 0)?,
         Formula::And(left, right) => {
-            eval_propositional(left, atoms, bits) && eval_propositional(right, atoms, bits)
+            eval_propositional(left, atoms, bits)? && eval_propositional(right, atoms, bits)?
         }
         Formula::Or(left, right) => {
-            eval_propositional(left, atoms, bits) || eval_propositional(right, atoms, bits)
+            eval_propositional(left, atoms, bits)? || eval_propositional(right, atoms, bits)?
         }
         Formula::Implies(left, right) => {
-            !eval_propositional(left, atoms, bits) || eval_propositional(right, atoms, bits)
+            !eval_propositional(left, atoms, bits)? || eval_propositional(right, atoms, bits)?
         }
-        _ => false,
-    }
+        _ => return None,
+    })
 }
 
 const MAX_COUNTERMODEL_ATOMS: usize = 16;
@@ -9411,8 +10338,11 @@ pub fn propositional_countermodel(hyps: &[Formula], target: &Formula) -> Option<
     }
     let atoms: Vec<Name> = atom_set.into_iter().collect();
     for bits in 0..(1u32 << atoms.len()) {
-        let hyps_hold = hyps.iter().all(|hyp| eval_propositional(hyp, &atoms, bits));
-        if hyps_hold && !eval_propositional(target, &atoms, bits) {
+        work_budget::spend().ok()?;
+        let hyps_hold = hyps
+            .iter()
+            .all(|hyp| eval_propositional(hyp, &atoms, bits) == Some(true));
+        if hyps_hold && eval_propositional(target, &atoms, bits) == Some(false) {
             return Some(
                 atoms
                     .iter()
@@ -9453,6 +10383,7 @@ fn find_arithmetic_countermodel(
     hyps: &[Formula],
     target: &Formula,
 ) -> Option<Vec<(Name, usize)>> {
+    work_budget::spend().ok()?;
     if idx == vars.len() {
         let hyps_hold = hyps
             .iter()
@@ -9483,6 +10414,7 @@ fn collect_arithmetic_formula_vars(
     terms: &[TermBinding],
     vars: &mut BTreeSet<Name>,
 ) -> Result<(), ()> {
+    work_budget::spend().map_err(|_| ())?;
     match formula {
         Formula::True | Formula::False => Ok(()),
         Formula::Eq(left, right) => {
@@ -9511,6 +10443,7 @@ fn collect_arithmetic_term_vars(
     terms: &[TermBinding],
     vars: &mut BTreeSet<Name>,
 ) -> Result<(), ()> {
+    work_budget::spend().map_err(|_| ())?;
     match term {
         Term::Ascribed { term, .. } => collect_arithmetic_term_vars(term, terms, vars),
         Term::Var(name) => {
@@ -9551,6 +10484,7 @@ fn collect_arithmetic_term_vars(
 }
 
 fn eval_arithmetic_formula(formula: &Formula, assignment: &HashMap<Name, usize>) -> Option<bool> {
+    work_budget::spend().ok()?;
     match formula {
         Formula::True => Some(true),
         Formula::False => Some(false),
@@ -9583,6 +10517,7 @@ fn eval_arithmetic_formula(formula: &Formula, assignment: &HashMap<Name, usize>)
 }
 
 fn eval_arithmetic_term(term: &Term, assignment: &HashMap<Name, usize>) -> Option<usize> {
+    work_budget::spend().ok()?;
     match term {
         Term::Ascribed { term, .. } => eval_arithmetic_term(term, assignment),
         Term::Var(name) => assignment.get(name).copied(),
@@ -9757,6 +10692,7 @@ fn find_first_order_countermodel(
     hyps: &[Formula],
     target: &Formula,
 ) -> Option<FirstOrderCountermodel> {
+    work_budget::spend().ok()?;
     if var_idx < search.terms.len() {
         let var = search.terms[var_idx].clone();
         for value in 0..search.domain_size {
@@ -9772,6 +10708,7 @@ fn find_first_order_countermodel(
     }
 
     for bits in 0..(1u64 << search.slot_count) {
+        work_budget::spend().ok()?;
         let hyps_hold = hyps
             .iter()
             .all(|hyp| eval_first_order_formula(hyp, assignment, search, bits) == Some(true));
@@ -9825,6 +10762,7 @@ fn collect_first_order_formula_signature(
     bound: &mut Vec<TermBinding>,
     sig: &mut FirstOrderSignature,
 ) -> Result<(), ()> {
+    work_budget::spend().map_err(|_| ())?;
     match formula {
         Formula::True | Formula::False => Ok(()),
         Formula::Eq(left, right) => {
@@ -9890,6 +10828,7 @@ fn collect_first_order_term_signature(
     bound: &[TermBinding],
     sig: &mut FirstOrderSignature,
 ) -> Result<Type, ()> {
+    work_budget::spend().map_err(|_| ())?;
     match term {
         Term::Ascribed { term, .. } => {
             collect_first_order_term_signature(env, ctx, term, bound, sig)
@@ -9955,6 +10894,7 @@ fn eval_first_order_formula(
     search: &FirstOrderSearch,
     bits: u64,
 ) -> Option<bool> {
+    work_budget::spend().ok()?;
     match formula {
         Formula::True => Some(true),
         Formula::False => Some(false),
@@ -9984,9 +10924,10 @@ fn eval_first_order_formula(
             let old = assignment.get(var).copied();
             for value in 0..search.domain_size {
                 assignment.insert(var.clone(), value);
-                if !eval_first_order_formula(body, assignment, search, bits)? {
+                let value = eval_first_order_formula(body, assignment, search, bits);
+                if value != Some(true) {
                     restore_first_order_assignment(assignment, var, old);
-                    return Some(false);
+                    return value;
                 }
             }
             restore_first_order_assignment(assignment, var, old);
@@ -9996,9 +10937,10 @@ fn eval_first_order_formula(
             let old = assignment.get(var).copied();
             for value in 0..search.domain_size {
                 assignment.insert(var.clone(), value);
-                if eval_first_order_formula(body, assignment, search, bits)? {
+                let value = eval_first_order_formula(body, assignment, search, bits);
+                if value != Some(false) {
                     restore_first_order_assignment(assignment, var, old);
-                    return Some(true);
+                    return value;
                 }
             }
             restore_first_order_assignment(assignment, var, old);
@@ -10021,6 +10963,7 @@ fn restore_first_order_assignment(
 }
 
 fn eval_first_order_term(term: &Term, assignment: &HashMap<Name, usize>) -> Option<usize> {
+    work_budget::spend().ok()?;
     match term {
         Term::Ascribed { term, .. } => eval_first_order_term(term, assignment),
         Term::Var(name) => assignment.get(name).copied(),
@@ -10372,6 +11315,7 @@ fn infer_kernel_proof_node(
     proof: &DraftProof,
     allowed_mode: LogicMode,
 ) -> Result<CheckedProof, KernelError> {
+    work_budget::spend().map_err(KernelError::new)?;
     match proof {
         DraftProof::Hyp(name) => {
             let Some(formula) = ctx.lookup_kernel_formula(name) else {
@@ -10546,6 +11490,14 @@ fn infer_kernel_proof_node(
             let checked_body = infer_kernel_proof_node(env, ctx, proof_body, allowed_mode)?;
             if !formula_rewrite_matches(&checked_body.formula, target, &left, &right)
                 && !formula_rewrite_matches(&checked_body.formula, target, &right, &left)
+                && !formula_rewrite_matches_exposed(
+                    env,
+                    ctx,
+                    &checked_body.formula,
+                    target,
+                    &left,
+                    &right,
+                )?
             {
                 return Err(KernelError::new(format!(
                     "cannot rewrite `{}` to `{target}` using `{left} = {right}`",
@@ -10983,6 +11935,7 @@ fn instantiate_theorem(
 }
 
 fn validate_type(env: &Env, ctx: &Context, ty: &Type) -> Result<(), ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     match ty {
         Type::Nat => Ok(()),
         Type::Prod(left, right) => {
@@ -11219,6 +12172,7 @@ fn validate_term_using_expected_type(
     term: &Term,
     expected: &Type,
 ) -> Result<Type, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     if let Term::Ascribed { .. } = term {
         let actual = validate_term(env, ctx, term)?;
         if &actual != expected {
@@ -11262,6 +12216,7 @@ fn validate_term_using_expected_type(
 }
 
 fn validate_term(env: &Env, ctx: &Context, term: &Term) -> Result<Type, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     match term {
         Term::Var(name) => {
             if let Some(ty) = ctx.lookup_term(name).or_else(|| env.consts.get(name)) {
@@ -11542,6 +12497,24 @@ fn function_signature(env: &Env, ctx: &Context, name: &str) -> Option<FuncDecl> 
                 }
             })
         })
+        .or_else(|| {
+            let definition = env.term_def(name)?;
+            // A named monomorphic data definition is a function value too.
+            // Definitions with schema/predicate parameters need explicit
+            // instantiation machinery and are not monomorphic signatures.
+            let args = definition
+                .params
+                .iter()
+                .map(|param| match &param.kind {
+                    ParamKind::Term(ty) => Some(ty.clone()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(FuncDecl {
+                args,
+                result: definition.ty.clone(),
+            })
+        })
 }
 
 fn canonicalize_function_arg(
@@ -11558,7 +12531,7 @@ fn canonicalize_function_arg(
         return Ok(name.clone());
     }
     if let Some(name) = resolve_top_level_name(ctx, name, |candidate| {
-        env.funcs.contains_key(candidate) || env.data_rec_defs.contains_key(candidate)
+        function_signature(env, ctx, candidate).is_some()
     }) {
         return Ok(name);
     }
@@ -11843,6 +12816,7 @@ fn validate_rank_one_predicate_application(
 }
 
 fn validate_formula(env: &Env, ctx: &Context, formula: &Formula) -> Result<(), ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     match formula {
         Formula::True | Formula::False => Ok(()),
         Formula::Atom(name) => {
@@ -12378,6 +13352,7 @@ fn normalize_formula_for_kernel(
     ctx: &Context,
     formula: &Formula,
 ) -> Result<Formula, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     let formula = normalize_formula_defs(env, ctx, formula)?;
     Ok(expand_data_constructor_equalities(env, ctx, formula))
 }
@@ -12698,11 +13673,86 @@ fn alpha_eq_formula_with(left: &Formula, right: &Formula, env: &mut AlphaEnv) ->
     }
 }
 
+/// Normalize term arguments without simplifying the logical shape of a
+/// rewrite target (in particular, preserve constructor equalities).
+fn normalize_rewrite_terms(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+) -> Result<Formula, ValidationError> {
+    Ok(match formula {
+        Formula::True | Formula::False | Formula::Atom(_) => formula.clone(),
+        Formula::PredApp(name, args) => Formula::PredApp(
+            name.clone(),
+            args.iter()
+                .map(|arg| normalize_term(env, ctx, arg))
+                .collect::<Result<_, _>>()?,
+        ),
+        Formula::Eq(a, b) => {
+            Formula::eq(normalize_term(env, ctx, a)?, normalize_term(env, ctx, b)?)
+        }
+        Formula::In(a, b) => {
+            Formula::membership(normalize_term(env, ctx, a)?, normalize_term(env, ctx, b)?)
+        }
+        Formula::Subset(a, b) => {
+            Formula::subset(normalize_term(env, ctx, a)?, normalize_term(env, ctx, b)?)
+        }
+        Formula::And(a, b) => Formula::and(
+            normalize_rewrite_terms(env, ctx, a)?,
+            normalize_rewrite_terms(env, ctx, b)?,
+        ),
+        Formula::Or(a, b) => Formula::or(
+            normalize_rewrite_terms(env, ctx, a)?,
+            normalize_rewrite_terms(env, ctx, b)?,
+        ),
+        Formula::Implies(a, b) => Formula::implies(
+            normalize_rewrite_terms(env, ctx, a)?,
+            normalize_rewrite_terms(env, ctx, b)?,
+        ),
+        Formula::Forall {
+            var,
+            var_type,
+            body,
+        }
+        | Formula::Exists {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut inner = ctx.clone();
+            inner.add_term(var.clone(), var_type.clone());
+            let body = normalize_rewrite_terms(env, &inner, body)?;
+            if matches!(formula, Formula::Forall { .. }) {
+                Formula::forall(var.clone(), var_type.clone(), body)
+            } else {
+                Formula::exists(var.clone(), var_type.clone(), body)
+            }
+        }
+    })
+}
+
+fn rewrite_input(
+    env: &Env,
+    ctx: &Context,
+    formula: &Formula,
+    needle: &Term,
+    replacement: &Term,
+    all: bool,
+) -> Result<Formula, TacticError> {
+    if !all && !formula_rewrite_sources(formula, needle, replacement).is_empty() {
+        return Ok(formula.clone());
+    }
+    normalize_rewrite_terms(env, ctx, formula).map_err(|err| {
+        TacticError::new(format!("cannot expose terms for rewrite: {}", err.message))
+    })
+}
+
 fn normalize_formula_defs(
     env: &Env,
     ctx: &Context,
     formula: &Formula,
 ) -> Result<Formula, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     unfold_formula_defs(env, ctx, formula, None).map(|(formula, _)| formula)
 }
 
@@ -12715,12 +13765,110 @@ fn unfold_named_formula_def(
     unfold_formula_defs(env, ctx, formula, Some(name))
 }
 
+/// Expand only the requested abbreviation, preserving computation and other
+/// definitions so `unfold` exposes a predictable, readable proof state.
+fn unfold_named_term(
+    env: &Env,
+    ctx: &Context,
+    term: &Term,
+    name: &str,
+) -> Result<Term, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
+    match term {
+        Term::Var(head) if head == name && ctx.lookup_term(head).is_none() => {
+            return instantiate_term_def(env, ctx, env.term_def(name).unwrap(), &[])
+                .map(|(body, _)| body);
+        }
+        Term::App(head, args) if head == name => {
+            return instantiate_term_def(env, ctx, env.term_def(name).unwrap(), args)
+                .map(|(body, _)| body);
+        }
+        _ => {}
+    }
+    let mut result = term.clone();
+    match &mut result {
+        Term::App(_, args) => {
+            for arg in args {
+                *arg = unfold_named_term(env, ctx, arg, name)?;
+            }
+        }
+        Term::Ascribed { term, .. }
+        | Term::Succ(term)
+        | Term::Fst(term)
+        | Term::Snd(term)
+        | Term::Singleton(term)
+        | Term::Complement(term)
+        | Term::Powerset(term) => {
+            **term = unfold_named_term(env, ctx, term, name)?;
+        }
+        Term::Add(left, right)
+        | Term::Mul(left, right)
+        | Term::Sub(left, right)
+        | Term::Pair(left, right)
+        | Term::Union(left, right)
+        | Term::Inter(left, right)
+        | Term::Diff(left, right)
+        | Term::CartProd(left, right) => {
+            **left = unfold_named_term(env, ctx, left, name)?;
+            **right = unfold_named_term(env, ctx, right, name)?;
+        }
+        Term::SetBuilder {
+            var,
+            var_type,
+            body,
+        } => {
+            let mut inner = ctx.clone();
+            inner.add_term(var.clone(), var_type.clone());
+            **body = unfold_formula_defs(env, &inner, body, Some(name))?.0;
+        }
+        Term::PredLambda { params, body } => {
+            let mut inner = ctx.clone();
+            for param in params {
+                if let Some(ty) = &param.ty {
+                    inner.add_term(param.name.clone(), ty.clone());
+                }
+            }
+            **body = unfold_formula_defs(env, &inner, body, Some(name))?.0;
+        }
+        Term::Var(_) | Term::Zero | Term::EmptySet(_) | Term::Universe(_) => {}
+    }
+    Ok(result)
+}
+
 fn unfold_formula_defs(
     env: &Env,
     ctx: &Context,
     formula: &Formula,
     only: Option<&str>,
 ) -> Result<(Formula, bool), ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
+    if let Some(name) = only.filter(|name| env.term_def(name).is_some()) {
+        let expanded = match formula {
+            Formula::PredApp(head, args) => Some(Formula::PredApp(
+                head.clone(),
+                args.iter()
+                    .map(|arg| unfold_named_term(env, ctx, arg, name))
+                    .collect::<Result<_, _>>()?,
+            )),
+            Formula::Eq(left, right) => Some(Formula::eq(
+                unfold_named_term(env, ctx, left, name)?,
+                unfold_named_term(env, ctx, right, name)?,
+            )),
+            Formula::In(left, right) => Some(Formula::membership(
+                unfold_named_term(env, ctx, left, name)?,
+                unfold_named_term(env, ctx, right, name)?,
+            )),
+            Formula::Subset(left, right) => Some(Formula::Subset(
+                unfold_named_term(env, ctx, left, name)?,
+                unfold_named_term(env, ctx, right, name)?,
+            )),
+            _ => None,
+        };
+        if let Some(expanded) = expanded {
+            let changed = &expanded != formula;
+            return Ok((expanded, changed));
+        }
+    }
     match formula {
         Formula::True => Ok((Formula::True, false)),
         Formula::False => Ok((Formula::False, false)),
@@ -13085,12 +14233,16 @@ fn term_without_outer_ascriptions(mut term: &Term) -> &Term {
 }
 
 fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     match term {
         Term::Ascribed { term, ty } => Ok(Term::Ascribed {
             term: Box::new(normalize_term(env, ctx, term)?),
             ty: ty.clone(),
         }),
         Term::Var(name) => {
+            if ctx.lookup_term(name).is_some() {
+                return Ok(term.clone());
+            }
             if let Some(def) = env.term_def(name) {
                 let (body, _) = instantiate_term_def(env, ctx, def, &[])?;
                 return normalize_term(env, ctx, &body);
@@ -13121,7 +14273,23 @@ fn normalize_term(env: &Env, ctx: &Context, term: &Term) -> Result<Term, Validat
         }
         Term::PredLambda { .. } => Ok(term.clone()),
         Term::Zero | Term::EmptySet(_) | Term::Universe(_) => Ok(term.clone()),
-        Term::Succ(term) => Ok(Term::Succ(Box::new(normalize_term(env, ctx, term)?))),
+        Term::Succ(_) => {
+            // Numerals are successor chains. Walk the chain without allocating
+            // one large normalization frame per digit, then normalize its
+            // (possibly symbolic) base and rebuild the same constructors.
+            let mut base = term;
+            let mut successors = 0;
+            while let Term::Succ(inner) = base {
+                work_budget::spend().map_err(ValidationError::new)?;
+                successors += 1;
+                base = inner;
+            }
+            let mut normalized = normalize_term(env, ctx, base)?;
+            for _ in 0..successors {
+                normalized = Term::Succ(Box::new(normalized));
+            }
+            Ok(normalized)
+        }
         Term::Add(left, right) => {
             let left = normalize_term(env, ctx, left)?;
             let right = normalize_term(env, ctx, right)?;
@@ -13261,6 +14429,7 @@ fn normalize_data_rec_def(
     arg: Term,
     extras: Vec<Term>,
 ) -> Result<Term, ValidationError> {
+    work_budget::spend().map_err(ValidationError::new)?;
     let stuck = |arg: Term, extras: &[Term]| {
         let mut all_args = vec![arg];
         all_args.extend(extras.iter().cloned());
@@ -14225,6 +15394,25 @@ fn formula_rewrite_matches(source: &Formula, target: &Formula, from: &Term, to: 
         .any(|rewritten| formulas_equal_ignoring_ascriptions(&rewritten, target))
 }
 
+/// The tactic can expose abbreviations before choosing a rewrite occurrence,
+/// while the proof it finishes with may retain a named term. Compare the same
+/// exposed term forms here without simplifying away the logical structure.
+fn formula_rewrite_matches_exposed(
+    env: &Env,
+    ctx: &Context,
+    source: &Formula,
+    target: &Formula,
+    left: &Term,
+    right: &Term,
+) -> Result<bool, ValidationError> {
+    let source = normalize_rewrite_terms(env, ctx, source)?;
+    let target = normalize_rewrite_terms(env, ctx, target)?;
+    let left = normalize_term(env, ctx, left)?;
+    let right = normalize_term(env, ctx, right)?;
+    Ok(formula_rewrite_matches(&source, &target, &left, &right)
+        || formula_rewrite_matches(&source, &target, &right, &left))
+}
+
 fn formula_rewrite_sources(target: &Formula, needle: &Term, replacement: &Term) -> Vec<Formula> {
     replace_formula_once(target, needle, replacement)
 }
@@ -14409,6 +15597,47 @@ impl ParseError {
             span.end += offset;
         }
         self
+    }
+}
+
+const MAX_SOURCE_BYTES: usize = 1024 * 1024;
+const MAX_EXPRESSION_BYTES: usize = 64 * 1024;
+const MAX_EXPRESSION_TOKENS: usize = 8192;
+const MAX_PARSE_DEPTH: usize = 128;
+const MAX_LITERAL_VALUE: usize = 4096;
+
+thread_local! {
+    static PARSE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static IFF_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+struct ParseDepthGuard(bool);
+impl ParseDepthGuard {
+    fn enter() -> Result<Self, ParseError> {
+        Self::enter_counter(false)
+    }
+    fn enter_counter(iff: bool) -> Result<Self, ParseError> {
+        work_budget::spend().map_err(ParseError::new)?;
+        let counter = if iff { &IFF_DEPTH } else { &PARSE_DEPTH };
+        let limit = if iff { 10 } else { MAX_PARSE_DEPTH };
+        counter.with(|depth| {
+            if depth.get() >= limit {
+                Err(ParseError::new(if iff {
+                    "parser resource limit: nested biconditionals expand too much; split the statement into named definitions".to_string()
+                } else {
+                    format!("parser resource limit: nesting exceeds {MAX_PARSE_DEPTH} parser frames; split the expression or proof into smaller parts")
+                }))
+            } else {
+                depth.set(depth.get() + 1);
+                Ok(Self(iff))
+            }
+        })
+    }
+}
+impl Drop for ParseDepthGuard {
+    fn drop(&mut self) {
+        let counter = if self.0 { &IFF_DEPTH } else { &PARSE_DEPTH };
+        counter.with(|depth| depth.set(depth.get() - 1));
     }
 }
 
@@ -14751,6 +15980,31 @@ impl ProofExpr {
                     }
                 }
                 ProofStep::Projection(projection) => {
+                    // Subsequent arguments apply to the projected proposition,
+                    // not to the conjunction from which it was selected.
+                    let pair = if matches!(cursor, Formula::And(_, _)) {
+                        cursor
+                    } else {
+                        let instantiated = subst_formula_terms(
+                            &subst_formula_schema(&cursor, &schema_subst),
+                            &term_subst,
+                        );
+                        let normalized = normalize_formula_defs(env, ctx, &instantiated)
+                            .map_err(|err| TacticError::new(err.message))?;
+                        // These substitutions are already present in the
+                        // normalized cursor; do not apply them a second time.
+                        term_subst.clear();
+                        normalized
+                    };
+                    let Formula::And(left, right) = pair else {
+                        return Err(TacticError::new(format!(
+                            "proof projection requires a conjunction, but the remaining statement is `{pair}`"
+                        )));
+                    };
+                    cursor = match projection {
+                        Projection::Left => *left,
+                        Projection::Right => *right,
+                    };
                     pending.push(PendingProofStep::Projection(projection.clone()));
                 }
             }
@@ -14829,6 +16083,7 @@ enum Tactic {
     Revert(Name),
     Exact(ProofExpr),
     Trivial,
+    Finite,
     Assumption,
     Apply(ProofExpr),
     Split,
@@ -14853,6 +16108,7 @@ enum Tactic {
         expr: ProofExpr,
         direction: RewriteDirection,
         all: bool,
+        hypothesis: Option<Name>,
     },
     Unfold(Name),
     Simp,
@@ -14961,7 +16217,9 @@ impl Tokens {
     }
 
     fn eat_ident(&mut self, expected: &str) -> bool {
-        if matches!(self.peek(), TokenKind::Ident(actual) if actual == expected) {
+        if matches!(self.peek(), TokenKind::Ident(actual) if actual == expected)
+            && !matches!(self.peek_at(1), TokenKind::Sym(sym) if sym == ".")
+        {
             self.pos += 1;
             true
         } else {
@@ -15021,6 +16279,7 @@ impl Tokens {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        let _depth = ParseDepthGuard::enter().map_err(|err| err.with_span(self.current_span()))?;
         let head = self.parse_type_atom()?;
         let mut arguments = Vec::new();
         while self.type_argument_starts() {
@@ -15122,6 +16381,7 @@ impl Tokens {
     }
 
     fn parse_term(&mut self) -> Result<Term, ParseError> {
+        let _depth = ParseDepthGuard::enter().map_err(|err| err.with_span(self.current_span()))?;
         if self.eat_sym("(") {
             let term = self.parse_term()?;
             self.expect_sym(":")?;
@@ -15133,6 +16393,9 @@ impl Tokens {
             });
         }
         if let Some(value) = self.eat_number() {
+            if value > MAX_LITERAL_VALUE {
+                return Err(ParseError::new(format!("parser resource limit: Nat literals currently use unary storage and must be at most {MAX_LITERAL_VALUE}")));
+            }
             return Ok(nat_literal_term(value));
         }
         if self.eat_ident("fun") {
@@ -15164,6 +16427,9 @@ impl Tokens {
             let mut elems = Vec::new();
             loop {
                 elems.push(self.parse_term()?);
+                if elems.len() > MAX_PARSE_DEPTH {
+                    return Err(ParseError::new("parser resource limit: set literal has too many elements; build it from smaller sets"));
+                }
                 if self.eat_sym("}") {
                     break;
                 }
@@ -15239,6 +16505,7 @@ impl Tokens {
     }
 
     fn parse_implication(&mut self) -> Result<Formula, ParseError> {
+        let _depth = ParseDepthGuard::enter().map_err(|err| err.with_span(self.current_span()))?;
         let left = self.parse_iff()?;
         if self.eat_sym("->") {
             let right = self.parse_implication()?;
@@ -15250,6 +16517,8 @@ impl Tokens {
     fn parse_iff(&mut self) -> Result<Formula, ParseError> {
         let left = self.parse_or()?;
         if self.eat_sym("<->") {
+            // `<->` expands to two implications and clones both sides.
+            let _iff_depth = ParseDepthGuard::enter_counter(true)?;
             let right = self.parse_implication()?;
             return Ok(Formula::and(
                 Formula::implies(left.clone(), right.clone()),
@@ -15260,6 +16529,7 @@ impl Tokens {
     }
 
     fn parse_or(&mut self) -> Result<Formula, ParseError> {
+        let _depth = ParseDepthGuard::enter().map_err(|err| err.with_span(self.current_span()))?;
         let left = self.parse_and()?;
         if self.eat_sym("\\/") {
             let right = self.parse_or()?;
@@ -15269,6 +16539,7 @@ impl Tokens {
     }
 
     fn parse_and(&mut self) -> Result<Formula, ParseError> {
+        let _depth = ParseDepthGuard::enter().map_err(|err| err.with_span(self.current_span()))?;
         let left = self.parse_unary()?;
         if self.eat_sym("/\\") {
             let right = self.parse_and()?;
@@ -15278,6 +16549,7 @@ impl Tokens {
     }
 
     fn parse_unary(&mut self) -> Result<Formula, ParseError> {
+        let _depth = ParseDepthGuard::enter().map_err(|err| err.with_span(self.current_span()))?;
         if self.eat_ident("forall") {
             let vars = self.parse_binder_names()?;
             self.expect_sym(":")?;
@@ -15360,6 +16632,11 @@ impl Tokens {
         let mut vars = Vec::new();
         loop {
             vars.push(self.expect_ident()?);
+            if vars.len() > MAX_PARSE_DEPTH {
+                return Err(ParseError::new(
+                    "parser resource limit: too many quantifier binders",
+                ));
+            }
             if matches!(self.peek(), TokenKind::Sym(sym) if sym == ":") {
                 break;
             }
@@ -15431,11 +16708,27 @@ impl Tokens {
 }
 
 fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
+    if input.len() > MAX_EXPRESSION_BYTES {
+        return Err(ParseError::new(format!(
+            "parser resource limit: expression exceeds {MAX_EXPRESSION_BYTES} bytes"
+        )));
+    }
+    work_budget::spend_many(input.len() as u64).map_err(ParseError::new)?;
     let chars: Vec<char> = input.chars().collect();
     let mut tokens = Vec::new();
     let mut i = 0;
 
     while i < chars.len() {
+        if tokens.len() >= MAX_EXPRESSION_TOKENS {
+            return Err(ParseError::new(format!(
+                "parser resource limit: expression exceeds {MAX_EXPRESSION_TOKENS} tokens"
+            ))
+            .with_span(Span {
+                start: i,
+                end: i + 1,
+            }));
+        }
+
         let ch = chars[i];
         if ch.is_whitespace() {
             i += 1;
@@ -15506,7 +16799,9 @@ fn lex(input: &str) -> Result<Vec<Token>, ParseError> {
             }));
         }
 
-        let rest: String = chars[i..].iter().collect();
+        // Only operators up to three characters long are inspected. Copying
+        // the entire suffix here made deeply grouped input quadratic.
+        let rest: String = chars[i..chars.len().min(i + 3)].iter().collect();
         let sym = if rest.starts_with(":=") {
             Some(":=")
         } else if rest.starts_with("->") {
@@ -15583,7 +16878,38 @@ fn finite_set_literal_term(elems: Vec<Term>) -> Term {
         .fold(last, |acc, set| Term::Union(Box::new(set), Box::new(acc)))
 }
 
+fn multiline_parse_error(
+    mut error: ParseError,
+    source: &str,
+    first_line: usize,
+    offset: usize,
+) -> ParseError {
+    if let Some(span) = &mut error.span {
+        let start = span.start + offset;
+        let end = span.end + offset;
+        let mut line = first_line;
+        let mut column_start = 0;
+        for (position, ch) in source.chars().take(start).enumerate() {
+            if ch == '\n' {
+                line += 1;
+                column_start = position + 1;
+            }
+        }
+        *span = Span {
+            start: start - column_start,
+            end: end - column_start,
+        };
+        error.line = Some(line);
+    }
+    error.with_line(first_line)
+}
+
 fn parse_file(source: &str) -> Result<File, ParseError> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(ParseError::new(format!("parser resource limit: source exceeds {MAX_SOURCE_BYTES} bytes; split it into imported modules")).with_line(1));
+    }
+    work_budget::spend_many(source.len() as u64)
+        .map_err(|message| ParseError::new(message).with_line(1))?;
     let mut commands = Vec::new();
     let mut namespace_stack = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
@@ -15786,29 +17112,36 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
         }
 
         if trimmed.starts_with("def ") {
-            let mut header = String::from(trimmed);
-            while !header.contains(":=") {
+            let mut definition = strip_comment(lines[i]).to_string();
+            i += 1;
+            while i < lines.len() && !is_command_start(strip_comment(lines[i]).trim()) {
+                definition.push('\n');
+                definition.push_str(strip_comment(lines[i]));
                 i += 1;
-                if i >= lines.len() {
-                    return Err(ParseError::new("unterminated definition").with_line(command_line));
-                }
-                header.push(' ');
-                header.push_str(strip_comment(lines[i]).trim());
             }
-
-            let Some((header, body)) = header.split_once(":=") else {
-                return Err(ParseError::new("expected `:=` in definition").with_line(command_line));
+            let Some((header, raw_body)) = definition.split_once(":=") else {
+                return Err(
+                    ParseError::new("unterminated definition: expected `:=` and a body")
+                        .with_line(command_line),
+                );
             };
-            let (name, params, result) =
-                parse_def_header(header).map_err(|err| err.with_line(command_line))?;
+            let (name, params, result) = parse_def_header(header)
+                .map_err(|err| multiline_parse_error(err, &definition, command_line, 0))?;
             let name = qualify_in_namespace(&namespace_stack, name);
+            let body_offset = header.chars().count()
+                + 2
+                + raw_body.chars().take_while(|ch| ch.is_whitespace()).count();
             let body = match &result {
-                DefResult::Formula => DefBody::Formula(
-                    parse_formula_str(body.trim()).map_err(|err| err.with_line(command_line))?,
-                ),
-                DefResult::Term(_) => DefBody::Term(
-                    parse_term_str(body.trim()).map_err(|err| err.with_line(command_line))?,
-                ),
+                DefResult::Formula => {
+                    DefBody::Formula(parse_formula_str(raw_body.trim()).map_err(|err| {
+                        multiline_parse_error(err, &definition, command_line, body_offset)
+                    })?)
+                }
+                DefResult::Term(_) => {
+                    DefBody::Term(parse_term_str(raw_body.trim()).map_err(|err| {
+                        multiline_parse_error(err, &definition, command_line, body_offset)
+                    })?)
+                }
             };
             commands.push(located_command(
                 command_line,
@@ -15819,7 +17152,6 @@ fn parse_file(source: &str) -> Result<File, ParseError> {
                     body,
                 }),
             ));
-            i += 1;
             continue;
         }
 
@@ -16250,6 +17582,8 @@ fn parse_pred_decl(input: &str) -> Result<(Name, Vec<Type>), ParseError> {
 }
 
 fn parse_tactic_lines(lines: &[RawTacticLine]) -> Result<Vec<LocatedTactic>, ParseError> {
+    let _depth = ParseDepthGuard::enter()
+        .map_err(|err| err.with_line(lines.first().map_or(1, |line| line.line)))?;
     let mut tactics = Vec::new();
     let mut i = 0;
 
@@ -16640,6 +17974,9 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
             parse_proof_expr(expr).map_err(|err| err.with_offset(offset))?,
         ));
     }
+    if line == "finite" {
+        return Ok(Tactic::Finite);
+    }
     if line == "trivial" {
         return Ok(Tactic::Trivial);
     }
@@ -16682,7 +18019,28 @@ fn parse_tactic_line(line: &str) -> Result<Tactic, ParseError> {
         } else {
             (RewriteDirection::Backward, rest)
         };
+        let mut depth = 0isize;
+        let mut at = None;
+        for (index, ch) in expr.char_indices() {
+            if depth == 0 && expr[index..].starts_with(" at ") {
+                at = Some(index);
+            }
+            match ch {
+                '(' | '{' => depth += 1,
+                ')' | '}' => depth -= 1,
+                _ => {}
+            }
+        }
+        let (expr, hypothesis) = if let Some(index) = at {
+            (
+                expr[..index].trim(),
+                Some(expect_single_name(expr[index + 4..].trim(), "rewrite at")?),
+            )
+        } else {
+            (expr, None)
+        };
         return Ok(Tactic::Rewrite {
+            hypothesis,
             expr: parse_proof_expr(expr)
                 .map_err(|err| err.with_offset(line.find(expr).unwrap_or(0)))?,
             direction,
@@ -16788,6 +18146,7 @@ const KNOWN_TACTICS: &[&str] = &[
     "revert",
     "exact",
     "trivial",
+    "finite",
     "assumption",
     "apply",
     "exists",
@@ -16952,6 +18311,12 @@ fn expect_single_name(input: &str, tactic: &str) -> Result<Name, ParseError> {
 }
 
 fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
+    let _depth = ParseDepthGuard::enter()?;
+    if input.len() > MAX_EXPRESSION_BYTES {
+        return Err(ParseError::new(
+            "parser resource limit: proof expression is too large",
+        ));
+    }
     let input = input.trim();
     if input.is_empty() {
         return Err(ParseError::new("expected proof expression"));
@@ -17022,6 +18387,7 @@ fn parse_proof_expr(input: &str) -> Result<ProofExpr, ParseError> {
 }
 
 fn tokenize_proof_expr(input: &str) -> Result<Vec<String>, ParseError> {
+    work_budget::spend_many(input.len() as u64).map_err(ParseError::new)?;
     let chars: Vec<char> = input.chars().collect();
     let mut tokens = Vec::new();
     let mut i = 0;
@@ -17758,6 +19124,7 @@ fn run_tactic_step_inner(
     allowed_mode: LogicMode,
     next_goal_id: &mut usize,
 ) -> Result<StepResult, TacticError> {
+    work_budget::spend().map_err(TacticError::new)?;
     match tactic {
         Tactic::Intro(name) => match goal.target {
             Formula::Implies(premise, conclusion) => {
@@ -17808,6 +19175,9 @@ fn run_tactic_step_inner(
             )),
         },
         Tactic::Revert(name) => {
+            if goal.context.lookup_term(name).is_some() {
+                return revert_term_variable(goal, name, next_goal_id);
+            }
             let mut context = goal.context;
             let (formula, proof) = context.pop_proof(name)?;
             let proof_imp_id = fresh_goal(next_goal_id);
@@ -17841,6 +19211,7 @@ fn run_tactic_step_inner(
                 notes: Vec::new(),
             })
         }
+        Tactic::Finite => finite_tactic::solve(env, goal, allowed_mode),
         Tactic::Trivial => {
             if !formulas_def_eq(env, &goal.context, &goal.target, &Formula::True)
                 .map_err(|err| TacticError::new(err.message))?
@@ -18221,8 +19592,23 @@ fn run_tactic_step_inner(
             expr,
             direction,
             all,
+            hypothesis,
         } => {
-            let eq_proof = proof_expr_for_inferred(env, &goal.context, expr, allowed_mode)?;
+            let inference_target = if let Some(name) = hypothesis {
+                goal.context
+                    .lookup(name)
+                    .ok_or_else(|| TacticError::new(format!("unknown hypothesis `{name}`")))?
+            } else {
+                &goal.target
+            };
+            let eq_proof = proof_expr_for_rewrite(
+                env,
+                &goal.context,
+                expr,
+                inference_target,
+                *direction,
+                allowed_mode,
+            )?;
             let checked = infer_kernel_proof_node(env, &goal.context, &eq_proof, allowed_mode)
                 .map_err(|err| TacticError::new(format!("cannot rewrite: {}", err.message)))?;
             let formula = normalize_formula_defs(env, &goal.context, &checked.formula)
@@ -18234,21 +19620,87 @@ fn run_tactic_step_inner(
                 RewriteDirection::Backward => (&right, &left),
                 RewriteDirection::Forward => (&left, &right),
             };
+            if let Some(name) = hypothesis {
+                let old_formula = goal
+                    .context
+                    .lookup(name)
+                    .cloned()
+                    .ok_or_else(|| TacticError::new(format!("unknown hypothesis `{name}`")))?;
+                let original_proof = goal
+                    .context
+                    .lookup_proof(name)
+                    .cloned()
+                    .unwrap_or_else(|| DraftProof::Hyp(name.clone()));
+                let kernel_formula = goal
+                    .context
+                    .lookup_kernel_formula(name)
+                    .cloned()
+                    .unwrap_or_else(|| old_formula.clone());
+                let input =
+                    rewrite_input(env, &goal.context, &old_formula, needle, replacement, *all)?;
+                let original_proof = if input != old_formula {
+                    DraftProof::Convert {
+                        proof_body: Box::new(original_proof),
+                        target: input.clone(),
+                    }
+                } else {
+                    original_proof
+                };
+                let (new_formula, proof) = if *all {
+                    if term_contains_subterm(replacement, needle) {
+                        return Err(TacticError::new(format!(
+                            "rewrite all would introduce new occurrences of `{needle}`"
+                        )));
+                    }
+                    let (formula, rewrites) =
+                        rewrite_all_with_equality(input.clone(), needle, replacement, &eq_proof);
+                    if rewrites.is_empty() {
+                        return Err(TacticError::new(format!(
+                            "rewrite could not find `{needle}` in hypothesis `{name}`"
+                        )));
+                    }
+                    let proof =
+                        build_simp_hypothesis_proof(original_proof, &input, false, &rewrites);
+                    (formula, proof)
+                } else {
+                    let formula = formula_rewrite_sources(&input, needle, replacement)
+                        .into_iter()
+                        .min_by_key(rewrite_source_score)
+                        .ok_or_else(|| {
+                            TacticError::new(format!(
+                                "rewrite could not find `{needle}` in hypothesis `{name}`"
+                            ))
+                        })?;
+                    let proof = DraftProof::EqSubst {
+                        eq_proof: Box::new(eq_proof),
+                        proof_body: Box::new(original_proof),
+                        target: formula.clone(),
+                    };
+                    (formula, proof)
+                };
+                let mut context = goal.context;
+                context.add_proof_with_kernel(name.clone(), new_formula, proof, kernel_formula);
+                let id = fresh_goal(next_goal_id);
+                return Ok(StepResult {
+                    replacement: PartialProof::Hole(id),
+                    new_goals: vec![Goal {
+                        id,
+                        context,
+                        target: goal.target,
+                    }],
+                    notes: Vec::new(),
+                });
+            }
+            let input = rewrite_input(env, &goal.context, &goal.target, needle, replacement, *all)?;
+            let exposed = input != goal.target;
             if *all {
                 if term_contains_subterm(replacement, needle) {
                     return Err(TacticError::new(format!(
                         "rewrite all would introduce new occurrences of `{needle}`"
                     )));
                 }
-                let rule = SimpRule {
-                    name: "rewrite all".to_string(),
-                    proof: SimpRuleProof::Local(Box::new(eq_proof)),
-                    params: Vec::new(),
-                    lhs: needle.clone(),
-                    rhs: replacement.clone(),
-                };
                 let (source_target, rewrites) =
-                    rewrite_with_simp_rules(env, &goal.context, goal.target.clone(), &[rule])?;
+                    rewrite_all_with_equality(input.clone(), needle, replacement, &eq_proof);
                 if rewrites.is_empty() {
                     return Err(TacticError::new(format!(
                         "rewrite could not find `{needle}` in goal `{}`",
@@ -18260,7 +19712,7 @@ fn run_tactic_step_inner(
                     replacement: build_simp_replacement(
                         body_id,
                         goal.target.clone(),
-                        false,
+                        exposed,
                         &rewrites,
                     ),
                     new_goals: vec![Goal {
@@ -18271,7 +19723,7 @@ fn run_tactic_step_inner(
                     notes: Vec::new(),
                 });
             }
-            let sources = formula_rewrite_sources(&goal.target, needle, replacement);
+            let sources = formula_rewrite_sources(&input, needle, replacement);
             if sources.is_empty() {
                 return Err(TacticError::new(format!(
                     "rewrite could not find `{needle}` in goal `{}`",
@@ -18291,12 +19743,21 @@ fn run_tactic_step_inner(
             };
 
             let body_id = fresh_goal(next_goal_id);
-            Ok(StepResult {
-                replacement: PartialProof::EqSubst {
-                    eq_proof: Box::new(PartialProof::Done(eq_proof)),
-                    proof_body: Box::new(PartialProof::Hole(body_id)),
+            let replacement = PartialProof::EqSubst {
+                eq_proof: Box::new(PartialProof::Done(eq_proof)),
+                proof_body: Box::new(PartialProof::Hole(body_id)),
+                target: input,
+            };
+            let replacement = if exposed {
+                PartialProof::Convert {
+                    proof_body: Box::new(replacement),
                     target: goal.target.clone(),
-                },
+                }
+            } else {
+                replacement
+            };
+            Ok(StepResult {
+                replacement,
                 new_goals: vec![Goal {
                     id: body_id,
                     context: goal.context,
@@ -18306,8 +19767,17 @@ fn run_tactic_step_inner(
             })
         }
         Tactic::Unfold(name) => {
-            let Some(def) = env.formula_def_scoped(&goal.context, name) else {
-                if let Some(matches) = env.ambiguous_formula_def_names(name) {
+            let definition_name = env
+                .formula_def_scoped(&goal.context, name)
+                .map(|def| &def.name)
+                .or_else(|| {
+                    env.term_def_scoped(&goal.context, name)
+                        .map(|def| &def.name)
+                });
+            let Some(definition_name) = definition_name else {
+                if let Some(matches) =
+                    ambiguous_leaf_names(env.defs.keys().chain(env.term_defs.keys()), name)
+                {
                     return Err(TacticError::new(ambiguous_reference_message(
                         "definition",
                         name,
@@ -18317,9 +19787,10 @@ fn run_tactic_step_inner(
                 return Err(TacticError::new(format!("unknown definition `{name}`")));
             };
             let (target, changed) =
-                unfold_named_formula_def(env, &goal.context, &goal.target, &def.name).map_err(
-                    |err| TacticError::new(format!("cannot unfold `{name}`: {}", err.message)),
-                )?;
+                unfold_named_formula_def(env, &goal.context, &goal.target, definition_name)
+                    .map_err(|err| {
+                        TacticError::new(format!("cannot unfold `{name}`: {}", err.message))
+                    })?;
             if !changed {
                 return Err(TacticError::new(format!(
                     "no occurrence of definition `{name}` in goal `{}`",
@@ -19125,6 +20596,9 @@ fn collect_simp_rules(
 ) -> Result<Vec<SimpRule>, TacticError> {
     let mut rules = Vec::new();
     for name in names {
+        if env.term_def_scoped(ctx, name).is_some() || env.formula_def_scoped(ctx, name).is_some() {
+            continue;
+        }
         if let Some(theorem) = env.theorem_scoped(ctx, name) {
             let Formula::Eq(lhs, rhs) = &theorem.statement else {
                 return Err(TacticError::new(format!(
@@ -19198,6 +20672,136 @@ fn build_simp_replacement(
     }
 }
 
+fn proof_mentions_term(proof: &DraftProof, name: &str) -> bool {
+    let mut found = false;
+    visit_proof_nodes(proof, &mut |node| {
+        found |= match node {
+            DraftProof::EqRefl(term) | DraftProof::ForallElim { arg: term, .. } => {
+                term_has_free_var(term, name)
+            }
+            DraftProof::FalseElim { target, .. }
+            | DraftProof::OrElim { target, .. }
+            | DraftProof::EqSubst { target, .. }
+            | DraftProof::Convert { target, .. }
+            | DraftProof::ExistsElim { target, .. }
+            | DraftProof::Classical { target, .. }
+            | DraftProof::Sorry { target } => formula_has_free_term(target, name),
+            DraftProof::OrIntroLeft { right_formula, .. } => {
+                formula_has_free_term(right_formula, name)
+            }
+            DraftProof::OrIntroRight { left_formula, .. } => {
+                formula_has_free_term(left_formula, name)
+            }
+            DraftProof::ImpIntro { hyp_formula, .. } => formula_has_free_term(hyp_formula, name),
+            DraftProof::ExistsIntro {
+                witness,
+                exists_formula,
+                ..
+            } => term_has_free_var(witness, name) || formula_has_free_term(exists_formula, name),
+            DraftProof::NatInd {
+                var_name, target, ..
+            }
+            | DraftProof::DataInd {
+                var_name, target, ..
+            } => var_name == name || formula_has_free_term(target, name),
+            DraftProof::TheoremRef { subst, .. } => {
+                schema_subst_free_term_vars(subst).contains(name)
+            }
+            _ => false,
+        };
+    });
+    found
+}
+
+fn revert_term_variable(
+    goal: Goal,
+    name: &str,
+    next_goal_id: &mut usize,
+) -> Result<StepResult, TacticError> {
+    let mut context = goal.context;
+    let ty = context
+        .lookup_term(name)
+        .cloned()
+        .expect("term checked by caller");
+    let mut removed_names = HashSet::new();
+    // A conservative evidence scan includes dependencies hidden by rewriting
+    // or simplification, and proofs built from an earlier affected binding.
+    loop {
+        let previous = removed_names.len();
+        for (binding, proof, kernel_formula) in context.proof_entries() {
+            if formula_has_free_term(&binding.formula, name)
+                || formula_has_free_term(kernel_formula, name)
+                || proof_mentions_term(proof, name)
+                || removed_names
+                    .iter()
+                    .any(|removed: &String| draft_proof_uses_free_hyp(proof, removed, false))
+            {
+                removed_names.insert(binding.name.clone());
+            }
+        }
+        if previous == removed_names.len() {
+            break;
+        }
+    }
+    let mut moved = Vec::new();
+    let mut seen = HashSet::new();
+    for (binding, proof) in context.proof_bindings().rev() {
+        if removed_names.contains(&binding.name) && seen.insert(binding.name.clone()) {
+            moved.push((binding.formula.clone(), proof.clone()));
+        }
+    }
+    moved.reverse();
+    let keep = context
+        .proof_vars
+        .iter()
+        .map(|b| !removed_names.contains(&b.name))
+        .collect::<Vec<_>>();
+    let mut index = 0;
+    context.proof_vars.retain(|_| {
+        let yes = keep[index];
+        index += 1;
+        yes
+    });
+    index = 0;
+    context.proof_terms.retain(|_| {
+        let yes = keep[index];
+        index += 1;
+        yes
+    });
+    index = 0;
+    context.proof_kernel_formulas.retain(|_| {
+        let yes = keep[index];
+        index += 1;
+        yes
+    });
+    context.term_vars.retain(|binding| binding.name != name);
+    let mut target = goal.target;
+    for (formula, _) in moved.iter().rev() {
+        target = Formula::implies(formula.clone(), target);
+    }
+    target = Formula::forall(name.to_string(), ty, target);
+    let id = fresh_goal(next_goal_id);
+    let mut replacement = PartialProof::ForallElim {
+        proof_forall: Box::new(PartialProof::Hole(id)),
+        arg: Term::Var(name.to_string()),
+    };
+    for (_, proof) in moved {
+        replacement = PartialProof::ImpElim {
+            proof_imp: Box::new(replacement),
+            proof_arg: Box::new(PartialProof::Done(proof)),
+        };
+    }
+    Ok(StepResult {
+        replacement,
+        new_goals: vec![Goal {
+            id,
+            context,
+            target,
+        }],
+        notes: Vec::new(),
+    })
+}
+
 fn build_simp_hypothesis_proof(
     original_proof: DraftProof,
     builtin_target: &Formula,
@@ -19261,6 +20865,27 @@ fn simplify_named_hypothesis_with_rules(
     let mut context = ctx.clone();
     context.add_proof_with_kernel(name.to_string(), formula, proof, kernel_formula);
     Ok((context, true))
+}
+
+fn rewrite_all_with_equality(
+    mut formula: Formula,
+    needle: &Term,
+    replacement: &Term,
+    proof: &DraftProof,
+) -> (Formula, Vec<SimpRewrite>) {
+    let mut rewrites = Vec::new();
+    while let Some(next) = formula_rewrite_sources(&formula, needle, replacement)
+        .into_iter()
+        .next()
+    {
+        rewrites.push(SimpRewrite {
+            before: formula,
+            after: next.clone(),
+            eq_proof: proof.clone(),
+        });
+        formula = next;
+    }
+    (formula, rewrites)
 }
 
 fn rewrite_with_simp_rules(
@@ -19639,6 +21264,60 @@ fn simplify_hypotheses_with_rules(
     Ok((context, changed))
 }
 
+/// Infer an equality theorem's missing schema arguments from an occurrence
+/// on the selected rewrite side. Explicit arguments remain fixed constraints.
+fn proof_expr_for_rewrite(
+    env: &Env,
+    ctx: &Context,
+    expr: &ProofExpr,
+    target: &Formula,
+    direction: RewriteDirection,
+    allowed_mode: LogicMode,
+) -> Result<DraftProof, TacticError> {
+    if !expr.is_bare_theorem_ref(env, ctx) {
+        return proof_expr_for_inferred(env, ctx, expr, allowed_mode);
+    }
+    let theorem = env
+        .theorem_scoped(ctx, &expr.base)
+        .expect("resolved theorem");
+    let explicit = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
+    let remaining = remaining_schema_params(&theorem.params, &explicit);
+    if remaining.is_empty() {
+        return proof_expr_for_inferred(env, ctx, expr, allowed_mode);
+    }
+    let statement = subst_formula_schema(&theorem.statement, &explicit);
+    let Formula::Eq(left, right) = statement else {
+        return Err(TacticError::new("rewrite expects an equality proof"));
+    };
+    let (lhs, rhs) = match direction {
+        RewriteDirection::Forward => (left, right),
+        RewriteDirection::Backward => (right, left),
+    };
+    let rule = SimpRule {
+        name: theorem.name.clone(),
+        proof: SimpRuleProof::Theorem,
+        params: remaining,
+        lhs,
+        rhs,
+    };
+    let normalized =
+        normalize_rewrite_terms(env, ctx, target).map_err(|err| TacticError::new(err.message))?;
+    for input in [target, &normalized] {
+        if let Some((_, DraftProof::TheoremRef { name, mut subst })) =
+            rewrite_formula_with_simp_rules_once(env, ctx, input, std::slice::from_ref(&rule))?
+        {
+            subst.type_args.extend(explicit.type_args.clone());
+            subst.term_args.extend(explicit.term_args.clone());
+            subst.formula_args.extend(explicit.formula_args.clone());
+            subst.predicate_args.extend(explicit.predicate_args.clone());
+            subst.function_args.extend(explicit.function_args.clone());
+            ensure_schema_subst_complete(&theorem.params, &subst, Some(&name))?;
+            return Ok(DraftProof::TheoremRef { name, subst });
+        }
+    }
+    Err(TacticError::new(format!("cannot infer parameters of `{}` from a matching rewrite occurrence in `{target}`; provide the missing parameters explicitly", theorem.name)))
+}
+
 fn proof_expr_for_inferred(
     env: &Env,
     ctx: &Context,
@@ -19738,15 +21417,108 @@ fn explicit_schema_subst(
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 let term = canonicalize_term(env, ctx, &term)
                     .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
-                validate_term(env, ctx, &term)
-                    .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
                 subst.term_args.insert(arg.name.clone(), term);
             }
         }
     }
 
+    infer_explicit_predicate_types(env, ctx, theorem, &mut subst)?;
+    // Types and predicate signatures can occur after an explicit term. Validate
+    // terms only once those constraints are available, so empty constructors
+    // receive their expected package type independently of argument order.
+    for arg in explicit_args {
+        let Some(param) = theorem.params.iter().find(|param| param.name == arg.name) else {
+            continue;
+        };
+        let ParamKind::Term(pattern) = &param.kind else {
+            continue;
+        };
+        let term = subst
+            .term_args
+            .get(&arg.name)
+            .expect("parsed term argument")
+            .clone();
+        if type_has_unresolved_schema_param(pattern, &theorem.params, &subst) {
+            validate_term(env, ctx, &term)
+                .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+        } else {
+            let expected = subst_type_schema(pattern, &subst);
+            validate_term_using_expected_type(env, ctx, &term, &expected)
+                .map_err(|err| explicit_schema_arg_error(theorem, arg, err.message))?;
+            if validate_term(env, ctx, &term).is_err() {
+                subst.term_args.insert(
+                    arg.name.clone(),
+                    Term::Ascribed {
+                        term: Box::new(term),
+                        ty: expected,
+                    },
+                );
+            }
+        }
+    }
     canonicalize_ready_explicit_predicate_args(env, ctx, theorem, &mut subst)?;
     Ok(subst)
+}
+
+/// Concrete predicate signatures and lambda annotations constrain schema types
+/// before substituted definitions are normalized. Process these after all named
+/// arguments so an explicit type is a constraint regardless of argument order.
+fn infer_explicit_predicate_types(
+    env: &Env,
+    ctx: &Context,
+    theorem: &Theorem,
+    subst: &mut SchemaSubst,
+) -> Result<(), TacticError> {
+    for param in &theorem.params {
+        let ParamKind::Predicate(expected) = &param.kind else {
+            continue;
+        };
+        let Some(arg) = subst.predicate_args.get(&param.name) else {
+            continue;
+        };
+        let actual: Vec<Option<Type>> = match arg {
+            PredicateArg::Named(name) => {
+                if let Some(signature) = predicate_signature(env, ctx, name) {
+                    signature.iter().cloned().map(Some).collect()
+                } else if let Some(def) = env.formula_def(name) {
+                    // A polymorphic definition has its own type variables. Do
+                    // not mistake those names for concrete caller types.
+                    if def.params.iter().any(|p| matches!(p.kind, ParamKind::Type)) {
+                        continue;
+                    }
+                    formula_def_predicate_term_types(def)
+                        .map_err(|err| TacticError::new(err.message))?
+                        .into_iter()
+                        .map(Some)
+                        .collect()
+                } else {
+                    continue;
+                }
+            }
+            PredicateArg::Lambda { params, .. } => params.iter().map(|p| p.ty.clone()).collect(),
+        };
+        if actual.len() != expected.len() {
+            return Err(TacticError::new(format!(
+                "predicate argument for `{}` in `{}` has {} argument(s), but expected {}",
+                param.name,
+                theorem.name,
+                actual.len(),
+                expected.len()
+            )));
+        }
+        for (pattern, actual) in expected.iter().zip(actual) {
+            let Some(actual) = actual else { continue };
+            unify_type(pattern, &actual, &theorem.params, subst).map_err(|_| {
+                TacticError::new(format!(
+                    "predicate argument for `{}` in `{}` has type `{actual}`, but expected `{}`",
+                    param.name,
+                    theorem.name,
+                    subst_type_schema(pattern, subst)
+                ))
+            })?;
+        }
+    }
+    Ok(())
 }
 
 fn canonicalize_ready_explicit_predicate_args(
@@ -19889,6 +21661,50 @@ fn proof_expr_for_expected(
     expr.to_proof(env, ctx, allowed_mode)
 }
 
+/// Recover the uncomputed proposition along an already checked application.
+/// This is presentation/elaboration data, never a replacement for proof checking.
+fn proof_surface_formula(env: &Env, ctx: &Context, proof: &DraftProof) -> Option<Formula> {
+    match proof {
+        DraftProof::Hyp(name) => ctx
+            .lookup_kernel_formula(name)
+            .or_else(|| ctx.lookup(name))
+            .cloned(),
+        DraftProof::TheoremRef { name, subst } => env
+            .theorem(name)
+            .map(|theorem| subst_formula_schema(&theorem.statement, subst)),
+        DraftProof::Convert { target, .. } => Some(target.clone()),
+        DraftProof::ForallElim { proof_forall, arg } => {
+            let formula = proof_surface_formula(env, ctx, proof_forall)?;
+            let (formula, _) = unfold_head_formula_defs(env, ctx, &formula).ok()?;
+            let Formula::Forall { var, body, .. } = formula else {
+                return None;
+            };
+            Some(subst_formula_term(&body, &var, arg))
+        }
+        DraftProof::ImpElim { proof_imp, .. } => {
+            let formula = proof_surface_formula(env, ctx, proof_imp)?;
+            let (formula, _) = unfold_head_formula_defs(env, ctx, &formula).ok()?;
+            let Formula::Implies(_, conclusion) = formula else {
+                return None;
+            };
+            Some(*conclusion)
+        }
+        DraftProof::AndElimLeft(inner) | DraftProof::AndElimRight(inner) => {
+            let formula = proof_surface_formula(env, ctx, inner)?;
+            let (formula, _) = unfold_head_formula_defs(env, ctx, &formula).ok()?;
+            let Formula::And(left, right) = formula else {
+                return None;
+            };
+            Some(if matches!(proof, DraftProof::AndElimLeft(_)) {
+                *left
+            } else {
+                *right
+            })
+        }
+        _ => None,
+    }
+}
+
 fn proof_expr_for_apply(
     env: &Env,
     ctx: &Context,
@@ -19896,38 +21712,74 @@ fn proof_expr_for_apply(
     target: &Formula,
     allowed_mode: LogicMode,
 ) -> Result<(DraftProof, Vec<Term>, Vec<Formula>), TacticError> {
-    if expr.is_bare_theorem_ref(env, ctx) {
+    let resolved = expr.resolve_dotted_projection_base(env, ctx);
+    let expr = &resolved;
+    if ctx.lookup(&expr.base).is_none()
+        && env.theorem_scoped(ctx, &expr.base).is_some()
+        && expr
+            .steps
+            .iter()
+            .all(|step| matches!(step, ProofStep::Projection(_)))
+    {
         let theorem = env
             .theorem_scoped(ctx, &expr.base)
             .ok_or_else(|| TacticError::new(format!("unknown theorem `{}`", expr.base)))?;
         let explicit = explicit_schema_subst(env, ctx, theorem, &expr.explicit_args)?;
+        let mut conclusion = theorem.statement.clone();
+        for step in &expr.steps {
+            if !matches!(conclusion, Formula::And(_, _)) {
+                let schema_ctx = build_theorem_context(env, &theorem.params)
+                    .map_err(|err| TacticError::new(err.message))?;
+                conclusion = normalize_formula_defs(env, &schema_ctx, &conclusion)
+                    .map_err(|err| TacticError::new(err.message))?;
+            }
+            let Formula::And(left, right) = conclusion else {
+                return Err(TacticError::new(format!(
+                    "cannot project `{}`: expected a conjunction",
+                    expr.base
+                )));
+            };
+            conclusion = match step {
+                ProofStep::Projection(Projection::Left) => *left,
+                ProofStep::Projection(Projection::Right) => *right,
+                ProofStep::Arg(_) => unreachable!("projection-only expression"),
+            };
+        }
         let plan = apply_plan_for_goal(
             env,
             ctx,
-            &theorem.statement,
+            &conclusion,
             target,
             &theorem.params,
             explicit,
             Some(theorem.name.as_str()),
         )?;
-        return Ok((
-            DraftProof::TheoremRef {
-                name: theorem.name.clone(),
-                subst: plan.schema_subst,
-            },
-            plan.forall_args,
-            plan.premises,
-        ));
+        let mut proof = DraftProof::TheoremRef {
+            name: theorem.name.clone(),
+            subst: plan.schema_subst,
+        };
+        for step in &expr.steps {
+            proof = match step {
+                ProofStep::Projection(Projection::Left) => DraftProof::AndElimLeft(Box::new(proof)),
+                ProofStep::Projection(Projection::Right) => {
+                    DraftProof::AndElimRight(Box::new(proof))
+                }
+                ProofStep::Arg(_) => unreachable!("projection-only expression"),
+            };
+        }
+        return Ok((proof, plan.forall_args, plan.premises));
     }
 
     let proof = expr.to_proof(env, ctx, allowed_mode)?;
     let checked = infer_kernel_proof_node(env, ctx, &proof, allowed_mode).map_err(|err| {
         TacticError::new(format!("cannot use proof with `apply`: {}", err.message))
     })?;
+    let surface =
+        proof_surface_formula(env, ctx, &proof).unwrap_or_else(|| checked.formula.clone());
     let plan = apply_plan_for_goal(
         env,
         ctx,
-        &checked.formula,
+        &surface,
         target,
         &[],
         SchemaSubst::default(),
@@ -20792,6 +22644,49 @@ fn unify_formula(
     }
 }
 
+fn unify_function_parameter(
+    name: &str,
+    target: &str,
+    unify: &mut UnifyState<'_>,
+) -> Result<(), ()> {
+    let Some(Param {
+        kind: ParamKind::Function { arguments, result },
+        ..
+    }) = unify.schema_params.iter().find(|param| param.name == name)
+    else {
+        return Err(());
+    };
+    if unify
+        .schema_subst
+        .function_args
+        .get(name)
+        .is_some_and(|existing| existing != target)
+    {
+        return Err(());
+    }
+    validate_function_schema_arg(
+        unify.env,
+        unify.ctx,
+        target,
+        arguments,
+        result,
+        unify.schema_params,
+        unify.schema_subst,
+    )
+    .map_err(|_| ())?;
+    unify
+        .schema_subst
+        .function_args
+        .insert(name.into(), target.into());
+    Ok(())
+}
+
+fn is_function_parameter(params: &[Param], name: &str) -> bool {
+    params
+        .iter()
+        .any(|param| param.name == name && matches!(param.kind, ParamKind::Function { .. }))
+}
+
 fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Result<(), ()> {
     if !matches!(pattern, Term::Ascribed { .. } | Term::Var(_)) {
         if let Term::Ascribed { term, .. } = target {
@@ -20816,8 +22711,9 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
                 )?;
                 unify_term(pattern, target, unify)
             } else {
+                let expected_ty = subst_type_schema(pattern_ty, unify.schema_subst);
                 let actual =
-                    validate_term_using_expected_type(unify.env, unify.ctx, target, pattern_ty)
+                    validate_term_using_expected_type(unify.env, unify.ctx, target, &expected_ty)
                         .map_err(|_| ())?;
                 unify_type(pattern_ty, &actual, unify.schema_params, unify.schema_subst)?;
                 unify_term(pattern, target, unify)
@@ -20850,7 +22746,24 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
                     Err(())
                 }
             } else {
-                let actual_ty = validate_term(unify.env, unify.ctx, target).map_err(|_| ())?;
+                let expected_ty = subst_type_schema(param_ty, unify.schema_subst);
+                let (actual_ty, inferred_term) = match validate_term(unify.env, unify.ctx, target) {
+                    Ok(ty) => (ty, target.clone()),
+                    Err(_) => {
+                        let ty = validate_term_using_expected_type(
+                            unify.env,
+                            unify.ctx,
+                            target,
+                            &expected_ty,
+                        )
+                        .map_err(|_| ())?;
+                        let term = Term::Ascribed {
+                            term: Box::new(target.clone()),
+                            ty: ty.clone(),
+                        };
+                        (ty, term)
+                    }
+                };
                 unify_type(
                     param_ty,
                     &actual_ty,
@@ -20860,9 +22773,14 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
                 unify
                     .schema_subst
                     .term_args
-                    .insert(name.clone(), target.clone());
+                    .insert(name.clone(), inferred_term);
                 Ok(())
             }
+        }
+        Term::Var(name) if is_function_parameter(unify.schema_params, name) => {
+            let target_name =
+                canonicalize_function_arg(unify.env, unify.ctx, target).map_err(|_| ())?;
+            unify_function_parameter(name, &target_name, unify)
         }
         Term::Var(_) => {
             if terms_equal_ignoring_ascriptions(pattern, target) {
@@ -20901,7 +22819,12 @@ fn unify_term(pattern: &Term, target: &Term, unify: &mut UnifyState<'_>) -> Resu
             let Term::App(t_name, t_args) = target else {
                 return Err(());
             };
-            if p_name != t_name || p_args.len() != t_args.len() {
+            if p_args.len() != t_args.len() {
+                return Err(());
+            }
+            if is_function_parameter(unify.schema_params, p_name) {
+                unify_function_parameter(p_name, t_name, unify)?;
+            } else if p_name != t_name {
                 return Err(());
             }
             for (p_arg, t_arg) in p_args.iter().zip(t_args) {
@@ -28642,11 +30565,12 @@ mod diagnostics_batch_tests {
             "{rendered}"
         );
         assert!(!rendered.contains("No such file"), "{rendered}");
-        let rendered = rendered_diagnostics("import std/hol/graph@1 as G\n");
+        let rendered = rendered_diagnostics("import std/hol/unknown@1 as G\n");
         assert!(
             rendered.contains("registered packages are `std/hol/list@1`"),
             "{rendered}"
         );
+        assert!(rendered.contains("`std/hol/graph@1`"), "{rendered}");
     }
 
     #[test]
@@ -28738,5 +30662,2418 @@ mod diagnostics_batch_tests {
             rendered.contains("it is available as `nat.add_comm` through its import alias"),
             "{rendered}"
         );
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod package_alias_identity_tests {
+    use super::*;
+
+    fn assert_certified(source: &str) -> HolShadowReport {
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:#?}", report.mismatches);
+        assert!(!diagnostics_have_errors(&report.certified().diagnostics));
+        report
+    }
+
+    #[test]
+    fn package_aliases_compose_in_both_import_orders() {
+        for imports in [
+            "import std/hol/list@1 as C\nimport std/hol/list@1 as F",
+            "import std/hol/list@1 as F\nimport std/hol/list@1 as C",
+        ] {
+            let report = assert_certified(&format!(
+                r#"{imports}
+
+theorem same_list (xs : C.List Nat) : F.length(xs) = C.length(xs) := by
+  refl
+
+theorem use_alias (xs : C.List Nat) : C.append(xs, F.nil) = xs := by
+  exact F.append_nil_right {{A := Nat; xs := xs}}
+
+theorem mixed_predicate (xs : F.List Nat) : C.Nodup(xs) -> F.Nodup(xs) := by
+  intro h
+  exact h
+"#
+            ));
+            assert_eq!(report.imported_packages, ["std/hol/list@1"]);
+            assert_eq!(report.theorems.iter().filter(|t| !t.is_imported).count(), 3);
+        }
+    }
+
+    #[test]
+    fn transitive_package_alias_example_is_certified() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let path = root.join("docs/hol/examples/package_aliases.ctea");
+        let source = include_str!("../../../docs/hol/examples/package_aliases.ctea");
+        let reversed = source.replace("import ../../../std/hol/counting.ctea as C\n", "");
+        let reversed = format!("import ../../../std/hol/counting.ctea as C\n{reversed}");
+        for source in [source, reversed.as_str()] {
+            let report = check_source_at_path_with_hol_shadow(source, &path);
+            assert!(
+                report.legacy.diagnostics.is_empty(),
+                "{:#?}",
+                report.legacy.diagnostics
+            );
+            assert!(report.is_match(), "{:#?}", report.mismatches);
+            assert!(!diagnostics_have_errors(&report.certified().diagnostics));
+            assert_eq!(report.theorems.iter().filter(|t| !t.is_imported).count(), 7);
+            let mapped = report
+                .theorems
+                .iter()
+                .find(|t| t.name == "mapped_length")
+                .unwrap();
+            assert_eq!(
+                mapped.statement_fragment,
+                hol::StatementFragment::HigherOrder
+            );
+        }
+    }
+
+    #[test]
+    fn finite_and_cardinality_aliases_share_predicates_functions_and_receipts() {
+        assert_certified(
+            r#"
+import std/hol/finite@1 as F
+import std/hol/finite@1 as G
+import std/hol/cardinality@1 as H
+import std/hol/cardinality@1 as J
+
+theorem finite_alias (xs : G.List Nat) (n : Nat) : F.HasCard(xs, n) -> G.HasCard(xs, n) := by
+  intro h
+  exact h
+
+theorem map_alias (f : Nat -> Nat) (xs : F.List Nat) : H.map(f, xs) = J.map(f, xs) := by
+  refl
+
+theorem map_lemma (f : Nat -> Nat) (xs : G.List Nat) : F.length(H.map(f, xs)) = G.length(xs) := by
+  exact J.map_length {A := Nat; B := Nat; f := f; xs := xs}
+"#,
+        );
+    }
+
+    #[test]
+    fn aliases_do_not_merge_different_element_types_or_local_datatypes() {
+        for source in [
+            r#"
+import std/hol/list@1 as C
+import std/hol/list@1 as F
+sort Person
+
+theorem wrong (xs : C.List Person) (ys : F.List Nat) : xs = ys := by
+  refl
+"#,
+            r#"
+namespace Local
+data List
+| nil
+| cons(Nat, List)
+end
+import std/hol/list@1 as F
+
+theorem wrong (xs : Local.List) : F.length(xs) = F.length(xs) := by
+  refl
+"#,
+            r#"
+import std/hol/list@1 as C
+import std/hol/list@1 as F
+
+theorem wrong (xs ys : C.List Nat) : F.length(xs) = C.length(ys) := by
+  refl
+"#,
+        ] {
+            let report = check_file_with_hol_shadow(source);
+            assert!(diagnostics_have_errors(&report.certified().diagnostics));
+            assert!(!report.legacy.theorems.iter().any(|t| t.name == "wrong"));
+        }
+    }
+
+    #[test]
+    fn alias_resolution_does_not_capture_a_local_binder() {
+        let source = r#"
+import std/hol/list@1
+import std/hol/list@1 as F
+
+theorem wrong : forall nil : F.List Nat, (F.nil : F.List Nat) = nil := by
+  intro xs
+  refl
+"#;
+        let report = check_file_with_hol_shadow(source);
+        assert!(diagnostics_have_errors(&report.certified().diagnostics));
+        assert!(!report.legacy.theorems.iter().any(|t| t.name == "wrong"));
+        assert_certified(
+            r#"
+import std/hol/list@1
+import std/hol/list@1 as F
+
+theorem local_refl : forall nil : F.List Nat, nil = nil := by
+  intro xs
+  refl
+"#,
+        );
+    }
+}
+
+#[cfg(test)]
+mod import_transaction_tests {
+    use super::*;
+
+    fn virtual_file(path: &str, source: &str) -> VirtualFile {
+        VirtualFile {
+            path: path.to_string(),
+            source: source.to_string(),
+        }
+    }
+
+    #[test]
+    fn failed_module_rolls_back_declarations_and_stops_dependent_diagnostics() {
+        let imports = [virtual_file(
+            "broken.ctea",
+            r#"
+sort Temporary
+theorem staged : True := by trivial
+theorem wrong : False := by trivial
+theorem cascading : Missing := by trivial
+"#,
+        )];
+        let mut checker = FileChecker::with_virtual_files(&imports);
+        checker.check_source("theorem before : True := by trivial\nimport broken.ctea\ntheorem after : Missing := by trivial\n", None);
+        assert_eq!(
+            checker
+                .result
+                .theorems
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>(),
+            ["before"]
+        );
+        assert!(!checker.env.has_top_level_name("Temporary"));
+        assert!(!checker.env.has_top_level_name("staged"));
+        assert!(checker.loaded_virtual_files.is_empty());
+        assert_eq!(checker.result.diagnostics.len(), 1);
+        let diagnostic = &checker.result.diagnostics[0];
+        assert!(
+            diagnostic.message.contains("theorem `wrong` failed"),
+            "{diagnostic:#?}"
+        );
+        assert_eq!(diagnostic.location.as_ref().unwrap().line, 2);
+        assert!(diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("broken.ctea") && note.contains("line 4")));
+        assert!(checker.virtual_import_stack.is_empty());
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn nested_failure_preserves_prior_imports_and_rolls_back_new_dependencies() {
+        let imports = [
+            virtual_file("shared.ctea", "theorem shared : True := by trivial\n"),
+            virtual_file(
+                "dependency.ctea",
+                "theorem dependency : True := by trivial\n",
+            ),
+            virtual_file(
+                "broken.ctea",
+                "import shared.ctea\nimport dependency.ctea\ntheorem wrong : False := by trivial\n",
+            ),
+        ];
+        let mut checker = FileChecker::with_virtual_files_and_hol_shadow(&imports).unwrap();
+        checker.check_source("import shared.ctea\nimport broken.ctea\n", None);
+        assert!(checker.env.theorem("shared").is_some());
+        assert!(checker.env.theorem("dependency").is_none());
+        assert_eq!(
+            checker.loaded_virtual_files,
+            HashSet::from([("shared.ctea".to_string(), None)])
+        );
+        let shadow = checker.hol_shadow.as_ref().unwrap();
+        assert_eq!(
+            shadow.imported_virtual_files,
+            BTreeSet::from(["shared.ctea".to_string()])
+        );
+        assert_eq!(
+            shadow
+                .theorems
+                .iter()
+                .map(|t| t.name.as_str())
+                .collect::<Vec<_>>(),
+            ["shared"]
+        );
+        assert!(shadow
+            .receipt_names
+            .values()
+            .all(|name| name != "dependency"));
+        // A rolled-back dependency must remain loadable, not cached as success.
+        checker.check_source(
+            "import dependency.ctea\ntheorem retry : True := by exact dependency\n",
+            None,
+        );
+        assert!(checker.env.theorem("retry").is_some());
+        assert_eq!(checker.result.diagnostics.len(), 1);
+        assert!(checker.hol_shadow.as_ref().unwrap().mismatches.is_empty());
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn failed_source_import_rolls_back_logical_packages_and_receipts() {
+        let imports = [virtual_file(
+            "broken.ctea",
+            "import std/hol/list@1 as L\ntheorem wrong : False := by trivial\n",
+        )];
+        let mut checker = FileChecker::with_virtual_files_and_hol_shadow(&imports).unwrap();
+        checker.check_source("import broken.ctea\n", None);
+        assert!(!checker.env.has_top_level_name("L.List"));
+        assert!(checker.loaded_library_packages.is_empty());
+        let shadow = checker.hol_shadow.as_ref().unwrap();
+        assert!(shadow.imported_packages.is_empty());
+        assert!(shadow.receipt_names.is_empty());
+        assert!(shadow.checked_declarations.is_empty());
+        checker.check_source("import std/hol/list@1 as L\ntheorem retry (xs : L.List Nat) : L.append(xs, L.nil) = xs := by\n  exact L.append_nil_right {A := Nat; xs := xs}\n", None);
+        assert!(checker.env.theorem("retry").is_some());
+        assert_eq!(checker.result.diagnostics.len(), 1);
+        assert!(checker.hol_shadow.as_ref().unwrap().mismatches.is_empty());
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn kernel_only_import_failure_is_reported_before_rollback() {
+        let imports = [virtual_file(
+            "unreplayed.ctea",
+            "sort Staged\ntheorem client : True := by exact seed\n",
+        )];
+        let mut checker = FileChecker::with_virtual_files_and_hol_shadow(&imports).unwrap();
+        checker.check_source("theorem seed : True := by trivial\n", None);
+        // Fault injection: the teaching environment knows a theorem the
+        // certification engine does not. An import must not publish it.
+        checker.hol_shadow = Some(HolShadowState::new().unwrap());
+        checker.check_source("import unreplayed.ctea\n", None);
+        assert_eq!(
+            checker.result.diagnostics.len(),
+            1,
+            "{:#?}",
+            checker.result.diagnostics
+        );
+        assert!(checker.result.diagnostics[0]
+            .message
+            .contains("failed kernel certification"));
+        assert!(!checker.env.has_top_level_name("Staged"));
+        assert!(checker.env.theorem("client").is_none());
+        assert!(checker.loaded_virtual_files.is_empty());
+        assert!(checker
+            .hol_shadow
+            .as_ref()
+            .unwrap()
+            .checked_declarations
+            .is_empty());
+    }
+
+    #[test]
+    fn failed_import_keeps_the_logical_package_retry_signal() {
+        let imports = [virtual_file("package.ctea", "import std/hol/list@1\n")];
+        let result = check_file_with_imports("import package.ctea\n", &imports);
+        assert!(result.requires_hol_shadow);
+        assert_eq!(result.diagnostics.len(), 1);
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn prelude_and_counting_have_one_actionable_collision_or_coexist_with_aliases() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/hol/examples/prelude_counting.ctea");
+        let source = include_str!("../../../docs/hol/examples/prelude_counting.ctea");
+        let unaliased = source.replace(" as Counting", "");
+        let report = check_source_at_path_with_hol_shadow(&unaliased, &path);
+        assert_eq!(
+            report.legacy.diagnostics.len(),
+            1,
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        let diagnostic = &report.legacy.diagnostics[0];
+        assert!(diagnostic
+            .message
+            .contains("logical package alias `List` is already declared"));
+        assert_eq!(diagnostic.location.as_ref().unwrap().line, 3);
+        assert!(diagnostic
+            .suggestions
+            .iter()
+            .any(|s| s.example.as_deref()
+                == Some("import ../../../std/hol/counting.ctea as Counting")));
+        assert!(report.imported_packages.is_empty());
+        assert!(report.legacy.theorems.iter().all(|t| t.is_imported));
+        assert!(!report
+            .imported_files
+            .iter()
+            .any(|p| p.ends_with("std/hol/counting.ctea")));
+        let reversed = source.replace("import ../../../std/hol/counting.ctea as Counting\n", "");
+        let reversed = format!("import ../../../std/hol/counting.ctea as Counting\n{reversed}");
+        for source in [source, reversed.as_str()] {
+            let report = check_source_at_path_with_hol_shadow(source, &path);
+            assert!(
+                report.legacy.diagnostics.is_empty(),
+                "{:#?}",
+                report.legacy.diagnostics
+            );
+            assert!(report.is_match(), "{:#?}", report.mismatches);
+            assert_eq!(report.theorems.iter().filter(|t| !t.is_imported).count(), 4);
+        }
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod bundled_library_tests {
+    use super::*;
+
+    #[test]
+    fn bundled_identity_cannot_be_spoofed_by_a_virtual_file() {
+        let report = check_file_with_imports_and_hol_shadow(
+            "import builtin:std/nat.ctea as N\ntheorem good (n : Nat) : add(n, 0) = n := by\n  exact N.add_zero_right {n := n}\n",
+            &[VirtualFile { path: "builtin:std/nat.ctea".to_string(), source: "axiom forged : False\n".to_string() }],
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:#?}", report.mismatches);
+        assert_eq!(report.imported_virtual_files, ["builtin:std/nat.ctea"]);
+        assert!(report.theorems.iter().all(|t| !t.name.contains("forged")));
+    }
+
+    #[test]
+    fn unknown_bundled_names_do_not_fall_through_to_virtual_files() {
+        let report = check_file_with_imports_and_hol_shadow(
+            "import builtin:std/not_registered.ctea\n",
+            &[VirtualFile {
+                path: "builtin:std/not_registered.ctea".to_string(),
+                source: "theorem fake : True := by trivial\n".to_string(),
+            }],
+        );
+        assert_eq!(report.legacy.diagnostics.len(), 1);
+        assert!(report.legacy.diagnostics[0]
+            .message
+            .contains("unknown bundled"));
+        assert!(report.imported_virtual_files.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod student_parser_tests {
+    use super::*;
+
+    #[test]
+    fn multiline_definitions_preserve_following_commands_and_comments() {
+        let result = check_file(
+            r#"
+def Related
+  (P Q : Prop)
+  : Prop :=
+  -- Each component can be on its own line.
+  P /\
+  Q
+
+def next (n : Nat) : Nat :=
+  add(n,
+      1)
+
+theorem use_related (P Q : Prop) : Related(P, Q) -> Q := by
+  intro h
+  exact h.right
+
+theorem use_next : next(1) = 2 := by refl
+"#,
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(result.theorems.len(), 2);
+    }
+
+    #[test]
+    fn multiline_definition_error_points_to_its_physical_line() {
+        let source =
+            "def Broken (P : Prop) : Prop :=\n  P /\\\n  $\ntheorem later : True := by trivial\n";
+        let result = check_file(source);
+        assert_eq!(result.diagnostics.len(), 1);
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(
+            diagnostic.location.as_ref().unwrap().line,
+            3,
+            "{diagnostic:#?}"
+        );
+        assert_eq!(diagnostic.span, Some(Span { start: 2, end: 3 }));
+    }
+
+    #[test]
+    fn parser_depth_budget_is_restored_after_failure() {
+        let source = format!(
+            "theorem deep : {}True{} := by trivial",
+            "(".repeat(1000),
+            ")".repeat(1000)
+        );
+        assert!(check_file(&source)
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("resource limit")));
+        assert!(check_file("theorem simple : True := by trivial")
+            .diagnostics
+            .is_empty());
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn projected_theorem_application_preserves_premise_and_target_types() {
+        let library = r#"
+def PairOfFunctions (P Q : Prop) : Prop := (P -> P) /\ (Q -> Q)
+theorem pair (P Q : Prop) : PairOfFunctions(P, Q) := by
+  split
+  intro h
+  exact h
+  intro h
+  exact h
+"#;
+        let good = format!(
+            r#"{library}
+theorem left_use (P Q : Prop) : P -> P := by
+  intro h
+  exact (pair {{P := P; Q := Q}}).left h
+theorem right_use (P Q : Prop) : Q -> Q := by
+  intro h
+  exact (pair {{P := P; Q := Q}}).right h
+"#
+        );
+        let report = check_file_with_hol_shadow(&good);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:#?}", report.mismatches);
+        for proof in [
+            "theorem wrong (P Q : Prop) : Q -> P := by\n  intro h\n  exact (pair {P := P; Q := Q}).left h\n",
+            "theorem wrong (P Q : Prop) : P -> Q := by\n  intro h\n  exact (pair {P := P; Q := Q}).left h\n",
+        ] {
+            let report = check_file_with_hol_shadow(&format!("{library}\n{proof}"));
+            assert!(diagnostics_have_errors(&report.certified().diagnostics));
+            assert!(!report.legacy.theorems.iter().any(|t| t.name == "wrong"));
+        }
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn projected_counting_proof_accepts_an_ordinary_argument() {
+        let report = check_file_with_hol_shadow(
+            r#"
+import builtin:std/hol/counting.ctea as C
+
+theorem member_of_counted_set (S : Set Nat) (xs : C.List Nat) (n x : Nat) :
+  C.HasSize(S, xs, n) -> C.Member(x, xs) -> x in S := by
+  intro size
+  intro member
+  exact (C.has_size_members {A := Nat; S := S; xs := xs; n := n} size x).left member
+"#,
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:#?}", report.mismatches);
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod theorem_outcome_tests {
+    use super::*;
+
+    #[test]
+    fn every_parsed_occurrence_has_an_outcome() {
+        let source = "theorem same (P : Prop) : P -> P := by\n  intro h\n  exact h\ntheorem same : False := by\n  refl\ntheorem invalid : missing := by\n  refl\ntheorem hole : True := by\n  sorry\naxiom assumption : True\ntheorem wrong : False := by\n  refl\n";
+        let report = check_file_with_hol_shadow(source);
+        let result = report.certified();
+        assert_eq!(
+            result
+                .theorem_outcomes
+                .iter()
+                .map(|o| (o.name.as_str(), o.status.as_str(), o.line))
+                .collect::<Vec<_>>(),
+            vec![
+                ("same", "accepted", 1),
+                ("same", "failed", 4),
+                ("invalid", "failed", 6),
+                ("hole", "incomplete", 8),
+                ("assumption", "trusted_axiom", 10),
+                ("wrong", "failed", 11),
+            ]
+        );
+        assert_eq!(result.theorems.len(), 3);
+    }
+
+    #[test]
+    fn import_rollback_and_skipped_proofs_are_explicit() {
+        let files = [VirtualFile { path: "broken.ctea".into(), source: "theorem helper : True := by\n  trivial\ntheorem broken : False := by\n  refl\ntheorem unreached : True := by\n  trivial\n".into() }];
+        let report = check_file_with_imports_and_hol_shadow(
+            "import broken.ctea\ntheorem root : True := by\n  trivial\n",
+            &files,
+        );
+        let outcomes = &report.certified().theorem_outcomes;
+        let status = |name| {
+            outcomes
+                .iter()
+                .find(|o| o.name == name)
+                .unwrap()
+                .status
+                .as_str()
+        };
+        assert_eq!(status("root"), "not_checked");
+        assert_eq!(status("helper"), "rolled_back");
+        assert_eq!(status("broken"), "failed");
+        assert_eq!(status("unreached"), "not_checked");
+        assert!(outcomes
+            .iter()
+            .filter(|o| o.name != "root")
+            .all(|o| o.is_imported));
+    }
+
+    #[test]
+    fn failed_tactic_is_never_reported_complete() {
+        let source = "theorem bad : False := by\n  refl\n";
+        for result in [
+            run_tactic(source, "bad", 0),
+            goals_at(source, Position { line: 3, column: 1 }),
+        ] {
+            assert!(diagnostics_have_errors(&result.diagnostics));
+            assert!(!result.completed);
+        }
+    }
+
+    #[test]
+    fn certification_failure_updates_the_exact_occurrence() {
+        let mut report = check_file_with_hol_shadow("theorem good : True := by\n  trivial\n");
+        report.mismatches.push(HolShadowMismatch {
+            declaration: "good".into(),
+            kind: HolShadowDeclarationKind::Theorem,
+            line: 1,
+            source_path: None,
+            is_imported: false,
+            message: "injected replay failure".into(),
+        });
+        let certified = report.certified();
+        assert_eq!(certified.theorem_outcomes[0].status, "failed");
+        assert!(certified.theorems.is_empty());
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod rewrite_hypothesis_tests {
+    use super::*;
+    fn checked(source: &str) {
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(report
+            .certified()
+            .theorem_outcomes
+            .iter()
+            .all(|o| o.status == "accepted"));
+    }
+    #[test]
+    fn local_rewrites_preserve_a_checked_proof_in_both_directions() {
+        checked(include_str!(
+            "../../../docs/hol/examples/rewrite_hypotheses.ctea"
+        ));
+        checked("theorem forward (x y : Nat) (P : Nat -> Prop) : x = y -> P(x) -> P(y) := by\n  intro e\n  intro h\n  rewrite -> e at h\n  exact h\n");
+        checked("theorem backward (x y : Nat) (P : Nat -> Prop) : x = y -> P(y) -> P(x) := by\n  intro e\n  intro h\n  rewrite <- e at h\n  exact h\n");
+        checked("theorem repeated (x y z : Nat) : x = y -> y = z -> add(x, x) = 0 -> add(z, z) = 0 := by\n  intro e\n  intro f\n  intro h\n  rewrite all -> e at h\n  rewrite all -> f at h\n  exact h\n");
+    }
+    #[test]
+    fn local_rewrite_retains_original_hypothesis_evidence() {
+        checked("theorem original (x y : Nat) (P : Nat -> Prop) : x = y -> P(x) -> P(x) := by\n  intro e\n  intro h\n  have saved : P(x) := by\n    exact h\n  rewrite -> e at h\n  exact saved\n");
+        checked("theorem self (x y : Nat) : x = y -> y = y := by\n  intro e\n  rewrite -> e at e\n  exact e\n");
+    }
+    #[test]
+    fn invalid_local_rewrites_are_rejected() {
+        for tactic in [
+            "rewrite -> e at missing",
+            "rewrite -> h at h",
+            "rewrite -> e at h",
+        ] {
+            let source = format!("theorem bad (x y : Nat) (P : Nat -> Prop) : x = y -> P(0) -> P(y) := by\n  intro e\n  intro h\n  {tactic}\n  exact h\n");
+            let report = check_file_with_hol_shadow(&source);
+            assert!(
+                diagnostics_have_errors(&report.certified().diagnostics),
+                "{tactic}"
+            );
+        }
+        let report = check_file_with_hol_shadow("theorem capture (x y : Nat) (P : Nat -> Prop) : x = y -> (forall y : Nat, P(x)) -> (forall y : Nat, P(y)) := by\n  intro e\n  intro h\n  rewrite -> e at h\n  exact h\n");
+        assert!(diagnostics_have_errors(&report.certified().diagnostics));
+    }
+    #[test]
+    fn editor_goal_and_explanation_describe_the_rewritten_hypothesis() {
+        let source = "theorem demo (x y : Nat) (P : Nat -> Prop) : x = y -> P(x) -> P(y) := by\n  intro e\n  intro h\n  rewrite -> e at h\n  exact h\n";
+        let result = run_tactic(source, "demo", 2);
+        assert!(!diagnostics_have_errors(&result.diagnostics));
+        assert_eq!(result.goals.len(), 1);
+        assert!(
+            result.goals[0]
+                .context
+                .iter()
+                .any(|line| line.contains("h : P(y)")),
+            "{:?}",
+            result.goals
+        );
+        assert_eq!(result.goals[0].target, "P(y)");
+        assert_eq!(
+            result.goals[0]
+                .context
+                .iter()
+                .filter(|line| line.starts_with("h : "))
+                .count(),
+            1
+        );
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod revert_term_tests {
+    use super::*;
+    fn certified(source: &str) {
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+    }
+    #[test]
+    fn revert_generalizes_a_term_and_dependent_hypotheses() {
+        certified(include_str!("../../../docs/hol/examples/revert_term.ctea"));
+        let source = "theorem demo (x : Nat) (P : Nat -> Prop) (Q : Prop) : Q -> P(x) -> P(x) := by\n  intro independent\n  intro dependent\n  revert x\n  intro x\n  intro dependent\n  exact dependent\n";
+        certified(source);
+        let result = run_tactic(source, "demo", 2);
+        assert_eq!(result.goals[0].target, "forall x : Nat, P(x) -> P(x)");
+        assert!(result.goals[0]
+            .context
+            .iter()
+            .any(|s| s == "independent : Q"));
+        assert!(!result.goals[0]
+            .context
+            .iter()
+            .any(|s| s.starts_with("x :") || s.starts_with("dependent :")));
+    }
+    #[test]
+    fn revert_finds_dependencies_hidden_in_saved_evidence() {
+        certified("theorem hidden (x : Nat) (P : Nat -> Prop) : P(x) /\\ True -> True := by\n  intro h\n  have saved : True := by\n    exact h.right\n  revert x\n  intro y\n  intro h\n  exact saved\n");
+        certified("theorem rewritten (x y : Nat) (P : Nat -> Prop) : x = y -> P(x) -> P(y) := by\n  intro e\n  intro h\n  rewrite -> e at h\n  revert x\n  intro z\n  intro e\n  intro h\n  exact h\n");
+    }
+    #[test]
+    fn counting_inclusion_can_generalize_its_container_before_induction() {
+        let original = include_str!("../../../std/hol/counting.ctea");
+        let before = "theorem nodup_inclusion_length_le\n  (A : Type) (xs : List A) :\n  forall ys : List A,";
+        let after = "theorem nodup_inclusion_length_le\n  (A : Type) (xs : List A) (ys : List A) :";
+        assert!(original.contains(before));
+        let changed = original.replacen(before, after, 1).replacen(
+            "le(length(xs), length(ys)) := by\n  induction xs with",
+            "le(length(xs), length(ys)) := by\n  revert ys\n  induction xs with",
+            1,
+        );
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../std/hol/counting.ctea");
+        let report = check_source_at_path_with_hol_shadow(&changed, path);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+    }
+
+    #[test]
+    fn shadowed_binder_cannot_capture_an_outer_assumption_in_hol() {
+        let mut elaborator = hol::CompatibilityElaborator::new().unwrap();
+        let parameters = vec![
+            Param {
+                name: "x".into(),
+                kind: ParamKind::Term(Type::Nat),
+            },
+            Param {
+                name: "P".into(),
+                kind: ParamKind::Predicate(vec![Type::Nat]),
+            },
+        ];
+        let px = Formula::PredApp("P".into(), vec![Term::Var("x".into())]);
+        let py = Formula::PredApp("P".into(), vec![Term::Var("y".into())]);
+        let bad_statement =
+            Formula::implies(px.clone(), Formula::forall("y".into(), Type::Nat, py));
+        let proof = DraftProof::ImpIntro {
+            hyp_name: "h".into(),
+            hyp_formula: px,
+            body: Box::new(DraftProof::ForallIntro {
+                var: "x".into(),
+                var_type: Type::Nat,
+                body: Box::new(DraftProof::Hyp("h".into())),
+            }),
+        };
+        assert!(elaborator
+            .declare_legacy_checked_theorem("capture", &parameters, &bad_statement, &proof)
+            .is_err());
+    }
+
+    #[test]
+    fn reverting_does_not_turn_a_particular_fact_into_a_universal_fact() {
+        let source = "theorem invalid (x : Nat) (P : Nat -> Prop) : P(x) -> forall y : Nat, P(y) := by\n  intro h\n  revert x\n  intro y\n  intro h\n  exact h\n";
+        assert!(diagnostics_have_errors(
+            &check_file_with_hol_shadow(source).certified().diagnostics
+        ));
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod term_unfold_tests {
+    use super::*;
+
+    #[test]
+    fn named_term_definitions_unfold_and_simplify_with_certificates() {
+        let source = include_str!("../../../docs/hol/examples/term_abbreviations.ctea");
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        let result = run_tactic_with_imports_and_hol_shadow(source, "expose", 0, &[]);
+        assert_eq!(result.goals[0].target, "1 = two");
+    }
+
+    #[test]
+    fn named_term_unfold_preserves_bound_variables() {
+        let mut env = Env::default();
+        env.add_term_def(TermDef {
+            name: "n".into(),
+            params: vec![],
+            ty: Type::Nat,
+            body: Term::Zero,
+        });
+        let formula = Formula::forall(
+            "n".into(),
+            Type::Nat,
+            Formula::eq(Term::Var("n".into()), Term::Zero),
+        );
+        let (expanded, changed) =
+            unfold_formula_defs(&env, &Context::default(), &formula, Some("n")).unwrap();
+        assert_eq!(expanded, formula);
+        assert!(!changed);
+    }
+    #[test]
+    fn folded_rewrite_rejects_capture_in_single_and_all_modes() {
+        for tactic in ["rewrite -> e", "rewrite all -> e"] {
+            let source = format!("def Next (n : Nat) : Nat := succ(n)\ntheorem bad (x y : Nat) (P : Nat -> Prop) : succ(x) = y -> (forall x : Nat, P(y)) -> forall x : Nat, P(Next(x)) := by\n  intro e\n  intro h\n  {tactic}\n  exact h\n");
+            let report = check_file_with_hol_shadow(&source);
+            assert!(
+                report
+                    .legacy
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("rewrite could not find")),
+                "{:?}",
+                report.legacy.diagnostics
+            );
+            assert!(!report.legacy.theorems.iter().any(|t| t.name == "bad"));
+        }
+    }
+
+    #[test]
+    fn folded_rewrite_shows_new_terms_and_retains_saved_evidence() {
+        let source = "def Next (n : Nat) : Nat := succ(n)\ntheorem saved (x y : Nat) (P : Nat -> Prop) : succ(x) = y -> P(Next(x)) -> P(Next(x)) /\\ P(y) := by\n  intro e\n  intro h\n  have old : P(Next(x)) := by\n    exact h\n  rewrite -> e at h\n  split\n  exact old\n  exact h\n";
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        let example = include_str!("../../../docs/hol/examples/term_abbreviations.ctea");
+        let goals = run_tactic_with_imports_and_hol_shadow(example, "rewrite_folded", 2, &[]);
+        assert_eq!(goals.goals[0].target, "P(y)");
+        let goals =
+            run_tactic_with_imports_and_hol_shadow(example, "rewrite_folded_hyp_all", 2, &[]);
+        assert!(goals.goals[0].context.iter().any(|h| h == "h : P(y, y)"));
+    }
+    #[test]
+    fn rewrite_all_does_not_silently_stop_after_thirty_two_occurrences() {
+        let from = Term::Var("x".into());
+        let to = Term::Var("y".into());
+        let formula = Formula::PredApp("P".into(), vec![from.clone(); 40]);
+        let (result, steps) =
+            rewrite_all_with_equality(formula, &from, &to, &DraftProof::Hyp("e".into()));
+        assert_eq!(steps.len(), 40);
+        assert_eq!(result, Formula::PredApp("P".into(), vec![to; 40]));
+    }
+
+    #[test]
+    fn imported_term_abbreviations_support_named_tactics_and_rewriting() {
+        let files = [VirtualFile { path: "terms.ctea".into(), source: "def Next (n : Nat) : Nat := succ(n)\ntheorem own (n : Nat) : Next(n) = succ(n) := by\n  unfold Next\n  refl\n".into() }];
+        let source = "import terms.ctea as L\ntheorem client (x y : Nat) (P : Nat -> Prop) : succ(x) = y -> P(y) -> P(L.Next(x)) := by\n  intro e\n  intro h\n  rewrite -> e\n  exact h\ntheorem named (x : Nat) : L.Next(x) = succ(x) := by\n  simp [L.Next]\n  refl\n";
+        let report = check_file_with_imports_and_hol_shadow(source, &files);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod rewrite_inference_tests {
+    use super::*;
+    #[test]
+    fn inferred_types_reach_unannotated_empty_constructor_patterns() {
+        let source = r#"
+import std/hol/list@1 as L
+theorem right (A : Type) (xs : L.List A) : L.append(xs, L.nil) = xs := by
+  rewrite -> L.append_nil_right
+  refl
+theorem simplified (xs : L.List Nat) : L.append(xs, L.nil) = xs := by
+  simp [L.append_nil_right]
+  refl
+theorem hypothesis (xs : L.List Nat) (n : Nat) :
+  L.length(L.append(xs, L.nil)) = n -> L.length(xs) = n := by
+  intro h
+  rewrite -> L.append_nil_right at h
+  exact h
+"#;
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in ["right", "simplified", "hypothesis"] {
+            assert!(report.theorems.iter().any(|t| t.name == name));
+        }
+    }
+
+    #[test]
+    fn empty_constructor_inference_keeps_explicit_types_and_list_contents() {
+        for (list, arguments) in [("L.nil", "{A := Set Nat}"), ("L.cons(0, L.nil)", "")] {
+            let source = format!("import std/hol/list@1 as L\ntheorem bad (xs : L.List Nat) : L.append(xs, {list}) = xs := by\n  rewrite -> L.append_nil_right {arguments}\n  refl\n");
+            let report = check_file_with_hol_shadow(&source);
+            assert!(report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.certified().theorems.iter().any(|t| t.name == "bad"));
+        }
+    }
+
+    #[test]
+    fn package_rewrites_infer_occurrence_parameters() {
+        let source = include_str!("../../../docs/hol/examples/inferred_rewrite.ctea");
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+    }
+    #[test]
+    fn rewrite_inference_respects_explicit_arguments_and_missing_information() {
+        for args in ["{h := 1}", "{A := Set Nat}"] {
+            let source = format!("import std/hol/list@1 as L\ntheorem bad (xs : L.List Nat) : L.length(L.cons(0, xs)) = succ(L.length(xs)) := by\n  rewrite -> L.length_cons {args}\n  refl\n");
+            let report = check_file_with_hol_shadow(&source);
+            assert!(!report.legacy.diagnostics.is_empty());
+            assert!(!report.certified().theorems.iter().any(|t| t.name == "bad"));
+        }
+        let source = "import std/hol/list@1 as L\ntheorem missing (xs : L.List Nat) : succ(L.length(xs)) = 2 := by\n  rewrite <- L.length_cons\n";
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("cannot infer parameters")),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+    }
+
+    #[test]
+    fn projected_apply_rejects_wrong_goal_and_type_constraints() {
+        for invocation in ["F.nodup_cons.left", "(F.nodup_cons {A := Set Nat}).right"] {
+            let source = format!("import std/hol/finite@1 as F\ntheorem bad : F.Nodup(F.cons(0, F.nil)) := by\n  apply {invocation}\n");
+            let report = check_file_with_hol_shadow(&source);
+            assert!(!report.legacy.diagnostics.is_empty());
+            assert!(!report.certified().theorems.iter().any(|t| t.name == "bad"));
+        }
+    }
+    #[test]
+    fn inferred_function_arguments_must_agree_at_every_occurrence() {
+        let source = "theorem same (f : Nat -> Nat) (x : Nat) : f(x) = f(x) := by\n  refl\ntheorem bad (g h : Nat -> Nat) (x : Nat) : g(x) = h(x) := by\n  apply same\n";
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("does not match goal")),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(!report.certified().theorems.iter().any(|t| t.name == "bad"));
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod explicit_predicate_type_inference_tests {
+    use super::*;
+
+    const BASE: &str = r#"
+data Token
+| token
+def IsZero (n : Nat) : Prop := n = 0
+theorem preserve (A : Type) (P : A -> Prop) (x : A) : P(x) -> P(x) := by
+  intro h
+  exact h
+theorem preserve_pair (A B : Type) (R : A -> B -> Prop) (x : A) (y : B) :
+  R(x, y) -> R(x, y) := by
+  intro h
+  exact h
+"#;
+
+    #[test]
+    fn explicit_predicates_and_lambda_annotations_infer_concrete_types() {
+        let source = format!(
+            r#"{BASE}
+theorem named : IsZero(0) -> IsZero(0) := by
+  exact preserve {{P := IsZero; x := 0}}
+theorem annotated : IsZero(0) -> IsZero(0) := by
+  exact preserve {{P := fun n : Nat => IsZero(n); x := 0}}
+theorem mixed (R : Nat -> Token -> Prop) : R(0, token) -> R(0, token) := by
+  exact preserve_pair {{R := R; x := 0; y := token}}
+theorem typed_mixed (R : Nat -> Token -> Prop) : R(0, token) -> R(0, token) := by
+  exact preserve_pair {{R := fun (n : Nat) (t : Token) => R(n, t); x := 0; y := token}}
+"#
+        );
+        let report = check_file_with_hol_shadow(&source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in ["named", "annotated", "mixed", "typed_mixed"] {
+            assert!(report.theorems.iter().any(|t| t.name == name));
+        }
+    }
+
+    #[test]
+    fn explicit_type_conflicts_are_rejected_in_either_argument_order() {
+        for arguments in [
+            "A := Token; P := IsZero; x := token",
+            "P := IsZero; A := Token; x := token",
+            "P := fun n : Nat => IsZero(n); A := Token; x := token",
+        ] {
+            let source =
+                format!("{BASE}\ntheorem wrong : True := by\n  exact preserve {{{arguments}}}\n");
+            let report = check_file_with_hol_shadow(&source);
+            assert!(
+                report
+                    .legacy
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("expected `Token`")),
+                "{:?}",
+                report.legacy.diagnostics
+            );
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod reachability_tests {
+    use super::*;
+
+    fn check(source: &str) -> HolShadowReport {
+        let files = [VirtualFile {
+            path: "roads.ctea".into(),
+            source: source.into(),
+        }];
+        VirtualProject::new("roads.ctea", &files).unwrap().check()
+    }
+
+    #[test]
+    fn bundled_reachability_composes_and_refutes_directed_routes() {
+        let report = check(include_str!("../../../docs/hol/examples/reachability.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "G.reaches_refl",
+            "G.reaches_edge",
+            "G.reaches_trans",
+            "G.reaches_invariant",
+            "G.not_reaches_of_closed",
+            "home_to_campus",
+            "no_return",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn reachability_does_not_reverse_edges_or_join_unmatched_endpoints() {
+        let base = include_str!("../../../docs/hol/examples/reachability.ctea");
+        for proof in [
+            "theorem wrong : G.Reaches(Road, campus, home) := by\n  exact home_to_campus\n",
+            "theorem wrong : G.Reaches(Road, home, campus) := by\n  apply G.reaches_trans {A := Stop; E := Road; b := campus}\n  apply G.reaches_edge {A := Stop; E := Road}\n  exact home_to_junction\n  exact G.reaches_refl {A := Stop; E := Road; a := campus}\n",
+        ] {
+            let report = check(&format!("{base}\n{proof}"));
+            assert!(report.legacy.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+            assert!(report.theorems.iter().any(|t| t.name == "no_return"));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod overlapping_union_tests {
+    use super::*;
+
+    fn check(source: &str) -> HolShadowReport {
+        let files = [VirtualFile {
+            path: "union.ctea".into(),
+            source: source.into(),
+        }];
+        VirtualProject::new("union.ctea", &files).unwrap().check()
+    }
+
+    #[test]
+    fn overlap_constructs_checked_witnesses_without_classical_reasoning() {
+        let report = check(include_str!(
+            "../../../docs/hol/examples/overlapping_union.ctea"
+        ));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "U.member_decidable",
+            "U.union_enumeration",
+            "U.union_enumeration_of_decidable_eq",
+            "U.has_size_union_exists",
+            "U.has_size_union_of_decidable_eq",
+            "overlap_has_enumeration",
+            "construct_union_size",
+            "colour_equality",
+            "any_colour_list_membership",
+            "any_colour_union",
+            "any_colour_set_union",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn union_construction_requires_decisions_and_preserves_duplicate_checks() {
+        let source = include_str!("../../../docs/hol/examples/overlapping_union.ctea");
+        let missing = source.replace("      right\n      finite", "      right\n      assumption");
+        let report = check(&missing);
+        assert!(report
+            .legacy
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error));
+        assert!(!report
+            .certified()
+            .theorems
+            .iter()
+            .any(|t| t.name == "overlap_has_enumeration"));
+        let wrong = format!("{source}\ntheorem bad : F.Nodup(F.cons(red, F.cons(blue, F.cons(blue, F.nil)))) := by\n  finite\n");
+        let report = check(&wrong);
+        assert!(report
+            .legacy
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error));
+        assert!(!report.certified().theorems.iter().any(|t| t.name == "bad"));
+        assert!(report
+            .certified()
+            .theorems
+            .iter()
+            .any(|t| t.name == "overlap_has_enumeration"));
+    }
+
+    #[test]
+    fn list_membership_decisions_cannot_be_derived_from_reflexivity_alone() {
+        let report = check(
+            r#"
+import builtin:std/hol/finite_union.ctea as U
+theorem bad (A : Type) (xs : U.List A) :
+  forall x : A, U.Member(x, xs) \/ not U.Member(x, xs) := by
+  apply U.member_decidable {A := A; xs := xs}
+  intro x
+  intro y
+  left
+  refl
+"#,
+        );
+        assert!(report
+            .legacy
+            .diagnostics
+            .iter()
+            .any(|d| d.severity == DiagnosticSeverity::Error));
+        assert!(!report.certified().theorems.iter().any(|t| t.name == "bad"));
+    }
+
+    #[test]
+    fn natural_equality_decisions_support_numeric_union_clients() {
+        let report = check(include_str!("../../../docs/hol/examples/nat_union.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "D.nat_eq_decidable",
+            "numeric_membership",
+            "numeric_union",
+            "numeric_set_union",
+            "distinct_numerals",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn equality_decisions_do_not_certify_either_branch_alone() {
+        for conclusion in ["n = m", "not n = m"] {
+            let source = format!("import builtin:std/hol/nat_decidable.ctea as D\ntheorem bad (n m : Nat) : {conclusion} := by\n  exact D.nat_eq_decidable n m\n");
+            let report = check(&source);
+            assert!(report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.certified().theorems.iter().any(|t| t.name == "bad"));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod finite_sums_tests {
+    use super::*;
+
+    fn virtual_check(source: &str) -> HolShadowReport {
+        let files = [VirtualFile {
+            path: "homework.ctea".into(),
+            source: source.into(),
+        }];
+        VirtualProject::new("homework.ctea", &files)
+            .unwrap()
+            .check()
+    }
+
+    #[test]
+    fn bundled_sums_compose_with_an_independent_list_alias() {
+        let report = virtual_check(include_str!("../../../docs/hol/examples/finite_sums.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "S.sum_nil",
+            "S.sum_cons",
+            "S.sum_append",
+            "repeated_values",
+            "total_two_groups",
+            "total_three_groups",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+        }
+    }
+
+    #[test]
+    fn sums_do_not_certify_wrong_totals_or_discard_the_second_group() {
+        for source in [
+            "import std/hol/sums.ctea as S\nimport std/hol/list@1 as L\ntheorem wrong : S.sum(L.cons(2, L.cons(2, L.nil))) = 2 := by\n  simp\n  refl\n",
+            "import std/hol/sums.ctea as S\nimport std/hol/list@1 as L\ntheorem wrong (xs ys : L.List Nat) : S.sum(L.append(xs, ys)) = S.sum(xs) := by\n  exact S.sum_append\n",
+        ] {
+            let report = virtual_check(source);
+            assert!(report.legacy.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod pigeonhole_collision_tests {
+    use super::*;
+
+    #[test]
+    fn positive_witnesses_record_the_actual_logic_used() {
+        let source = include_str!("../../../docs/hol/examples/pigeonhole_collision.ctea");
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in ["explicit_collision", "some_collision"] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+            assert_eq!(
+                theorem.hol_mode_used,
+                if name == "explicit_collision" {
+                    LogicMode::Constructive
+                } else {
+                    LogicMode::Classical
+                }
+            );
+        }
+        let base = report
+            .theorems
+            .iter()
+            .find(|t| {
+                t.library_identity.as_deref() == Some("builtin:std/hol/pigeonhole.ctea::pigeonhole")
+            })
+            .unwrap();
+        assert_eq!(base.hol_mode_used, LogicMode::Constructive);
+        let generic = report
+            .theorems
+            .iter()
+            .find(|t| t.name == "some_collision")
+            .unwrap();
+        assert_eq!(
+            generic.required_fragment,
+            hol::StatementFragment::HigherOrder
+        );
+        assert!(generic.features.contains(&hol::ProofFeature::Classical));
+    }
+
+    #[test]
+    fn generic_collision_cannot_be_used_as_a_constructive_theorem() {
+        let source = include_str!("../../../docs/hol/examples/pigeonhole_collision.ctea")
+            .replace("mode classical", "mode constructive");
+        let report = check_file_with_hol_shadow(&source);
+        assert!(
+            report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("classical")),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(!report
+            .certified()
+            .theorems
+            .iter()
+            .any(|t| t.name == "some_collision"));
+        assert!(report
+            .certified()
+            .theorems
+            .iter()
+            .any(|t| t.name == "explicit_collision"));
+    }
+    #[test]
+    fn explicit_collision_requires_distinct_inputs_and_equal_outputs() {
+        for replacement in ["red", "yellow"] {
+            let source = include_str!("../../../docs/hol/examples/pigeonhole_collision.ctea")
+                .replace("exists green", &format!("exists {replacement}"));
+            let report = check_file_with_hol_shadow(&source);
+            assert!(!report.legacy.diagnostics.is_empty());
+            assert!(!report
+                .certified()
+                .theorems
+                .iter()
+                .any(|t| t.name == "explicit_collision"));
+        }
+    }
+    #[test]
+    fn editor_completion_and_explanation_enforce_the_declared_mode() {
+        let source = "mode classical\ntheorem excluded (P : Prop) : P \\/ not P := by\n  by_cases h : P\n  left\n  exact h\n  right\n  exact h\nmode constructive\ntheorem bad (P : Prop) : P \\/ not P := by\n  apply excluded\n";
+        let goals = run_tactic_with_imports_and_hol_shadow(source, "bad", 0, &[]);
+        assert!(!goals.completed);
+        assert!(
+            goals.diagnostics.iter().any(|d| d
+                .message
+                .contains("classical reasoning in constructive mode")),
+            "{:?}",
+            goals.diagnostics
+        );
+        let explanation = explain_theorem_with_imports_and_hol_shadow(source, "bad", &[]);
+        assert!(!explanation.completed);
+        assert!(
+            explanation.diagnostics.iter().any(|d| d
+                .message
+                .contains("classical reasoning in constructive mode")),
+            "{:?}",
+            explanation.diagnostics
+        );
+    }
+}
+
+#[cfg(test)]
+mod computation_preview_tests {
+    use super::*;
+    const SOURCE: &str = include_str!("../../../docs/hol/examples/goal_computation.ctea");
+
+    #[test]
+    fn apply_retains_the_written_premise_and_exposes_its_computation() {
+        let result = check_file(SOURCE);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let goals = run_tactic(SOURCE, "not_symmetric", 1);
+        assert_eq!(goals.goals[0].target, "le(0, 1)");
+        assert_eq!(goals.goals[0].computed_target.as_deref(), Some("True"));
+        assert!(!goals.completed);
+        let explained = explain_theorem(SOURCE, "not_symmetric");
+        assert!(explained.completed, "{:?}", explained.diagnostics);
+        assert_eq!(explained.steps[1].after[0].target, "le(0, 1)");
+        assert_eq!(
+            explained.steps[1].after[0].computed_target.as_deref(),
+            Some("True")
+        );
+    }
+
+    #[test]
+    fn false_preview_and_unchanged_symbolic_goals_are_distinguished() {
+        let false_goal = run_tactic(SOURCE, "impossible_assumption", 0);
+        assert_eq!(false_goal.goals[0].target, "le(1, 0)");
+        assert_eq!(
+            false_goal.goals[0].computed_target.as_deref(),
+            Some("False")
+        );
+        let symbolic = run_tactic(SOURCE, "symbolic", 0);
+        assert_eq!(symbolic.goals[0].computed_target, None);
+        let bad = check_file("theorem bad : le(1, 0) := by\n  trivial\n");
+        assert!(!bad.diagnostics.is_empty());
+        assert!(bad.theorems.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod classroom_namespace_tests {
+    use super::*;
+
+    #[test]
+    fn keyword_namespace_prefixes_do_not_consume_lambda_syntax() {
+        let source = "namespace fun\ndef Total (P : Nat -> Prop) : Prop := exists x : Nat, P(x)\nend fun\ntheorem witness : fun.Total(fun x : Nat => x = 0) := by\n  unfold fun.Total\n  exists 0\n  refl\n";
+        let result = check_file(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.theorems.len(), 1);
+        assert!(parse_formula_str("fun.").is_err());
+        assert!(parse_term_str("fun x : Nat =>").is_err());
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn students_can_reuse_library_theorem_names_with_the_qualified_prelude() {
+        let source = "import builtin:std/qualified_prelude.ctea\ntheorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by\n  exact nat.add_comm\ntheorem length_append (xs ys : list.List) : list.length(list.append(xs, ys)) = add(list.length(xs), list.length(ys)) := by\n  exact list.length_append\ntheorem identity_total : fun.Total(fun (x : Nat) (y : Nat) => x = y) := by\n  unfold fun.Total\n  intro x\n  exists x\n  refl\n";
+        let report = check_file_with_hol_shadow(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in ["add_comm", "length_append", "identity_total"] {
+            assert!(report
+                .theorems
+                .iter()
+                .any(|t| t.name == name && !t.is_imported));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod explicit_path_tests {
+    use super::*;
+    fn check(source: &str) -> HolShadowReport {
+        VirtualProject::new(
+            "paths.ctea",
+            &[VirtualFile {
+                path: "paths.ctea".into(),
+                source: source.into(),
+            }],
+        )
+        .unwrap()
+        .check()
+    }
+    #[test]
+    fn public_paths_compose_through_shared_list_aliases_without_added_trust() {
+        let report = check(include_str!(
+            "../../../docs/hol/examples/explicit_paths.ctea"
+        ));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "P.path_append",
+            "stay",
+            "first_leg",
+            "second_leg",
+            "complete_journey",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+            let expected = if name == "P.path_append" || name == "complete_journey" {
+                hol::StatementFragment::HigherOrder
+            } else {
+                hol::StatementFragment::FirstOrderInductive
+            };
+            assert_eq!(theorem.required_fragment, expected, "{name}");
+        }
+    }
+    #[test]
+    fn empty_path_arguments_use_later_relation_types_and_reject_conflicts() {
+        let base = include_str!("../../../docs/hol/examples/explicit_paths.ctea");
+        let reordered = base.replace(
+            "E := Road; h := junction; t := L.nil; a := home; b := junction",
+            "t := L.nil; h := junction; a := home; b := junction; E := Road",
+        );
+        assert_ne!(base, reordered);
+        let report = check(&reordered);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for args in ["A := Nat; E := Road;", "E := Road; A := Nat;"] {
+            let wrong = base.replace("G.path_cons {E := Road;", &format!("G.path_cons {{{args}"));
+            let report = check(&wrong);
+            assert!(report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.theorems.iter().any(|t| t.name == "first_leg"));
+        }
+    }
+
+    #[test]
+    fn public_paths_reject_reversal_endpoint_changes_and_bad_composition() {
+        let base = include_str!("../../../docs/hol/examples/explicit_paths.ctea");
+        for wrong in [
+            "theorem wrong : G.ValidPath(Road, L.cons(junction, L.nil), junction, home) := by\n  exact first_leg\n",
+            "theorem wrong : G.ValidPath(Road, L.nil, home, campus) := by\n  apply (G.path_nil {E := Road; a := home; b := campus}).right\n  refl\n",
+            "theorem wrong : G.ValidPath(Road, L.append(L.cons(junction, L.nil), L.cons(campus, L.nil)), home, campus) := by\n  exact P.path_append {E := Road; xs := L.cons(junction, L.nil); ys := L.cons(campus, L.nil)} home campus campus first_leg second_leg\n",
+        ] {
+            let report = check(&format!("{base}\n{wrong}"));
+            assert!(report.legacy.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+            assert!(report.theorems.iter().any(|t| t.name == "complete_journey"));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "hol-shadow"))]
+mod degree_counting_tests {
+    use super::*;
+    fn check(source: &str) -> HolShadowReport {
+        VirtualProject::new(
+            "degrees.ctea",
+            &[VirtualFile {
+                path: "degrees.ctea".into(),
+                source: source.into(),
+            }],
+        )
+        .unwrap()
+        .check()
+    }
+    #[test]
+    fn weighted_sums_and_edge_degrees_are_checked_without_added_trust() {
+        let report = check(include_str!("../../../docs/hol/examples/edge_degrees.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "W.sum_map_add",
+            "W.sum_map_constant",
+            "edge_has_two_ends",
+            "loop_counts_twice",
+            "parallel_edges_count_separately",
+            "three_vertex_handshake",
+            "three_vertex_handshake_mul",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+    #[test]
+    fn finite_weighted_sums_only_require_evidence_on_the_enumeration() {
+        let report = check(include_str!(
+            "../../../docs/hol/examples/selected_contributions.ctea"
+        ));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "W.sum_map_add_on",
+            "W.sum_map_constant_on",
+            "W.sum_map_congr_on",
+            "FSum.sum_on_set_constant",
+            "FSum.sum_on_set_congr",
+            "different_outside",
+            "selected_total",
+            "selected_totals_agree",
+            "two_selected_copies",
+            "selected_set_size",
+            "selected_set_total",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn finite_weighted_sums_reject_missing_evidence_and_duplicate_set_enumerations() {
+        let base = include_str!("../../../docs/hol/examples/selected_contributions.ctea");
+        for wrong in [
+            "theorem wrong : S.sum(C.map(contribution, C.cons(outside, C.nil))) = mul(C.length(C.cons(outside, C.nil)), 2) := by\n  apply W.sum_map_constant_on {A := Item; f := contribution; xs := C.cons(outside, C.nil); k := 2}\n  intro x\n  intro member\n  refl\n",
+            "theorem wrong : F.HasSize(Selected, C.cons(selected, C.cons(selected, C.nil)), 2) := by\n  unfold F.HasSize\n  split\n  finite\n  split\n  refl\n  finite\n",
+            "theorem wrong : S.sum(C.map(contribution, C.cons(outside, C.nil))) = S.sum(C.map(alternative, C.cons(outside, C.nil))) := by\n  apply W.sum_map_congr_on {A := Item; f := contribution; g := alternative; xs := C.cons(outside, C.nil)}\n  intro x\n  intro member\n  refl\n",
+        ] {
+            let report = check(&format!("{base}\n{wrong}"));
+            assert!(report.legacy.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error), "{:?}", report.legacy.diagnostics);
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+            assert!(report.theorems.iter().any(|t| t.name == "selected_set_total"));
+        }
+    }
+
+    #[test]
+    fn finite_set_totals_are_independent_of_checked_enumeration_order() {
+        let report = check(include_str!(
+            "../../../docs/hol/examples/reordered_totals.ctea"
+        ));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "E.remove_weighted_member",
+            "E.sum_same_members",
+            "E.sum_enumeration_independent",
+            "forward_size",
+            "backward_size",
+            "reordered_total",
+            "forward_total",
+            "backward_total",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn enumeration_comparison_rejects_duplicates_and_missing_members() {
+        let base = include_str!("../../../docs/hol/examples/reordered_totals.ctea");
+        for wrong in [
+            "theorem wrong : S.sum(C.map(weight, C.cons(low, forward))) = S.sum(C.map(weight, forward)) := by\n  apply E.sum_same_members {A := Vertex; f := weight; xs := C.cons(low, forward)} forward\n  finite\n",
+            "theorem wrong : F.HasSize(Active, C.cons(low, C.nil), 1) := by\n  apply F.has_size_intro {A := Vertex; S := Active; xs := C.cons(low, C.nil); n := 1}\n  finite\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n  unfold Active\n  finite\n",
+        ] {
+            let report = check(&format!("{base}\n{wrong}"));
+            assert!(report.legacy.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error && d.message.contains("finite")), "{:?}", report.legacy.diagnostics);
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+            assert!(report.theorems.iter().any(|t| t.name == "backward_total"));
+        }
+    }
+
+    #[test]
+    fn rewrite_replay_exposes_abbreviations_in_known_proofs() {
+        let base = "func value : Nat -> Nat\ndef first : Nat := 0\ndef second : Nat := 1\n";
+        for (direction, premise, goal, known) in [
+            (
+                "<-",
+                "value(first) = value(second)",
+                "value(second)",
+                "value(first)",
+            ),
+            (
+                "->",
+                "value(first) = value(second)",
+                "value(first)",
+                "value(second)",
+            ),
+        ] {
+            let source = format!("{base}theorem transported : {premise} -> {known} = 7 -> {goal} = 7 := by\n  intro changed\n  intro known\n  rewrite {direction} changed\n  exact known\n");
+            let report = check(&source);
+            assert!(
+                report.legacy.diagnostics.is_empty(),
+                "{:?}",
+                report.legacy.diagnostics
+            );
+            assert!(report.is_match(), "{:?}", report.mismatches);
+            let wrong = source.replace(&format!("-> {goal} = 7"), &format!("-> {goal} = 8"));
+            let report = check(&wrong);
+            assert!(!report.theorems.iter().any(|t| t.name == "transported"));
+        }
+    }
+
+    #[test]
+    fn generic_endpoint_sums_check_loops_and_absent_vertices() {
+        let report = check(include_str!(
+            "../../../docs/hol/examples/endpoint_contributions.ctea"
+        ));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "E.sum_single_support",
+            "E.sum_absent_support",
+            "E.sum_endpoint_pair",
+            "ordinary_edge_total",
+            "loop_edge_total",
+            "absent_endpoint_total",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn concrete_modular_square_certifies_on_native_checker_stack() {
+        // Match the native CLI checker stack. Actual release-Wasm coverage
+        // lives in the browser grading harness; debug frames are not a Wasm proxy.
+        std::thread::Builder::new()
+            .stack_size(256 * 1024 * 1024)
+            .spawn(|| {
+                let report = check(include_str!(
+                    "../../../docs/hol/examples/modular_square.ctea"
+                ));
+                assert!(
+                    report.legacy.diagnostics.is_empty(),
+                    "{:?}",
+                    report.legacy.diagnostics
+                );
+                assert!(report.is_match(), "{:?}", report.mismatches);
+                assert!(report.theorems.iter().any(|t| t.name == "clock_squares"));
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn modular_zero_simplification_replays_beneath_existential_binders() {
+        let source = include_str!("../../../docs/book/hol-code/ch20-solutions.ctea");
+        let report = check(source);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in ["ex20_1", "ex20_2", "ex20_3", "ex20_4"] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+            assert_eq!(
+                theorem.required_fragment,
+                hol::StatementFragment::FirstOrderInductive
+            );
+        }
+        let wrong = source.replace(
+            "M.ModEq(0, x, y) -> x = y",
+            "M.ModEq(0, x, y) -> x = succ(y)",
+        );
+        let report = check(&wrong);
+        assert!(!report.theorems.iter().any(|t| t.name == "ex20_4"));
+        assert!(report.theorems.iter().any(|t| t.name == "ex20_3"));
+    }
+
+    #[test]
+    fn finite_probability_counts_have_constructive_receipts() {
+        let report = check(include_str!(
+            "../../../docs/hol/examples/probability_counts.ctea"
+        ));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "P.nonempty_denominator",
+            "P.complement_counts",
+            "P.numerator_add",
+            "P.constant_numerator",
+            "partition_total",
+            "total_heads",
+            "ticket_first_heads",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn finite_probability_counts_reject_false_totals_and_empty_denominators() {
+        let source = include_str!("../../../docs/hol/examples/probability_counts.ctea");
+        for (wrong, rejected) in [
+            (source.replace("S.sum(C.map(heads, outcomes)) = 4", "S.sum(C.map(heads, outcomes)) = 5"), "total_heads"),
+            (source.replace("S.sum(C.map(first_head, tickets)) = 3", "S.sum(C.map(first_head, tickets)) = 2"), "ticket_first_heads"),
+            (format!("{source}\ntheorem empty_denominator : not C.length((C.nil : C.List Outcome)) = 0 := by\n  exact P.nonempty_denominator\n"), "empty_denominator"),
+            (source.replace("add(first_head(outcome), first_tail(outcome)) = 1", "add(first_head(outcome), first_head(outcome)) = 1"), "complementary"),
+        ] {
+            let report = check(&wrong);
+            assert!(report.legacy.diagnostics.iter().any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.theorems.iter().any(|t| t.name == rejected), "{rejected} was certified");
+            assert!(report.theorems.iter().any(|t| t.name == "sample_size"));
+        }
+    }
+
+    #[test]
+    fn recurrence_laws_accept_named_definitions_and_non_numeric_states() {
+        let report = check(include_str!("../../../docs/hol/examples/recurrences.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "R.recurrence_unique",
+            "R.constant_step_closed",
+            "R.constant_step_successor",
+            "tokens_closed",
+            "after_four_ticks",
+            "two_descriptions",
+            "state_sequence_unique",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+    }
+
+    #[test]
+    fn recurrence_claims_need_the_right_initial_value_and_update() {
+        let source = include_str!("../../../docs/hol/examples/recurrences.ctea");
+        for wrong in [
+            source.replace("| zero => 2", "| zero => 3"),
+            source.replace("| succ k rec => add(3, rec)", "| succ k rec => add(4, rec)"),
+        ] {
+            let report = check(&wrong);
+            assert!(report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Error
+                    && d.message.contains("tokens_closed")));
+            assert!(!report.theorems.iter().any(|t| t.name == "tokens_closed"));
+            assert!(report
+                .theorems
+                .iter()
+                .any(|t| t.name == "state_sequence_unique"));
+        }
+    }
+
+    #[test]
+    fn named_definition_function_arguments_reject_wrong_signatures() {
+        let base = "data Flag\n| yes\n\ndef bad_result (n : Nat) : Flag := yes\ndef bad_arity (n m : Nat) : Nat := n\ndef bad_domain (s : Flag) : Nat := 0\ndef good (n : Nat) : Nat := n\ntheorem reflexive (f : Nat -> Nat) : forall n : Nat, f(n) = f(n) := by\n  intro n\n  refl\n";
+        for (name, message) in [
+            ("bad_result", "result type"),
+            ("bad_arity", "argument(s)"),
+            ("bad_domain", "incompatible domain"),
+        ] {
+            let source = format!("{base}\ntheorem wrong : forall n : Nat, good(n) = good(n) := by\n  exact reflexive {{f := {name}}}\n");
+            let report = check(&source);
+            assert!(
+                report
+                    .legacy
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains(message)),
+                "{:?}",
+                report.legacy.diagnostics
+            );
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+        }
+    }
+
+    #[test]
+    fn generic_handshake_connects_endpoint_proofs_and_degree_counts() {
+        let report = check(include_str!("../../../docs/hol/examples/handshake.ctea"));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "H.row_as_sum",
+            "H.rows_constant",
+            "H.columns_as_degrees",
+            "H.handshake",
+            "ordinary_edge_total",
+            "loop_edge_total",
+            "edge_total",
+            "degree_counts",
+            "handshake_total",
+            "six_incidences",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+            if name == "H.handshake" {
+                assert_eq!(
+                    theorem.required_fragment,
+                    hol::StatementFragment::HigherOrder
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn handshake_rejects_wrong_degrees_and_missing_occurrences() {
+        let base = include_str!("../../../docs/hol/examples/handshake.ctea");
+        for source in [
+            base.replace("| home => 4", "| home => 3"),
+            base.replace(
+                "M.cons(bridge, M.cons(bridge, M.cons(loop, M.nil)))",
+                "M.cons(bridge, M.cons(loop, M.nil))",
+            ),
+        ] {
+            let report = check(&source);
+            assert!(report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("degree_counts")
+                    && d.severity == DiagnosticSeverity::Error));
+            assert!(!report.theorems.iter().any(|t| t.name == "handshake_total"));
+            assert!(report.theorems.iter().any(|t| t.name == "edge_total"));
+        }
+    }
+
+    #[test]
+    fn generic_double_counting_checks_shared_list_aliases() {
+        let report = check(include_str!(
+            "../../../docs/hol/examples/double_counting.ctea"
+        ));
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        for name in [
+            "D.columns_without_rows",
+            "D.columns_add_row",
+            "D.double_counting",
+            "monday_total",
+            "tuesday_total",
+            "graph_total",
+            "totals_agree",
+            "by_day",
+            "by_subject",
+            "repeated_day",
+        ] {
+            let theorem = report.theorems.iter().find(|t| t.name == name).unwrap();
+            assert_eq!(theorem.hol_mode_used, LogicMode::Constructive);
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+            if name == "D.double_counting" {
+                assert_eq!(
+                    theorem.required_fragment,
+                    hol::StatementFragment::HigherOrder
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn double_counting_rejects_wrong_totals_and_swapped_types() {
+        let base = include_str!("../../../docs/hol/examples/double_counting.ctea");
+        for wrong in [
+            "theorem wrong : M.rows_total(signups, days, subjects) = 20 := by\n  exact by_day\n",
+            "theorem wrong : M.rows_total(signups, subjects, days) = 21 := by\n  refl\n",
+            "theorem wrong : M.rows_total(signups, M.cons(monday, M.cons(monday, M.nil)), subjects) = 6 := by\n  exact repeated_day\n",
+        ] {
+            let report = check(&format!("{base}\n{wrong}"));
+            assert!(!report.legacy.diagnostics.is_empty());
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+            assert!(report.theorems.iter().any(|t| t.name == "by_subject"));
+        }
+    }
+
+    #[test]
+    fn endpoint_sums_reject_missing_endpoints_and_single_counted_loops() {
+        let base = include_str!("../../../docs/hol/examples/endpoint_contributions.ctea");
+        let ordinary = base
+            .split("theorem ordinary_edge_total")
+            .nth(1)
+            .unwrap()
+            .split("theorem loop_edge_total")
+            .next()
+            .unwrap();
+        let loop_case = base
+            .split("theorem loop_edge_total")
+            .nth(1)
+            .unwrap()
+            .split("-- Excluding")
+            .next()
+            .unwrap();
+        for wrong in [
+            format!(
+                "theorem wrong{}",
+                ordinary
+                    .replace("vertices))", "C.cons(home, C.nil)))")
+                    .replace("vertices := vertices", "vertices := C.cons(home, C.nil)")
+            ),
+            format!(
+                "theorem wrong{}",
+                loop_case.replace("loop_incidence", "home_end")
+            ),
+        ] {
+            let report = check(&format!("{base}\n{wrong}"));
+            assert!(
+                report.legacy.diagnostics.iter().any(
+                    |d| d.severity == DiagnosticSeverity::Error && d.message.contains("finite")
+                ),
+                "{:?}",
+                report.legacy.diagnostics
+            );
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+            assert!(report.theorems.iter().any(|t| t.name == "loop_edge_total"));
+        }
+    }
+
+    #[test]
+    fn degree_counting_does_not_discard_loops_or_parallel_edges() {
+        let base = include_str!("../../../docs/hol/examples/edge_degrees.ctea");
+        for claim in [
+            "degree(L.cons(north_loop, L.nil), north) = 1",
+            "degree(L.cons(north_south, L.cons(north_south, L.nil)), south) = 1",
+        ] {
+            let report = check(&format!(
+                "{base}\ntheorem wrong : {claim} := by\n  simp\n  refl\n"
+            ));
+            assert!(report
+                .legacy
+                .diagnostics
+                .iter()
+                .any(|d| d.severity == DiagnosticSeverity::Error));
+            assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+        }
+    }
+    #[test]
+    fn numeral_multiplication_rewrites_replay_checked_arithmetic() {
+        for numeral in [0, 1, 2, 3] {
+            let source = format!("theorem expanded (a n : Nat) : a = mul(n, {numeral}) -> add(2, a) = add(2, mul(n, {numeral})) := by\n  intro h\n  rewrite -> h\n  refl\n");
+            let report = check(&source);
+            assert!(
+                report.legacy.diagnostics.is_empty(),
+                "{:?}",
+                report.legacy.diagnostics
+            );
+            assert!(report.is_match(), "{:?}", report.mismatches);
+            let theorem = report
+                .theorems
+                .iter()
+                .find(|t| t.name == "expanded")
+                .unwrap();
+            assert!(theorem.axiom_deps.is_empty());
+            assert!(theorem.incomplete_deps.is_empty());
+        }
+        let report = check("axiom given (a n : Nat) : a = mul(n, 2)\ntheorem dependent (a n : Nat) : add(2, a) = add(2, mul(n, 2)) := by\n  rewrite -> given a n\n  refl\n");
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        let dependent = report
+            .theorems
+            .iter()
+            .find(|t| t.name == "dependent")
+            .unwrap();
+        assert!(
+            dependent
+                .axiom_deps
+                .iter()
+                .any(|name| name.contains("given")),
+            "{:?}",
+            dependent.axiom_deps
+        );
+        let report = check("theorem wrong (a n : Nat) : a = mul(n, 2) -> add(2, a) = add(3, mul(n, 2)) := by\n  intro h\n  rewrite -> h\n  refl\n");
+        assert!(!report.theorems.iter().any(|t| t.name == "wrong"));
+    }
+}
+
+#[cfg(test)]
+mod aggregate_work_tests {
+    use super::*;
+
+    #[test]
+    fn parsing_rejects_exhaustion_before_building_commands_and_recovers() {
+        {
+            let _scope = work_budget::Scope::enter();
+            work_budget::set_remaining_for_test(1);
+            let error = parse_file("theorem answer : True := by\n  trivial\n").unwrap_err();
+            assert!(error.message.contains(work_budget::EXHAUSTED));
+            assert_eq!(error.line, Some(1));
+            assert!(work_budget::spend().is_err());
+        }
+        assert!(check_file("theorem answer : True := by\n  trivial\n")
+            .diagnostics
+            .is_empty());
+    }
+
+    #[test]
+    fn lexer_and_parse_frames_cannot_refresh_the_shared_budget() {
+        let _scope = work_budget::Scope::enter();
+        work_budget::set_remaining_for_test(1);
+        assert!(lex("True -> True")
+            .unwrap_err()
+            .message
+            .contains(work_budget::EXHAUSTED));
+        assert!(ParseDepthGuard::enter().is_err());
+        work_budget::set_remaining_for_test(100);
+        assert!(parse_file("theorem answer : True := by\n  trivial\n").is_ok());
+    }
+
+    #[test]
+    fn buffer_entrypoint_shares_parsing_budget_and_returns_a_diagnostic() {
+        {
+            let _scope = work_budget::Scope::enter();
+            work_budget::set_remaining_for_test(1);
+            let result =
+                check_source_at_path("theorem answer : True := by\n  trivial\n", "homework.ctea");
+            assert!(result.theorems.is_empty());
+            assert!(result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains(work_budget::EXHAUSTED)
+                    || d.notes
+                        .iter()
+                        .any(|note| note.contains(work_budget::EXHAUSTED))));
+        }
+        assert!(
+            check_source_at_path("theorem answer : True := by\n  trivial\n", "homework.ctea")
+                .diagnostics
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn legacy_successor_normalization_charges_iterative_nodes() {
+        let _scope = work_budget::Scope::enter();
+        let env = Env::new();
+        let ctx = Context::default();
+        let term = (0..16).fold(Term::Zero, |term, _| Term::Succ(Box::new(term)));
+        work_budget::set_remaining_for_test(4);
+        assert!(normalize_term(&env, &ctx, &term)
+            .unwrap_err()
+            .message
+            .contains(work_budget::EXHAUSTED));
+        assert!(work_budget::spend().is_err());
+        work_budget::set_remaining_for_test(100);
+        assert_eq!(normalize_term(&env, &ctx, &term).unwrap(), term);
+    }
+
+    #[test]
+    fn legacy_validation_and_unfolding_share_the_work_allowance() {
+        let _scope = work_budget::Scope::enter();
+        let env = Env::new();
+        let ctx = Context::default();
+        let formula = Formula::And(Box::new(Formula::True), Box::new(Formula::True));
+        work_budget::set_remaining_for_test(1);
+        assert!(validate_formula(&env, &ctx, &formula)
+            .unwrap_err()
+            .message
+            .contains(work_budget::EXHAUSTED));
+        work_budget::set_remaining_for_test(1);
+        assert!(normalize_formula_defs(&env, &ctx, &formula)
+            .unwrap_err()
+            .message
+            .contains(work_budget::EXHAUSTED));
+        work_budget::set_remaining_for_test(100);
+        validate_formula(&env, &ctx, &formula).unwrap();
+        assert_eq!(
+            normalize_formula_defs(&env, &ctx, &formula).unwrap(),
+            formula
+        );
+        let invalid = Term::Add(Box::new(Term::Zero), Box::new(Term::EmptySet(Type::Nat)));
+        assert!(validate_term(&env, &ctx, &invalid).is_err());
+    }
+
+    #[test]
+    fn interrupted_quantifiers_restore_shadowed_assignments() {
+        let _scope = work_budget::Scope::enter();
+        let search = FirstOrderSearch {
+            domain_size: 1,
+            terms: Vec::new(),
+            slots: Vec::new(),
+            slot_count: 0,
+        };
+        for formula in [
+            Formula::forall("x".into(), Type::Named("A".into()), Formula::True),
+            Formula::exists("x".into(), Type::Named("A".into()), Formula::False),
+        ] {
+            for original in [None, Some(42)] {
+                let mut assignment = HashMap::new();
+                if let Some(value) = original {
+                    assignment.insert("x".into(), value);
+                }
+                work_budget::set_remaining_for_test(1);
+                assert_eq!(
+                    eval_first_order_formula(&formula, &mut assignment, &search, 0),
+                    None
+                );
+                assert_eq!(assignment.get("x").copied(), original);
+            }
+        }
+    }
+
+    #[test]
+    fn exhausted_diagnostic_search_preserves_the_original_proof_error() {
+        // Find the boundary between required checking and optional search;
+        // do not depend on the number of validation steps before that boundary.
+        for limit in 1..128 {
+            let mut checker = FileChecker::new();
+            work_budget::set_remaining_for_test(limit);
+            checker.check_source("theorem bad (P : Prop) : P := by\n  exact missing\n", None);
+            let exhausted = work_budget::spend().is_err();
+            let result = checker.finish();
+            assert!(result.theorems.is_empty());
+            if exhausted
+                && result
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("missing"))
+            {
+                assert!(!result
+                    .diagnostics
+                    .iter()
+                    .flat_map(|d| &d.notes)
+                    .any(|note| note.contains("false when")));
+                return;
+            }
+        }
+        panic!("No exhausted diagnostic search preserved the original error");
+    }
+
+    #[test]
+    fn countermodel_budget_exhaustion_is_unknown_not_false() {
+        let _scope = work_budget::Scope::enter();
+        let target = Formula::And(Box::new(Formula::True), Box::new(Formula::False));
+        work_budget::set_remaining_for_test(1);
+        assert_eq!(eval_propositional(&target, &[], 0), None);
+        work_budget::set_remaining_for_test(1);
+        assert_eq!(eval_arithmetic_formula(&target, &HashMap::new()), None);
+        let search = FirstOrderSearch {
+            domain_size: 1,
+            terms: Vec::new(),
+            slots: Vec::new(),
+            slot_count: 0,
+        };
+        work_budget::set_remaining_for_test(1);
+        assert_eq!(
+            eval_first_order_formula(&target, &mut HashMap::new(), &search, 0),
+            None
+        );
+        work_budget::set_remaining_for_test(100);
+        assert_eq!(eval_propositional(&target, &[], 0), Some(false));
+        assert_eq!(
+            eval_arithmetic_formula(&target, &HashMap::new()),
+            Some(false)
+        );
+        assert_eq!(
+            eval_first_order_formula(&target, &mut HashMap::new(), &search, 0),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn countermodel_searches_stop_and_recover_without_fabricating_witnesses() {
+        let _scope = work_budget::Scope::enter();
+        let target = Formula::And(Box::new(Formula::True), Box::new(Formula::False));
+        work_budget::set_remaining_for_test(5);
+        assert!(propositional_countermodel(&[], &target).is_none());
+        assert!(work_budget::spend().is_err());
+        work_budget::set_remaining_for_test(2);
+        assert!(find_arithmetic_countermodel(&[], 0, &mut HashMap::new(), &[], &target).is_none());
+        assert!(work_budget::spend().is_err());
+        let search = FirstOrderSearch {
+            domain_size: 1,
+            terms: Vec::new(),
+            slots: Vec::new(),
+            slot_count: 0,
+        };
+        work_budget::set_remaining_for_test(3);
+        assert!(
+            find_first_order_countermodel(&search, 0, &mut HashMap::new(), &[], &target).is_none()
+        );
+        assert!(work_budget::spend().is_err());
+        work_budget::set_remaining_for_test(100);
+        assert!(propositional_countermodel(&[], &target).is_some());
+        assert!(find_arithmetic_countermodel(&[], 0, &mut HashMap::new(), &[], &target).is_some());
+        assert!(
+            find_first_order_countermodel(&search, 0, &mut HashMap::new(), &[], &target).is_some()
+        );
+    }
+
+    #[test]
+    fn import_rollback_does_not_refund_exhausted_work() {
+        let imports = [VirtualFile {
+            path: "dependency.ctea".to_string(),
+            source:
+                "theorem staged : True := by\n  trivial\ntheorem overflow : True := by\n  trivial\n"
+                    .to_string(),
+        }];
+        // Locate exhaustion in the second imported proof, after parsing and
+        // staging the first, without tying this regression to parser costs.
+        for limit in 1..512 {
+            let mut checker = FileChecker::with_virtual_files(&imports);
+            checker.check_source("theorem before : True := by\n  trivial\n", None);
+            let commands =
+                parse_file("import dependency.ctea\ntheorem after : True := by\n  trivial\n")
+                    .unwrap()
+                    .commands;
+            work_budget::set_remaining_for_test(limit);
+            checker.check_commands(commands, None, None, false, None, None);
+            let failed_second = checker.result.diagnostics.iter().any(|d| {
+                d.message.contains("theorem `overflow` failed")
+                    && d.message.contains(work_budget::EXHAUSTED)
+            });
+            if !failed_second {
+                continue;
+            }
+            assert!(checker.env.theorem("staged").is_none());
+            assert!(checker.env.theorem("overflow").is_none());
+            assert!(checker.loaded_virtual_files.is_empty());
+            assert_eq!(work_budget::spend(), Err(work_budget::EXHAUSTED));
+            assert_eq!(checker.result.theorems.len(), 1);
+            assert_eq!(checker.result.theorems[0].name, "before");
+            return;
+        }
+        panic!("No exhaustion boundary found in the second imported proof");
+    }
+
+    #[test]
+    fn exhausted_budget_preserves_prior_results_and_marks_remainder_unchecked() {
+        let mut checker = FileChecker::new();
+        checker.check_source("theorem before : True := by\n  trivial\n", None);
+        let commands = parse_file(
+            "theorem later : True := by\n  trivial\ntheorem last : True := by\n  trivial\n",
+        )
+        .unwrap()
+        .commands;
+        work_budget::set_remaining_for_test(0);
+        checker.check_commands(commands, None, None, false, None, None);
+        let result = checker.finish();
+        assert_eq!(result.theorems.len(), 1);
+        assert_eq!(result.theorems[0].name, "before");
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains(work_budget::EXHAUSTED)));
+        for name in ["later", "last"] {
+            assert_eq!(
+                result
+                    .theorem_outcomes
+                    .iter()
+                    .find(|t| t.name == name)
+                    .unwrap()
+                    .status,
+                "not_checked"
+            );
+        }
+        assert!(check_file("theorem next : True := by\n  trivial\n")
+            .diagnostics
+            .is_empty());
+    }
+
+    #[cfg(feature = "hol-shadow")]
+    #[test]
+    fn aggregate_exhaustion_in_replay_never_certifies_the_whole_file() {
+        let mut checker = FileChecker::with_hol_shadow().unwrap();
+        let source = (0..40)
+            .map(|n| format!("theorem t{n} : True := by\n  trivial\n"))
+            .collect::<String>();
+        let commands = parse_file(&source).unwrap().commands;
+        work_budget::set_remaining_for_test(400);
+        checker.check_commands(commands, None, None, false, None, None);
+        let report = checker.finish_hol_shadow();
+        assert!(report
+            .legacy
+            .theorem_outcomes
+            .iter()
+            .any(|t| t.status == "not_checked"));
+        assert!(report
+            .legacy
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains(work_budget::EXHAUSTED)));
+        assert!(report.theorems.len() < 40);
+        assert!(check_file_with_hol_shadow("theorem next : True := by\n  trivial\n").is_match());
     }
 }

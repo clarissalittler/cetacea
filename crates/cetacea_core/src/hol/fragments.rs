@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::Arc;
 
 use super::proofs::HolProofAudit;
 use super::terms::{
@@ -570,6 +571,7 @@ pub struct ProofReceipt {
     direct_features: BTreeSet<ProofFeature>,
     transitive_features: BTreeSet<ProofFeature>,
     direct_dependencies: BTreeSet<DeclarationId>,
+    dependency_receipts: Vec<Arc<DeclarationReceipt>>,
     transitive_dependencies: BTreeSet<DeclarationId>,
     axiom_dependencies: BTreeSet<DeclarationId>,
     incomplete_dependencies: BTreeSet<DeclarationId>,
@@ -588,12 +590,16 @@ impl ProofReceipt {
             transitive_features: direct_features.clone(),
             direct_features,
             direct_dependencies: BTreeSet::new(),
+            dependency_receipts: Vec::new(),
             transitive_dependencies: BTreeSet::new(),
             axiom_dependencies: BTreeSet::new(),
             incomplete_dependencies: BTreeSet::new(),
         };
 
         for dependency in dependencies {
+            receipt
+                .dependency_receipts
+                .push(Arc::new(dependency.clone()));
             receipt.direct_dependencies.insert(dependency.id);
             receipt.transitive_dependencies.insert(dependency.id);
             receipt
@@ -785,6 +791,7 @@ pub struct ReceiptPolicy {
     profile: TeachingProfile,
     allowed_features: BTreeSet<ProofFeature>,
     allowed_axioms: BTreeSet<DeclarationId>,
+    allowed_checked_dependencies: BTreeSet<DeclarationId>,
     allow_any_axiom: bool,
     allow_incomplete: bool,
     allowed_dependencies: Option<BTreeSet<DeclarationId>>,
@@ -796,6 +803,7 @@ impl ReceiptPolicy {
             profile,
             allowed_features: profile.base_features(),
             allowed_axioms: BTreeSet::new(),
+            allowed_checked_dependencies: BTreeSet::new(),
             allow_any_axiom: false,
             allow_incomplete: false,
             allowed_dependencies: None,
@@ -823,6 +831,21 @@ impl ReceiptPolicy {
         self.allowed_axioms.insert(id);
     }
 
+    /// Treat this checked, trust-free dependency as a supplied lemma for
+    /// fragment accounting. The root statement and its own proof features
+    /// remain subject to the profile. Strong principles remain transitive.
+    /// Callers must separately authenticate the intended library export.
+    pub fn allow_checked_dependency(&mut self, declaration: &DeclarationReceipt) -> bool {
+        if declaration.status != EvidenceStatus::Checked
+            || !declaration.proof().axiom_dependencies.is_empty()
+            || !declaration.proof().incomplete_dependencies.is_empty()
+        {
+            return false;
+        }
+        self.allowed_checked_dependencies.insert(declaration.id);
+        true
+    }
+
     pub fn allow_any_axiom(&mut self) {
         self.allow_any_axiom = true;
     }
@@ -846,14 +869,15 @@ impl ReceiptPolicy {
                 maximum,
             });
         }
-        if receipt.dependency_fragment > maximum {
+        let (dependency_fragment, features) = self.ungranted_requirements(declaration);
+        if dependency_fragment > maximum {
             violations.push(PolicyViolation::DependencyFragmentExceeds {
-                actual: receipt.dependency_fragment,
+                actual: dependency_fragment,
                 maximum,
             });
         }
 
-        for feature in &receipt.transitive_features {
+        for feature in &features {
             if !self.allowed_features.contains(feature) {
                 violations.push(PolicyViolation::FeatureNotAllowed(*feature));
             } else if feature.minimum_fragment() > maximum {
@@ -901,6 +925,61 @@ impl ReceiptPolicy {
         violations.sort();
         violations.dedup();
         violations
+    }
+
+    fn ungranted_requirements(
+        &self,
+        declaration: &DeclarationReceipt,
+    ) -> (StatementFragment, BTreeSet<ProofFeature>) {
+        if self.allowed_checked_dependencies.is_empty() {
+            return (
+                declaration.receipt.dependency_fragment,
+                declaration.receipt.transitive_features.clone(),
+            );
+        }
+        let mut fragment = StatementFragment::Prop;
+        let mut features = declaration.receipt.direct_features.clone();
+        // Grants cannot hide strong principles used inside supplied lemmas.
+        features.extend(
+            declaration
+                .receipt
+                .transitive_features
+                .iter()
+                .copied()
+                .filter(|feature| {
+                    matches!(
+                        feature,
+                        ProofFeature::Classical
+                            | ProofFeature::FunctionExtensionality
+                            | ProofFeature::PropositionalExtensionality
+                            | ProofFeature::Choice
+                    )
+                }),
+        );
+        let mut pending = declaration
+            .receipt
+            .dependency_receipts
+            .iter()
+            .map(Arc::as_ref)
+            .collect::<Vec<_>>();
+        let mut visited = BTreeSet::new();
+        while let Some(dependency) = pending.pop() {
+            if !visited.insert(dependency.id)
+                || self.allowed_checked_dependencies.contains(&dependency.id)
+            {
+                continue;
+            }
+            fragment = fragment.combine(dependency.receipt.statement_fragment);
+            features.extend(dependency.receipt.direct_features.iter().copied());
+            pending.extend(
+                dependency
+                    .receipt
+                    .dependency_receipts
+                    .iter()
+                    .map(Arc::as_ref),
+            );
+        }
+        (fragment, features)
     }
 
     fn axiom_is_allowed(&self, id: DeclarationId) -> bool {
@@ -1028,6 +1107,130 @@ mod tests {
             term,
         )
         .expect("classify statement")
+    }
+
+    #[test]
+    fn checked_dependency_grant_is_narrow_and_preserves_receipt_facts() {
+        let lemma = DeclarationReceipt::checked(
+            DeclarationId(900),
+            StatementFragment::HigherOrder,
+            [ProofFeature::HigherOrderAbstraction],
+            [],
+        );
+        let middle = DeclarationReceipt::checked(
+            DeclarationId(901),
+            StatementFragment::FirstOrder,
+            [],
+            [&lemma],
+        );
+        let root = DeclarationReceipt::checked(
+            DeclarationId(902),
+            StatementFragment::FirstOrder,
+            [],
+            [&middle],
+        );
+        let mut policy = ReceiptPolicy::new(TeachingProfile::FirstOrder);
+        assert!(!policy.check(&root).is_empty());
+        assert!(policy.allow_checked_dependency(&lemma));
+        assert!(policy.check(&root).is_empty());
+        assert_eq!(
+            root.proof().required_fragment(),
+            StatementFragment::HigherOrder
+        );
+        assert!(
+            !policy.check(&lemma).is_empty(),
+            "a grant does not waive the root statement"
+        );
+        let own_hol = DeclarationReceipt::checked(
+            DeclarationId(903),
+            StatementFragment::FirstOrder,
+            [ProofFeature::HigherOrderInstantiation],
+            [&lemma],
+        );
+        assert!(
+            !policy.check(&own_hol).is_empty(),
+            "own higher-order work is not granted"
+        );
+        let unrelated =
+            DeclarationReceipt::checked(DeclarationId(904), StatementFragment::HigherOrder, [], []);
+        let combined = DeclarationReceipt::checked(
+            DeclarationId(905),
+            StatementFragment::FirstOrder,
+            [],
+            [&lemma, &unrelated],
+        );
+        assert!(
+            !policy.check(&combined).is_empty(),
+            "a different HOL dependency is not granted"
+        );
+    }
+
+    #[test]
+    fn grants_never_hide_trust_incompleteness_or_strong_principles() {
+        let axiom = DeclarationReceipt::trusted_axiom_with_dependencies(
+            DeclarationId(910),
+            StatementFragment::Prop,
+            [],
+        );
+        let hole =
+            DeclarationReceipt::incomplete(DeclarationId(911), StatementFragment::Prop, [], []);
+        let tainted =
+            DeclarationReceipt::checked(DeclarationId(912), StatementFragment::Prop, [], [&axiom]);
+        let mut policy = ReceiptPolicy::new(TeachingProfile::FirstOrder);
+        assert!(!policy.allow_checked_dependency(&axiom));
+        assert!(!policy.allow_checked_dependency(&hole));
+        assert!(!policy.allow_checked_dependency(&tainted));
+        for feature in [
+            ProofFeature::Classical,
+            ProofFeature::Choice,
+            ProofFeature::FunctionExtensionality,
+            ProofFeature::PropositionalExtensionality,
+        ] {
+            let lemma = DeclarationReceipt::checked(
+                DeclarationId(913),
+                StatementFragment::HigherOrder,
+                [feature],
+                [],
+            );
+            let root = DeclarationReceipt::checked(
+                DeclarationId(914),
+                StatementFragment::FirstOrder,
+                [],
+                [&lemma],
+            );
+            assert!(policy.allow_checked_dependency(&lemma));
+            assert!(policy
+                .check(&root)
+                .iter()
+                .any(|v| matches!(v, PolicyViolation::FeatureNotAllowed(f) if *f == feature)));
+        }
+    }
+
+    #[test]
+    fn shared_dependency_is_checked_on_every_ungranted_route() {
+        let shared =
+            DeclarationReceipt::checked(DeclarationId(920), StatementFragment::HigherOrder, [], []);
+        let supplied = DeclarationReceipt::checked(
+            DeclarationId(921),
+            StatementFragment::FirstOrder,
+            [],
+            [&shared],
+        );
+        let other = DeclarationReceipt::checked(
+            DeclarationId(922),
+            StatementFragment::FirstOrder,
+            [],
+            [&shared],
+        );
+        let root = DeclarationReceipt::checked(
+            DeclarationId(923),
+            StatementFragment::FirstOrder,
+            [],
+            [&supplied, &other],
+        );
+        let mut policy = ReceiptPolicy::new(TeachingProfile::FirstOrder);
+        assert!(policy.allow_checked_dependency(&supplied));
+        assert!(!policy.check(&root).is_empty());
     }
 
     #[test]
@@ -1389,6 +1592,59 @@ mod tests {
             fol_facade.proof().required_fragment(),
             StatementFragment::HigherOrder
         );
+    }
+
+    #[test]
+    fn reserved_strong_principle_permissions_remain_independent() {
+        use crate::assignment::parse_manifest;
+        // These reserved features have no teaching-language producer yet.
+        for (feature, permission) in [
+            (ProofFeature::FunctionExtensionality, "allow_extensionality"),
+            (
+                ProofFeature::PropositionalExtensionality,
+                "allow_extensionality",
+            ),
+            (ProofFeature::Choice, "allow_choice"),
+        ] {
+            let receipt = DeclarationReceipt::checked(
+                DeclarationId(1),
+                StatementFragment::HigherOrder,
+                [feature],
+                [],
+            );
+            for flag in [
+                "allow_classical",
+                "allow_extensionality",
+                "allow_choice",
+                "allow_new_axioms",
+                "allow_incomplete",
+            ] {
+                let manifest =
+                    parse_manifest(&format!("version = 1\nprofile = 'hol'\n{flag} = true\n"))
+                        .unwrap();
+                assert_eq!(
+                    manifest
+                        .teaching_policy()
+                        .receipt_policy()
+                        .check(&receipt)
+                        .is_empty(),
+                    flag == permission,
+                    "{feature:?}: {flag}"
+                );
+            }
+            let restricted = parse_manifest(&format!(
+                "version = 1\nprofile = 'fol'\n{permission} = true\n"
+            ))
+            .unwrap();
+            assert!(
+                !restricted
+                    .teaching_policy()
+                    .receipt_policy()
+                    .check(&receipt)
+                    .is_empty(),
+                "Permission must not raise the teaching profile"
+            );
+        }
     }
 
     #[test]

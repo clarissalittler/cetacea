@@ -178,8 +178,13 @@ http://localhost:8000/web/
 The browser build embeds the standard library for virtual imports, so tutorial
 sources can still use imports such as `import std/prelude.ctea`,
 `import std/qualified_prelude.ctea`, or `import ../../../std/prelude.ctea`.
-The checked `std/hol/counting.ctea` and `std/hol/pigeonhole.ctea` source
-modules are embedded too.
+The checked `std/hol/counting.ctea`, `std/hol/pigeonhole.ctea`, and
+`std/hol/pigeonhole_classical.ctea` source modules are embedded too.
+The last exports `pigeonhole_collision`: from counts `n + 1` and `n`, it proves
+the existence of distinct inputs with equal outputs. Use it in classical mode;
+the constructive negative theorem remains in `pigeonhole.ctea`. See the
+[collision example](hol/examples/pigeonhole_collision.ctea) for an explicit
+constructive pair and a generic classical existence proof.
 It also accepts exact versioned logical imports such as
 `import std/hol/list@1 as L`, `import std/hol/finite@1 as F`, and
 `import std/hol/cardinality@1 as C`. A browser check
@@ -195,11 +200,60 @@ dependency.
 
 The browser UI also shows the current proof goals, rule-based tactic hints for
 each open goal, diagnostic repair suggestions, a searchable theorem-library
-panel populated by the checked source and imported standard library, and a
-line-by-line proof explanation for the selected theorem. Tactic hints are
+panel populated by the checked source and imported standard library (including
+logical package exports), and a
+line-by-line proof explanation for the selected theorem. Aliases of the same
+checked package declaration share one library entry; searching for a particular
+alias keeps that spelling available for insertion. Distinct declarations with
+the same proposition remain separate. Tactic hints are
 speculatively executed before they are shown, so suggestions that would fail
 are dropped. The editor autosaves to localStorage, re-checks as you type,
-marks error lines inline, and has a load-example menu.
+marks error lines inline, and has a load-example menu. Checking runs in a
+separate Web Worker so the editor remains responsive. **Cancel check** stops
+active and queued analysis without changing your source; **Check** resumes with
+a fresh worker. Editing also cancels analysis of the old source. Each worker
+request has a ten-second limit; a timeout or worker failure leaves the editor
+available for corrections and retry. Results from an earlier edit or cursor
+request are discarded.
+
+Use **Open .ctea** to load a UTF-8 source file and **Download .ctea** to keep or
+submit the current editor contents under the displayed file name. Opening a
+file, loading an example, resetting the sample, or restoring a checkpoint first
+keeps the previous work as a checkpoint. **Save checkpoint** records a stage
+you want to return to; choose it from **Saved checkpoints** and press
+**Restore checkpoint**. The ten latest distinct checkpoints are retained.
+Restored work is checked again; saved text is not a proof certificate.
+
+Autosave keeps the current source, file name, and checkpoints in this browser.
+The previous editor-only save format is read automatically. A separate save
+status reports disabled/full storage and stays visible while checking continues.
+If autosave fails, work remains in memory and downloading still works; download
+before closing the page. Unreadable saved data is preserved without overwriting
+it. Browser storage is local to this browser and site, so download work you need
+to retain. File opening rejects binary, invalid UTF-8, and sources over 1 MiB
+without replacing the editor.
+
+Expand **Project files** to open/download a `.ctea-project` archive or select
+another source file. **File path** supplies the path for **Add file** or
+**Rename active file**, for example `lesson/helper.ctea`. Renaming does not
+rewrite imports. Project autosave and checkpoints keep all files; **Download
+project** exports them together, while **Download .ctea** exports the active
+file only. Opening an invalid archive leaves current work intact. See
+[BROWSER_PROJECTS.md](BROWSER_PROJECTS.md) for the archive format and limits.
+Assignment manifests are not yet supported in browser projects.
+
+If a saved document is damaged, autosave pauses and any intact checkpoints
+remain available. **Download saved data** keeps a recovery backup of the
+original. After restoring or opening the work you want to keep, **Resume
+autosave with recovered work** saves it together with the original data. If
+that save fails, download your current work before closing the page. The
+original-data download remains available after a successful resume and reload.
+
+If another tab changes the saved work, this tab pauses autosave and keeps its
+editor contents. Download this tab's file or project before reloading; you can
+continue editing and checking in the meantime. The save status shows pending
+writes. Autosave requires browser support for shared storage locking; when it
+is unavailable, use downloads to retain your work.
 
 The CLI prints accepted declarations from the root file. Imported declarations
 are checked and loaded, but they are not printed as part of the importing file's
@@ -285,8 +339,17 @@ import ../std/prelude.ctea
 ```
 
 Import paths are resolved relative to the importing file first, then relative
-to the current working directory. A file imported more than once is loaded once,
-so it is safe for several files to import a shared library.
+to the current working directory. Exact `std/...` names fall back to the
+standard library bundled with the checker if no filesystem copy exists. Thus
+`import std/nat.ctea as nat` also works in an assignment folder outside the
+repository. Use `import builtin:std/nat.ctea as nat` to explicitly select the
+bundled copy even when a local copy exists. Relative dependencies inside a
+bundled module stay in that bundle. A file imported more than once under the
+same alias is loaded once, so several files can share a library.
+
+Grading manifests authorize bundled sources explicitly as
+`builtin:std/nat.ctea`; a filesystem library cannot satisfy that permission or
+requirement. See the [manifest guide](hol/ASSIGNMENT_MANIFESTS.md).
 
 The standard prelude imports the current library files:
 
@@ -306,6 +369,31 @@ Nat, set, list, and function-graph lemmas:
 ```text
 import ../std/prelude.ctea
 ```
+
+The prelude's concrete `List` and the logical packages' generic `List A` are
+separate datatypes. When combining the prelude with counting, give counting an
+alias:
+
+```text
+import std/prelude.ctea
+import std/hol/counting.ctea as Counting
+```
+
+Use `List` and `length` for the prelude's lists, and `Counting.List Nat` and
+`Counting.length` for the package's lists. Both import orders work. The
+[checked coexistence example](hol/examples/prelude_counting.ctea) demonstrates
+both types and the counting library in one file. Alternatively, use
+`std/qualified_prelude.ctea` to keep the legacy modules qualified too.
+
+An import publishes declarations only after its module and dependencies check
+successfully. On failure, the checker rolls back that import's new declarations,
+loaded dependencies, and HOL receipts; previously successful imports remain.
+The error points to your import line, with the originating file/line in its
+notes. Checking stops at the first error inside an imported module, and at a
+failed import in the calling file, to avoid dependent error cascades. Earlier
+root declarations remain reported. Fix the import and check again to see later
+declarations. Ordinary failed root proofs still allow other root proofs to be
+checked.
 
 Import modes do not leak into the importing file. If an imported file switches
 to `mode classical`, your file still starts in constructive mode unless it says
@@ -665,6 +753,20 @@ imports retain the legacy global behavior.
 
 ## Definitions
 
+Definition headers and bodies may span lines; the next declaration ends the
+body. Comments and blank lines are allowed:
+
+```text
+def Both (P Q : Prop) : Prop :=
+  P /\
+  Q
+```
+
+A projected theorem proof can be applied directly, as in
+`exact (lemma {P := P; Q := Q}).left h`. Arguments after the projection apply
+to the selected component.
+
+
 Formula definitions are transparent. They can be unfolded explicitly with
 `unfold`, and `simp` can unfold them when that helps.
 
@@ -836,8 +938,23 @@ theorem recovered (n : Nat) : P(n) -> P(n) := by
       exact h
 ```
 
-Reversion proceeds from newest hypothesis to oldest. If later hypotheses remain,
-revert those first.
+Proof-hypothesis reversion proceeds from newest hypothesis to oldest. If later
+hypotheses remain, revert those first.
+
+You can also use `revert x` for a term variable. It generalizes the goal to
+`forall x : T, ...` and moves dependent hypotheses into implication premises.
+Independent hypotheses stay available. This is useful when an induction
+hypothesis must cover a changing parameter: write `revert ys` before
+`induction xs` rather than restructuring the theorem declaration. In each
+branch, introduce the generalized variable and its assumptions again. You may
+reuse the original variable name.
+
+Reversion tracks displayed formulas, their original kernel formulas, and local
+proof evidence, so rewriting or simplifying a hypothesis does not hide a
+necessary dependency. The evidence scan is conservative and may move an extra
+hypothesis. Type, proposition, predicate, and function schema parameters are
+not term variables and are not generalized by this command.
+See `docs/hol/examples/revert_term.ctea` for checked examples.
 
 ### `exact`
 
@@ -884,6 +1001,12 @@ theorem id_assumption (P : Prop) : P -> P := by
   intro h
   assumption
 ```
+
+Goal displays preserve the written proposition and show a separate
+`Computes to:` line when transparent definitions or built-in computation
+change it. For example, `le(0, 1)` computes to `True` and can be proved with
+`trivial`. A preview of `False` means a contradiction is still required; it
+does not close the goal. Browser proof explanations retain both forms.
 
 ### `apply`
 
@@ -1091,6 +1214,35 @@ rejects `rewrite all` when the replacement would introduce new occurrences of
 the term being rewritten. Bare `rewrite all h` is accepted as shorthand for
 `rewrite all <- h`.
 
+Transparent term abbreviations are exposed when a single rewrite cannot find
+a direct match. `rewrite all` exposes terms before matching so folded and
+explicit occurrences are both rewritten. This includes built-in term
+computation, while preserving the logical shape of the goal.
+
+Append `at name` to rewrite a named hypothesis instead of the goal:
+
+```text
+rewrite -> equality at member
+rewrite <- equality at member
+rewrite all -> equality at member
+```
+
+For example, if `equality : x = y` and `member : P(x)`, the first command
+replaces `member` by a checked proof of `P(y)`. The goal stays the same. The
+old hypothesis's kernel justification is retained, so proofs saved before the
+rewrite remain valid. Package computation lemmas work here too:
+`rewrite -> L.length_cons {A := Nat; h := 0; t := xs} at length`.
+Unknown hypotheses and equalities with no matching occurrence give diagnostics.
+See `docs/hol/examples/rewrite_hypotheses.ctea` for complete checked examples.
+
+For equality theorems, `rewrite` infers missing parameters from the first
+matching occurrence on the selected side. For example,
+`rewrite -> L.length_cons` infers the list type, head, and tail. This also
+works with `at h` and `rewrite all`; the latter rewrites all occurrences of
+the inferred instance. Explicit arguments constrain inference. Parameters
+absent from the selected side still need explicit values, such as the head
+in `rewrite <- L.length_cons {h := 0}`.
+
 For theorems with parameters, explicit instantiation is sometimes needed:
 
 ```text
@@ -1106,7 +1258,10 @@ rewrite <- eq_symm h
 
 ### `unfold`
 
-Use `unfold Name` to unfold a transparent formula definition in the goal.
+Use `unfold Name` to expand a transparent formula or term definition in the
+goal. Term definitions expand inside predicate arguments, equalities, and set
+expressions, including beneath quantifiers. Only the named definition expands;
+other definitions and computations remain for later steps.
 
 ```text
 theorem happy_mother_def_intro : Happy(mother(alice)) -> HappyMother(alice) := by
@@ -1114,6 +1269,20 @@ theorem happy_mother_def_intro : Happy(mother(alice)) -> HappyMother(alice) := b
   unfold HappyMother
   exact h
 ```
+
+### `finite`
+
+With `import std/hol/finite@1 as F`, use `finite` for concrete constructor-list
+claims: `F.HasCard(xs, n)`, `F.Nodup(xs)`, list length, membership, and coverage.
+Term abbreviations for lists are supported. Coverage requires a datatype whose
+constructors have no arguments. The tactic builds a checked constructive proof
+from the imported list laws and datatype cases; wrong counts, duplicates, and
+missing constructors are rejected.
+
+Search is limited to 2,048 goal visits and depth 96. Failure does not establish
+that the claim is false; larger or unsupported proofs can be written manually.
+The search budget does not replace the separate runtime checking budget.
+See [`finite_enumeration.ctea`](hol/examples/finite_enumeration.ctea).
 
 ### `simp`
 
@@ -1146,7 +1315,10 @@ Use `simp at h` to simplify a named hypothesis in the local context, or
 `simp at *` to simplify the current goal and all local hypotheses. Listed
 equality rules can also target hypotheses: `simp [mother_alice] at h` and
 `simp [mother_alice] at *`. The names in `simp [...]` may be top-level
-equality theorems or local equality hypotheses introduced in the proof.
+equality theorems, local equality hypotheses introduced in the proof, or
+transparent formula and term definitions. For example, `simp [Next]` accepts
+a term abbreviation named `Next`. Listed definitions use the same built-in
+unfolding as plain `simp`; they do not restrict which definitions simplify.
 
 Examples:
 
@@ -1474,8 +1646,17 @@ parsed according to the parameter kind:
 - function-symbol parameters, such as `f := mother`
 - term parameters, such as `x := alice`
 
+Concrete predicate signatures and typed lambda parameters can supply missing
+type arguments. For example, if `Student` and `Enrolled` both have type
+`Person -> Prop`, `exact forall_mono {P := Student; Q := Enrolled}` can infer
+`A := Person`. Explicit type arguments must agree with these signatures,
+regardless of their order inside the braces. Polymorphic predicate definitions
+and unannotated lambdas may still need type arguments supplied explicitly.
+
 Cetacea can infer many theorem parameters from the goal, especially for bare
-theorem references in `exact` and `apply`. For `apply`, it also uses local
+theorem references in `exact` and `apply`, and projected conjunctions such as
+`apply F.member_cons.right`. Function parameters can be inferred from named
+functions appearing in the goal. For `apply`, it also uses local
 hypotheses and simple implication/conjunction consequences of those hypotheses
 to fill missing parameters. When inference fails, use explicit arguments.
 
@@ -1837,10 +2018,8 @@ Cetacea is intentionally small. Important current limitations:
   parameters; recursion on later arguments and mutual recursion are not
   supported.
 - `induction` rejects unreverted local proof hypotheses that depend on the
-  induction variable. `revert h` handles proof hypotheses, but term-variable
-  generalization is not yet available.
-- `simp [lemma] at h` can rewrite a hypothesis, but general
-  `rewrite -> lemma at h` syntax is not yet available.
+  induction variable. Use `revert h` for a proof hypothesis or `revert x`
+  to generalize a term variable with its dependent hypotheses.
 - Checked source modules can consume versioned logical packages, but there is
   no direct compiler from a source module to a new transactional `@1` package
   record.
@@ -1897,3 +2076,68 @@ The current examples and standard library follow these conventions:
 - Indent case and induction branch bodies by four spaces under the arm.
 - Prefer importing `std/prelude.ctea` in examples that use the library.
 - Use explicit theorem instantiation when it makes a proof more predictable.
+
+## Parser resource limits
+
+The checker rejects excessive source with a diagnostic rather than attempting
+unbounded parsing. Current limits are 1 MiB per source file, 64 KiB and 8,192
+tokens per parsed expression, 128 nested parser frames, 128 grouped quantifier
+binders or set-literal elements, and ten nested biconditional expansions.
+Parser frames are an implementation depth budget, not a count of parentheses.
+Split large expressions into named definitions or lemmas and large files into
+modules.
+
+Nat literals currently expand into unary terms, so individual literals above
+4,096 are rejected before allocation. This is a current representation limit;
+larger arithmetic needs a compact numeral representation. These parser limits
+complement HOL normalization limits. They do not replace browser worker
+isolation or external limits for batch grading.
+
+
+## Browser regression checks
+
+Run `node --test web/tests/*.test.mjs` for worker lifecycle, saved-work, and theorem-search
+unit tests. With the Wasm build and local server described above, open
+`http://localhost:8000/web/tests/browser-recovery.html` for full-editor recovery
+and package-search checks. The harness uses isolated temporary browser-storage keys and
+injected busy/failing workers, then retries with the real Wasm checker. It does
+not overwrite saved student work. All twenty-four checks should report PASS, including
+the real ten-second timeout. This is a functional check, not a substitute for
+keyboard, screen-reader, or classroom usability testing.
+
+
+Terminal and line-mode theorem search include checked logical-package exports
+as well as source theorems. Aliases of one receipt appear once per query; a
+query naming a particular alias returns that spelling. Distinct declarations
+with equal statements remain separate. Imported search entries do not count as
+accepted root declarations, and the catalog is rebuilt when source is rechecked.
+
+
+## Structured theorem outcomes
+
+CLI and browser check JSON include `theorem_outcomes`, separate from the
+accepted `theorems` list. Each parsed theorem or axiom occurrence has `name`,
+`statement`, `line`, `path`, `is_imported`, and `status`. Duplicate names remain
+separate occurrences. Status is one of `accepted`, `incomplete`, `trusted_axiom`,
+`failed`, `not_checked` (checking stopped before this declaration), or
+`rolled_back` (an imported declaration passed, but its import transaction failed).
+Kernel replay rejection changes the occurrence to `failed`. These statuses
+report checking, not assignment-policy approval; consumers must still inspect
+file diagnostics and policy violations. Whole-file parse failures report a
+parse diagnostic and do not invent theorem outcomes from an unparsed file.
+The browser's Declaration results panel also shows failed and skipped root
+proofs, alongside its accepted declarations.
+
+
+Browser assignment grading has a separate regression page,
+`web/tests/assignment-parity.html`. First run
+`python3 scripts/browser_assignment_parity.py --check` to compare its fixtures
+with fresh native CLI output, then serve the repository and open that page.
+All 31 cases should agree on acceptance, kernel certification and policy
+violation categories. See `docs/BROWSER_ASSIGNMENTS.md` for coverage and limits.
+
+
+For responsive layout checks, open `web/tests/browser-layout.html`. It checks
+320, 768 and 1280 CSS-pixel widths with long names and expanded help, using
+isolated in-memory storage. See `docs/BROWSER_ACCESSIBILITY.md` for the remaining
+keyboard and assistive-technology verification.

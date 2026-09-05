@@ -1,0 +1,30 @@
+-- Positive pigeonhole witnesses, with classical reasoning made explicit.
+-- The constructive contradiction theorem remains in pigeonhole.ctea.
+import pigeonhole.ctea as P
+import std/hol/finite@1 as F
+
+mode classical
+
+theorem pigeonhole_collision
+  (A : Type) (B : Type) (f : A -> B)
+  (xs : F.List A) (ys : F.List B) (n : Nat) :
+  F.HasCard(xs, succ(n)) ->
+  F.HasCard(ys, n) ->
+  exists x1 : A, exists x2 : A,
+    (not x1 = x2) /\ f(x1) = f(x2) := by
+  intro source_cardinality
+  intro target_cardinality
+  by_contra no_collision
+  apply P.pigeonhole {A := A; B := B; f := f; xs := xs; ys := ys; n := n}
+  exact source_cardinality
+  exact target_cardinality
+  intro x1
+  intro x2
+  intro same_image
+  by_contra distinct
+  apply no_collision
+  exists x1
+  exists x2
+  split
+  exact distinct
+  exact same_image

@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cetacea narrow-screen checks</title>
+<h1>Narrow-screen editor checks</h1>
+<p>Isolated editor at 320 CSS pixels. Uses in-memory test storage.</p>
+<pre id="results" role="status">Running…</pre>
+<iframe title="Narrow editor under test" style="width:320px;height:700px;border:1px solid"></iframe>
+<script type="module">
+const output = document.querySelector('#results');
+const frame = document.querySelector('iframe');
+const name = 'lesson/' + 'long_filename_'.repeat(12) + '.ctea';
+const source = 'theorem ' + 'long_theorem_name_'.repeat(8) + ' : True := by\n  trivial\n';
+const state = {version: 1, name: name.split('/').pop(), source, history: [],
+  project: {root: name, files: [{path: name, source}]}};
+// Optional seed for manual keyboard recovery checks; still wholly in-memory.
+if (new URLSearchParams(location.search).has('assignment')) {
+  state.assignment = {path: 'keyboard.ctea-assignment',
+    source: 'version = 1\nprofile = "prop"\n', files: [], archiveName: 'keyboard.ctea-task'};
+}
+const setup = `<base href="${new URL('../', location.href)}"><script>
+const storage = new Map([['cetacea.web.work.v1', ${JSON.stringify(JSON.stringify(state))}]]);
+Object.defineProperty(window, 'localStorage', {value: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value)}});
+<\/script>`;
+const html = await (await fetch(`../index.html?layout=${Date.now()}`, {cache: 'no-store'})).text();
+frame.srcdoc = html.replace('<head>', '<head>' + setup)
+  .replace(/\.\/styles\.css[^" ]*/, `./styles.css?layout=${Date.now()}`)
+  .replace('./app.js', `./app.js?layout=${Date.now()}`);
+async function until(predicate) {
+  const end = performance.now() + 20000;
+  while (!predicate()) {
+    if (performance.now() > end) throw new Error('Editor did not finish checking');
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+try {
+  await until(() => frame.contentDocument?.querySelector('#status')?.textContent.includes('HOL certified'));
+  const doc = frame.contentDocument;
+  for (const details of doc.querySelectorAll('details')) details.open = true;
+  const lines = [];
+  for (const targetWidth of [320, 768, 1280]) {
+    frame.style.width = `${targetWidth}px`;
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const width = doc.documentElement.clientWidth;
+    const overflow = [...doc.querySelectorAll('button, input, select, summary, .project-controls p')]
+      .filter(element => !element.hidden && element.getClientRects().length)
+      .filter(element => { const rect = element.getBoundingClientRect(); return rect.left < -1 || rect.right > width + 1; })
+      .map(element => element.id || element.textContent.slice(0, 60));
+    if (doc.documentElement.scrollWidth > width + 1 || overflow.length) {
+      throw new Error(`Viewport ${width}, document ${doc.documentElement.scrollWidth}; overflowing controls: ${overflow.join(', ')}`);
+    }
+    lines.push(`PASS: ${targetWidth}px editor keeps controls and expanded help within the viewport, including long project and theorem names.`);
+  }
+  frame.style.width = '320px';
+  output.textContent = lines.join('\n');
+} catch (error) { output.textContent = 'FAIL: ' + error.message; }
+</script>

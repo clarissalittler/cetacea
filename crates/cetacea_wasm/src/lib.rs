@@ -1,4 +1,5 @@
 use cetacea_core::hol::{run_linked_hol_smoke, EvidenceStatus};
+mod project_request;
 use cetacea_core::{
     check_file_with_imports_and_hol_shadow, explain_theorem_with_imports_and_hol_shadow,
     goals_at_with_imports_and_hol_shadow, outline, run_tactic_with_imports_and_hol_shadow,
@@ -169,41 +170,13 @@ pub unsafe extern "C" fn cetacea_explain_theorem(
 }
 
 fn standard_imports() -> Vec<VirtualFile> {
-    [
-        (
-            "std/prelude.ctea",
-            include_str!("../../../std/prelude.ctea"),
-        ),
-        (
-            "std/qualified_prelude.ctea",
-            include_str!("../../../std/qualified_prelude.ctea"),
-        ),
-        ("std/prop.ctea", include_str!("../../../std/prop.ctea")),
-        ("std/fol.ctea", include_str!("../../../std/fol.ctea")),
-        ("std/eq.ctea", include_str!("../../../std/eq.ctea")),
-        ("std/nat.ctea", include_str!("../../../std/nat.ctea")),
-        ("std/set.ctea", include_str!("../../../std/set.ctea")),
-        ("std/list.ctea", include_str!("../../../std/list.ctea")),
-        ("std/fun.ctea", include_str!("../../../std/fun.ctea")),
-        (
-            "std/hol/counting.ctea",
-            include_str!("../../../std/hol/counting.ctea"),
-        ),
-        (
-            "std/hol/pigeonhole.ctea",
-            include_str!("../../../std/hol/pigeonhole.ctea"),
-        ),
-        (
-            "std/modular.ctea",
-            include_str!("../../../std/modular.ctea"),
-        ),
-    ]
-    .into_iter()
-    .map(|(path, source)| VirtualFile {
-        path: path.to_string(),
-        source: source.to_string(),
-    })
-    .collect()
+    cetacea_core::stdlib::STANDARD_LIBRARY_SOURCES
+        .iter()
+        .map(|(path, source)| VirtualFile {
+            path: (*path).to_string(),
+            source: (*source).to_string(),
+        })
+        .collect()
 }
 
 unsafe fn read_input(ptr: *const u8, len: usize) -> Result<String, String> {
@@ -233,8 +206,28 @@ fn error_json(message: &str) -> String {
 }
 
 fn hol_shadow_result_json(report: &HolShadowReport) -> String {
-    let theorems = report
-        .legacy
+    let certified_result = report.certified();
+    let outcomes = certified_result
+        .theorem_outcomes
+        .iter()
+        .map(|outcome| {
+            format!(
+                r#"{{"name":{},"statement":{},"status":{},"line":{},"path":{},"is_imported":{}}}"#,
+                json_string(&outcome.name),
+                json_string(&outcome.statement),
+                json_string(&outcome.status),
+                outcome.line,
+                outcome
+                    .source_path
+                    .as_ref()
+                    .map(|p| json_string(&p.to_string_lossy()))
+                    .unwrap_or_else(|| "null".into()),
+                outcome.is_imported,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let theorems = certified_result
         .theorems
         .iter()
         .map(|theorem| {
@@ -268,6 +261,11 @@ fn hol_shadow_result_json(report: &HolShadowReport) -> String {
         })
         .collect::<Vec<_>>()
         .join(",");
+    let package_theorems = report.package_theorems.iter().map(|theorem| format!(
+        r#"{{"name":{},"statement":{},"mode":{},"status":"accepted","is_axiom":false,"is_imported":true,"uses_sorry":false,"axiom_deps":[],{}}}"#,
+        json_string(&theorem.name), json_string(&theorem.statement),
+        json_string(&theorem.hol_mode_used.to_string()), hol_theorem_fields_json(theorem, report),
+    )).collect::<Vec<_>>().join(",");
     let diagnostics = diagnostics_json(&report.legacy.diagnostics);
     let mismatches = report
         .mismatches
@@ -288,8 +286,8 @@ fn hol_shadow_result_json(report: &HolShadowReport) -> String {
         .join(",");
     let certified = !diagnostics_have_errors(&report.legacy.diagnostics) && report.is_match();
     format!(
-        r#"{{"ok":{},"hol_certified":{},"imported_packages":[{}],"theorems":[{}],"diagnostics":[{}]}}"#,
-        certified, certified, imported_packages, theorems, diagnostics,
+        r#"{{"ok":{},"hol_certified":{},"imported_packages":[{}],"theorems":[{}],"package_theorems":[{}],"theorem_outcomes":[{outcomes}],"diagnostics":[{}]}}"#,
+        certified, certified, imported_packages, theorems, package_theorems, diagnostics,
     )
 }
 
@@ -480,10 +478,14 @@ fn goal_json(goal: &GoalSnapshot) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        r#"{{"id":{},"context":[{}],"target":{},"hints":[{}]}}"#,
+        r#"{{"id":{},"context":[{}],"target":{},"computed_target":{},"hints":[{}]}}"#,
         goal.id,
         context,
         json_string(&goal.target),
+        goal.computed_target
+            .as_deref()
+            .map(json_string)
+            .unwrap_or_else(|| "null".into()),
         hints
     )
 }
@@ -933,5 +935,265 @@ theorem length_append_use (A : Type) (xs ys : L.List A) :
                 "missing {expected} in {playground_json}"
             );
         }
+    }
+    #[test]
+    fn browser_check_composes_independent_package_aliases() {
+        let source = include_str!("../../../docs/hol/examples/package_aliases.ctea");
+        let report = check_file_with_imports_and_hol_shadow(source, &standard_imports());
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:#?}", report.mismatches);
+        let json = hol_shadow_result_json(&report);
+        assert!(json.contains("\"hol_certified\":true"), "{json}");
+    }
+    #[test]
+    fn browser_check_uses_bundled_finite_sums() {
+        let source = include_str!("../../../docs/hol/examples/finite_sums.ctea");
+        let report = check_file_with_imports_and_hol_shadow(source, &standard_imports());
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_finite_sums_chapter_infers_empty_list_rewrites() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/book/hol-code/ch17-examples.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_check_uses_bundled_reachability() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/reachability.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_explicit_path_concatenation() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/explicit_paths.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_edge_degrees_and_weighted_sums() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/edge_degrees.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_selected_contributions_and_set_enumerations() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/selected_contributions.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_reordered_weighted_enumerations() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/reordered_totals.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_generic_endpoint_sums() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/endpoint_contributions.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_generic_double_counting() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/double_counting.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_generic_handshake() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/handshake.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_checks_finite_probability_counts() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/probability_counts.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+
+    #[test]
+    fn browser_checks_recurrences_with_named_definitions() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/recurrences.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_constructs_overlapping_union_witnesses() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/overlapping_union.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn browser_constructs_numeric_union_witnesses() {
+        let report = check_file_with_imports_and_hol_shadow(
+            include_str!("../../../docs/hol/examples/nat_union.ctea"),
+            &standard_imports(),
+        );
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains("\"hol_certified\":true"));
+    }
+    #[test]
+    fn package_aliases_expose_the_same_library_receipt() {
+        let report = check_file_with_imports_and_hol_shadow(
+            "import std/hol/list@1 as L\nimport std/hol/list@1 as R\n",
+            &standard_imports(),
+        );
+        assert!(report.is_match());
+        assert!(report.legacy.diagnostics.is_empty());
+        let left = report
+            .package_theorems
+            .iter()
+            .find(|t| t.name == "L.append_nil_right")
+            .unwrap();
+        let right = report
+            .package_theorems
+            .iter()
+            .find(|t| t.name == "R.append_nil_right")
+            .unwrap();
+        assert_eq!(left.receipt.id(), right.receipt.id());
+        assert!(left.is_imported && right.is_imported);
+    }
+
+    #[test]
+    fn browser_prelude_counting_imports_coexist_or_report_one_root_error() {
+        let source = include_str!("../../../docs/hol/examples/prelude_counting.ctea");
+        let imports = standard_imports();
+        let report = check_file_with_imports_and_hol_shadow(source, &imports);
+        assert!(
+            report.legacy.diagnostics.is_empty(),
+            "{:#?}",
+            report.legacy.diagnostics
+        );
+        assert!(report.is_match(), "{:#?}", report.mismatches);
+        assert!(hol_shadow_result_json(&report).contains(r#""hol_certified":true"#));
+        let broken = source.replace(" as Counting", "");
+        let report = check_file_with_imports_and_hol_shadow(&broken, &imports);
+        assert_eq!(report.legacy.diagnostics.len(), 1);
+        assert_eq!(
+            report.legacy.diagnostics[0].location.as_ref().unwrap().line,
+            3
+        );
+        assert!(report.imported_packages.is_empty());
+        assert!(hol_shadow_result_json(&report).contains(r#""hol_certified":false"#));
+        let stepped =
+            run_tactic_with_imports_and_hol_shadow(&broken, "counted_length", 0, &imports);
+        assert_eq!(stepped.diagnostics.len(), 1);
+        assert!(stepped.goals.is_empty());
+        let explanation =
+            explain_theorem_with_imports_and_hol_shadow(&broken, "counted_length", &imports);
+        assert_eq!(explanation.diagnostics.len(), 1);
+        assert!(!explanation.completed);
     }
 }

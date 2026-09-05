@@ -1,0 +1,118 @@
+-- Uniformly choose one of four ordered pairs of coin results.
+import builtin:std/hol/probability_counts.ctea as P
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+mode constructive
+
+data Outcome
+| hh
+| ht
+| th
+| tt
+
+def outcomes : C.List Outcome := C.cons(hh, C.cons(ht, C.cons(th, C.cons(tt, C.nil))))
+
+defrec first_head (outcome : Outcome) : Nat
+| hh => 1
+| ht => 1
+| th => 0
+| tt => 0
+
+defrec first_tail (outcome : Outcome) : Nat
+| hh => 0
+| ht => 0
+| th => 1
+| tt => 1
+
+defrec second_head (outcome : Outcome) : Nat
+| hh => 1
+| ht => 0
+| th => 1
+| tt => 0
+
+defrec heads (outcome : Outcome) : Nat
+| hh => 2
+| ht => 1
+| th => 1
+| tt => 0
+
+theorem sample_size : C.length(outcomes) = 4 := by
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_nil
+  refl
+
+theorem denominator_nonzero : not C.length(outcomes) = 0 := by
+  exact P.nonempty_denominator
+
+theorem complementary (outcome : Outcome) : add(first_head(outcome), first_tail(outcome)) = 1 := by
+  induction outcome with
+  | hh =>
+      refl
+  | ht =>
+      refl
+  | th =>
+      refl
+  | tt =>
+      refl
+
+theorem partition_total :
+  add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(first_tail, outcomes))) = C.length(outcomes) := by
+  apply P.complement_counts {A := Outcome; f := first_head; g := first_tail; xs := outcomes}
+  intro outcome
+  intro member
+  exact complementary
+
+-- The numerator of the first-head probability is 2; its denominator is 4.
+theorem first_head_count : S.sum(C.map(first_head, outcomes)) = 2 := by
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_nil
+  refl
+
+theorem second_head_count : S.sum(C.map(second_head, outcomes)) = 2 := by
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_nil
+  refl
+
+theorem head_contributions (outcome : Outcome) : heads(outcome) = add(first_head(outcome), second_head(outcome)) := by
+  induction outcome with
+  | hh =>
+      refl
+  | ht =>
+      refl
+  | th =>
+      refl
+  | tt =>
+      refl
+
+theorem total_heads : S.sum(C.map(heads, outcomes)) = 4 := by
+  have linear : S.sum(C.map(heads, outcomes)) = add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(second_head, outcomes))) := by
+    apply P.numerator_add {A := Outcome; f := first_head; g := second_head; h := heads; xs := outcomes}
+    intro outcome
+    intro member
+    exact head_contributions
+  rewrite -> first_head_count at linear
+  rewrite -> second_head_count at linear
+  exact linear
+
+-- Listing hh twice changes the experiment: choose uniformly among five tickets.
+def tickets : C.List Outcome := C.cons(hh, outcomes)
+
+theorem ticket_count : C.length(tickets) = 5 := by
+  rewrite -> C.length_cons
+  rewrite -> sample_size
+  refl
+
+theorem ticket_first_heads : S.sum(C.map(first_head, tickets)) = 3 := by
+  rewrite -> C.map_cons
+  rewrite -> S.sum_cons
+  rewrite -> first_head_count
+  refl

@@ -1,0 +1,56 @@
+-- Chapter 18: explicit directed paths.
+import std/hol/graph@1 as G
+
+mode constructive
+
+-- Staying at a vertex requires no edge.
+theorem ex18_1 (A : Type) (E : A -> A -> Prop) (a : A) :
+  G.ValidPath(E, G.nil, a, a) := by
+  apply (G.path_nil {A := A; E := E; a := a; b := a}).right
+  refl
+
+-- Prepend one edge to an already checked tail path.
+theorem ex18_2 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :
+  E(a, h) -> G.ValidPath(E, t, h, b) -> G.ValidPath(E, G.cons(h, t), a, b) := by
+  intro edge
+  intro tail
+  apply (G.path_cons {A := A; E := E; h := h; t := t; a := a; b := b}).right
+  split
+  exact edge
+  exact tail
+
+-- Removing the first visited vertex changes the start of the remaining path.
+theorem ex18_3 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :
+  G.ValidPath(E, G.cons(h, t), a, b) -> G.ValidPath(E, t, h, b) := by
+  intro path
+  have parts : E(a, h) /\ G.ValidPath(E, t, h, b) := (G.path_cons {A := A; E := E; h := h; t := t; a := a; b := b}).left path
+  exact parts.right
+
+-- Join two paths at a common endpoint. Keep endpoints general during induction.
+theorem ex18_4 (A : Type) (E : A -> A -> Prop) (xs ys : G.List A) :
+  forall a b c : A,
+  G.ValidPath(E, xs, a, b) -> G.ValidPath(E, ys, b, c) ->
+  G.ValidPath(E, G.append(xs, ys), a, c) := by
+  induction xs with
+  | nil =>
+      intro a
+      intro b
+      intro c
+      intro first
+      intro second
+      have same : b = a := (G.path_nil {A := A; E := E; a := a; b := b}).left first
+      rewrite -> G.append_nil_left
+      rewrite <- same
+      exact second
+  | cons h t ih =>
+      intro a
+      intro b
+      intro c
+      intro first
+      intro second
+      have parts : E(a, h) /\ G.ValidPath(E, t, h, b) := (G.path_cons {A := A; E := E; h := h; t := t; a := a; b := b}).left first
+      rewrite -> G.append_cons
+      apply (G.path_cons {A := A; E := E; h := h; t := G.append(t, ys); a := a; b := c}).right
+      split
+      exact parts.left
+      exact ih h b c parts.right second

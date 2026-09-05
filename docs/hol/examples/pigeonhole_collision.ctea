@@ -1,0 +1,42 @@
+import builtin:std/hol/pigeonhole_classical.ctea as P
+import std/hol/finite@1 as F
+
+mode constructive
+
+data Colour
+| red
+| yellow
+| green
+
+data Bit
+| zero_bit
+| one_bit
+
+defrec encode (colour : Colour) : Bit
+| red => zero_bit
+| yellow => one_bit
+| green => zero_bit
+
+def colours : F.List Colour := F.cons(red, F.cons(yellow, F.cons(green, F.nil)))
+def bits : F.List Bit := F.cons(zero_bit, F.cons(one_bit, F.nil))
+
+-- For this particular function, we can exhibit the pair constructively.
+theorem explicit_collision :
+  exists x1 : Colour, exists x2 : Colour,
+    (not x1 = x2) /\ encode(x1) = encode(x2) := by
+  exists red
+  exists green
+  split
+  intro same_colour
+  contradiction
+  refl
+
+-- The generic theorem supplies existence through classical reasoning.
+mode classical
+
+theorem some_collision (f : Colour -> Bit) :
+  exists x1 : Colour, exists x2 : Colour,
+    (not x1 = x2) /\ f(x1) = f(x2) := by
+  apply P.pigeonhole_collision {xs := colours; ys := bits; n := 2}
+  finite
+  finite

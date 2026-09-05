@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch06-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -47,7 +47,7 @@ theorem cs_subset_union : CS subset union(CS, Math) := by
 
 -- The library already knows that shape.
 theorem cs_subset_union_library : CS subset union(CS, Math) := by
-  exact subset_union_left {T := Student; A := CS; B := Math}
+  exact set.subset_union_left {T := Student; A := CS; B := Math}
 
 -- Section 6.4: element chasing, the universal set-proof skeleton.
 theorem overlap_takes_cs : inter(CS, Math) subset CS := by
@@ -75,10 +75,10 @@ theorem three_hops
   intro h2
   intro h3
   have hAC : A subset C
-  apply subset_trans
+  apply set.subset_trans
   exact h1
   exact h2
-  apply subset_trans
+  apply set.subset_trans
   exact hAC
   exact h3
 
@@ -88,7 +88,7 @@ theorem inter_union_dist
   (T : Type)
   (A B C : Set T)
   : inter(A, union(B, C)) = union(inter(A, B), inter(A, C)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -122,7 +122,7 @@ theorem compl_union_demo
   (T : Type)
   (A B : Set T)
   : compl(union(A, B)) = inter(compl(A), compl(B)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -148,7 +148,7 @@ theorem compl_union_demo
 
 -- Section 6.7: the other route to equality — mutual inclusion.
 theorem inter_self (T : Type) (A : Set T) : inter(A, A) = A := by
-  apply subset_antisymm
+  apply set.subset_antisymm
   simp
   intro x
   intro hx
@@ -160,12 +160,12 @@ theorem inter_self (T : Type) (A : Set T) : inter(A, A) = A := by
   exact hx
   exact hx
 
-theorem union_empty_right_demo (T : Type) (A : Set T) : A = union(A, empty(T)) := by
-  apply subset_antisymm
-  exact subset_union_left {T := T; A := A; B := empty(T)}
-  apply union_subset
-  exact subset_refl
-  exact empty_subset
+theorem union_empty_right (T : Type) (A : Set T) : A = union(A, empty(T)) := by
+  apply set.subset_antisymm
+  exact set.subset_union_left {T := T; A := A; B := empty(T)}
+  apply set.union_subset
+  exact set.subset_refl
+  exact set.empty_subset
 
 -- Section 6.8: the OTHER De Morgan law hides a classical step (Chapter 3
 -- returns). Everything below this line has classical permission.
@@ -175,7 +175,7 @@ theorem compl_inter_demo
   (T : Type)
   (A B : Set T)
   : compl(inter(A, B)) = union(compl(A), compl(B)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split

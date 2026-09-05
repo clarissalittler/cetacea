@@ -1,0 +1,60 @@
+-- Reachability as membership in every edge-closed set containing the start.
+-- This interface proves reachability; it does not return a list of vertices.
+mode constructive
+
+def Closed (A : Type) (E : A -> A -> Prop) (S : Set A) : Prop :=
+  forall x y : A, x in S -> E(x, y) -> y in S
+
+def Reaches (A : Type) (E : A -> A -> Prop) (a b : A) : Prop :=
+  forall S : Set A, a in S -> Closed(E, S) -> b in S
+
+theorem reaches_refl (A : Type) (E : A -> A -> Prop) (a : A) :
+  Reaches(E, a, a) := by
+  unfold Reaches
+  intro S
+  intro start
+  intro closed
+  exact start
+
+theorem reaches_edge (A : Type) (E : A -> A -> Prop) (a b : A) :
+  E(a, b) -> Reaches(E, a, b) := by
+  intro edge
+  unfold Reaches
+  intro S
+  intro start
+  intro closed
+  simp [Closed] at closed
+  exact closed a b start edge
+
+theorem reaches_trans (A : Type) (E : A -> A -> Prop) (a b c : A) :
+  Reaches(E, a, b) -> Reaches(E, b, c) -> Reaches(E, a, c) := by
+  intro first
+  intro second
+  simp [Reaches] at first
+  simp [Reaches] at second
+  unfold Reaches
+  intro S
+  intro start
+  intro closed
+  exact second S (first S start closed) closed
+
+-- Any invariant preserved by every edge also holds at every reachable vertex.
+theorem reaches_invariant
+  (A : Type) (E : A -> A -> Prop) (a b : A) (S : Set A) :
+  Reaches(E, a, b) -> a in S -> Closed(E, S) -> b in S := by
+  intro reachable
+  intro start
+  intro closed
+  simp [Reaches] at reachable
+  exact reachable S start closed
+
+-- A closed set containing the start but excluding the finish rules out a route.
+theorem not_reaches_of_closed
+  (A : Type) (E : A -> A -> Prop) (a b : A) (S : Set A) :
+  a in S -> Closed(E, S) -> not b in S -> not Reaches(E, a, b) := by
+  intro start
+  intro closed
+  intro excluded
+  intro reachable
+  apply excluded
+  exact reaches_invariant {A := A; E := E; a := a; b := b; S := S} reachable start closed

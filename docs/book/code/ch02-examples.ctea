@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch02-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -30,7 +30,7 @@ theorem or_intro_demo (P Q : Prop) : P -> P \/ Q := by
   exact hp
 
 -- Section 2.4: or-elimination is proof by cases.
-theorem or_elim_demo (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+theorem or_elim (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
   intro hpr
   intro hqr
   intro h
@@ -62,7 +62,7 @@ theorem explosion_short (P Q : Prop) : P -> not P -> Q := by
   contradiction
 
 -- Section 2.5: modus tollens.
-theorem modus_tollens_demo (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+theorem modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
   intro hpq
   intro hnq
   intro hp

@@ -1,0 +1,1638 @@
+[
+  {
+    "name": "docs/hol/pilot/pigeonhole_client.ctea-assignment",
+    "project": {
+      "root": "docs/hol/pilot/pigeonhole_client.ctea",
+      "files": [
+        {
+          "path": "docs/hol/pilot/pigeonhole_client.ctea",
+          "source": "-- A first-order student client of a supplied constructive pigeonhole proof.\nimport builtin:std/hol/pigeonhole.ctea as P\nimport std/hol/finite@1 as Fin\nmode constructive\ntheorem collision (A B : Type) (f : A -> B) (xs : Fin.List A) (ys : Fin.List B) (n : Nat) :\n  Fin.HasCard(xs, succ(n)) -> Fin.HasCard(ys, n) -> not (forall x y : A, f(x) = f(y) -> x = y) := by\n  exact P.pigeonhole {A := A; B := B; f := f; xs := xs; ys := ys; n := n}\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/hol/pilot/pigeonhole_client.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\nallowed_imports = [\"builtin:std/hol/pigeonhole.ctea\", \"builtin:std/hol/counting.ctea\", \"builtin:std/nat.ctea\", \"std/hol/list@1\", \"std/hol/finite@1\", \"std/hol/cardinality@1\"]\nallowed_theorems = [\"builtin:std/hol/pigeonhole.ctea::pigeonhole\"]\nrequired_imports = [\"builtin:std/hol/pigeonhole.ctea\"]\nrequired_theorem.collision = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?1) (?5 : Nat) : std/hol/finite@1.HasCard(?3, succ(?5)) -> std/hol/finite@1.HasCard(?4, ?5) -> not (forall ?6 : ?0, forall ?7 : ?0, ?2(?6) = ?2(?7) -> ?6 = ?7)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch13-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch13-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch13-solutions.ctea",
+          "source": "-- Proofs, Checked -- Chapter 13: exercise solutions.\n-- Spoilers! Try docs/book/hol-code/ch13-exercises.ctea first.\n--\n--   cargo run -p cetacea_cli -- docs/book/hol-code/ch13-solutions.ctea\n\nimport std/hol/finite@1 as F\n\nmode constructive\n\ndata Traffic\n| red\n| yellow\n| green\n\n-- Exercise 13.1\ntheorem ex13_1 :\n  F.length(F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) = 3 := by\n  rewrite -> F.length_cons\n  rewrite -> F.length_cons\n  rewrite -> F.length_cons\n  rewrite -> F.length_nil\n  refl\n\n-- Exercise 13.2\ntheorem ex13_2 :\n  forall x : Traffic,\n    F.Member(x, F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) := by\n  intro x\n  induction x with\n  | red =>\n      apply F.member_cons.right\n      left\n      trivial\n  | yellow =>\n      apply F.member_cons.right\n      right\n      apply F.member_cons.right\n      left\n      trivial\n  | green =>\n      apply F.member_cons.right\n      right\n      apply F.member_cons.right\n      right\n      apply F.member_cons.right\n      left\n      trivial\n\n-- Exercise 13.3\ntheorem ex13_3 :\n  F.Nodup(F.cons(red, F.cons(yellow, F.cons(green, F.nil)))) := by\n  apply F.nodup_cons.right\n  split\n  intro red_in_tail\n  have red_cases : red = yellow \\/ F.Member(red, F.cons(green, F.nil)) := by\n    apply F.member_cons.left\n    exact red_in_tail\n  cases red_cases with\n  | left red_yellow =>\n      contradiction\n  | right red_in_last =>\n      have red_last_cases : red = green \\/ F.Member(red, (F.nil : F.List Traffic)) := by\n        apply F.member_cons.left\n        exact red_in_last\n      cases red_last_cases with\n      | left red_green =>\n          contradiction\n      | right red_in_nil =>\n          exact F.member_nil {A := Traffic; x := red} red_in_nil\n  apply F.nodup_cons.right\n  split\n  intro yellow_in_tail\n  have yellow_cases : yellow = green \\/ F.Member(yellow, (F.nil : F.List Traffic)) := by\n    apply F.member_cons.left\n    exact yellow_in_tail\n  cases yellow_cases with\n  | left yellow_green =>\n      contradiction\n  | right yellow_in_nil =>\n      exact F.member_nil {A := Traffic; x := yellow} yellow_in_nil\n  apply F.nodup_cons.right\n  split\n  intro green_in_nil\n  exact F.member_nil {A := Traffic; x := green} green_in_nil\n  exact F.nodup_nil {A := Traffic}\n\n-- Exercise 13.4\ntheorem ex13_4 :\n  F.HasCard(\n    F.cons(red, F.cons(yellow, F.cons(green, F.nil))),\n    3\n  ) := by\n  apply F.has_card_intro\n  exact ex13_3\n  exact ex13_1\n  exact ex13_2\n\n-- Exercise 13.5\ntheorem ex13_5\n  (A : Type) (xs : F.List A) (n : Nat) :\n  F.HasCard(xs, n) ->\n  F.Nodup(xs) /\\\n    (F.length(xs) = n /\\ (forall x : A, F.Member(x, xs))) := by\n  intro cardinality\n  split\n  exact F.has_card_nodup {A := A; xs := xs; n := n} cardinality\n  split\n  exact F.has_card_length {A := A; xs := xs; n := n} cardinality\n  exact F.has_card_coverage {A := A; xs := xs; n := n} cardinality\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch13-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\n\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\n\nallowed_imports = [\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nrequired_imports = [\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nallowed_axioms = []\n\nrequired_theorem.ex13_1 = 'std/hol/list@1.length(std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil)))) = 3'\nrequired_theorem.ex13_2 = 'forall ?0 : Traffic, std/hol/list@1.Member(?0, std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil))))'\nrequired_theorem.ex13_3 = 'std/hol/list@1.Nodup(std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil))))'\nrequired_theorem.ex13_4 = 'std/hol/finite@1.HasCard(std/hol/list@1.cons(red, std/hol/list@1.cons(yellow, std/hol/list@1.cons(green, std/hol/list@1.nil))), 3)'\nrequired_theorem.ex13_5 = '(?0 : Type) (?1 : std/hol/list@1.List ?0) (?2 : Nat) : std/hol/finite@1.HasCard(?1, ?2) -> std/hol/list@1.Nodup(?1) /\\ (std/hol/list@1.length(?1) = ?2 /\\ (forall ?3 : ?0, std/hol/list@1.Member(?3, ?1)))'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch14-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch14-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch14-solutions.ctea",
+          "source": "-- Proofs, Checked -- Chapter 14: exercise solutions.\n-- Spoilers! Try docs/book/hol-code/ch14-exercises.ctea first.\n--\n--   cargo run -p cetacea_cli -- docs/book/hol-code/ch14-solutions.ctea\n\nimport std/hol/finite@1 as F\nimport std/hol/cardinality@1 as F\n\nmode constructive\n\ndata Answer\n| no\n| yes\n\ndata Bit\n| zero_bit\n| one_bit\n\ndefrec encode_answer (answer : Answer) : Bit\n| no => zero_bit\n| yes => one_bit\n\ndefrec decode_answer (bit : Bit) : Answer\n| zero_bit => no\n| one_bit => yes\n\n-- Exercise 14.1\ntheorem ex14_1 (answer : Answer) :\n  decode_answer(encode_answer(answer)) = answer := by\n  induction answer with\n  | no =>\n      refl\n  | yes =>\n      refl\n\n-- Exercise 14.2\ntheorem ex14_2 (bit : Bit) :\n  encode_answer(decode_answer(bit)) = bit := by\n  induction bit with\n  | zero_bit =>\n      refl\n  | one_bit =>\n      refl\n\n-- Exercise 14.3\ntheorem ex14_3 (xs : F.List Answer) :\n  F.length(F.map(encode_answer, xs)) = F.length(xs) := by\n  exact F.map_length {\n    A := Answer; B := Bit; f := encode_answer; xs := xs\n  }\n\n-- Exercise 14.4\ntheorem ex14_4\n  (A : Type) (B : Type)\n  (f : A -> B) (g : B -> A) (xs : F.List A) :\n  (forall x : A, g(f(x)) = x) ->\n  F.Nodup(xs) ->\n  F.Nodup(F.map(f, xs)) := by\n  exact F.nodup_map_injective {\n    A := A; B := B; f := f; g := g; xs := xs\n  }\n\n-- Exercise 14.5\ntheorem ex14_5\n  (A : Type) (B : Type)\n  (f : A -> B) (g : B -> A) (xs : F.List A) :\n  (forall y : B, f(g(y)) = y) ->\n  (forall x : A, F.Member(x, xs)) ->\n  (forall y : B, F.Member(y, F.map(f, xs))) := by\n  exact F.map_coverage_surjective {\n    A := A; B := B; f := f; g := g; xs := xs\n  }\n\n-- Exercise 14.6\ntheorem ex14_6\n  (A : Type) (B : Type)\n  (f : A -> B) (g : B -> A)\n  (xs : F.List A) (n : Nat) :\n  F.HasCard(xs, n) ->\n  (forall x : A, g(f(x)) = x) ->\n  (forall y : B, f(g(y)) = y) ->\n  F.HasCard(F.map(f, xs), n) := by\n  intro source_cardinality\n  intro left_inverse\n  intro right_inverse\n  apply F.has_card_intro {\n    A := B;\n    xs := F.map(f, xs);\n    n := n\n  }\n  exact ex14_4 {\n    A := A; B := B; f := f; g := g; xs := xs\n  } left_inverse (F.has_card_nodup {\n    A := A; xs := xs; n := n\n  } source_cardinality)\n  rewrite -> F.map_length {A := A; B := B; f := f; xs := xs}\n  exact F.has_card_length {A := A; xs := xs; n := n} source_cardinality\n  exact ex14_5 {\n    A := A; B := B; f := f; g := g; xs := xs\n  } right_inverse (F.has_card_coverage {\n    A := A; xs := xs; n := n\n  } source_cardinality)\n\n-- Exercise 14.7\ntheorem ex14_7 (xs : F.List Answer) (n : Nat) :\n  F.HasCard(xs, n) -> F.HasCard(F.map(encode_answer, xs), n) := by\n  intro source_cardinality\n  apply ex14_6 {\n    A := Answer;\n    B := Bit;\n    f := encode_answer;\n    g := decode_answer;\n    xs := xs;\n    n := n\n  }\n  exact source_cardinality\n  intro answer\n  exact ex14_1 {answer := answer}\n  intro bit\n  exact ex14_2 {bit := bit}\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch14-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\n\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\n\nallowed_imports = [\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nrequired_imports = [\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nallowed_axioms = []\n\nrequired_theorem.ex14_1 = '(?0 : Answer) : decode_answer(encode_answer(?0)) = ?0'\nrequired_theorem.ex14_2 = '(?0 : Bit) : encode_answer(decode_answer(?0)) = ?0'\nrequired_theorem.ex14_6 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1) (?3 : ?1 -> ?0) (?4 : std/hol/list@1.List ?0) (?5 : Nat) : std/hol/finite@1.HasCard(?4, ?5) -> (forall ?6 : ?0, ?3(?2(?6)) = ?6) -> (forall ?7 : ?1, ?2(?3(?7)) = ?7) -> std/hol/finite@1.HasCard(std/hol/cardinality@1.map(?2, ?4), ?5)'\nrequired_theorem.ex14_7 = '(?0 : std/hol/list@1.List Answer) (?1 : Nat) : std/hol/finite@1.HasCard(?0, ?1) -> std/hol/finite@1.HasCard(std/hol/cardinality@1.map(encode_answer, ?0), ?1)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch14-solutions-fol.ctea-assignment rejects docs/book/hol-code/ch14-solutions.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch14-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch14-solutions.ctea",
+          "source": "-- Proofs, Checked -- Chapter 14: exercise solutions.\n-- Spoilers! Try docs/book/hol-code/ch14-exercises.ctea first.\n--\n--   cargo run -p cetacea_cli -- docs/book/hol-code/ch14-solutions.ctea\n\nimport std/hol/finite@1 as F\nimport std/hol/cardinality@1 as F\n\nmode constructive\n\ndata Answer\n| no\n| yes\n\ndata Bit\n| zero_bit\n| one_bit\n\ndefrec encode_answer (answer : Answer) : Bit\n| no => zero_bit\n| yes => one_bit\n\ndefrec decode_answer (bit : Bit) : Answer\n| zero_bit => no\n| one_bit => yes\n\n-- Exercise 14.1\ntheorem ex14_1 (answer : Answer) :\n  decode_answer(encode_answer(answer)) = answer := by\n  induction answer with\n  | no =>\n      refl\n  | yes =>\n      refl\n\n-- Exercise 14.2\ntheorem ex14_2 (bit : Bit) :\n  encode_answer(decode_answer(bit)) = bit := by\n  induction bit with\n  | zero_bit =>\n      refl\n  | one_bit =>\n      refl\n\n-- Exercise 14.3\ntheorem ex14_3 (xs : F.List Answer) :\n  F.length(F.map(encode_answer, xs)) = F.length(xs) := by\n  exact F.map_length {\n    A := Answer; B := Bit; f := encode_answer; xs := xs\n  }\n\n-- Exercise 14.4\ntheorem ex14_4\n  (A : Type) (B : Type)\n  (f : A -> B) (g : B -> A) (xs : F.List A) :\n  (forall x : A, g(f(x)) = x) ->\n  F.Nodup(xs) ->\n  F.Nodup(F.map(f, xs)) := by\n  exact F.nodup_map_injective {\n    A := A; B := B; f := f; g := g; xs := xs\n  }\n\n-- Exercise 14.5\ntheorem ex14_5\n  (A : Type) (B : Type)\n  (f : A -> B) (g : B -> A) (xs : F.List A) :\n  (forall y : B, f(g(y)) = y) ->\n  (forall x : A, F.Member(x, xs)) ->\n  (forall y : B, F.Member(y, F.map(f, xs))) := by\n  exact F.map_coverage_surjective {\n    A := A; B := B; f := f; g := g; xs := xs\n  }\n\n-- Exercise 14.6\ntheorem ex14_6\n  (A : Type) (B : Type)\n  (f : A -> B) (g : B -> A)\n  (xs : F.List A) (n : Nat) :\n  F.HasCard(xs, n) ->\n  (forall x : A, g(f(x)) = x) ->\n  (forall y : B, f(g(y)) = y) ->\n  F.HasCard(F.map(f, xs), n) := by\n  intro source_cardinality\n  intro left_inverse\n  intro right_inverse\n  apply F.has_card_intro {\n    A := B;\n    xs := F.map(f, xs);\n    n := n\n  }\n  exact ex14_4 {\n    A := A; B := B; f := f; g := g; xs := xs\n  } left_inverse (F.has_card_nodup {\n    A := A; xs := xs; n := n\n  } source_cardinality)\n  rewrite -> F.map_length {A := A; B := B; f := f; xs := xs}\n  exact F.has_card_length {A := A; xs := xs; n := n} source_cardinality\n  exact ex14_5 {\n    A := A; B := B; f := f; g := g; xs := xs\n  } right_inverse (F.has_card_coverage {\n    A := A; xs := xs; n := n\n  } source_cardinality)\n\n-- Exercise 14.7\ntheorem ex14_7 (xs : F.List Answer) (n : Nat) :\n  F.HasCard(xs, n) -> F.HasCard(F.map(encode_answer, xs), n) := by\n  intro source_cardinality\n  apply ex14_6 {\n    A := Answer;\n    B := Bit;\n    f := encode_answer;\n    g := decode_answer;\n    xs := xs;\n    n := n\n  }\n  exact source_cardinality\n  intro answer\n  exact ex14_1 {answer := answer}\n  intro bit\n  exact ex14_2 {bit := bit}\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch14-solutions-fol.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\n\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\n\nallowed_imports = [\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nrequired_imports = [\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nallowed_axioms = []\n\nrequired_theorem.ex14_7 = '(?0 : std/hol/list@1.List Answer) (?1 : Nat) : std/hol/finite@1.HasCard(?0, ?1) -> std/hol/finite@1.HasCard(std/hol/cardinality@1.map(encode_answer, ?0), ?1)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex14_3",
+          "dependency_fragment"
+        ],
+        [
+          "ex14_3",
+          "statement_fragment"
+        ],
+        [
+          "ex14_4",
+          "dependency_fragment"
+        ],
+        [
+          "ex14_4",
+          "statement_fragment"
+        ],
+        [
+          "ex14_5",
+          "dependency_fragment"
+        ],
+        [
+          "ex14_5",
+          "statement_fragment"
+        ],
+        [
+          "ex14_6",
+          "dependency_fragment"
+        ],
+        [
+          "ex14_6",
+          "statement_fragment"
+        ],
+        [
+          "ex14_7",
+          "dependency_fragment"
+        ],
+        [
+          "ex14_7",
+          "statement_fragment"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch15-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch15-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch15-solutions.ctea",
+          "source": "-- Proofs, Checked -- Chapter 15: exercise solutions.\n-- Spoilers! Try docs/book/hol-code/ch15-exercises.ctea first.\n--\n--   cargo run -p cetacea_cli -- docs/book/hol-code/ch15-solutions.ctea\n\nimport ../../../std/nat.ctea\nimport std/hol/finite@1 as F\nimport std/hol/cardinality@1 as F\n\nmode constructive\n\n-- Exercise 15.1\ntheorem ex15_1\n  (A : Type) (a : A) (ys : F.List A) :\n  F.Member(a, ys) ->\n  exists zs : F.List A,\n    F.length(ys) = succ(F.length(zs)) /\\\n    (forall x : A,\n      (x = a -> False) ->\n      F.Member(x, ys) ->\n      F.Member(x, zs)) := by\n  induction ys with\n  | nil =>\n      intro member_a\n      exfalso\n      exact F.member_nil {A := A; x := a} member_a\n  | cons h t ih =>\n      intro member_a\n      have member_cases : a = h \\/ F.Member(a, t) := by\n        apply (F.member_cons {A := A; x := a; h := h; t := t}).left\n        exact member_a\n      cases member_cases with\n      | left a_h =>\n          exists t\n          split\n          rewrite -> F.length_cons {A := A; h := h; t := t}\n          refl\n          intro x\n          intro x_not_a\n          intro member_x\n          have x_cases : x = h \\/ F.Member(x, t) := by\n            apply (F.member_cons {A := A; x := x; h := h; t := t}).left\n            exact member_x\n          cases x_cases with\n          | left x_h =>\n              exfalso\n              apply x_not_a\n              rewrite -> a_h\n              exact x_h\n          | right x_in_t =>\n              exact x_in_t\n      | right a_in_t =>\n          cases ih a_in_t with\n          | intro zs removal =>\n              exists F.cons(h, zs)\n              split\n              rewrite -> F.length_cons {A := A; h := h; t := t}\n              rewrite -> F.length_cons {A := A; h := h; t := zs}\n              rewrite -> removal.left\n              refl\n              intro x\n              intro x_not_a\n              intro member_x\n              have x_cases : x = h \\/ F.Member(x, t) := by\n                apply (F.member_cons {A := A; x := x; h := h; t := t}).left\n                exact member_x\n              apply (F.member_cons {\n                A := A; x := x; h := h; t := zs\n              }).right\n              cases x_cases with\n              | left x_h =>\n                  left\n                  exact x_h\n              | right x_in_t =>\n                  right\n                  exact removal.right x x_not_a x_in_t\n\n-- Exercise 15.2\ntheorem ex15_2 (A : Type) (xs : F.List A) :\n  forall ys : F.List A,\n  F.Nodup(xs) ->\n  (forall x : A, F.Member(x, xs) -> F.Member(x, ys)) ->\n  le(F.length(xs), F.length(ys)) := by\n  induction xs with\n  | nil =>\n      intro ys\n      intro nodup_xs\n      intro included\n      rewrite -> F.length_nil {A := A}\n      exact zero_le {n := F.length(ys)}\n  | cons h t ih =>\n      intro ys\n      intro nodup_xs\n      intro included\n      have nodup_parts : (F.Member(h, t) -> False) /\\ F.Nodup(t) := by\n        apply (F.nodup_cons {A := A; h := h; t := t}).left\n        exact nodup_xs\n      have h_in_xs : F.Member(h, F.cons(h, t)) := by\n        apply (F.member_cons {A := A; x := h; h := h; t := t}).right\n        left\n        refl\n      have h_in_ys : F.Member(h, ys) := included h h_in_xs\n      cases ex15_1 {A := A; a := h; ys := ys} h_in_ys with\n      | intro zs removal =>\n          have tail_included : forall x : A, F.Member(x, t) -> F.Member(x, zs) := by\n            intro x\n            intro x_in_t\n            apply removal.right x\n            intro x_h\n            apply nodup_parts.left\n            rewrite <- x_h\n            exact x_in_t\n            apply included x\n            apply (F.member_cons {A := A; x := x; h := h; t := t}).right\n            right\n            exact x_in_t\n          have tail_le : le(F.length(t), F.length(zs)) := by\n            apply ih zs\n            exact nodup_parts.right\n            exact tail_included\n          have lifted_tail_le : le(succ(F.length(t)), succ(F.length(zs))) := by\n            exact le_succ_succ_rev {\n              n := F.length(t); m := F.length(zs)\n            } tail_le\n          rewrite -> F.length_cons {A := A; h := h; t := t}\n          rewrite -> removal.left\n          exact lifted_tail_le\n\n-- Exercise 15.3\ntheorem ex15_3\n  (A : Type) (B : Type) (f : A -> B)\n  (xs : F.List A) (y : B) :\n  F.Member(y, F.map(f, xs)) ->\n  exists x : A, F.Member(x, xs) /\\ f(x) = y := by\n  induction xs with\n  | nil =>\n      intro member_y\n      exfalso\n      apply F.member_nil {A := B; x := y}\n      rewrite <- F.map_nil {A := A; B := B; f := f}\n      exact member_y\n  | cons h t ih =>\n      intro member_y\n      have member_cases : y = f(h) \\/ F.Member(y, F.map(f, t)) := by\n        apply (F.member_cons {\n          A := B; x := y; h := f(h); t := F.map(f, t)\n        }).left\n        rewrite <- F.map_cons {\n          A := A; B := B; f := f; h := h; t := t\n        }\n        exact member_y\n      cases member_cases with\n      | left y_fh =>\n          exists h\n          split\n          apply (F.member_cons {A := A; x := h; h := h; t := t}).right\n          left\n          refl\n          rewrite -> y_fh\n          refl\n      | right y_in_map_t =>\n          cases ih y_in_map_t with\n          | intro x witness =>\n              exists x\n              split\n              apply (F.member_cons {A := A; x := x; h := h; t := t}).right\n              right\n              exact witness.left\n              exact witness.right\n\n-- Exercise 15.4\ntheorem ex15_4\n  (A : Type) (B : Type) (f : A -> B) (xs : F.List A) :\n  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->\n  F.Nodup(xs) ->\n  F.Nodup(F.map(f, xs)) := by\n  induction xs with\n  | nil =>\n      intro injective\n      intro nodup_xs\n      rewrite -> F.map_nil {A := A; B := B; f := f}\n      exact F.nodup_nil {A := B}\n  | cons h t ih =>\n      intro injective\n      intro nodup_xs\n      have nodup_parts : (F.Member(h, t) -> False) /\\ F.Nodup(t) := by\n        apply (F.nodup_cons {A := A; h := h; t := t}).left\n        exact nodup_xs\n      rewrite -> F.map_cons {A := A; B := B; f := f; h := h; t := t}\n      apply (F.nodup_cons {\n        A := B; h := f(h); t := F.map(f, t)\n      }).right\n      split\n      intro fh_in_tail\n      have preimage : exists x : A, F.Member(x, t) /\\ f(x) = f(h) := by\n        exact ex15_3 {\n          A := A; B := B; f := f; xs := t; y := f(h)\n        } fh_in_tail\n      cases preimage with\n      | intro x witness =>\n          apply nodup_parts.left\n          have x_h : x = h := injective x h witness.right\n          rewrite <- x_h\n          exact witness.left\n      apply ih injective\n      exact nodup_parts.right\n\n-- Exercise 15.5\ntheorem ex15_5 (n : Nat) : le(succ(n), n) -> False := by\n  induction n with\n  | zero =>\n      exact succ_not_le_zero 0\n  | succ k ih =>\n      intro bad_order\n      apply ih\n      exact le_succ_succ {n := succ(k); m := k} bad_order\n\n-- Exercise 15.6\ntheorem ex15_6\n  (A : Type) (B : Type) (f : A -> B)\n  (xs : F.List A) (ys : F.List B) (n : Nat) :\n  F.HasCard(xs, succ(n)) ->\n  F.HasCard(ys, n) ->\n  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->\n  False := by\n  intro source_cardinality\n  intro target_cardinality\n  intro injective\n  have mapped_nodup : F.Nodup(F.map(f, xs)) := by\n    apply ex15_4 {A := A; B := B; f := f; xs := xs}\n    exact injective\n    exact F.has_card_nodup {\n      A := A; xs := xs; n := succ(n)\n    } source_cardinality\n  have mapped_in_target : forall y : B, F.Member(y, F.map(f, xs)) -> F.Member(y, ys) := by\n    intro y\n    intro y_in_map\n    exact F.has_card_coverage {\n      A := B; xs := ys; n := n\n    } target_cardinality y\n  have bad_order : le(F.length(F.map(f, xs)), F.length(ys)) := by\n    apply ex15_2 {A := B; xs := F.map(f, xs)} ys\n    exact mapped_nodup\n    exact mapped_in_target\n  apply ex15_5 n\n  rewrite <- F.has_card_length {\n    A := A; xs := xs; n := succ(n)\n  } source_cardinality\n  rewrite <- F.has_card_length {\n    A := B; xs := ys; n := n\n  } target_cardinality\n  rewrite <- F.map_length {A := A; B := B; f := f; xs := xs}\n  exact bad_order\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch15-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\n\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\n\nallowed_imports = [\n  \"../../../std/nat.ctea\",\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nrequired_imports = [\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nallowed_axioms = []\n\nrequired_theorem.ex15_1 = '(?0 : Type) (?1 : ?0) (?2 : std/hol/list@1.List ?0) : std/hol/list@1.Member(?1, ?2) -> exists ?3 : std/hol/list@1.List ?0, std/hol/list@1.length(?2) = succ(std/hol/list@1.length(?3)) /\\ (forall ?4 : ?0, (not ?4 = ?1) -> std/hol/list@1.Member(?4, ?2) -> std/hol/list@1.Member(?4, ?3))'\nrequired_theorem.ex15_2 = '(?0 : Type) (?1 : std/hol/list@1.List ?0) : forall ?2 : std/hol/list@1.List ?0, std/hol/list@1.Nodup(?1) -> (forall ?3 : ?0, std/hol/list@1.Member(?3, ?1) -> std/hol/list@1.Member(?3, ?2)) -> le(std/hol/list@1.length(?1), std/hol/list@1.length(?2))'\nrequired_theorem.ex15_3 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1) (?3 : std/hol/list@1.List ?0) (?4 : ?1) : std/hol/list@1.Member(?4, std/hol/cardinality@1.map(?2, ?3)) -> exists ?5 : ?0, std/hol/list@1.Member(?5, ?3) /\\ ?2(?5) = ?4'\nrequired_theorem.ex15_4 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1) (?3 : std/hol/list@1.List ?0) : (forall ?4 : ?0, forall ?5 : ?0, ?2(?4) = ?2(?5) -> ?4 = ?5) -> std/hol/list@1.Nodup(?3) -> std/hol/list@1.Nodup(std/hol/cardinality@1.map(?2, ?3))'\nrequired_theorem.ex15_5 = '(?0 : Nat) : not le(succ(?0), ?0)'\nrequired_theorem.ex15_6 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?1) (?5 : Nat) : std/hol/finite@1.HasCard(?3, succ(?5)) -> std/hol/finite@1.HasCard(?4, ?5) -> not (forall ?6 : ?0, forall ?7 : ?0, ?2(?6) = ?2(?7) -> ?6 = ?7)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch15-solutions-fol.ctea-assignment rejects docs/book/hol-code/ch15-solutions.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch15-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch15-solutions.ctea",
+          "source": "-- Proofs, Checked -- Chapter 15: exercise solutions.\n-- Spoilers! Try docs/book/hol-code/ch15-exercises.ctea first.\n--\n--   cargo run -p cetacea_cli -- docs/book/hol-code/ch15-solutions.ctea\n\nimport ../../../std/nat.ctea\nimport std/hol/finite@1 as F\nimport std/hol/cardinality@1 as F\n\nmode constructive\n\n-- Exercise 15.1\ntheorem ex15_1\n  (A : Type) (a : A) (ys : F.List A) :\n  F.Member(a, ys) ->\n  exists zs : F.List A,\n    F.length(ys) = succ(F.length(zs)) /\\\n    (forall x : A,\n      (x = a -> False) ->\n      F.Member(x, ys) ->\n      F.Member(x, zs)) := by\n  induction ys with\n  | nil =>\n      intro member_a\n      exfalso\n      exact F.member_nil {A := A; x := a} member_a\n  | cons h t ih =>\n      intro member_a\n      have member_cases : a = h \\/ F.Member(a, t) := by\n        apply (F.member_cons {A := A; x := a; h := h; t := t}).left\n        exact member_a\n      cases member_cases with\n      | left a_h =>\n          exists t\n          split\n          rewrite -> F.length_cons {A := A; h := h; t := t}\n          refl\n          intro x\n          intro x_not_a\n          intro member_x\n          have x_cases : x = h \\/ F.Member(x, t) := by\n            apply (F.member_cons {A := A; x := x; h := h; t := t}).left\n            exact member_x\n          cases x_cases with\n          | left x_h =>\n              exfalso\n              apply x_not_a\n              rewrite -> a_h\n              exact x_h\n          | right x_in_t =>\n              exact x_in_t\n      | right a_in_t =>\n          cases ih a_in_t with\n          | intro zs removal =>\n              exists F.cons(h, zs)\n              split\n              rewrite -> F.length_cons {A := A; h := h; t := t}\n              rewrite -> F.length_cons {A := A; h := h; t := zs}\n              rewrite -> removal.left\n              refl\n              intro x\n              intro x_not_a\n              intro member_x\n              have x_cases : x = h \\/ F.Member(x, t) := by\n                apply (F.member_cons {A := A; x := x; h := h; t := t}).left\n                exact member_x\n              apply (F.member_cons {\n                A := A; x := x; h := h; t := zs\n              }).right\n              cases x_cases with\n              | left x_h =>\n                  left\n                  exact x_h\n              | right x_in_t =>\n                  right\n                  exact removal.right x x_not_a x_in_t\n\n-- Exercise 15.2\ntheorem ex15_2 (A : Type) (xs : F.List A) :\n  forall ys : F.List A,\n  F.Nodup(xs) ->\n  (forall x : A, F.Member(x, xs) -> F.Member(x, ys)) ->\n  le(F.length(xs), F.length(ys)) := by\n  induction xs with\n  | nil =>\n      intro ys\n      intro nodup_xs\n      intro included\n      rewrite -> F.length_nil {A := A}\n      exact zero_le {n := F.length(ys)}\n  | cons h t ih =>\n      intro ys\n      intro nodup_xs\n      intro included\n      have nodup_parts : (F.Member(h, t) -> False) /\\ F.Nodup(t) := by\n        apply (F.nodup_cons {A := A; h := h; t := t}).left\n        exact nodup_xs\n      have h_in_xs : F.Member(h, F.cons(h, t)) := by\n        apply (F.member_cons {A := A; x := h; h := h; t := t}).right\n        left\n        refl\n      have h_in_ys : F.Member(h, ys) := included h h_in_xs\n      cases ex15_1 {A := A; a := h; ys := ys} h_in_ys with\n      | intro zs removal =>\n          have tail_included : forall x : A, F.Member(x, t) -> F.Member(x, zs) := by\n            intro x\n            intro x_in_t\n            apply removal.right x\n            intro x_h\n            apply nodup_parts.left\n            rewrite <- x_h\n            exact x_in_t\n            apply included x\n            apply (F.member_cons {A := A; x := x; h := h; t := t}).right\n            right\n            exact x_in_t\n          have tail_le : le(F.length(t), F.length(zs)) := by\n            apply ih zs\n            exact nodup_parts.right\n            exact tail_included\n          have lifted_tail_le : le(succ(F.length(t)), succ(F.length(zs))) := by\n            exact le_succ_succ_rev {\n              n := F.length(t); m := F.length(zs)\n            } tail_le\n          rewrite -> F.length_cons {A := A; h := h; t := t}\n          rewrite -> removal.left\n          exact lifted_tail_le\n\n-- Exercise 15.3\ntheorem ex15_3\n  (A : Type) (B : Type) (f : A -> B)\n  (xs : F.List A) (y : B) :\n  F.Member(y, F.map(f, xs)) ->\n  exists x : A, F.Member(x, xs) /\\ f(x) = y := by\n  induction xs with\n  | nil =>\n      intro member_y\n      exfalso\n      apply F.member_nil {A := B; x := y}\n      rewrite <- F.map_nil {A := A; B := B; f := f}\n      exact member_y\n  | cons h t ih =>\n      intro member_y\n      have member_cases : y = f(h) \\/ F.Member(y, F.map(f, t)) := by\n        apply (F.member_cons {\n          A := B; x := y; h := f(h); t := F.map(f, t)\n        }).left\n        rewrite <- F.map_cons {\n          A := A; B := B; f := f; h := h; t := t\n        }\n        exact member_y\n      cases member_cases with\n      | left y_fh =>\n          exists h\n          split\n          apply (F.member_cons {A := A; x := h; h := h; t := t}).right\n          left\n          refl\n          rewrite -> y_fh\n          refl\n      | right y_in_map_t =>\n          cases ih y_in_map_t with\n          | intro x witness =>\n              exists x\n              split\n              apply (F.member_cons {A := A; x := x; h := h; t := t}).right\n              right\n              exact witness.left\n              exact witness.right\n\n-- Exercise 15.4\ntheorem ex15_4\n  (A : Type) (B : Type) (f : A -> B) (xs : F.List A) :\n  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->\n  F.Nodup(xs) ->\n  F.Nodup(F.map(f, xs)) := by\n  induction xs with\n  | nil =>\n      intro injective\n      intro nodup_xs\n      rewrite -> F.map_nil {A := A; B := B; f := f}\n      exact F.nodup_nil {A := B}\n  | cons h t ih =>\n      intro injective\n      intro nodup_xs\n      have nodup_parts : (F.Member(h, t) -> False) /\\ F.Nodup(t) := by\n        apply (F.nodup_cons {A := A; h := h; t := t}).left\n        exact nodup_xs\n      rewrite -> F.map_cons {A := A; B := B; f := f; h := h; t := t}\n      apply (F.nodup_cons {\n        A := B; h := f(h); t := F.map(f, t)\n      }).right\n      split\n      intro fh_in_tail\n      have preimage : exists x : A, F.Member(x, t) /\\ f(x) = f(h) := by\n        exact ex15_3 {\n          A := A; B := B; f := f; xs := t; y := f(h)\n        } fh_in_tail\n      cases preimage with\n      | intro x witness =>\n          apply nodup_parts.left\n          have x_h : x = h := injective x h witness.right\n          rewrite <- x_h\n          exact witness.left\n      apply ih injective\n      exact nodup_parts.right\n\n-- Exercise 15.5\ntheorem ex15_5 (n : Nat) : le(succ(n), n) -> False := by\n  induction n with\n  | zero =>\n      exact succ_not_le_zero 0\n  | succ k ih =>\n      intro bad_order\n      apply ih\n      exact le_succ_succ {n := succ(k); m := k} bad_order\n\n-- Exercise 15.6\ntheorem ex15_6\n  (A : Type) (B : Type) (f : A -> B)\n  (xs : F.List A) (ys : F.List B) (n : Nat) :\n  F.HasCard(xs, succ(n)) ->\n  F.HasCard(ys, n) ->\n  (forall x1 x2 : A, f(x1) = f(x2) -> x1 = x2) ->\n  False := by\n  intro source_cardinality\n  intro target_cardinality\n  intro injective\n  have mapped_nodup : F.Nodup(F.map(f, xs)) := by\n    apply ex15_4 {A := A; B := B; f := f; xs := xs}\n    exact injective\n    exact F.has_card_nodup {\n      A := A; xs := xs; n := succ(n)\n    } source_cardinality\n  have mapped_in_target : forall y : B, F.Member(y, F.map(f, xs)) -> F.Member(y, ys) := by\n    intro y\n    intro y_in_map\n    exact F.has_card_coverage {\n      A := B; xs := ys; n := n\n    } target_cardinality y\n  have bad_order : le(F.length(F.map(f, xs)), F.length(ys)) := by\n    apply ex15_2 {A := B; xs := F.map(f, xs)} ys\n    exact mapped_nodup\n    exact mapped_in_target\n  apply ex15_5 n\n  rewrite <- F.has_card_length {\n    A := A; xs := xs; n := succ(n)\n  } source_cardinality\n  rewrite <- F.has_card_length {\n    A := B; xs := ys; n := n\n  } target_cardinality\n  rewrite <- F.map_length {A := A; B := B; f := f; xs := xs}\n  exact bad_order\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch15-solutions-fol.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\n\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\n\nallowed_imports = [\n  \"../../../std/nat.ctea\",\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nrequired_imports = [\n  \"std/hol/cardinality@1\",\n  \"std/hol/finite@1\",\n  \"std/hol/list@1\",\n]\nallowed_axioms = []\n\nrequired_theorem.ex15_6 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?1) (?5 : Nat) : std/hol/finite@1.HasCard(?3, succ(?5)) -> std/hol/finite@1.HasCard(?4, ?5) -> not (forall ?6 : ?0, forall ?7 : ?0, ?2(?6) = ?2(?7) -> ?6 = ?7)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex15_3",
+          "dependency_fragment"
+        ],
+        [
+          "ex15_3",
+          "statement_fragment"
+        ],
+        [
+          "ex15_4",
+          "dependency_fragment"
+        ],
+        [
+          "ex15_4",
+          "statement_fragment"
+        ],
+        [
+          "ex15_6",
+          "dependency_fragment"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch16-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch16-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch16-solutions.ctea",
+          "source": "-- Proofs, Checked -- Chapter 16: exercise solutions.\n-- Spoilers! Try docs/book/hol-code/ch16-exercises.ctea first.\n--\n--   cargo run -p cetacea_cli -- docs/book/hol-code/ch16-solutions.ctea\n\nimport ../../../std/hol/counting.ctea as C\n\nmode constructive\n\n-- Exercise 16.1\ntheorem ex16_1\n  (A : Type) (S T : Set A)\n  (xs ys : C.List A) (m n : Nat) (x : A) :\n  C.HasSize(S, xs, m) ->\n  C.HasSize(T, ys, n) ->\n  x in union(S, T) ->\n  C.Member(x, C.append(xs, ys)) := by\n  intro size_s\n  intro size_t\n  intro x_in_union\n  simp at x_in_union\n  apply (C.member_append {A := A; x := x; xs := xs} ys).right\n  cases x_in_union with\n  | left x_in_s =>\n      left\n      apply (C.has_size_members {\n        A := A; S := S; xs := xs; n := m\n      } size_s x).right\n      exact x_in_s\n  | right x_in_t =>\n      right\n      apply (C.has_size_members {\n        A := A; S := T; xs := ys; n := n\n      } size_t x).right\n      exact x_in_t\n\n-- Exercise 16.2\ntheorem ex16_2\n  (A : Type) (xs : C.List A) :\n  forall ys : C.List A,\n  C.Nodup(xs) ->\n  C.Nodup(ys) ->\n  (forall x : A, C.Member(x, xs) -> C.Member(x, ys) -> False) ->\n  C.Nodup(C.append(xs, ys)) := by\n  induction xs with\n  | nil =>\n      intro ys\n      intro nodup_xs\n      intro nodup_ys\n      intro disjoint\n      rewrite -> C.append_nil_left {A := A; xs := ys}\n      exact nodup_ys\n  | cons h t ih =>\n      intro ys\n      intro nodup_xs\n      intro nodup_ys\n      intro disjoint\n      have nodup_parts : (C.Member(h, t) -> False) /\\ C.Nodup(t) := by\n        apply (C.nodup_cons {A := A; h := h; t := t}).left\n        exact nodup_xs\n      rewrite -> C.append_cons {A := A; h := h; t := t; ys := ys}\n      apply (C.nodup_cons {\n        A := A; h := h; t := C.append(t, ys)\n      }).right\n      split\n      intro h_in_append\n      have h_cases : C.Member(h, t) \\/ C.Member(h, ys) := by\n        apply (C.member_append {A := A; x := h; xs := t} ys).left\n        exact h_in_append\n      cases h_cases with\n      | left h_in_t =>\n          exact nodup_parts.left h_in_t\n      | right h_in_ys =>\n          apply disjoint h\n          apply (C.member_cons {A := A; x := h; h := h; t := t}).right\n          left\n          refl\n          exact h_in_ys\n      apply ih\n      exact nodup_parts.right\n      exact nodup_ys\n      intro x\n      intro x_in_t\n      intro x_in_ys\n      apply disjoint x\n      apply (C.member_cons {A := A; x := x; h := h; t := t}).right\n      right\n      exact x_in_t\n      exact x_in_ys\n\n-- Exercise 16.3\ntheorem ex16_3\n  (A : Type) (S T : Set A)\n  (xs ys : C.List A) (m n : Nat) :\n  C.HasSize(S, xs, m) ->\n  C.HasSize(T, ys, n) ->\n  (forall x : A, x in S -> x in T -> False) ->\n  C.HasSize(union(S, T), C.append(xs, ys), add(m, n)) := by\n  intro size_s\n  intro size_t\n  intro disjoint\n  apply C.has_size_intro {\n    A := A;\n    S := union(S, T);\n    xs := C.append(xs, ys);\n    n := add(m, n)\n  }\n  apply ex16_2 {A := A; xs := xs}\n  exact C.has_size_nodup {A := A; S := S; xs := xs; n := m} size_s\n  exact C.has_size_nodup {A := A; S := T; xs := ys; n := n} size_t\n  intro x\n  intro x_in_xs\n  intro x_in_ys\n  apply disjoint x\n  apply (C.has_size_members {\n    A := A; S := S; xs := xs; n := m\n  } size_s x).left\n  exact x_in_xs\n  apply (C.has_size_members {\n    A := A; S := T; xs := ys; n := n\n  } size_t x).left\n  exact x_in_ys\n  rewrite -> C.length_append {A := A; xs := xs; ys := ys}\n  rewrite -> C.has_size_length {\n    A := A; S := S; xs := xs; n := m\n  } size_s\n  rewrite -> C.has_size_length {\n    A := A; S := T; xs := ys; n := n\n  } size_t\n  refl\n  intro x\n  split\n  intro x_in_append\n  have x_cases : C.Member(x, xs) \\/ C.Member(x, ys) := by\n    apply (C.member_append {A := A; x := x; xs := xs} ys).left\n    exact x_in_append\n  simp\n  cases x_cases with\n  | left x_in_xs =>\n      left\n      apply (C.has_size_members {\n        A := A; S := S; xs := xs; n := m\n      } size_s x).left\n      exact x_in_xs\n  | right x_in_ys =>\n      right\n      apply (C.has_size_members {\n        A := A; S := T; xs := ys; n := n\n      } size_t x).left\n      exact x_in_ys\n  intro x_in_union\n  apply ex16_1 {\n    A := A; S := S; T := T; xs := xs; ys := ys; m := m; n := n; x := x\n  }\n  exact size_s\n  exact size_t\n  exact x_in_union\n\n-- Exercise 16.4\ntheorem ex16_4\n  (A : Type) (S T : Set A)\n  (xs ys zs : C.List A) (m n k : Nat) :\n  C.HasSize(S, xs, m) ->\n  C.HasSize(T, ys, n) ->\n  C.HasSize(union(S, T), zs, k) ->\n  le(k, add(m, n)) := by\n  intro size_s\n  intro size_t\n  intro size_union\n  have union_in_append : forall x : A, C.Member(x, zs) -> C.Member(x, C.append(xs, ys)) := by\n    intro x\n    intro x_in_zs\n    apply ex16_1 {\n      A := A; S := S; T := T; xs := xs; ys := ys; m := m; n := n; x := x\n    }\n    exact size_s\n    exact size_t\n    apply (C.has_size_members {\n      A := A; S := union(S, T); xs := zs; n := k\n    } size_union x).left\n    exact x_in_zs\n  have list_bound : le(C.length(zs), C.length(C.append(xs, ys))) := by\n    apply C.nodup_inclusion_length_le {A := A; xs := zs}\n    exact C.has_size_nodup {\n      A := A; S := union(S, T); xs := zs; n := k\n    } size_union\n    exact union_in_append\n  rewrite <- C.has_size_length {\n    A := A; S := union(S, T); xs := zs; n := k\n  } size_union\n  rewrite <- C.has_size_length {\n    A := A; S := S; xs := xs; n := m\n  } size_s\n  rewrite <- C.has_size_length {\n    A := A; S := T; xs := ys; n := n\n  } size_t\n  rewrite <- C.length_append {A := A; xs := xs; ys := ys}\n  exact list_bound\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch16-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\n\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\n\nallowed_imports = [\n  \"../../../std/hol/counting.ctea\",\n  \"../../../std/nat.ctea\",\n  \"std/hol/list@1\",\n]\nrequired_imports = [\n  \"std/hol/list@1\",\n]\nallowed_axioms = []\n\nrequired_theorem.ex16_1 = '(?0 : Type) (?1 : Set ?0) (?2 : Set ?0) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?0) (?5 : Nat) (?6 : Nat) (?7 : ?0) : C.HasSize(?1, ?3, ?5) -> C.HasSize(?2, ?4, ?6) -> ?7 in union(?1, ?2) -> std/hol/list@1.Member(?7, std/hol/list@1.append(?3, ?4))'\nrequired_theorem.ex16_2 = '(?0 : Type) (?1 : std/hol/list@1.List ?0) : forall ?2 : std/hol/list@1.List ?0, std/hol/list@1.Nodup(?1) -> std/hol/list@1.Nodup(?2) -> (forall ?3 : ?0, std/hol/list@1.Member(?3, ?1) -> not std/hol/list@1.Member(?3, ?2)) -> std/hol/list@1.Nodup(std/hol/list@1.append(?1, ?2))'\nrequired_theorem.ex16_3 = '(?0 : Type) (?1 : Set ?0) (?2 : Set ?0) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?0) (?5 : Nat) (?6 : Nat) : C.HasSize(?1, ?3, ?5) -> C.HasSize(?2, ?4, ?6) -> (forall ?7 : ?0, ?7 in ?1 -> not ?7 in ?2) -> C.HasSize(union(?1, ?2), std/hol/list@1.append(?3, ?4), add(?5, ?6))'\nrequired_theorem.ex16_4 = '(?0 : Type) (?1 : Set ?0) (?2 : Set ?0) (?3 : std/hol/list@1.List ?0) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?0) (?6 : Nat) (?7 : Nat) (?8 : Nat) : C.HasSize(?1, ?3, ?6) -> C.HasSize(?2, ?4, ?7) -> C.HasSize(union(?1, ?2), ?5, ?8) -> le(?8, add(?6, ?7))'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch17-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch17-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch17-solutions.ctea",
+          "source": "-- Chapter 17 solutions. Try ch17-exercises.ctea before reading these proofs.\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/list@1 as L\nimport builtin:std/nat.ctea as N\n\nmode constructive\n\ntheorem ex17_1 : S.sum(L.cons(3, L.cons(0, L.cons(3, L.nil)))) = 6 := by\n  simp\n  refl\n\ntheorem ex17_2 (xs : L.List Nat) (n : Nat) :\n  S.sum(xs) = n -> S.sum(L.cons(4, xs)) = add(4, n) := by\n  intro total\n  rewrite -> S.sum_cons\n  rewrite -> total\n  refl\n\ntheorem ex17_3 (xs ys : L.List Nat) (m n : Nat) :\n  S.sum(xs) = m -> S.sum(ys) = n ->\n  S.sum(L.append(xs, ys)) = add(m, n) := by\n  intro first\n  intro second\n  rewrite -> S.sum_append\n  rewrite -> first\n  rewrite -> second\n  refl\n\ntheorem ex17_4 (xs ys zs : L.List Nat) :\n  S.sum(L.append(L.append(xs, ys), zs)) =\n  add(S.sum(xs), add(S.sum(ys), S.sum(zs))) := by\n  rewrite -> S.sum_append\n  rewrite -> S.sum_append\n  rewrite -> N.add_assoc\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch17-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/list@1\"]\nrequired_imports = [\"builtin:std/hol/sums.ctea\", \"std/hol/list@1\"]\nallowed_axioms = []\n\nrequired_theorem.ex17_1 = 'S.sum(std/hol/list@1.cons(3, std/hol/list@1.cons(0, std/hol/list@1.cons(3, std/hol/list@1.nil)))) = 6'\nrequired_theorem.ex17_2 = '(?0 : std/hol/list@1.List Nat) (?1 : Nat) : S.sum(?0) = ?1 -> S.sum(std/hol/list@1.cons(4, ?0)) = add(4, ?1)'\nrequired_theorem.ex17_3 = '(?0 : std/hol/list@1.List Nat) (?1 : std/hol/list@1.List Nat) (?2 : Nat) (?3 : Nat) : S.sum(?0) = ?2 -> S.sum(?1) = ?3 -> S.sum(std/hol/list@1.append(?0, ?1)) = add(?2, ?3)'\nrequired_theorem.ex17_4 = '(?0 : std/hol/list@1.List Nat) (?1 : std/hol/list@1.List Nat) (?2 : std/hol/list@1.List Nat) : S.sum(std/hol/list@1.append(std/hol/list@1.append(?0, ?1), ?2)) = add(S.sum(?0), add(S.sum(?1), S.sum(?2)))'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch18-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch18-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch18-solutions.ctea",
+          "source": "-- Chapter 18: explicit directed paths.\nimport std/hol/graph@1 as G\n\nmode constructive\n\n-- Staying at a vertex requires no edge.\ntheorem ex18_1 (A : Type) (E : A -> A -> Prop) (a : A) :\n  G.ValidPath(E, G.nil, a, a) := by\n  apply (G.path_nil {A := A; E := E; a := a; b := a}).right\n  refl\n\n-- Prepend one edge to an already checked tail path.\ntheorem ex18_2 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :\n  E(a, h) -> G.ValidPath(E, t, h, b) -> G.ValidPath(E, G.cons(h, t), a, b) := by\n  intro edge\n  intro tail\n  apply (G.path_cons {A := A; E := E; h := h; t := t; a := a; b := b}).right\n  split\n  exact edge\n  exact tail\n\n-- Removing the first visited vertex changes the start of the remaining path.\ntheorem ex18_3 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :\n  G.ValidPath(E, G.cons(h, t), a, b) -> G.ValidPath(E, t, h, b) := by\n  intro path\n  have parts : E(a, h) /\\ G.ValidPath(E, t, h, b) := (G.path_cons {A := A; E := E; h := h; t := t; a := a; b := b}).left path\n  exact parts.right\n\n-- Join two paths at a common endpoint. Keep endpoints general during induction.\ntheorem ex18_4 (A : Type) (E : A -> A -> Prop) (xs ys : G.List A) :\n  forall a b c : A,\n  G.ValidPath(E, xs, a, b) -> G.ValidPath(E, ys, b, c) ->\n  G.ValidPath(E, G.append(xs, ys), a, c) := by\n  induction xs with\n  | nil =>\n      intro a\n      intro b\n      intro c\n      intro first\n      intro second\n      have same : b = a := (G.path_nil {A := A; E := E; a := a; b := b}).left first\n      rewrite -> G.append_nil_left\n      rewrite <- same\n      exact second\n  | cons h t ih =>\n      intro a\n      intro b\n      intro c\n      intro first\n      intro second\n      have parts : E(a, h) /\\ G.ValidPath(E, t, h, b) := (G.path_cons {A := A; E := E; h := h; t := t; a := a; b := b}).left first\n      rewrite -> G.append_cons\n      apply (G.path_cons {A := A; E := E; h := h; t := G.append(t, ys); a := a; b := c}).right\n      split\n      exact parts.left\n      exact ih h b c parts.right second\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch18-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"std/hol/graph@1\", \"std/hol/list@1\", \"builtin:std/hol/paths.ctea\"]\nrequired_imports = [\"std/hol/graph@1\"]\nallowed_axioms = []\n\nrequired_theorem.ex18_1 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : ?0) : std/hol/graph@1.ValidPath(?1, std/hol/list@1.nil, ?2, ?2)'\nrequired_theorem.ex18_2 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : std/hol/list@1.List ?0) (?3 : ?0) (?4 : ?0) (?5 : ?0) : ?1(?3, ?4) -> std/hol/graph@1.ValidPath(?1, ?2, ?4, ?5) -> std/hol/graph@1.ValidPath(?1, std/hol/list@1.cons(?4, ?2), ?3, ?5)'\nrequired_theorem.ex18_3 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : std/hol/list@1.List ?0) (?3 : ?0) (?4 : ?0) (?5 : ?0) : std/hol/graph@1.ValidPath(?1, std/hol/list@1.cons(?4, ?2), ?3, ?5) -> std/hol/graph@1.ValidPath(?1, ?2, ?4, ?5)'\nrequired_theorem.ex18_4 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : std/hol/list@1.List ?0) (?3 : std/hol/list@1.List ?0) : forall ?4 : ?0, forall ?5 : ?0, forall ?6 : ?0, std/hol/graph@1.ValidPath(?1, ?2, ?4, ?5) -> std/hol/graph@1.ValidPath(?1, ?3, ?5, ?6) -> std/hol/graph@1.ValidPath(?1, std/hol/list@1.append(?2, ?3), ?4, ?6)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch19-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch19-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch19-solutions.ctea",
+          "source": "-- Chapter 19: double counting and the handshake identity.\nimport std/hol/matrix@1 as M\nimport std/hol/cardinality@1 as C\nimport builtin:std/hol/double_counting.ctea as D\nimport builtin:std/hol/weighted_sums.ctea as W\nimport builtin:std/hol/handshake.ctea as H\nimport builtin:std/hol/sums.ctea as S\nmode constructive\n\n-- Compute the sum of a row with no columns.\ntheorem ex19_1 (A B : Type) (w : A -> B -> Nat) (a : A) :\n  M.row_sum(w, a, M.nil) = 0 := by\n  exact M.row_sum_nil {A := A; B := B; w := w; a := a}\n\n-- Induct over the columns: a table with no rows has total zero.\ntheorem ex19_2 (A B : Type) (w : A -> B -> Nat) (ys : M.List B) :\n  M.columns_total(w, M.nil, ys) = 0 := by\n  induction ys with\n  | nil =>\n      exact M.columns_total_nil {A := A; B := B; w := w; xs := M.nil}\n  | cons b tail ih =>\n      rewrite -> M.columns_total_cons\n      rewrite -> M.column_sum_nil\n      rewrite -> ih\n      simp\n      refl\n\ntheorem ex19_3 (A B : Type) (w : A -> B -> Nat) (a : A) (xs : M.List A) (ys : M.List B) :\n  M.columns_total(w, M.cons(a, xs), ys) = add(M.row_sum(w, a, ys), M.columns_total(w, xs, ys)) := by\n  induction ys with\n  | nil =>\n      rewrite -> M.columns_total_nil\n      rewrite -> M.row_sum_nil\n      rewrite -> M.columns_total_nil\n      simp\n      refl\n  | cons b tail ih =>\n      rewrite -> M.columns_total_cons\n      rewrite -> M.column_sum_cons\n      rewrite -> ih\n      rewrite -> M.row_sum_cons\n      rewrite -> M.columns_total_cons\n      exact W.add_interchange\n\ntheorem ex19_4 (Edge Vertex : Type) (incidence : Edge -> Vertex -> Nat)\n  (degree : Vertex -> Nat) (edges : M.List Edge) (vertices : M.List Vertex) :\n  (forall e : Edge, C.Member(e, edges) -> M.row_sum(incidence, e, vertices) = 2) ->\n  (forall v : Vertex, C.Member(v, vertices) -> degree(v) = M.column_sum(incidence, edges, v)) ->\n  S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by\n  intro two_ends\n  intro degrees\n  rewrite -> H.columns_as_degrees {A := Edge; B := Vertex; w := incidence; degree := degree; xs := edges; ys := vertices} degrees\n  rewrite <- D.double_counting\n  exact H.rows_constant {A := Edge; B := Vertex; w := incidence; xs := edges; ys := vertices; k := 2} two_ends\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch19-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"std/hol/matrix@1\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"builtin:std/hol/double_counting.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/hol/handshake.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\"]\nrequired_imports = [\"std/hol/matrix@1\"]\nallowed_axioms = []\n\nrequired_theorem.ex19_1 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?0) : std/hol/matrix@1.row_sum(?2, ?3, std/hol/list@1.nil) = 0'\nrequired_theorem.ex19_2 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : std/hol/list@1.List ?1) : std/hol/matrix@1.columns_total(?2, std/hol/list@1.nil, ?3) = 0'\nrequired_theorem.ex19_3 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?0) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?1) : std/hol/matrix@1.columns_total(?2, std/hol/list@1.cons(?3, ?4), ?5) = add(std/hol/matrix@1.row_sum(?2, ?3, ?5), std/hol/matrix@1.columns_total(?2, ?4, ?5))'\nrequired_theorem.ex19_4 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?1 -> Nat) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?1) : (forall ?6 : ?0, std/hol/list@1.Member(?6, ?4) -> std/hol/matrix@1.row_sum(?2, ?6, ?5) = 2) -> (forall ?7 : ?1, std/hol/list@1.Member(?7, ?5) -> ?3(?7) = std/hol/matrix@1.column_sum(?2, ?4, ?7)) -> S.sum(std/hol/cardinality@1.map(?3, ?5)) = mul(std/hol/list@1.length(?4), 2)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch20-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch20-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch20-solutions.ctea",
+          "source": "-- Chapter 20: divisibility and modular arithmetic over natural numbers.\nimport builtin:std/modular.ctea as M\nmode constructive\n\n-- A divisibility proof supplies the multiplier.\ntheorem ex20_1 : M.Divides(4, 20) := by\n  unfold M.Divides\n  exists 5\n  refl\n\n-- A common divisor is preserved by this linear combination.\ntheorem ex20_2 (d a b : Nat) :\n  M.Divides(d, a) -> M.Divides(d, b) -> M.Divides(d, add(a, mul(b, 3))) := by\n  intro da\n  intro db\n  apply M.divides_add {d := d; a := a; b := mul(b, 3)}\n  exact da\n  exact M.divides_mul {d := d; a := b; k := 3} db\n\n-- Congruent inputs give congruent values of x*x + 1.\ntheorem ex20_3 (m x y : Nat) :\n  M.ModEq(m, x, y) -> M.ModEq(m, add(mul(x, x), 1), add(mul(y, y), 1)) := by\n  intro same\n  apply M.modeq_add {m := m; x := mul(x, x); y := mul(y, y); u := 1; v := 1}\n  exact M.modeq_mul {m := m; x := x; y := y; u := x; v := y} same same\n  exact M.modeq_refl {m := m; x := 1}\n\n-- With modulus zero, the two padded values are just the original values.\ntheorem ex20_4 (x y : Nat) : M.ModEq(0, x, y) -> x = y := by\n  intro congruent\n  simp at congruent\n  cases congruent with\n  | intro a remaining =>\n      cases remaining with\n      | intro b equal =>\n          exact equal\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch20-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/modular.ctea\", \"builtin:std/nat.ctea\", \"builtin:std/eq.ctea\"]\nrequired_imports = [\"builtin:std/modular.ctea\"]\nallowed_axioms = []\n\nrequired_theorem.ex20_1 = 'M.Divides(4, 20)'\nrequired_theorem.ex20_2 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : M.Divides(?0, ?1) -> M.Divides(?0, ?2) -> M.Divides(?0, add(?1, mul(?2, 3)))'\nrequired_theorem.ex20_3 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : M.ModEq(?0, ?1, ?2) -> M.ModEq(?0, add(mul(?1, ?1), 1), add(mul(?2, ?2), 1))'\nrequired_theorem.ex20_4 = '(?0 : Nat) (?1 : Nat) : M.ModEq(0, ?0, ?1) -> ?0 = ?1'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch21-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch21-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch21-solutions.ctea",
+          "source": "-- Chapter 21: recurrence equations and induction.\nimport builtin:std/hol/recurrences.ctea as R\nimport builtin:std/nat.ctea as N\nmode constructive\n\n-- Specialize a general closed form at four ticks.\ntheorem ex21_1 (f : Nat -> Nat) :\n  f(0) = 2 ->\n  (forall n : Nat, f(succ(n)) = add(3, f(n))) -> f(4) = 14 := by\n  intro initial\n  intro step\n  have all_ticks : forall n : Nat, f(n) = add(2, mul(n, 3)) := by\n    apply R.constant_step_closed {f := f; a := 2; d := 3}\n    exact initial\n    exact step\n  exact all_ticks 4\n\ntheorem ex21_2 (a d n : Nat) :\n  add(a, mul(succ(n), d)) = add(d, add(a, mul(n, d))) := by\n  rewrite -> N.mul_succ_left\n  rewrite <- N.add_assoc {n := a; m := d; k := mul(n, d)}\n  rewrite -> N.add_comm {n := a; m := d}\n  rewrite -> N.add_assoc\n  refl\n\ntheorem ex21_3 (f : Nat -> Nat) (a d : Nat) :\n  f(0) = a ->\n  (forall n : Nat, f(succ(n)) = add(d, f(n))) ->\n  forall n : Nat, f(n) = add(a, mul(n, d)) := by\n  intro initial\n  intro step\n  intro n\n  induction n with\n  | zero =>\n      simp\n      exact initial\n  | succ k ih =>\n      rewrite -> step k\n      rewrite -> ih\n      rewrite -> N.mul_succ_left\n      rewrite <- N.add_assoc {n := d; m := a; k := mul(k, d)}\n      rewrite -> N.add_comm {n := d; m := a}\n      rewrite -> N.add_assoc\n      refl\n\ntheorem ex21_4 (A : Type) (f g : Nat -> A) (step : Nat -> A -> A) :\n  f(0) = g(0) ->\n  (forall n : Nat, f(succ(n)) = step(n, f(n))) ->\n  (forall n : Nat, g(succ(n)) = step(n, g(n))) ->\n  forall n : Nat, f(n) = g(n) := by\n  intro initial\n  intro f_step\n  intro g_step\n  intro n\n  induction n with\n  | zero =>\n      exact initial\n  | succ k ih =>\n      rewrite -> f_step k\n      rewrite -> g_step k\n      rewrite -> ih\n      refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch21-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/recurrences.ctea\", \"builtin:std/nat.ctea\"]\nrequired_imports = [\"builtin:std/hol/recurrences.ctea\"]\nallowed_axioms = []\n\nrequired_theorem.ex21_1 = '(?0 : Nat -> Nat) : ?0(0) = 2 -> (forall ?1 : Nat, ?0(succ(?1)) = add(3, ?0(?1))) -> ?0(4) = 14'\nrequired_theorem.ex21_2 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : add(?0, mul(succ(?2), ?1)) = add(?1, add(?0, mul(?2, ?1)))'\nrequired_theorem.ex21_3 = '(?0 : Nat -> Nat) (?1 : Nat) (?2 : Nat) : ?0(0) = ?1 -> (forall ?3 : Nat, ?0(succ(?3)) = add(?2, ?0(?3))) -> forall ?4 : Nat, ?0(?4) = add(?1, mul(?4, ?2))'\nrequired_theorem.ex21_4 = '(?0 : Type) (?1 : Nat -> ?0) (?2 : Nat -> ?0) (?3 : Nat -> ?0 -> ?0) : ?1(0) = ?2(0) -> (forall ?4 : Nat, ?1(succ(?4)) = ?3(?4, ?1(?4))) -> (forall ?5 : Nat, ?2(succ(?5)) = ?3(?5, ?2(?5))) -> forall ?6 : Nat, ?1(?6) = ?2(?6)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch22-solutions.ctea-assignment",
+    "project": {
+      "root": "docs/book/hol-code/ch22-solutions.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch22-solutions.ctea",
+          "source": "import builtin:std/hol/probability_counts.ctea as P\nimport builtin:std/hol/weighted_sums.ctea as W\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ntheorem ex22_1 (A : Type) (x : A) (xs : C.List A) :\n  not C.length(C.cons(x, xs)) = 0 := by\n  rewrite -> C.length_cons\n  intro zero_length\n  contradiction\n\ntheorem ex22_2(A : Type) (f g : A -> Nat) (xs : C.List A) :\n  (forall x : A, C.Member(x, xs) -> add(f(x), g(x)) = 1) ->\n  add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) = C.length(xs) := by\n  induction xs with\n  | nil =>\n      intro partition\n      rewrite -> C.map_nil\n      rewrite -> C.map_nil\n      rewrite -> C.length_nil\n      simp\n      refl\n  | cons x t ih =>\n      intro partition\n      have head_member : C.Member(x, C.cons(x, t)) := W.member_head\n      have head : add(f(x), g(x)) = 1 := partition x head_member\n      have on_tail : forall y : A, C.Member(y, t) -> add(f(y), g(y)) = 1 := by\n        intro y\n        intro member\n        have in_list : C.Member(y, C.cons(x, t)) := W.member_tail {A := A; x := x; y := y; t := t} member\n        exact partition y in_list\n      have tail : add(S.sum(C.map(f, t)), S.sum(C.map(g, t))) = C.length(t) := ih on_tail\n      rewrite -> C.map_cons\n      rewrite -> C.map_cons\n      rewrite -> S.sum_cons\n      rewrite -> W.add_interchange\n      rewrite -> head\n      rewrite -> tail\n      rewrite -> C.length_cons\n      refl\n\ntheorem ex22_3 (A : Type) (f g h : A -> Nat) (xs : C.List A) (a b : Nat) :\n  (forall x : A, C.Member(x, xs) -> h(x) = add(f(x), g(x))) ->\n  S.sum(C.map(f, xs)) = a -> S.sum(C.map(g, xs)) = b ->\n  S.sum(C.map(h, xs)) = add(a, b) := by\n  intro pointwise\n  intro first\n  intro second\n  have linear : S.sum(C.map(h, xs)) = add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) := by\n    exact P.numerator_add {A := A; f := f; g := g; h := h; xs := xs} pointwise\n  rewrite -> first at linear\n  rewrite -> second at linear\n  exact linear\n\ntheorem ex22_4 (A : Type) (f : A -> Nat) (xs : C.List A) (k : Nat) :\n  (forall x : A, C.Member(x, xs) -> f(x) = k) ->\n  S.sum(C.map(f, xs)) = mul(C.length(xs), k) := by\n  exact W.sum_map_constant_on {A := A; f := f; xs := xs; k := k}\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch22-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/probability_counts.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\"]\nrequired_imports = [\"builtin:std/hol/probability_counts.ctea\"]\nallowed_axioms = []\n\nrequired_theorem.ex22_1 = '(?0 : Type) (?1 : ?0) (?2 : std/hol/list@1.List ?0) : not std/hol/list@1.length(std/hol/list@1.cons(?1, ?2)) = 0'\nrequired_theorem.ex22_2 = '(?0 : Type) (?1 : ?0 -> Nat) (?2 : ?0 -> Nat) (?3 : std/hol/list@1.List ?0) : (forall ?4 : ?0, std/hol/list@1.Member(?4, ?3) -> add(?1(?4), ?2(?4)) = 1) -> add(S.sum(std/hol/cardinality@1.map(?1, ?3)), S.sum(std/hol/cardinality@1.map(?2, ?3))) = std/hol/list@1.length(?3)'\nrequired_theorem.ex22_3 = '(?0 : Type) (?1 : ?0 -> Nat) (?2 : ?0 -> Nat) (?3 : ?0 -> Nat) (?4 : std/hol/list@1.List ?0) (?5 : Nat) (?6 : Nat) : (forall ?7 : ?0, std/hol/list@1.Member(?7, ?4) -> ?3(?7) = add(?1(?7), ?2(?7))) -> S.sum(std/hol/cardinality@1.map(?1, ?4)) = ?5 -> S.sum(std/hol/cardinality@1.map(?2, ?4)) = ?6 -> S.sum(std/hol/cardinality@1.map(?3, ?4)) = add(?5, ?6)'\nrequired_theorem.ex22_4 = '(?0 : Type) (?1 : ?0 -> Nat) (?2 : std/hol/list@1.List ?0) (?3 : Nat) : (forall ?4 : ?0, std/hol/list@1.Member(?4, ?2) -> ?1(?4) = ?3) -> S.sum(std/hol/cardinality@1.map(?1, ?2)) = mul(std/hol/list@1.length(?2), ?3)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch17-solutions.ctea-assignment rejects docs/book/hol-code/ch17-exercises.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch17-exercises.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch17-exercises.ctea",
+          "source": "-- Chapter 17 exercises. Replace each sorry with a proof.\n-- Keep the theorem names and statements; helper theorems are welcome.\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/list@1 as L\nimport builtin:std/nat.ctea as N\n\nmode constructive\n\n-- 17.1: Entries contribute once per occurrence, including repeated values.\ntheorem ex17_1 : S.sum(L.cons(3, L.cons(0, L.cons(3, L.nil)))) = 6 := by\n  sorry\n\n-- 17.2: Use a known total to account for one new entry.\ntheorem ex17_2 (xs : L.List Nat) (n : Nat) :\n  S.sum(xs) = n -> S.sum(L.cons(4, xs)) = add(4, n) := by\n  sorry\n\n-- 17.3: Combine two groups whose totals are known.\ntheorem ex17_3 (xs ys : L.List Nat) (m n : Nat) :\n  S.sum(xs) = m -> S.sum(ys) = n ->\n  S.sum(L.append(xs, ys)) = add(m, n) := by\n  sorry\n\n-- 17.4: Combine three groups, then associate the numerical additions to the right.\ntheorem ex17_4 (xs ys zs : L.List Nat) :\n  S.sum(L.append(L.append(xs, ys), zs)) =\n  add(S.sum(xs), add(S.sum(ys), S.sum(zs))) := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch17-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/list@1\"]\nrequired_imports = [\"builtin:std/hol/sums.ctea\", \"std/hol/list@1\"]\nallowed_axioms = []\n\nrequired_theorem.ex17_1 = 'S.sum(std/hol/list@1.cons(3, std/hol/list@1.cons(0, std/hol/list@1.cons(3, std/hol/list@1.nil)))) = 6'\nrequired_theorem.ex17_2 = '(?0 : std/hol/list@1.List Nat) (?1 : Nat) : S.sum(?0) = ?1 -> S.sum(std/hol/list@1.cons(4, ?0)) = add(4, ?1)'\nrequired_theorem.ex17_3 = '(?0 : std/hol/list@1.List Nat) (?1 : std/hol/list@1.List Nat) (?2 : Nat) (?3 : Nat) : S.sum(?0) = ?2 -> S.sum(?1) = ?3 -> S.sum(std/hol/list@1.append(?0, ?1)) = add(?2, ?3)'\nrequired_theorem.ex17_4 = '(?0 : std/hol/list@1.List Nat) (?1 : std/hol/list@1.List Nat) (?2 : std/hol/list@1.List Nat) : S.sum(std/hol/list@1.append(std/hol/list@1.append(?0, ?1), ?2)) = add(S.sum(?0), add(S.sum(?1), S.sum(?2)))'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex17_1",
+          "incomplete"
+        ],
+        [
+          "ex17_2",
+          "incomplete"
+        ],
+        [
+          "ex17_3",
+          "incomplete"
+        ],
+        [
+          "ex17_4",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch18-solutions.ctea-assignment rejects docs/book/hol-code/ch18-exercises.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch18-exercises.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch18-exercises.ctea",
+          "source": "-- Replace each sorry. Keep the theorem names and statements.\n-- Chapter 18: explicit directed paths.\nimport std/hol/graph@1 as G\n\nmode constructive\n\n-- Staying at a vertex requires no edge.\ntheorem ex18_1 (A : Type) (E : A -> A -> Prop) (a : A) :\n  G.ValidPath(E, G.nil, a, a) := by\n  sorry\n\n-- Prepend one edge to an already checked tail path.\ntheorem ex18_2 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :\n  E(a, h) -> G.ValidPath(E, t, h, b) -> G.ValidPath(E, G.cons(h, t), a, b) := by\n  sorry\n\n-- Removing the first visited vertex changes the start of the remaining path.\ntheorem ex18_3 (A : Type) (E : A -> A -> Prop) (t : G.List A) (a h b : A) :\n  G.ValidPath(E, G.cons(h, t), a, b) -> G.ValidPath(E, t, h, b) := by\n  sorry\n\n-- Join two paths at a common endpoint. Keep endpoints general during induction.\ntheorem ex18_4 (A : Type) (E : A -> A -> Prop) (xs ys : G.List A) :\n  forall a b c : A,\n  G.ValidPath(E, xs, a, b) -> G.ValidPath(E, ys, b, c) ->\n  G.ValidPath(E, G.append(xs, ys), a, c) := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch18-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"std/hol/graph@1\", \"std/hol/list@1\", \"builtin:std/hol/paths.ctea\"]\nrequired_imports = [\"std/hol/graph@1\"]\nallowed_axioms = []\n\nrequired_theorem.ex18_1 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : ?0) : std/hol/graph@1.ValidPath(?1, std/hol/list@1.nil, ?2, ?2)'\nrequired_theorem.ex18_2 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : std/hol/list@1.List ?0) (?3 : ?0) (?4 : ?0) (?5 : ?0) : ?1(?3, ?4) -> std/hol/graph@1.ValidPath(?1, ?2, ?4, ?5) -> std/hol/graph@1.ValidPath(?1, std/hol/list@1.cons(?4, ?2), ?3, ?5)'\nrequired_theorem.ex18_3 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : std/hol/list@1.List ?0) (?3 : ?0) (?4 : ?0) (?5 : ?0) : std/hol/graph@1.ValidPath(?1, std/hol/list@1.cons(?4, ?2), ?3, ?5) -> std/hol/graph@1.ValidPath(?1, ?2, ?4, ?5)'\nrequired_theorem.ex18_4 = '(?0 : Type) (?1 : ?0 -> ?0 -> Prop) (?2 : std/hol/list@1.List ?0) (?3 : std/hol/list@1.List ?0) : forall ?4 : ?0, forall ?5 : ?0, forall ?6 : ?0, std/hol/graph@1.ValidPath(?1, ?2, ?4, ?5) -> std/hol/graph@1.ValidPath(?1, ?3, ?5, ?6) -> std/hol/graph@1.ValidPath(?1, std/hol/list@1.append(?2, ?3), ?4, ?6)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex18_1",
+          "incomplete"
+        ],
+        [
+          "ex18_2",
+          "incomplete"
+        ],
+        [
+          "ex18_3",
+          "incomplete"
+        ],
+        [
+          "ex18_4",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch19-solutions.ctea-assignment rejects docs/book/hol-code/ch19-exercises.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch19-exercises.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch19-exercises.ctea",
+          "source": "-- Replace each sorry. Keep theorem names and statements.\n-- Chapter 19: double counting and the handshake identity.\nimport std/hol/matrix@1 as M\nimport std/hol/cardinality@1 as C\nimport builtin:std/hol/double_counting.ctea as D\nimport builtin:std/hol/weighted_sums.ctea as W\nimport builtin:std/hol/handshake.ctea as H\nimport builtin:std/hol/sums.ctea as S\nmode constructive\n\n-- Compute the sum of a row with no columns.\ntheorem ex19_1 (A B : Type) (w : A -> B -> Nat) (a : A) :\n  M.row_sum(w, a, M.nil) = 0 := by\n  sorry\n\n-- Induct over the columns: a table with no rows has total zero.\ntheorem ex19_2 (A B : Type) (w : A -> B -> Nat) (ys : M.List B) :\n  M.columns_total(w, M.nil, ys) = 0 := by\n  sorry\n\ntheorem ex19_3 (A B : Type) (w : A -> B -> Nat) (a : A) (xs : M.List A) (ys : M.List B) :\n  M.columns_total(w, M.cons(a, xs), ys) = add(M.row_sum(w, a, ys), M.columns_total(w, xs, ys)) := by\n  sorry\n\ntheorem ex19_4 (Edge Vertex : Type) (incidence : Edge -> Vertex -> Nat)\n  (degree : Vertex -> Nat) (edges : M.List Edge) (vertices : M.List Vertex) :\n  (forall e : Edge, C.Member(e, edges) -> M.row_sum(incidence, e, vertices) = 2) ->\n  (forall v : Vertex, C.Member(v, vertices) -> degree(v) = M.column_sum(incidence, edges, v)) ->\n  S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch19-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"std/hol/matrix@1\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"builtin:std/hol/double_counting.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/hol/handshake.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\"]\nrequired_imports = [\"std/hol/matrix@1\"]\nallowed_axioms = []\n\nrequired_theorem.ex19_1 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?0) : std/hol/matrix@1.row_sum(?2, ?3, std/hol/list@1.nil) = 0'\nrequired_theorem.ex19_2 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : std/hol/list@1.List ?1) : std/hol/matrix@1.columns_total(?2, std/hol/list@1.nil, ?3) = 0'\nrequired_theorem.ex19_3 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?0) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?1) : std/hol/matrix@1.columns_total(?2, std/hol/list@1.cons(?3, ?4), ?5) = add(std/hol/matrix@1.row_sum(?2, ?3, ?5), std/hol/matrix@1.columns_total(?2, ?4, ?5))'\nrequired_theorem.ex19_4 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?1 -> Nat) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?1) : (forall ?6 : ?0, std/hol/list@1.Member(?6, ?4) -> std/hol/matrix@1.row_sum(?2, ?6, ?5) = 2) -> (forall ?7 : ?1, std/hol/list@1.Member(?7, ?5) -> ?3(?7) = std/hol/matrix@1.column_sum(?2, ?4, ?7)) -> S.sum(std/hol/cardinality@1.map(?3, ?5)) = mul(std/hol/list@1.length(?4), 2)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex19_1",
+          "incomplete"
+        ],
+        [
+          "ex19_2",
+          "incomplete"
+        ],
+        [
+          "ex19_3",
+          "incomplete"
+        ],
+        [
+          "ex19_4",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch20-solutions.ctea-assignment rejects docs/book/hol-code/ch20-exercises.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch20-exercises.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch20-exercises.ctea",
+          "source": "-- Replace each sorry; keep theorem names and statements.\n-- Chapter 20: divisibility and modular arithmetic over natural numbers.\nimport builtin:std/modular.ctea as M\nmode constructive\n\n-- A divisibility proof supplies the multiplier.\ntheorem ex20_1 : M.Divides(4, 20) := by\n  sorry\n\n-- A common divisor is preserved by this linear combination.\ntheorem ex20_2 (d a b : Nat) :\n  M.Divides(d, a) -> M.Divides(d, b) -> M.Divides(d, add(a, mul(b, 3))) := by\n  sorry\n\n-- Congruent inputs give congruent values of x*x + 1.\ntheorem ex20_3 (m x y : Nat) :\n  M.ModEq(m, x, y) -> M.ModEq(m, add(mul(x, x), 1), add(mul(y, y), 1)) := by\n  sorry\n\n-- With modulus zero, the two padded values are just the original values.\ntheorem ex20_4 (x y : Nat) : M.ModEq(0, x, y) -> x = y := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch20-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/modular.ctea\", \"builtin:std/nat.ctea\", \"builtin:std/eq.ctea\"]\nrequired_imports = [\"builtin:std/modular.ctea\"]\nallowed_axioms = []\n\nrequired_theorem.ex20_1 = 'M.Divides(4, 20)'\nrequired_theorem.ex20_2 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : M.Divides(?0, ?1) -> M.Divides(?0, ?2) -> M.Divides(?0, add(?1, mul(?2, 3)))'\nrequired_theorem.ex20_3 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : M.ModEq(?0, ?1, ?2) -> M.ModEq(?0, add(mul(?1, ?1), 1), add(mul(?2, ?2), 1))'\nrequired_theorem.ex20_4 = '(?0 : Nat) (?1 : Nat) : M.ModEq(0, ?0, ?1) -> ?0 = ?1'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex20_1",
+          "incomplete"
+        ],
+        [
+          "ex20_2",
+          "incomplete"
+        ],
+        [
+          "ex20_3",
+          "incomplete"
+        ],
+        [
+          "ex20_4",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch21-solutions.ctea-assignment rejects docs/book/hol-code/ch21-exercises.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch21-exercises.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch21-exercises.ctea",
+          "source": "-- Replace every sorry, keeping theorem names and statements.\n-- Chapter 21: recurrence equations and induction.\nimport builtin:std/hol/recurrences.ctea as R\nimport builtin:std/nat.ctea as N\nmode constructive\n\n-- Specialize a general closed form at four ticks.\ntheorem ex21_1 (f : Nat -> Nat) :\n  f(0) = 2 ->\n  (forall n : Nat, f(succ(n)) = add(3, f(n))) -> f(4) = 14 := by\n  sorry\n\ntheorem ex21_2 (a d n : Nat) :\n  add(a, mul(succ(n), d)) = add(d, add(a, mul(n, d))) := by\n  sorry\n\ntheorem ex21_3 (f : Nat -> Nat) (a d : Nat) :\n  f(0) = a ->\n  (forall n : Nat, f(succ(n)) = add(d, f(n))) ->\n  forall n : Nat, f(n) = add(a, mul(n, d)) := by\n  sorry\n\ntheorem ex21_4 (A : Type) (f g : Nat -> A) (step : Nat -> A -> A) :\n  f(0) = g(0) ->\n  (forall n : Nat, f(succ(n)) = step(n, f(n))) ->\n  (forall n : Nat, g(succ(n)) = step(n, g(n))) ->\n  forall n : Nat, f(n) = g(n) := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch21-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/recurrences.ctea\", \"builtin:std/nat.ctea\"]\nrequired_imports = [\"builtin:std/hol/recurrences.ctea\"]\nallowed_axioms = []\n\nrequired_theorem.ex21_1 = '(?0 : Nat -> Nat) : ?0(0) = 2 -> (forall ?1 : Nat, ?0(succ(?1)) = add(3, ?0(?1))) -> ?0(4) = 14'\nrequired_theorem.ex21_2 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : add(?0, mul(succ(?2), ?1)) = add(?1, add(?0, mul(?2, ?1)))'\nrequired_theorem.ex21_3 = '(?0 : Nat -> Nat) (?1 : Nat) (?2 : Nat) : ?0(0) = ?1 -> (forall ?3 : Nat, ?0(succ(?3)) = add(?2, ?0(?3))) -> forall ?4 : Nat, ?0(?4) = add(?1, mul(?4, ?2))'\nrequired_theorem.ex21_4 = '(?0 : Type) (?1 : Nat -> ?0) (?2 : Nat -> ?0) (?3 : Nat -> ?0 -> ?0) : ?1(0) = ?2(0) -> (forall ?4 : Nat, ?1(succ(?4)) = ?3(?4, ?1(?4))) -> (forall ?5 : Nat, ?2(succ(?5)) = ?3(?5, ?2(?5))) -> forall ?6 : Nat, ?1(?6) = ?2(?6)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex21_1",
+          "incomplete"
+        ],
+        [
+          "ex21_2",
+          "incomplete"
+        ],
+        [
+          "ex21_3",
+          "incomplete"
+        ],
+        [
+          "ex21_4",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "docs/book/hol-code/ch22-solutions.ctea-assignment rejects docs/book/hol-code/ch22-exercises.ctea",
+    "project": {
+      "root": "docs/book/hol-code/ch22-exercises.ctea",
+      "files": [
+        {
+          "path": "docs/book/hol-code/ch22-exercises.ctea",
+          "source": "import builtin:std/hol/probability_counts.ctea as P\nimport builtin:std/hol/weighted_sums.ctea as W\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ntheorem ex22_1 (A : Type) (x : A) (xs : C.List A) :\n  not C.length(C.cons(x, xs)) = 0 := by\n  sorry\n\ntheorem ex22_2(A : Type) (f g : A -> Nat) (xs : C.List A) :\n  (forall x : A, C.Member(x, xs) -> add(f(x), g(x)) = 1) ->\n  add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) = C.length(xs) := by\n  sorry\n\ntheorem ex22_3 (A : Type) (f g h : A -> Nat) (xs : C.List A) (a b : Nat) :\n  (forall x : A, C.Member(x, xs) -> h(x) = add(f(x), g(x))) ->\n  S.sum(C.map(f, xs)) = a -> S.sum(C.map(g, xs)) = b ->\n  S.sum(C.map(h, xs)) = add(a, b) := by\n  sorry\n\ntheorem ex22_4 (A : Type) (f : A -> Nat) (xs : C.List A) (k : Nat) :\n  (forall x : A, C.Member(x, xs) -> f(x) = k) ->\n  S.sum(C.map(f, xs)) = mul(C.length(xs), k) := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "docs/book/hol-code/ch22-solutions.ctea-assignment",
+      "source": "version = 1\nprofile = \"hol\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/probability_counts.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\"]\nrequired_imports = [\"builtin:std/hol/probability_counts.ctea\"]\nallowed_axioms = []\n\nrequired_theorem.ex22_1 = '(?0 : Type) (?1 : ?0) (?2 : std/hol/list@1.List ?0) : not std/hol/list@1.length(std/hol/list@1.cons(?1, ?2)) = 0'\nrequired_theorem.ex22_2 = '(?0 : Type) (?1 : ?0 -> Nat) (?2 : ?0 -> Nat) (?3 : std/hol/list@1.List ?0) : (forall ?4 : ?0, std/hol/list@1.Member(?4, ?3) -> add(?1(?4), ?2(?4)) = 1) -> add(S.sum(std/hol/cardinality@1.map(?1, ?3)), S.sum(std/hol/cardinality@1.map(?2, ?3))) = std/hol/list@1.length(?3)'\nrequired_theorem.ex22_3 = '(?0 : Type) (?1 : ?0 -> Nat) (?2 : ?0 -> Nat) (?3 : ?0 -> Nat) (?4 : std/hol/list@1.List ?0) (?5 : Nat) (?6 : Nat) : (forall ?7 : ?0, std/hol/list@1.Member(?7, ?4) -> ?3(?7) = add(?1(?7), ?2(?7))) -> S.sum(std/hol/cardinality@1.map(?1, ?4)) = ?5 -> S.sum(std/hol/cardinality@1.map(?2, ?4)) = ?6 -> S.sum(std/hol/cardinality@1.map(?3, ?4)) = add(?5, ?6)'\nrequired_theorem.ex22_4 = '(?0 : Type) (?1 : ?0 -> Nat) (?2 : std/hol/list@1.List ?0) (?3 : Nat) : (forall ?4 : ?0, std/hol/list@1.Member(?4, ?2) -> ?1(?4) = ?3) -> S.sum(std/hol/cardinality@1.map(?1, ?2)) = mul(std/hol/list@1.length(?2), ?3)'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "ex22_1",
+          "incomplete"
+        ],
+        [
+          "ex22_2",
+          "incomplete"
+        ],
+        [
+          "ex22_3",
+          "incomplete"
+        ],
+        [
+          "ex22_4",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "simple",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_theorem.answer = 'True'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "wrong-signature",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_theorem.answer = 'False'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "theorem_signature"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "missing-theorem",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_theorem.missing = 'True'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "missing",
+          "required_theorem"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "incomplete",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "new-axiom",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "axiom answer : True\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "trusted_axiom"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "classical-denied",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "mode classical\ntheorem answer (P : Prop) : P \\/ not P := by\n  by_cases h : P\n  left\n  exact h\n  right\n  exact h\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "feature"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "missing-import",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_imports = ['std/hol/list@1']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "std/hol/list@1",
+          "required_import"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "forbidden-import",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "import std/hol/list@1 as L\ntheorem answer : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallowed_imports = []\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "std/hol/list@1",
+          "import"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "concrete-modular-square",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Concrete modular multiplication: both congruence premises are checked.\nimport builtin:std/modular.ctea as M\nmode constructive\n\ntheorem clock_27_3 : M.ModEq(12, 27, 3) := by\n  unfold M.ModEq\n  exists 0\n  exists 2\n  refl\n\ntheorem clock_squares : M.ModEq(12, mul(27, 27), mul(3, 3)) := by\n  exact M.modeq_mul {m := 12; x := 27; y := 3; u := 27; v := 3} clock_27_3 clock_27_3\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'fol+induction'\nallowed_imports = ['builtin:std/modular.ctea', 'builtin:std/nat.ctea', 'builtin:std/eq.ctea']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "concrete-modular-square-wrong",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Concrete modular multiplication: both congruence premises are checked.\nimport builtin:std/modular.ctea as M\nmode constructive\n\ntheorem clock_27_3 : M.ModEq(12, 27, 3) := by\n  unfold M.ModEq\n  exists 0\n  exists 2\n  refl\n\ntheorem clock_squares : M.ModEq(12, mul(27, 27), 8) := by\n  exact M.modeq_mul {m := 12; x := 27; y := 3; u := 27; v := 3} clock_27_3 clock_27_3\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'fol+induction'\nallowed_imports = ['builtin:std/modular.ctea', 'builtin:std/nat.ctea', 'builtin:std/eq.ctea']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "concrete-square",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem square : mul(27, 27) = 729 := by\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "concrete-square-wrong",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem square : mul(27, 27) = 728 := by\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "failed-proof",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : False := by\n  trivial\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "local-axiom-cannot-be-whitelisted",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "axiom answer : True\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallowed_axioms = ['answer']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "allowed_axiom"
+        ],
+        [
+          "answer",
+          "trusted_axiom"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "selected-weighted-evidence",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Values outside the selected list need not satisfy its counting premise.\nimport builtin:std/hol/weighted_sums.ctea as W\nimport std/hol/cardinality@1 as C\nimport builtin:std/hol/sums.ctea as S\nimport builtin:std/hol/finite_weighted_sums.ctea as FSum\nimport builtin:std/hol/counting.ctea as F\nmode constructive\n\ndata Item\n| selected\n| outside\n\ndefrec contribution (x : Item) : Nat\n| selected => 2\n| outside => 99\n\ndefrec alternative (x : Item) : Nat\n| selected => 2\n| outside => 0\n\n-- The functions really differ away from the selected items.\ntheorem different_outside : not contribution(outside) = alternative(outside) := by\n  simp\n  intro impossible\n  contradiction\n\n-- No global assertion that contribution is constantly two is required.\ntheorem selected_total (xs : C.List Item) :\n  (forall x : Item, C.Member(x, xs) -> x = selected) ->\n  S.sum(C.map(contribution, xs)) = mul(C.length(xs), 2) := by\n  intro selected_only\n  apply W.sum_map_constant_on {A := Item; f := contribution; xs := xs; k := 2}\n  intro x\n  intro member\n  have same : x = selected := selected_only x member\n  rewrite all -> same\n  simp\n  refl\n\n-- Agreement on the list suffices even though the functions differ outside it.\ntheorem selected_totals_agree (xs : C.List Item) :\n  (forall x : Item, C.Member(x, xs) -> x = selected) ->\n  S.sum(C.map(contribution, xs)) = S.sum(C.map(alternative, xs)) := by\n  intro selected_only\n  apply W.sum_map_congr_on {A := Item; f := contribution; g := alternative; xs := xs}\n  intro x\n  intro member\n  have same : x = selected := selected_only x member\n  rewrite all -> same\n  simp\n  refl\n\n-- Duplicate occurrences still contribute separately.\ntheorem two_selected_copies :\n  S.sum(C.map(contribution, C.cons(selected, C.cons(selected, C.nil)))) = 4 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  simp\n  refl\n\n-- Unlike the repeated list above, this is an exact set enumeration.\ndef Selected : Set Item := { x : Item | x = selected }\n\ntheorem selected_set_size : F.HasSize(Selected, C.cons(selected, C.nil), 1) := by\n  apply F.has_size_intro {A := Item; S := Selected; xs := C.cons(selected, C.nil); n := 1}\n  finite\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n  unfold Selected\n  finite\n\ntheorem selected_set_total :\n  S.sum(C.map(contribution, C.cons(selected, C.nil))) = mul(1, 2) := by\n  apply FSum.sum_on_set_constant {A := Item; f := contribution; V := Selected; xs := C.cons(selected, C.nil); n := 1; k := 2}\n  exact selected_set_size\n  intro x\n  intro in_set\n  simp [Selected] at in_set\n  rewrite -> in_set\n  simp\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/finite_weighted_sums.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "selected-weighted-evidence-missing",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Values outside the selected list need not satisfy its counting premise.\nimport builtin:std/hol/weighted_sums.ctea as W\nimport std/hol/cardinality@1 as C\nimport builtin:std/hol/sums.ctea as S\nimport builtin:std/hol/finite_weighted_sums.ctea as FSum\nimport builtin:std/hol/counting.ctea as F\nmode constructive\n\ndata Item\n| selected\n| outside\n\ndefrec contribution (x : Item) : Nat\n| selected => 2\n| outside => 99\n\ndefrec alternative (x : Item) : Nat\n| selected => 2\n| outside => 0\n\n-- The functions really differ away from the selected items.\ntheorem different_outside : not contribution(outside) = alternative(outside) := by\n  simp\n  intro impossible\n  contradiction\n\n-- No global assertion that contribution is constantly two is required.\ntheorem selected_total (xs : C.List Item) :\n  (forall x : Item, C.Member(x, xs) -> x = selected) ->\n  S.sum(C.map(contribution, xs)) = mul(C.length(xs), 2) := by\n  intro selected_only\n  apply W.sum_map_constant_on {A := Item; f := contribution; xs := xs; k := 2}\n  intro x\n  intro member\n  have same : x = selected := selected_only x member\n  rewrite all -> same\n  simp\n  refl\n\n-- Agreement on the list suffices even though the functions differ outside it.\ntheorem selected_totals_agree (xs : C.List Item) :\n  (forall x : Item, C.Member(x, xs) -> x = selected) ->\n  S.sum(C.map(contribution, xs)) = S.sum(C.map(alternative, xs)) := by\n  intro selected_only\n  apply W.sum_map_congr_on {A := Item; f := contribution; g := alternative; xs := xs}\n  intro x\n  intro member\n  have same : x = selected := selected_only x member\n  rewrite all -> same\n  simp\n  refl\n\n-- Duplicate occurrences still contribute separately.\ntheorem two_selected_copies :\n  S.sum(C.map(contribution, C.cons(selected, C.cons(selected, C.nil)))) = 4 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  simp\n  refl\n\n-- Unlike the repeated list above, this is an exact set enumeration.\ndef Selected : Set Item := { x : Item | x = selected }\n\ntheorem selected_set_size : F.HasSize(Selected, C.cons(selected, C.nil), 1) := by\n  apply F.has_size_intro {A := Item; S := Selected; xs := C.cons(selected, C.nil); n := 1}\n  finite\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n  unfold Selected\n  finite\n\ntheorem selected_set_total :\n  S.sum(C.map(contribution, C.cons(selected, C.nil))) = mul(1, 2) := by\n  apply FSum.sum_on_set_constant {A := Item; f := contribution; V := Selected; xs := C.cons(selected, C.nil); n := 1; k := 2}\n  exact selected_set_size\n  intro x\n  intro in_set\n  simp [Selected] at in_set\n  rewrite -> in_set\n  simp\n  refl\n\ntheorem wrong : S.sum(C.map(contribution, C.cons(outside, C.nil))) = mul(C.length(C.cons(outside, C.nil)), 2) := by\n  apply W.sum_map_constant_on {A := Item; f := contribution; xs := C.cons(outside, C.nil); k := 2}\n  intro x\n  intro member\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/finite_weighted_sums.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "reordered-weighted-enumeration",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Reordering a checked finite-set enumeration does not change its total.\nimport builtin:std/hol/weighted_enumerations.ctea as E\nimport builtin:std/hol/counting.ctea as F\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ndata Vertex\n| low\n| high\n| isolated\n\ndefrec weight (v : Vertex) : Nat\n| low => 2\n| high => 5\n| isolated => 0\n\ndef Active : Set Vertex := { v : Vertex | v = low \\/ v = high }\ndef forward : C.List Vertex := C.cons(low, C.cons(high, C.nil))\ndef backward : C.List Vertex := C.cons(high, C.cons(low, C.nil))\n\ntheorem forward_size : F.HasSize(Active, forward, 2) := by\n  apply F.has_size_intro {A := Vertex; S := Active; xs := forward; n := 2}\n  finite\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n  unfold Active\n  finite\n\ntheorem backward_size : F.HasSize(Active, backward, 2) := by\n  apply F.has_size_intro {A := Vertex; S := Active; xs := backward; n := 2}\n  finite\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n  unfold Active\n  finite\n\ntheorem reordered_total :\n  S.sum(C.map(weight, forward)) = S.sum(C.map(weight, backward)) := by\n  apply E.sum_enumeration_independent {A := Vertex; f := weight; V := Active; xs := forward; ys := backward; m := 2; n := 2}\n  exact forward_size\n  exact backward_size\n\ntheorem forward_total : S.sum(C.map(weight, forward)) = 7 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  simp\n  refl\n\ntheorem backward_total : S.sum(C.map(weight, backward)) = 7 := by\n  rewrite <- reordered_total\n  exact forward_total\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"builtin:std/hol/weighted_enumerations.ctea\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "reordered-weighted-enumeration-duplicate",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Reordering a checked finite-set enumeration does not change its total.\nimport builtin:std/hol/weighted_enumerations.ctea as E\nimport builtin:std/hol/counting.ctea as F\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ndata Vertex\n| low\n| high\n| isolated\n\ndefrec weight (v : Vertex) : Nat\n| low => 2\n| high => 5\n| isolated => 0\n\ndef Active : Set Vertex := { v : Vertex | v = low \\/ v = high }\ndef forward : C.List Vertex := C.cons(low, C.cons(high, C.nil))\ndef backward : C.List Vertex := C.cons(high, C.cons(low, C.nil))\n\ntheorem forward_size : F.HasSize(Active, forward, 2) := by\n  apply F.has_size_intro {A := Vertex; S := Active; xs := forward; n := 2}\n  finite\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n  unfold Active\n  finite\n\ntheorem backward_size : F.HasSize(Active, backward, 2) := by\n  apply F.has_size_intro {A := Vertex; S := Active; xs := backward; n := 2}\n  finite\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n  unfold Active\n  finite\n\ntheorem reordered_total :\n  S.sum(C.map(weight, forward)) = S.sum(C.map(weight, backward)) := by\n  apply E.sum_enumeration_independent {A := Vertex; f := weight; V := Active; xs := forward; ys := backward; m := 2; n := 2}\n  exact forward_size\n  exact backward_size\n\ntheorem forward_total : S.sum(C.map(weight, forward)) = 7 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  simp\n  refl\n\ntheorem backward_total : S.sum(C.map(weight, backward)) = 7 := by\n  rewrite <- reordered_total\n  exact forward_total\n\ntheorem wrong : S.sum(C.map(weight, C.cons(low, forward))) = S.sum(C.map(weight, forward)) := by\n  apply E.sum_same_members {A := Vertex; f := weight; xs := C.cons(low, forward)} forward\n  finite\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"builtin:std/hol/weighted_enumerations.ctea\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "generic-endpoint-incidences",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Two endpoints contribute two, even when they occupy the same vertex.\nimport builtin:std/hol/endpoint_sums.ctea as E\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ndata Vertex\n| home\n| away\n\ndef vertices : C.List Vertex := C.cons(home, C.cons(away, C.nil))\n\ndefrec home_end (v : Vertex) : Nat\n| home => 1\n| away => 0\n\ndefrec away_end (v : Vertex) : Nat\n| home => 0\n| away => 1\n\ndefrec bridge_incidence (v : Vertex) : Nat\n| home => 1\n| away => 1\n\ndefrec loop_incidence (v : Vertex) : Nat\n| home => 2\n| away => 0\n\ntheorem ordinary_edge_total : S.sum(C.map(bridge_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := away_end; incidence := bridge_incidence; a := home; b := away; vertices := vertices}\n  -- Duplicate-free enumeration and both endpoints present.\n  finite\n  finite\n  finite\n  -- Each indicator is one at its endpoint.\n  finite\n  finite\n  -- It is zero elsewhere; incidence adds the two indicators.\n  finite\n  finite\n  finite\n\ntheorem loop_edge_total : S.sum(C.map(loop_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := loop_incidence; a := home; b := home; vertices := vertices}\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n\n-- Excluding an endpoint loses its contribution; it cannot still count as one.\ntheorem absent_endpoint_total :\n  S.sum(C.map(home_end, C.cons(away, C.nil))) = 0 := by\n  apply E.sum_absent_support {A := Vertex; f := home_end; a := home; xs := C.cons(away, C.nil)}\n  finite\n  finite\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"builtin:std/hol/weighted_enumerations.ctea\", \"builtin:std/hol/endpoint_sums.ctea\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "generic-endpoint-incidences-bad-loop",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Two endpoints contribute two, even when they occupy the same vertex.\nimport builtin:std/hol/endpoint_sums.ctea as E\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ndata Vertex\n| home\n| away\n\ndef vertices : C.List Vertex := C.cons(home, C.cons(away, C.nil))\n\ndefrec home_end (v : Vertex) : Nat\n| home => 1\n| away => 0\n\ndefrec away_end (v : Vertex) : Nat\n| home => 0\n| away => 1\n\ndefrec bridge_incidence (v : Vertex) : Nat\n| home => 1\n| away => 1\n\ndefrec loop_incidence (v : Vertex) : Nat\n| home => 2\n| away => 0\n\ntheorem ordinary_edge_total : S.sum(C.map(bridge_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := away_end; incidence := bridge_incidence; a := home; b := away; vertices := vertices}\n  -- Duplicate-free enumeration and both endpoints present.\n  finite\n  finite\n  finite\n  -- Each indicator is one at its endpoint.\n  finite\n  finite\n  -- It is zero elsewhere; incidence adds the two indicators.\n  finite\n  finite\n  finite\n\ntheorem loop_edge_total : S.sum(C.map(loop_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := loop_incidence; a := home; b := home; vertices := vertices}\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n\n-- Excluding an endpoint loses its contribution; it cannot still count as one.\ntheorem absent_endpoint_total :\n  S.sum(C.map(home_end, C.cons(away, C.nil))) = 0 := by\n  apply E.sum_absent_support {A := Vertex; f := home_end; a := home; xs := C.cons(away, C.nil)}\n  finite\n  finite\n\ntheorem wrong : S.sum(C.map(home_end, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := home_end; a := home; b := home; vertices := vertices}\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"builtin:std/hol/weighted_enumerations.ctea\", \"builtin:std/hol/endpoint_sums.ctea\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "generic-double-counting",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Count workshop signups by day or by subject.\nimport builtin:std/hol/double_counting.ctea as D\nimport std/hol/matrix@1 as M\nimport std/hol/list@1 as L\nmode constructive\n\ndata Day\n| monday\n| tuesday\n\ndata Subject\n| logic\n| graphs\n| counting\n\ndefrec monday_signups (subject : Subject) : Nat\n| logic => 1\n| graphs => 2\n| counting => 3\n\ndefrec tuesday_signups (subject : Subject) : Nat\n| logic => 4\n| graphs => 5\n| counting => 6\n\ndefrec signups (day : Day) (subject : Subject) : Nat\n| monday => monday_signups(subject)\n| tuesday => tuesday_signups(subject)\n\n-- The List import and matrix package share one list type.\ndef days : L.List Day := L.cons(monday, L.cons(tuesday, L.nil))\ndef subjects : M.List Subject := M.cons(logic, M.cons(graphs, M.cons(counting, M.nil)))\n\ntheorem monday_total : M.row_sum(signups, monday, subjects) = 6 := by\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_nil\n  refl\n\ntheorem tuesday_total : M.row_sum(signups, tuesday, subjects) = 15 := by\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_nil\n  refl\n\ntheorem graph_total : M.column_sum(signups, days, graphs) = 7 := by\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_nil\n  refl\n\ntheorem totals_agree : M.rows_total(signups, days, subjects) = M.columns_total(signups, days, subjects) := by\n  exact D.double_counting {A := Day; B := Subject; w := signups; xs := days; ys := subjects}\n\ntheorem by_day : M.rows_total(signups, days, subjects) = 21 := by\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_nil\n  rewrite -> monday_total\n  rewrite -> tuesday_total\n  refl\n\ntheorem by_subject : M.columns_total(signups, days, subjects) = 21 := by\n  rewrite <- totals_agree\n  exact by_day\n\n-- Lists retain occurrences: listing Monday twice counts its signups twice.\ntheorem repeated_day : M.rows_total(signups, M.cons(monday, M.cons(monday, M.nil)), subjects) = 12 := by\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_nil\n  rewrite all -> monday_total\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"std/hol/matrix@1\", \"std/hol/list@1\", \"std/hol/cardinality@1\", \"builtin:std/hol/double_counting.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "generic-double-counting-wrong-total",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Count workshop signups by day or by subject.\nimport builtin:std/hol/double_counting.ctea as D\nimport std/hol/matrix@1 as M\nimport std/hol/list@1 as L\nmode constructive\n\ndata Day\n| monday\n| tuesday\n\ndata Subject\n| logic\n| graphs\n| counting\n\ndefrec monday_signups (subject : Subject) : Nat\n| logic => 1\n| graphs => 2\n| counting => 3\n\ndefrec tuesday_signups (subject : Subject) : Nat\n| logic => 4\n| graphs => 5\n| counting => 6\n\ndefrec signups (day : Day) (subject : Subject) : Nat\n| monday => monday_signups(subject)\n| tuesday => tuesday_signups(subject)\n\n-- The List import and matrix package share one list type.\ndef days : L.List Day := L.cons(monday, L.cons(tuesday, L.nil))\ndef subjects : M.List Subject := M.cons(logic, M.cons(graphs, M.cons(counting, M.nil)))\n\ntheorem monday_total : M.row_sum(signups, monday, subjects) = 6 := by\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_nil\n  refl\n\ntheorem tuesday_total : M.row_sum(signups, tuesday, subjects) = 15 := by\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_cons\n  rewrite -> M.row_sum_nil\n  refl\n\ntheorem graph_total : M.column_sum(signups, days, graphs) = 7 := by\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_nil\n  refl\n\ntheorem totals_agree : M.rows_total(signups, days, subjects) = M.columns_total(signups, days, subjects) := by\n  exact D.double_counting {A := Day; B := Subject; w := signups; xs := days; ys := subjects}\n\ntheorem by_day : M.rows_total(signups, days, subjects) = 21 := by\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_nil\n  rewrite -> monday_total\n  rewrite -> tuesday_total\n  refl\n\ntheorem by_subject : M.columns_total(signups, days, subjects) = 21 := by\n  rewrite <- totals_agree\n  exact by_day\n\n-- Lists retain occurrences: listing Monday twice counts its signups twice.\ntheorem repeated_day : M.rows_total(signups, M.cons(monday, M.cons(monday, M.nil)), subjects) = 12 := by\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_cons\n  rewrite -> M.rows_total_nil\n  rewrite all -> monday_total\n  refl\n\ntheorem wrong : M.columns_total(signups, days, subjects) = 20 := by\n  rewrite <- totals_agree\n  exact by_day\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"std/hol/matrix@1\", \"std/hol/list@1\", \"std/hol/cardinality@1\", \"builtin:std/hol/double_counting.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "generic-handshake",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Two endpoints contribute two, even when they occupy the same vertex.\nimport builtin:std/hol/endpoint_sums.ctea as E\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nimport builtin:std/hol/handshake.ctea as H\nimport std/hol/matrix@1 as M\nmode constructive\n\ndata Vertex\n| home\n| away\n\ndef vertices : C.List Vertex := C.cons(home, C.cons(away, C.nil))\n\ndefrec home_end (v : Vertex) : Nat\n| home => 1\n| away => 0\n\ndefrec away_end (v : Vertex) : Nat\n| home => 0\n| away => 1\n\ndefrec bridge_incidence (v : Vertex) : Nat\n| home => 1\n| away => 1\n\ndefrec loop_incidence (v : Vertex) : Nat\n| home => 2\n| away => 0\n\ntheorem ordinary_edge_total : S.sum(C.map(bridge_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := away_end; incidence := bridge_incidence; a := home; b := away; vertices := vertices}\n  -- Duplicate-free enumeration and both endpoints present.\n  finite\n  finite\n  finite\n  -- Each indicator is one at its endpoint.\n  finite\n  finite\n  -- It is zero elsewhere; incidence adds the two indicators.\n  finite\n  finite\n  finite\n\ntheorem loop_edge_total : S.sum(C.map(loop_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := loop_incidence; a := home; b := home; vertices := vertices}\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n\n-- Two bridge occurrences and a loop at home.\ndata Edge\n| bridge\n| loop\n\ndefrec incidence (e : Edge) (v : Vertex) : Nat\n| bridge => bridge_incidence(v)\n| loop => loop_incidence(v)\n\ndef edges : M.List Edge := M.cons(bridge, M.cons(bridge, M.cons(loop, M.nil)))\n\ndefrec degree (v : Vertex) : Nat\n| home => 4\n| away => 2\n\ntheorem edge_total (e : Edge) : M.row_sum(incidence, e, vertices) = 2 := by\n  induction e with\n  | bridge =>\n      have row : M.row_sum(incidence, bridge, vertices) = S.sum(C.map(bridge_incidence, vertices)) := by\n        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := bridge; f := bridge_incidence; ys := vertices}\n        finite\n      rewrite -> row\n      exact ordinary_edge_total\n  | loop =>\n      have row : M.row_sum(incidence, loop, vertices) = S.sum(C.map(loop_incidence, vertices)) := by\n        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := loop; f := loop_incidence; ys := vertices}\n        finite\n      rewrite -> row\n      exact loop_edge_total\n\ntheorem degree_counts (v : Vertex) : degree(v) = M.column_sum(incidence, edges, v) := by\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_nil\n  induction v with\n  | home =>\n      refl\n  | away =>\n      refl\n\ntheorem handshake_total : S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by\n  apply H.handshake {Edge := Edge; Vertex := Vertex; incidence := incidence; degree := degree; edges := edges; vertices := vertices}\n  intro e\n  intro listed\n  exact edge_total e\n  intro v\n  intro listed\n  exact degree_counts v\n\ntheorem edge_count : C.length(edges) = 3 := by\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n\ntheorem six_incidences : S.sum(C.map(degree, vertices)) = 6 := by\n  rewrite -> handshake_total\n  rewrite all -> edge_count\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/double_counting.ctea\", \"builtin:std/hol/endpoint_sums.ctea\", \"builtin:std/hol/handshake.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_enumerations.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"std/hol/matrix@1\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "generic-handshake-loop-counted-once",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Two endpoints contribute two, even when they occupy the same vertex.\nimport builtin:std/hol/endpoint_sums.ctea as E\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nimport builtin:std/hol/handshake.ctea as H\nimport std/hol/matrix@1 as M\nmode constructive\n\ndata Vertex\n| home\n| away\n\ndef vertices : C.List Vertex := C.cons(home, C.cons(away, C.nil))\n\ndefrec home_end (v : Vertex) : Nat\n| home => 1\n| away => 0\n\ndefrec away_end (v : Vertex) : Nat\n| home => 0\n| away => 1\n\ndefrec bridge_incidence (v : Vertex) : Nat\n| home => 1\n| away => 1\n\ndefrec loop_incidence (v : Vertex) : Nat\n| home => 2\n| away => 0\n\ntheorem ordinary_edge_total : S.sum(C.map(bridge_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := away_end; incidence := bridge_incidence; a := home; b := away; vertices := vertices}\n  -- Duplicate-free enumeration and both endpoints present.\n  finite\n  finite\n  finite\n  -- Each indicator is one at its endpoint.\n  finite\n  finite\n  -- It is zero elsewhere; incidence adds the two indicators.\n  finite\n  finite\n  finite\n\ntheorem loop_edge_total : S.sum(C.map(loop_incidence, vertices)) = 2 := by\n  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := loop_incidence; a := home; b := home; vertices := vertices}\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n  finite\n\n-- Two bridge occurrences and a loop at home.\ndata Edge\n| bridge\n| loop\n\ndefrec incidence (e : Edge) (v : Vertex) : Nat\n| bridge => bridge_incidence(v)\n| loop => loop_incidence(v)\n\ndef edges : M.List Edge := M.cons(bridge, M.cons(bridge, M.cons(loop, M.nil)))\n\ndefrec degree (v : Vertex) : Nat\n| home => 3\n| away => 2\n\ntheorem edge_total (e : Edge) : M.row_sum(incidence, e, vertices) = 2 := by\n  induction e with\n  | bridge =>\n      have row : M.row_sum(incidence, bridge, vertices) = S.sum(C.map(bridge_incidence, vertices)) := by\n        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := bridge; f := bridge_incidence; ys := vertices}\n        finite\n      rewrite -> row\n      exact ordinary_edge_total\n  | loop =>\n      have row : M.row_sum(incidence, loop, vertices) = S.sum(C.map(loop_incidence, vertices)) := by\n        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := loop; f := loop_incidence; ys := vertices}\n        finite\n      rewrite -> row\n      exact loop_edge_total\n\ntheorem degree_counts (v : Vertex) : degree(v) = M.column_sum(incidence, edges, v) := by\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_cons\n  rewrite -> M.column_sum_nil\n  induction v with\n  | home =>\n      refl\n  | away =>\n      refl\n\ntheorem handshake_total : S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by\n  apply H.handshake {Edge := Edge; Vertex := Vertex; incidence := incidence; degree := degree; edges := edges; vertices := vertices}\n  intro e\n  intro listed\n  exact edge_total e\n  intro v\n  intro listed\n  exact degree_counts v\n\ntheorem edge_count : C.length(edges) = 3 := by\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n\ntheorem six_incidences : S.sum(C.map(degree, vertices)) = 6 := by\n  rewrite -> handshake_total\n  rewrite all -> edge_count\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = [\"builtin:std/hol/counting.ctea\", \"builtin:std/hol/double_counting.ctea\", \"builtin:std/hol/endpoint_sums.ctea\", \"builtin:std/hol/handshake.ctea\", \"builtin:std/hol/sums.ctea\", \"builtin:std/hol/weighted_enumerations.ctea\", \"builtin:std/hol/weighted_sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/cardinality@1\", \"std/hol/list@1\", \"std/hol/matrix@1\"]\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "finite-probability-counts",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Uniformly choose one of four ordered pairs of coin results.\nimport builtin:std/hol/probability_counts.ctea as P\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ndata Outcome\n| hh\n| ht\n| th\n| tt\n\ndef outcomes : C.List Outcome := C.cons(hh, C.cons(ht, C.cons(th, C.cons(tt, C.nil))))\n\ndefrec first_head (outcome : Outcome) : Nat\n| hh => 1\n| ht => 1\n| th => 0\n| tt => 0\n\ndefrec first_tail (outcome : Outcome) : Nat\n| hh => 0\n| ht => 0\n| th => 1\n| tt => 1\n\ndefrec second_head (outcome : Outcome) : Nat\n| hh => 1\n| ht => 0\n| th => 1\n| tt => 0\n\ndefrec heads (outcome : Outcome) : Nat\n| hh => 2\n| ht => 1\n| th => 1\n| tt => 0\n\ntheorem sample_size : C.length(outcomes) = 4 := by\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n\ntheorem denominator_nonzero : not C.length(outcomes) = 0 := by\n  exact P.nonempty_denominator\n\ntheorem complementary (outcome : Outcome) : add(first_head(outcome), first_tail(outcome)) = 1 := by\n  induction outcome with\n  | hh =>\n      refl\n  | ht =>\n      refl\n  | th =>\n      refl\n  | tt =>\n      refl\n\ntheorem partition_total :\n  add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(first_tail, outcomes))) = C.length(outcomes) := by\n  apply P.complement_counts {A := Outcome; f := first_head; g := first_tail; xs := outcomes}\n  intro outcome\n  intro member\n  exact complementary\n\n-- The numerator of the first-head probability is 2; its denominator is 4.\ntheorem first_head_count : S.sum(C.map(first_head, outcomes)) = 2 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  refl\n\ntheorem second_head_count : S.sum(C.map(second_head, outcomes)) = 2 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  refl\n\ntheorem head_contributions (outcome : Outcome) : heads(outcome) = add(first_head(outcome), second_head(outcome)) := by\n  induction outcome with\n  | hh =>\n      refl\n  | ht =>\n      refl\n  | th =>\n      refl\n  | tt =>\n      refl\n\ntheorem total_heads : S.sum(C.map(heads, outcomes)) = 4 := by\n  have linear : S.sum(C.map(heads, outcomes)) = add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(second_head, outcomes))) := by\n    apply P.numerator_add {A := Outcome; f := first_head; g := second_head; h := heads; xs := outcomes}\n    intro outcome\n    intro member\n    exact head_contributions\n  rewrite -> first_head_count at linear\n  rewrite -> second_head_count at linear\n  exact linear\n\n-- Listing hh twice changes the experiment: choose uniformly among five tickets.\ndef tickets : C.List Outcome := C.cons(hh, outcomes)\n\ntheorem ticket_count : C.length(tickets) = 5 := by\n  rewrite -> C.length_cons\n  rewrite -> sample_size\n  refl\n\ntheorem ticket_first_heads : S.sum(C.map(first_head, tickets)) = 3 := by\n  rewrite -> C.map_cons\n  rewrite -> S.sum_cons\n  rewrite -> first_head_count\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = ['builtin:std/hol/probability_counts.ctea', 'builtin:std/hol/weighted_sums.ctea', 'builtin:std/hol/sums.ctea', 'builtin:std/nat.ctea', 'std/hol/cardinality@1', 'std/hol/list@1']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "finite-probability-lost-ticket",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- Uniformly choose one of four ordered pairs of coin results.\nimport builtin:std/hol/probability_counts.ctea as P\nimport builtin:std/hol/sums.ctea as S\nimport std/hol/cardinality@1 as C\nmode constructive\n\ndata Outcome\n| hh\n| ht\n| th\n| tt\n\ndef outcomes : C.List Outcome := C.cons(hh, C.cons(ht, C.cons(th, C.cons(tt, C.nil))))\n\ndefrec first_head (outcome : Outcome) : Nat\n| hh => 1\n| ht => 1\n| th => 0\n| tt => 0\n\ndefrec first_tail (outcome : Outcome) : Nat\n| hh => 0\n| ht => 0\n| th => 1\n| tt => 1\n\ndefrec second_head (outcome : Outcome) : Nat\n| hh => 1\n| ht => 0\n| th => 1\n| tt => 0\n\ndefrec heads (outcome : Outcome) : Nat\n| hh => 2\n| ht => 1\n| th => 1\n| tt => 0\n\ntheorem sample_size : C.length(outcomes) = 4 := by\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_cons\n  rewrite -> C.length_nil\n  refl\n\ntheorem denominator_nonzero : not C.length(outcomes) = 0 := by\n  exact P.nonempty_denominator\n\ntheorem complementary (outcome : Outcome) : add(first_head(outcome), first_tail(outcome)) = 1 := by\n  induction outcome with\n  | hh =>\n      refl\n  | ht =>\n      refl\n  | th =>\n      refl\n  | tt =>\n      refl\n\ntheorem partition_total :\n  add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(first_tail, outcomes))) = C.length(outcomes) := by\n  apply P.complement_counts {A := Outcome; f := first_head; g := first_tail; xs := outcomes}\n  intro outcome\n  intro member\n  exact complementary\n\n-- The numerator of the first-head probability is 2; its denominator is 4.\ntheorem first_head_count : S.sum(C.map(first_head, outcomes)) = 2 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  refl\n\ntheorem second_head_count : S.sum(C.map(second_head, outcomes)) = 2 := by\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_cons\n  rewrite -> C.map_nil\n  refl\n\ntheorem head_contributions (outcome : Outcome) : heads(outcome) = add(first_head(outcome), second_head(outcome)) := by\n  induction outcome with\n  | hh =>\n      refl\n  | ht =>\n      refl\n  | th =>\n      refl\n  | tt =>\n      refl\n\ntheorem total_heads : S.sum(C.map(heads, outcomes)) = 4 := by\n  have linear : S.sum(C.map(heads, outcomes)) = add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(second_head, outcomes))) := by\n    apply P.numerator_add {A := Outcome; f := first_head; g := second_head; h := heads; xs := outcomes}\n    intro outcome\n    intro member\n    exact head_contributions\n  rewrite -> first_head_count at linear\n  rewrite -> second_head_count at linear\n  exact linear\n\n-- Listing hh twice changes the experiment: choose uniformly among five tickets.\ndef tickets : C.List Outcome := C.cons(hh, outcomes)\n\ntheorem ticket_count : C.length(tickets) = 5 := by\n  rewrite -> C.length_cons\n  rewrite -> sample_size\n  refl\n\ntheorem ticket_first_heads : S.sum(C.map(first_head, tickets)) = 2 := by\n  rewrite -> C.map_cons\n  rewrite -> S.sum_cons\n  rewrite -> first_head_count\n  refl\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = ['builtin:std/hol/probability_counts.ctea', 'builtin:std/hol/weighted_sums.ctea', 'builtin:std/hol/sums.ctea', 'builtin:std/nat.ctea', 'std/hol/cardinality@1', 'std/hol/list@1']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "recurrences-and-named-functions",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- A machine starts with two tokens and gains three tokens each tick.\nimport builtin:std/hol/recurrences.ctea as R\nmode constructive\n\ndefrec tokens (n : Nat) : Nat\n| zero => 2\n| succ k rec => add(3, rec)\n\ntheorem tokens_closed (n : Nat) : tokens(n) = add(2, mul(n, 3)) := by\n  have all_ticks : forall k : Nat, tokens(k) = add(2, mul(k, 3)) := by\n    apply R.constant_step_closed {f := tokens; a := 2; d := 3}\n    refl\n    intro k\n    simp\n    refl\n  exact all_ticks n\n\ntheorem after_four_ticks : tokens(4) = 14 := by\n  rewrite -> tokens_closed\n  refl\n\n-- An independently written formula describes the same sequence.\ndef formula (n : Nat) : Nat := add(2, mul(n, 3))\ndef advance (n previous : Nat) : Nat := add(3, previous)\n\ntheorem two_descriptions (n : Nat) : tokens(n) = formula(n) := by\n  have all_ticks : forall k : Nat, tokens(k) = formula(k) := by\n    apply R.recurrence_unique {A := Nat; f := tokens; g := formula; step := advance}\n    refl\n    intro k\n    simp\n    refl\n    intro k\n    exact R.constant_step_successor {a := 2; d := 3; n := k}\n  exact all_ticks n\n\n-- Uniqueness also applies when the states are not numbers.\ndata State\n| ready\n| busy\n\ndefrec toggle (s : State) : State\n| ready => busy\n| busy => ready\n\ndefrec machine (n : Nat) : State\n| zero => ready\n| succ k rec => toggle(rec)\n\ndef transition (n : Nat) (s : State) : State := toggle(s)\n\ntheorem state_sequence_unique (other : Nat -> State) :\n  other(0) = ready ->\n  (forall k : Nat, other(succ(k)) = toggle(other(k))) ->\n  forall n : Nat, machine(n) = other(n) := by\n  intro initial\n  intro next\n  apply R.recurrence_unique {A := State; f := machine; g := other; step := transition}\n  rewrite -> initial\n  refl\n  intro k\n  simp\n  refl\n  intro k\n  exact next k\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = ['builtin:std/hol/recurrences.ctea', 'builtin:std/nat.ctea']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "recurrences-wrong-update",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "-- A machine starts with two tokens and gains three tokens each tick.\nimport builtin:std/hol/recurrences.ctea as R\nmode constructive\n\ndefrec tokens (n : Nat) : Nat\n| zero => 2\n| succ k rec => add(4, rec)\n\ntheorem tokens_closed (n : Nat) : tokens(n) = add(2, mul(n, 3)) := by\n  have all_ticks : forall k : Nat, tokens(k) = add(2, mul(k, 3)) := by\n    apply R.constant_step_closed {f := tokens; a := 2; d := 3}\n    refl\n    intro k\n    simp\n    refl\n  exact all_ticks n\n\ntheorem after_four_ticks : tokens(4) = 14 := by\n  rewrite -> tokens_closed\n  refl\n\n-- An independently written formula describes the same sequence.\ndef formula (n : Nat) : Nat := add(2, mul(n, 3))\ndef advance (n previous : Nat) : Nat := add(3, previous)\n\ntheorem two_descriptions (n : Nat) : tokens(n) = formula(n) := by\n  have all_ticks : forall k : Nat, tokens(k) = formula(k) := by\n    apply R.recurrence_unique {A := Nat; f := tokens; g := formula; step := advance}\n    refl\n    intro k\n    simp\n    refl\n    intro k\n    exact R.constant_step_successor {a := 2; d := 3; n := k}\n  exact all_ticks n\n\n-- Uniqueness also applies when the states are not numbers.\ndata State\n| ready\n| busy\n\ndefrec toggle (s : State) : State\n| ready => busy\n| busy => ready\n\ndefrec machine (n : Nat) : State\n| zero => ready\n| succ k rec => toggle(rec)\n\ndef transition (n : Nat) (s : State) : State := toggle(s)\n\ntheorem state_sequence_unique (other : Nat -> State) :\n  other(0) = ready ->\n  (forall k : Nat, other(succ(k)) = toggle(other(k))) ->\n  forall n : Nat, machine(n) = other(n) := by\n  intro initial\n  intro next\n  apply R.recurrence_unique {A := State; f := machine; g := other; step := transition}\n  rewrite -> initial\n  refl\n  intro k\n  simp\n  refl\n  intro k\n  exact next k\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'hol'\nallowed_imports = ['builtin:std/hol/recurrences.ctea', 'builtin:std/nat.ctea']\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": false,
+      "violations": []
+    }
+  },
+  {
+    "name": "incomplete-permitted",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_incomplete = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "incomplete-allow_extensionality",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_extensionality = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "incomplete-allow_choice",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "theorem answer : True := by\n  sorry\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_choice = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "incomplete"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "new-axiom-permitted",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "axiom answer : True\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_new_axioms = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "new-axiom-allow_extensionality",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "axiom answer : True\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_extensionality = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "trusted_axiom"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "new-axiom-allow_choice",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "axiom answer : True\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_choice = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "trusted_axiom"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "classical-denied-permitted",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "mode classical\ntheorem answer (P : Prop) : P \\/ not P := by\n  by_cases h : P\n  left\n  exact h\n  right\n  exact h\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_classical = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "classical-denied-allow_extensionality",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "mode classical\ntheorem answer (P : Prop) : P \\/ not P := by\n  by_cases h : P\n  left\n  exact h\n  right\n  exact h\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_extensionality = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "feature"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "classical-denied-allow_choice",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "mode classical\ntheorem answer (P : Prop) : P \\/ not P := by\n  by_cases h : P\n  left\n  exact h\n  right\n  exact h\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nallow_choice = true\n",
+      "files": []
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "feature"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "pinned-grant",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_imports = ['helper.ctea']\nallowed_theorems = ['helper.ctea::helper']\nrequired_theorem.answer = 'True'\n",
+      "files": [
+        {
+          "path": "helper.ctea",
+          "source": "theorem helper : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  },
+  {
+    "name": "axiom-tainted-grant",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_imports = ['helper.ctea']\nallowed_theorems = ['helper.ctea::helper']\nrequired_theorem.answer = 'True'\n",
+      "files": [
+        {
+          "path": "helper.ctea",
+          "source": "axiom helper : True\n"
+        }
+      ]
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "trusted_axiom"
+        ],
+        [
+          "helper.ctea::helper",
+          "allowed_theorem"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "incomplete-grant",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_imports = ['helper.ctea']\nallowed_theorems = ['helper.ctea::helper']\nrequired_theorem.answer = 'True'\n",
+      "files": [
+        {
+          "path": "helper.ctea",
+          "source": "theorem helper : True := by\n  sorry\n"
+        }
+      ]
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "answer",
+          "incomplete"
+        ],
+        [
+          "helper.ctea::helper",
+          "allowed_theorem"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "transitive-import-denied",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_imports = ['helper.ctea']\nallowed_theorems = ['helper.ctea::helper']\nrequired_theorem.answer = 'True'\n",
+      "files": [
+        {
+          "path": "helper.ctea",
+          "source": "import other.ctea as O\ntheorem helper : True := by\n  exact O.other\n"
+        },
+        {
+          "path": "other.ctea",
+          "source": "theorem other : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "expected": {
+      "accepted": false,
+      "certified": true,
+      "violations": [
+        [
+          "other.ctea",
+          "import"
+        ]
+      ]
+    }
+  },
+  {
+    "name": "transitive-import-permitted",
+    "project": {
+      "root": "main.ctea",
+      "files": [
+        {
+          "path": "main.ctea",
+          "source": "import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n"
+        }
+      ]
+    },
+    "assignment": {
+      "path": "task.ctea-assignment",
+      "source": "version = 1\nprofile = 'prop'\nrequired_imports = ['helper.ctea']\nallowed_theorems = ['helper.ctea::helper']\nrequired_theorem.answer = 'True'\nallowed_imports = ['helper.ctea', 'other.ctea']\n",
+      "files": [
+        {
+          "path": "helper.ctea",
+          "source": "import other.ctea as O\ntheorem helper : True := by\n  exact O.other\n"
+        },
+        {
+          "path": "other.ctea",
+          "source": "theorem other : True := by\n  trivial\n"
+        }
+      ]
+    },
+    "expected": {
+      "accepted": true,
+      "certified": true,
+      "violations": []
+    }
+  }
+]

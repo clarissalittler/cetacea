@@ -1,0 +1,57 @@
+-- Reordering a checked finite-set enumeration does not change its total.
+import builtin:std/hol/weighted_enumerations.ctea as E
+import builtin:std/hol/counting.ctea as F
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+mode constructive
+
+data Vertex
+| low
+| high
+| isolated
+
+defrec weight (v : Vertex) : Nat
+| low => 2
+| high => 5
+| isolated => 0
+
+def Active : Set Vertex := { v : Vertex | v = low \/ v = high }
+def forward : C.List Vertex := C.cons(low, C.cons(high, C.nil))
+def backward : C.List Vertex := C.cons(high, C.cons(low, C.nil))
+
+theorem forward_size : F.HasSize(Active, forward, 2) := by
+  apply F.has_size_intro {A := Vertex; S := Active; xs := forward; n := 2}
+  finite
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_nil
+  refl
+  unfold Active
+  finite
+
+theorem backward_size : F.HasSize(Active, backward, 2) := by
+  apply F.has_size_intro {A := Vertex; S := Active; xs := backward; n := 2}
+  finite
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_nil
+  refl
+  unfold Active
+  finite
+
+theorem reordered_total :
+  S.sum(C.map(weight, forward)) = S.sum(C.map(weight, backward)) := by
+  apply E.sum_enumeration_independent {A := Vertex; f := weight; V := Active; xs := forward; ys := backward; m := 2; n := 2}
+  exact forward_size
+  exact backward_size
+
+theorem forward_total : S.sum(C.map(weight, forward)) = 7 := by
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_nil
+  simp
+  refl
+
+theorem backward_total : S.sum(C.map(weight, backward)) = 7 := by
+  rewrite <- reordered_total
+  exact forward_total

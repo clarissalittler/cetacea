@@ -106,7 +106,7 @@ one direction is constructive — the other needs classical logic. The
 standard library provides the constructive halves.
 
 ```text
--- not_exists_to_forall_not: imported from std/fol.ctea.
+-- fol.not_exists_to_forall_not: imported from std/fol.ctea.
 -- (forall x, not P(x)) <-> not (exists x, P(x))    -- both constructive
 
 -- not_forall_to_exists_not: only classically provable.
@@ -158,7 +158,7 @@ from the kernel — it's the most common place students get tangled.
 
 If you need the other direction (rewrite an `x` to a `y`), use
 `rewrite -> h` for forward rewriting, or rewrite with a symmetric proof
-such as `rewrite eq_symm h`. You can also use `eq_subst_left` from
+such as `rewrite eq.eq_symm h`. You can also use `eq.eq_subst_left` from
 `std/eq.ctea` directly:
 
 ```text
@@ -167,12 +167,12 @@ theorem rewrite_back
   : alice = bob -> P(bob) -> P(alice) := by
   intro h
   intro hp
-  apply eq_subst_left {A := Person; P := P; x := alice; y := bob}
+  apply eq.eq_subst_left {A := Person; P := P; x := alice; y := bob}
   exact h
   exact hp
 ```
 
-`eq_subst_left` says: from `x = y` and `P(y)`, conclude `P(x)`. Filling
+`eq.eq_subst_left` says: from `x = y` and `P(y)`, conclude `P(x)`. Filling
 in the schema makes that exactly the lemma we need.
 
 ## Module 4 worked exercises
@@ -200,8 +200,8 @@ hypothesis. See `forall_exists_chain` in the companion file.
 
 ### Exercise 8: `forall x, P(x) /\ Q(x)) <-> ((forall x, P(x)) /\ (forall x, Q(x)))`
 
-Both directions are in `std/fol.ctea` as `forall_and_left`,
-`forall_and_right`, and `forall_and_intro`. Try to write your own version
+Both directions are in `std/fol.ctea` as `fol.forall_and_left`,
+`fol.forall_and_right`, and `fol.forall_and_intro`. Try to write your own version
 without looking and then compare.
 
 ### Negation of nested quantifiers

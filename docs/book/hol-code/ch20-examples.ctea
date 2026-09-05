@@ -1,0 +1,41 @@
+-- Divisibility witnesses and a clock calculation.
+import builtin:std/modular.ctea as M
+mode constructive
+
+theorem four_divides_twenty : M.Divides(4, 20) := by
+  unfold M.Divides
+  exists 5
+  refl
+
+-- Add no cycles to 27 and two 12-hour cycles to 3.
+theorem clock_27_3 : M.ModEq(12, 27, 3) := by
+  unfold M.ModEq
+  exists 0
+  exists 2
+  refl
+
+theorem clock_reverse : M.ModEq(12, 3, 27) := by
+  exact M.modeq_sym {m := 12; x := 27; y := 3} clock_27_3
+
+-- Congruent symbolic inputs have congruent squares.
+theorem congruent_squares (m x y : Nat) :
+  M.ModEq(m, x, y) -> M.ModEq(m, mul(x, x), mul(y, y)) := by
+  intro same
+  exact M.modeq_mul {m := m; x := x; y := y; u := x; v := y} same same
+
+-- Truncated subtraction loses information when the second input is larger.
+theorem subtraction_trap : sub(2, 9) = 0 := by
+  refl
+
+theorem zero_divides_zero : M.Divides(0, 0) := by
+  exact M.divides_zero {a := 0}
+
+-- Congruence modulo zero is equality for this subtraction-free definition.
+theorem zero_modulus (x y : Nat) : M.ModEq(0, x, y) -> x = y := by
+  intro congruent
+  simp at congruent
+  cases congruent with
+  | intro a remaining =>
+      cases remaining with
+      | intro b equal =>
+          exact equal

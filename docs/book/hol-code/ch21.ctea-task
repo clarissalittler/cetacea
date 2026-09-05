@@ -1,0 +1,7 @@
+{
+  "format": "cetacea-assignment",
+  "version": 1,
+  "path": "docs/book/hol-code/ch21-solutions.ctea-assignment",
+  "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/recurrences.ctea\", \"builtin:std/nat.ctea\"]\nrequired_imports = [\"builtin:std/hol/recurrences.ctea\"]\nallowed_axioms = []\n\nrequired_theorem.ex21_1 = '(?0 : Nat -> Nat) : ?0(0) = 2 -> (forall ?1 : Nat, ?0(succ(?1)) = add(3, ?0(?1))) -> ?0(4) = 14'\nrequired_theorem.ex21_2 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : add(?0, mul(succ(?2), ?1)) = add(?1, add(?0, mul(?2, ?1)))'\nrequired_theorem.ex21_3 = '(?0 : Nat -> Nat) (?1 : Nat) (?2 : Nat) : ?0(0) = ?1 -> (forall ?3 : Nat, ?0(succ(?3)) = add(?2, ?0(?3))) -> forall ?4 : Nat, ?0(?4) = add(?1, mul(?4, ?2))'\nrequired_theorem.ex21_4 = '(?0 : Type) (?1 : Nat -> ?0) (?2 : Nat -> ?0) (?3 : Nat -> ?0 -> ?0) : ?1(0) = ?2(0) -> (forall ?4 : Nat, ?1(succ(?4)) = ?3(?4, ?1(?4))) -> (forall ?5 : Nat, ?2(succ(?5)) = ?3(?5, ?2(?5))) -> forall ?6 : Nat, ?1(?6) = ?2(?6)'\n",
+  "files": []
+}

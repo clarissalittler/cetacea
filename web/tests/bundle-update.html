@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cetacea open-page bundle update test</title>
+<h1>Open-page bundle update test</h1>
+<p>Runs real packaged clients, workers and Wasm across a local server update. Student storage is untouched.</p>
+<pre id="results" role="status">Running…</pre>
+<script type="module">
+const output = document.querySelector('#results');
+const lines = [];
+const clients = [];
+function assert(condition, message) { if (!condition) throw new Error(message); }
+function pass(message) { lines.push(`PASS: ${message}`); output.textContent = lines.join('\n'); }
+async function state() { return (await fetch('/__bundle-test__/state')).json(); }
+async function check(client, fixtures, label) {
+  for (const fixture of fixtures) {
+    const result = await client.run('project', [fixture.project, 'check', {assignment: fixture.assignment}]);
+    const violations = [...new Set(result.assignment.violations.map(v => JSON.stringify([v.declaration, v.kind])))].map(v => JSON.parse(v));
+    violations.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+    const actual = {accepted: result.assignment.accepted, certified: result.hol_certified, violations};
+    assert(JSON.stringify(actual) === JSON.stringify(fixture.expected), `${label}: ${fixture.name} grading mismatch`);
+  }
+  pass(`${label}: all ${fixtures.length} grading cases match native results`);
+}
+try {
+  const initial = await state();
+  assert(!initial.updated, 'Restart the test server before repeating the test');
+  const fixtures = await (await fetch('/__bundle-test__/fixtures')).json();
+  const oldPage = await (await fetch('/')).text();
+  assert(oldPage.includes(`assets/${initial.old}/app.js`), 'Initial page does not reference old build');
+  const {CheckerClient: OldClient} = await import(`/assets/${initial.old}/checker-client.mjs`);
+  const oldClient = new OldClient();
+  clients.push(oldClient);
+  await check(oldClient, fixtures, 'Before update');
+  oldClient.stop();
+  const update = await fetch('/__bundle-test__/update', {method: 'POST', headers: {'X-Test-Token': initial.token}});
+  assert(update.ok, 'Server update failed');
+  const newPage = await (await fetch('/')).text();
+  assert(newPage.includes(`assets/${initial.new}/app.js`), 'Updated page does not reference new build');
+  assert(!newPage.includes(`assets/${initial.old}/app.js`), 'Updated page still uses old build');
+  pass('Server now serves the new root page without reloading this page');
+  await check(oldClient, fixtures, 'Old page with a fresh worker after update');
+  const {CheckerClient: NewClient} = await import(`/assets/${initial.new}/checker-client.mjs`);
+  const newClient = new NewClient();
+  clients.push(newClient);
+  await check(newClient, fixtures, 'New build after update');
+  const final = await state();
+  for (const build of [initial.old, initial.new]) {
+    for (const asset of ['checker-worker.js', 'pkg/cetacea_wasm.wasm']) {
+      assert(final.requests.some(r => r.updated && r.path === `/assets/${build}/${asset}`),
+        `No post-update network request for ${build}/${asset}`);
+    }
+  }
+  pass('Server received fresh worker and Wasm requests for both builds after update');
+  output.textContent += '\nAll open-page bundle update checks passed.';
+} catch (error) {
+  output.textContent = lines.join('\n') + '\nFAIL: ' + error.message;
+} finally {
+  for (const client of clients) client.stop();
+}
+</script>

@@ -1,6 +1,6 @@
 -- Companion file for docs/cs250/06_relations.md.
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -39,14 +39,14 @@ theorem equality_relation_equivalence : Equivalence(fun x y : Thing => x = y) :=
   intro x
   intro y
   intro h
-  exact eq_symm h
+  exact eq.eq_symm h
   unfold Transitive
   intro x
   intro y
   intro z
   intro h1
   intro h2
-  exact eq_trans h1 h2
+  exact eq.eq_trans h1 h2
 
 -- "If R is symmetric and transitive AND there's some witness y with
 -- R(x, y), then R(x, x)." The flawed argument from Module 1 §6 is
@@ -74,11 +74,11 @@ theorem eq_refl_demo (A : Type) (x : A) : x = x := by
   refl
 
 theorem eq_sym_demo (A : Type) (x y : A) : x = y -> y = x := by
-  exact eq_symm
+  exact eq.eq_symm
 
-theorem eq_trans_demo (A : Type) (x y z : A)
+theorem eq_trans (A : Type) (x y z : A)
   : x = y -> y = z -> x = z := by
-  exact eq_trans
+  exact eq.eq_trans
 
 -- An axiomatic equivalence relation: a sketch of how you'd handle
 -- something like modular congruence.

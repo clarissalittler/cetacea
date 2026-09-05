@@ -30,7 +30,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "and_intro_demo",
+          "name": "and_intro",
           "statement": "P -> Q -> P /\\ Q",
           "status": "accepted",
           "uses_sorry": false
@@ -81,7 +81,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "29be23cecfb903361ed5fd25ccac85fbd62a2024861f33b1758a7323d1e4fc56"
+      "source_sha256": "40b7c41e8887f2afa39cbe248dbddc0f1d24e68bf2a8a21f0fa2680dd577e40f"
     },
     {
       "diagnostics": [],
@@ -145,7 +145,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "0ff5ff633228f59d218b8e371c4b4985101da55b5ea54d10c122a91a67ad6413"
+      "source_sha256": "977d50b2b58b533944d23f694d08678295f2d7bfb4aedea08394f4c5bc5344fb"
     },
     {
       "diagnostics": [
@@ -280,7 +280,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "0e5e6683b2f4999b382d72fe9e0a0be725e57f4e7bd672e7619d17e997143066"
+      "source_sha256": "839b49660a43c432cc13fbc4958a6e3a6b66a1337154ab0a3501e9e703479b66"
     },
     {
       "diagnostics": [],
@@ -320,7 +320,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "or_elim_demo",
+          "name": "or_elim",
           "statement": "(P -> R) -> (Q -> R) -> P \\/ Q -> R",
           "status": "accepted",
           "uses_sorry": false
@@ -356,7 +356,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "modus_tollens_demo",
+          "name": "modus_tollens",
           "statement": "(P -> Q) -> (not Q) -> not P",
           "status": "accepted",
           "uses_sorry": false
@@ -380,7 +380,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "f4ccef065f90e9da2bcb43e0e568dc8b2aee087cc3e0f25eb28ba2a7420c3fd6"
+      "source_sha256": "838034a94861b500d6375357e59582b887401bd35962b04ef1c539bdac2ba3da"
     },
     {
       "diagnostics": [],
@@ -453,7 +453,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "ed88d338bf514917604a9bc9e2bb47ea6b2002ab45120c22c4261894d4f40849"
+      "source_sha256": "f71a84e4bd23546b5ea8a62667041e63228d5c2e5846717b82d116e1bfca5f95"
     },
     {
       "diagnostics": [
@@ -589,7 +589,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "d3a076f92da3ded4f2fad51154e32a72ec77adf53e72cf413056d8c7655d1ef6"
+      "source_sha256": "061c25bdd16bdd24b5afd6757d06d8a2127896c1b179b36d0775d8be6c61d4cf"
     },
     {
       "diagnostics": [],
@@ -611,7 +611,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "classical",
-          "name": "em_demo",
+          "name": "em",
           "statement": "P \\/ (not P)",
           "status": "accepted",
           "uses_sorry": false
@@ -620,7 +620,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "classical",
-          "name": "dne_demo",
+          "name": "dne",
           "statement": "(not (not P)) -> P",
           "status": "accepted",
           "uses_sorry": false
@@ -653,7 +653,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "b77ba197b02136ff4b7c800d6ae87ca53ba01ba3c6676d1cba93f5a59e138429"
+      "source_sha256": "ed7dfc2b558f051231fcf02c4525e688bbc4962945cc994b5c44a6d2bc078008"
     },
     {
       "diagnostics": [],
@@ -717,7 +717,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "575f64b7e359bcbf69e835dac284e00b43b22f69ed88e863b4caf7e9b515fdc2"
+      "source_sha256": "5f1d9946a477f3d04911afd64f107e09cd8377524b92e9c31fca56af1a293090"
     },
     {
       "diagnostics": [
@@ -816,7 +816,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "5541157adab57e18ba9c352546ddd82d132e114cecd41560ba3a50834afc43ff"
+      "source_sha256": "a21f38c7fe8cadf6e8570f7963dafbfa7d13c0e30ee29e1ce51e8337677a5640"
     },
     {
       "diagnostics": [],
@@ -865,7 +865,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "exists_mono_demo",
+          "name": "exists_mono",
           "statement": "(forall x : Person, Happy(x) -> Rich(x)) -> (exists x : Person, Happy(x)) -> exists x : Person, Rich(x)",
           "status": "accepted",
           "uses_sorry": false
@@ -907,7 +907,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "fdc95ab606d181a136539421bf709b7ce5b6d5a3ae1de7ca3c79f9e10ea8981b"
+      "source_sha256": "6301f28b786916945d5f14fac1bb3d492ded9f007eefdd7b55ead8e4887709da"
     },
     {
       "diagnostics": [],
@@ -980,7 +980,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "2149c367bad3ca7f5f292b564e8e3f9a968e632b78a86b968baac42cbb966581"
+      "source_sha256": "d4fba9e8fb46bcf591ec9ac147344665ce85f1b8b2d3e634197c979fa1e134ec"
     },
     {
       "diagnostics": [
@@ -1089,7 +1089,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "dacdb9df38eebac32284b6cc2d246f6fbefb5e4a6899c7d773b207cf449898cd"
+      "source_sha256": "b3c8d5d96e37eec9b0e8d1ca62f5c6a910c04ccaf26c944f0ad01cc35350941c"
     },
     {
       "diagnostics": [],
@@ -1252,7 +1252,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "03c1280ef27fa46d3054086800e03ee543b6da44951be5262c3bd470afea9d45"
+      "source_sha256": "1f1feaae0f9b264497711383a6c3824685468fe04bf60e9f15106770a3d3b428"
     },
     {
       "diagnostics": [],
@@ -1325,7 +1325,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "7f9d05186be7ff6cc7d068e0e13ab8e7264d82aaf2abec60b5f84d15a89fcad5"
+      "source_sha256": "bc57237a02eefa5a6d10e8f3badbf9971d025ff060cf859ec03fcd989d126018"
     },
     {
       "diagnostics": [
@@ -1459,7 +1459,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "492870f999bbb10ea291f2dd6828110f9908bc0037acb44799a384c882c7f55c"
+      "source_sha256": "6d0eaafcafe450445e0ddf943e1b9ee08c0f3420c03d62ba29d52155051f0e76"
     },
     {
       "diagnostics": [],
@@ -1542,7 +1542,7 @@
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
@@ -1553,7 +1553,7 @@
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
@@ -1564,7 +1564,7 @@
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
@@ -1575,18 +1575,18 @@
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "union_empty_right_demo",
+          "name": "union_empty_right",
           "statement": "A = union(A, empty(T))",
           "status": "accepted",
           "uses_sorry": false
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "classical",
@@ -1596,7 +1596,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "5b4c52a14aea9a0734027c963a78a22ed30ba4e9ccadc88e8b1bc8fd81d098b2"
+      "source_sha256": "f0fa2506b7b6724627bc0d43fb9b153ef673bb98d501e54b0e807b6c1a980fdf"
     },
     {
       "diagnostics": [],
@@ -1678,7 +1678,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "82d8e15fae85939867555f0be92c2108bacba1d7a7e2ed3ebda22306fbf8608f"
+      "source_sha256": "f676513275ca19ff37bd7c8574cb2ebf46dc2fbcdfdd8d5ab5def9ad3104f1b2"
     },
     {
       "diagnostics": [
@@ -1794,7 +1794,7 @@
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
@@ -1805,7 +1805,7 @@
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
@@ -1816,7 +1816,7 @@
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "classical",
@@ -1826,7 +1826,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "3d04805a8c4ae5635a4d981a89b8707bc70348739e40cfa3e016657c861c52f6"
+      "source_sha256": "18c4f7ae864dc78c8521e594789d433ba392ee4f7a98a6295919633d234efc06"
     },
     {
       "diagnostics": [],
@@ -1894,7 +1894,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_reflexive",
-          "statement": "Reflexive(fun x y : Nat => ModEq(m, x, y))",
+          "statement": "Reflexive(fun x y : Nat => modular.ModEq(m, x, y))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -1903,7 +1903,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_symmetric",
-          "statement": "Symmetric(fun x y : Nat => ModEq(m, x, y))",
+          "statement": "Symmetric(fun x y : Nat => modular.ModEq(m, x, y))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -1912,7 +1912,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_transitive",
-          "statement": "Transitive(fun x y : Nat => ModEq(m, x, y))",
+          "statement": "Transitive(fun x y : Nat => modular.ModEq(m, x, y))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -1921,7 +1921,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_equivalence",
-          "statement": "Equivalence(fun x y : Nat => ModEq(m, x, y))",
+          "statement": "Equivalence(fun x y : Nat => modular.ModEq(m, x, y))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -1930,12 +1930,12 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "clock_27_is_3",
-          "statement": "ModEq(12, 27, 3)",
+          "statement": "modular.ModEq(12, 27, 3)",
           "status": "accepted",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "5c481206d0d4db331f8b3ac538b8cef6cca2f5ae6f0873bd606b36b033f488b5"
+      "source_sha256": "6df74dda67394193f643b3583f9f1a0bac21ab3f91d0dd2e6cac001513355cab"
     },
     {
       "diagnostics": [],
@@ -1949,7 +1949,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex7_1",
-          "statement": "ModEq(10, 23, 3)",
+          "statement": "modular.ModEq(10, 23, 3)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -1958,7 +1958,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex7_2",
-          "statement": "Reflexive(fun x y : Nat => Divides(x, y))",
+          "statement": "Reflexive(fun x y : Nat => modular.Divides(x, y))",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -1976,7 +1976,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex7_4",
-          "statement": "Transitive(fun x y : Nat => Divides(x, y))",
+          "statement": "Transitive(fun x y : Nat => modular.Divides(x, y))",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2017,7 +2017,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "d194a07c1c2fcb6c1e75e564e8eedd6abaa55f94d0cd860e36573f4cf027caf0"
+      "source_sha256": "459040414250bd4566f16158aa69a7061b266c682f2fff51f4b51c0b1c66b916"
     },
     {
       "diagnostics": [
@@ -2026,9 +2026,9 @@
             "line": 17,
             "path": "docs/book/code/ch07-mistakes.ctea"
           },
-          "message": "theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => ModEq(m, x, y))`",
+          "message": "theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => modular.ModEq(m, x, y))`",
           "notes": [
-            "target: Reflexive(fun x y : Nat => ModEq(m, x, y))"
+            "target: Reflexive(fun x y : Nat => modular.ModEq(m, x, y))"
           ],
           "severity": "error"
         },
@@ -2053,7 +2053,7 @@
       ],
       "path": "docs/book/code/ch07-mistakes.ctea",
       "root_declarations": [],
-      "source_sha256": "e9d40e9c67346e40f18307eab7109a0ba786f559be8d5718a0f329fd40408665"
+      "source_sha256": "4bca141b4559f552999370ec03df66187463c8fab3e04365b404d7b2af54414e"
     },
     {
       "diagnostics": [],
@@ -2067,7 +2067,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex7_1",
-          "statement": "ModEq(10, 23, 3)",
+          "statement": "modular.ModEq(10, 23, 3)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2076,7 +2076,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex7_2",
-          "statement": "Reflexive(fun x y : Nat => Divides(x, y))",
+          "statement": "Reflexive(fun x y : Nat => modular.Divides(x, y))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2094,7 +2094,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex7_4",
-          "statement": "Transitive(fun x y : Nat => Divides(x, y))",
+          "statement": "Transitive(fun x y : Nat => modular.Divides(x, y))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2135,7 +2135,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "17bc01297b6a9a4a5ecd69af5bf913ebb3246fd82b77b58d0b3e4efe77bb6059"
+      "source_sha256": "270b84a07a879921eb7b6fd553da37fd42f7385feb33d46b14c957a4d5a29867"
     },
     {
       "diagnostics": [],
@@ -2149,7 +2149,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "age_graph_total",
-          "statement": "Total(fun (p : Person) (n : Nat) => age(p) = n)",
+          "statement": "fun.Total(fun (p : Person) (n : Nat) => age(p) = n)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2158,7 +2158,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "mother_graph_total",
-          "statement": "Total(fun x y : Person => mother(x) = y)",
+          "statement": "fun.Total(fun x y : Person => mother(x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2167,7 +2167,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "mother_graph_single_valued",
-          "statement": "SingleValued(fun x y : Person => mother(x) = y)",
+          "statement": "fun.SingleValued(fun x y : Person => mother(x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2176,7 +2176,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "succ_graph_injective",
-          "statement": "Injective(fun x y : Nat => succ(x) = y)",
+          "statement": "fun.Injective(fun x y : Nat => succ(x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2194,7 +2194,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "succ_not_surjective",
-          "statement": "not Surjective(fun x y : Nat => succ(x) = y)",
+          "statement": "not fun.Surjective(fun x y : Nat => succ(x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2203,7 +2203,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "identity_bijective_demo",
-          "statement": "Bijective(fun x y : Person => x = y)",
+          "statement": "fun.Bijective(fun x y : Person => x = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2212,7 +2212,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "compose_preserves_injective",
-          "statement": "Injective(F) -> Injective(G) -> forall x1 : Person, forall x2 : Person, forall z : Person, (exists y : Person, F(x1, y) /\\ G(y, z)) -> (exists y : Person, F(x2, y) /\\ G(y, z)) -> x1 = x2",
+          "statement": "fun.Injective(F) -> fun.Injective(G) -> forall x1 : Person, forall x2 : Person, forall z : Person, (exists y : Person, F(x1, y) /\\ G(y, z)) -> (exists y : Person, F(x2, y) /\\ G(y, z)) -> x1 = x2",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2226,7 +2226,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "549093b3c0d832ca41229436d02320991d8e76307b158847f49253e704e72503"
+      "source_sha256": "23cc1bd31b7327669227950b6915f971d2502a281b629e1136a9acca7b76a874"
     },
     {
       "diagnostics": [],
@@ -2240,7 +2240,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_1",
-          "statement": "Total(fun x y : Nat => mul(x, x) = y)",
+          "statement": "fun.Total(fun x y : Nat => mul(x, x) = y)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2249,7 +2249,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_2",
-          "statement": "SingleValued(fun x y : Nat => mul(x, x) = y)",
+          "statement": "fun.SingleValued(fun x y : Nat => mul(x, x) = y)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2258,7 +2258,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_3",
-          "statement": "Injective(fun x y : Nat => add(x, 2) = y)",
+          "statement": "fun.Injective(fun x y : Nat => add(x, 2) = y)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2267,7 +2267,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_4",
-          "statement": "Surjective(fun x y : Nat => x = y)",
+          "statement": "fun.Surjective(fun x y : Nat => x = y)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2276,7 +2276,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_5",
-          "statement": "Total(fun x y : Person => y = alice)",
+          "statement": "fun.Total(fun x y : Person => y = alice)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2285,7 +2285,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_6",
-          "statement": "SingleValued(fun x y : Person => y = alice)",
+          "statement": "fun.SingleValued(fun x y : Person => y = alice)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2294,12 +2294,12 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_7",
-          "statement": "Surjective(F) -> Surjective(G) -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\\ G(y, z)",
+          "statement": "fun.Surjective(F) -> fun.Surjective(G) -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\\ G(y, z)",
           "status": "incomplete",
           "uses_sorry": true
         }
       ],
-      "source_sha256": "2a2d54e743e4a4e9bb5fce30c2c0d22a18db85d549c74dd5e88633fc5f3d9eff"
+      "source_sha256": "a98b6ebe0610fbb79564f229ebed7ba5921fa0c25443c791f67ea1fb90992000"
     },
     {
       "diagnostics": [
@@ -2347,7 +2347,7 @@
       ],
       "path": "docs/book/code/ch08-mistakes.ctea",
       "root_declarations": [],
-      "source_sha256": "07a0a413adb6ed7c3972e865ef7f2b20f0ea30ed9ba1608483522ab55cdc9d8e"
+      "source_sha256": "60f1f47bb4489ff22537094fa3a6b153d2c360be2f6342c133b8e020d41b289d"
     },
     {
       "diagnostics": [],
@@ -2361,7 +2361,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_1",
-          "statement": "Total(fun x y : Nat => mul(x, x) = y)",
+          "statement": "fun.Total(fun x y : Nat => mul(x, x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2370,7 +2370,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_2",
-          "statement": "SingleValued(fun x y : Nat => mul(x, x) = y)",
+          "statement": "fun.SingleValued(fun x y : Nat => mul(x, x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2379,7 +2379,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_3",
-          "statement": "Injective(fun x y : Nat => add(x, 2) = y)",
+          "statement": "fun.Injective(fun x y : Nat => add(x, 2) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2388,7 +2388,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_4",
-          "statement": "Surjective(fun x y : Nat => x = y)",
+          "statement": "fun.Surjective(fun x y : Nat => x = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2397,7 +2397,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_5",
-          "statement": "Total(fun x y : Person => y = alice)",
+          "statement": "fun.Total(fun x y : Person => y = alice)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2406,7 +2406,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_6",
-          "statement": "SingleValued(fun x y : Person => y = alice)",
+          "statement": "fun.SingleValued(fun x y : Person => y = alice)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2415,12 +2415,12 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex8_7",
-          "statement": "Surjective(F) -> Surjective(G) -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\\ G(y, z)",
+          "statement": "fun.Surjective(F) -> fun.Surjective(G) -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\\ G(y, z)",
           "status": "accepted",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "e4840c9f7b5642cc96343cf1d572a80448d7a64598bb32531818c3329c03ce2d"
+      "source_sha256": "36e0c7c95fd97cf1ca459419431a27a0da3de2a9a19582fc2045c15b361f286c"
     },
     {
       "diagnostics": [],
@@ -2442,7 +2442,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "add_zero_left_demo",
+          "name": "add_zero_left",
           "statement": "add(0, n) = n",
           "status": "accepted",
           "uses_sorry": false
@@ -2451,7 +2451,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "add_zero_right_demo",
+          "name": "add_zero_right",
           "statement": "add(n, 0) = n",
           "status": "accepted",
           "uses_sorry": false
@@ -2460,7 +2460,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "sub_self_demo",
+          "name": "sub_self",
           "statement": "sub(n, n) = 0",
           "status": "accepted",
           "uses_sorry": false
@@ -2469,7 +2469,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "add_comm_demo",
+          "name": "add_comm",
           "statement": "add(n, m) = add(m, n)",
           "status": "accepted",
           "uses_sorry": false
@@ -2484,7 +2484,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "aa02eb2fa4b6c0e0517aa4dc6154f867f7c6151246a6a267b8b91984ff505850"
+      "source_sha256": "15bb6431bbb928eb6527843cabd1485182102c739c0b02fc40e7f85a5b28a660"
     },
     {
       "diagnostics": [],
@@ -2548,7 +2548,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "6af86151d3406101a99c9066d07f28a3585d962234c4d50edf937488884487e9"
+      "source_sha256": "35472940ee50b3f077535c3df1bf1deb77ade9bf88aa58eb1c006b5c593a7ff7"
     },
     {
       "diagnostics": [
@@ -2607,7 +2607,7 @@
       ],
       "path": "docs/book/code/ch09-mistakes.ctea",
       "root_declarations": [],
-      "source_sha256": "18d035f2ef49c5f93a3b1b6cbb051954eb7c55e0ba983c89ff7519a12699bc5b"
+      "source_sha256": "b0f035eccf0eda16044365f53b9c2dee71fac4e456dc71f02ef57ab0fa14cb73"
     },
     {
       "diagnostics": [],
@@ -2671,7 +2671,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "c0ebc73c22157cfeef17f5986ca44126f3940d824c02fad60820c2b5f7202074"
+      "source_sha256": "c0c5b16fd7cf8407001522f131a5de9e7c2a76bd19d881c28bfe4744b534427a"
     },
     {
       "diagnostics": [],
@@ -2747,8 +2747,8 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "length_demo",
-          "statement": "length(cons(7, cons(4, nil))) = 2",
+          "name": "length",
+          "statement": "list.length(list.cons(7, list.cons(4, list.nil))) = 2",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2757,7 +2757,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "sum_demo",
-          "statement": "sum(cons(1, cons(2, cons(3, nil)))) = 6",
+          "statement": "sum(list.cons(1, list.cons(2, list.cons(3, list.nil)))) = 6",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2765,8 +2765,8 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "append_demo",
-          "statement": "append(cons(1, nil), cons(2, nil)) = cons(1, cons(2, nil))",
+          "name": "append",
+          "statement": "list.append(list.cons(1, list.nil), list.cons(2, list.nil)) = list.cons(1, list.cons(2, list.nil))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2774,8 +2774,8 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "append_cons_demo",
-          "statement": "append(cons(h, t), l) = cons(h, append(t, l))",
+          "name": "append_cons",
+          "statement": "list.append(list.cons(h, t), l) = list.cons(h, list.append(t, l))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2784,7 +2784,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "replicate_two",
-          "statement": "replicate(2, 9) = cons(9, cons(9, nil))",
+          "statement": "replicate(2, 9) = list.cons(9, list.cons(9, list.nil))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2793,23 +2793,23 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_5_20_direct",
-          "statement": "Divides(5, 20)",
+          "statement": "modular.Divides(5, 20)",
           "status": "accepted",
           "uses_sorry": false
         },
         {
           "axiom_deps": [
-            "modeq_zero_to_divides"
+            "modular.modeq_zero_to_divides"
           ],
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_5_20_via_modeq",
-          "statement": "Divides(5, 20)",
+          "statement": "modular.Divides(5, 20)",
           "status": "accepted",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "344cda5dbbde572f7d905ab2bfe73759593813a0b87d179f59face72c1faf9ed"
+      "source_sha256": "4b3ba9875c50fad16ac6c4a02d1cbc75c8cf8751fe8302434cea88eb739a1314"
     },
     {
       "diagnostics": [],
@@ -2850,7 +2850,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex10_4",
-          "statement": "length(replicate(n, x)) = n",
+          "statement": "list.length(replicate(n, x)) = n",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2859,7 +2859,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex10_5",
-          "statement": "Divides(3, 12)",
+          "statement": "modular.Divides(3, 12)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -2868,12 +2868,12 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex10_6",
-          "statement": "Divides(3, 12)",
+          "statement": "modular.Divides(3, 12)",
           "status": "incomplete",
           "uses_sorry": true
         }
       ],
-      "source_sha256": "1d6cdaf07cfb5db065ae4b71386703db09854e14e81e30b7f4b3bdb70c6a2ee6"
+      "source_sha256": "0fd9cdaf9db08671720b8b6e2eeecdf729a26bc9ba3afbc8fb20c0f2f0d28c62"
     },
     {
       "diagnostics": [
@@ -2882,7 +2882,7 @@
             "line": 13,
             "path": "docs/book/code/ch10-mistakes.ctea"
           },
-          "message": "cannot redeclare `length` as a recursive definition",
+          "message": "cannot redeclare `list.length` as a recursive definition",
           "notes": [],
           "severity": "error"
         },
@@ -2891,7 +2891,7 @@
             "line": 22,
             "path": "docs/book/code/ch10-mistakes.ctea"
           },
-          "message": "recursive definition case `cons` expects 3 binder(s), but got 2",
+          "message": "recursive definition case `list.cons` expects 3 binder(s), but got 2",
           "notes": [
             "bind the 2 constructor argument(s) first, then 1 recursive result(s)"
           ],
@@ -2902,9 +2902,9 @@
             "line": 28,
             "path": "docs/book/code/ch10-mistakes.ctea"
           },
-          "message": "theorem `append_nil_right` failed: refl cannot prove `append(l, nil) = l` because the sides are not identical",
+          "message": "theorem `append_nil_right` failed: refl cannot prove `list.append(l, list.nil) = l` because the sides are not identical",
           "notes": [
-            "target: append(l, nil) = l"
+            "target: list.append(l, list.nil) = l"
           ],
           "severity": "error"
         }
@@ -2916,7 +2916,7 @@
       ],
       "path": "docs/book/code/ch10-mistakes.ctea",
       "root_declarations": [],
-      "source_sha256": "7b020300d0a307c16e86c83c4106086b756174d6e55db25219b924d0026bef28"
+      "source_sha256": "60ff59e21d01cd0b0bdb0cec02db616a7dbb07886c05511bb70e207c2300a935"
     },
     {
       "diagnostics": [
@@ -2969,7 +2969,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex10_4",
-          "statement": "length(replicate(n, x)) = n",
+          "statement": "list.length(replicate(n, x)) = n",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -2978,23 +2978,23 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex10_5",
-          "statement": "Divides(3, 12)",
+          "statement": "modular.Divides(3, 12)",
           "status": "accepted",
           "uses_sorry": false
         },
         {
           "axiom_deps": [
-            "modeq_zero_to_divides"
+            "modular.modeq_zero_to_divides"
           ],
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex10_6",
-          "statement": "Divides(3, 12)",
+          "statement": "modular.Divides(3, 12)",
           "status": "accepted",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "75f7612d5d604e93c70fb7c200f358bd2267499bef45fe371580dcdabdd8c71f"
+      "source_sha256": "607859e4bc76d95cfcc0633bbedac4a7dd5fef002b4d64434d4f5105e8da2b46"
     },
     {
       "diagnostics": [],
@@ -3007,8 +3007,8 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "append_nil_demo",
-          "statement": "append(l, nil) = l",
+          "name": "append_nil",
+          "statement": "list.append(l, list.nil) = l",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -3016,8 +3016,8 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "length_append_demo",
-          "statement": "length(append(l1, l2)) = add(length(l1), length(l2))",
+          "name": "length_append",
+          "statement": "list.length(list.append(l1, l2)) = add(list.length(l1), list.length(l2))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -3040,7 +3040,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "491f65eed5ac8c7ddc2da4b3af7fe999bfd372e464716ef85d0f320e0211d6a8"
+      "source_sha256": "77c4a64d2020856a418be2d89f34eddc5af73773bec2faeb63eb327ddd465781"
     },
     {
       "diagnostics": [],
@@ -3063,7 +3063,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex11_2",
-          "statement": "append(append(l1, l2), l3) = append(l1, append(l2, l3))",
+          "statement": "list.append(list.append(l1, l2), l3) = list.append(l1, list.append(l2, l3))",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -3072,7 +3072,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex11_3",
-          "statement": "sum(append(l1, l2)) = add(sum(l1), sum(l2))",
+          "statement": "sum(list.append(l1, l2)) = add(sum(l1), sum(l2))",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -3104,7 +3104,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "15d6f82a50772cba20f3b022defba1462e5594eb8f152f0d7012533759e42fbe"
+      "source_sha256": "da587e770f2c73bbeb8766b2645ecd02bff4b08dd914d80aa444f8e97eb5b08b"
     },
     {
       "diagnostics": [
@@ -3113,9 +3113,9 @@
             "line": 14,
             "path": "docs/book/code/ch11-mistakes.ctea"
           },
-          "message": "theorem `arms_out_of_order` failed: induction arm `cons` does not match constructor `nil`; arms must follow the declaration order",
+          "message": "theorem `arms_out_of_order` failed: induction arm `list.cons` does not match constructor `list.nil`; arms must follow the declaration order",
           "notes": [
-            "target: append(l, nil) = l"
+            "target: list.append(l, list.nil) = l"
           ],
           "severity": "error"
         },
@@ -3124,9 +3124,9 @@
             "line": 25,
             "path": "docs/book/code/ch11-mistakes.ctea"
           },
-          "message": "theorem `missing_binders` failed: induction arm `cons` expects 3 binder(s): one per constructor argument, then one induction hypothesis per recursive argument",
+          "message": "theorem `missing_binders` failed: induction arm `list.cons` expects 3 binder(s): one per constructor argument, then one induction hypothesis per recursive argument",
           "notes": [
-            "target: append(l, nil) = l"
+            "target: list.append(l, list.nil) = l"
           ],
           "severity": "error"
         },
@@ -3151,7 +3151,7 @@
       ],
       "path": "docs/book/code/ch11-mistakes.ctea",
       "root_declarations": [],
-      "source_sha256": "3ea651f654a083031b0c5470cbc23056bfe201d843ee25adc712b7d86dbc204d"
+      "source_sha256": "377e97c20f775ea24b3f354d634b0f33d4b0f27048836785bf44f8142456c9a0"
     },
     {
       "diagnostics": [],
@@ -3174,7 +3174,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex11_2",
-          "statement": "append(append(l1, l2), l3) = append(l1, append(l2, l3))",
+          "statement": "list.append(list.append(l1, l2), l3) = list.append(l1, list.append(l2, l3))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -3183,7 +3183,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "ex11_3",
-          "statement": "sum(append(l1, l2)) = add(sum(l1), sum(l2))",
+          "statement": "sum(list.append(l1, l2)) = add(sum(l1), sum(l2))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -3215,7 +3215,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "40d1f26606a62f17d2b2e29b6d266f9267882f9820e99e9506dc14b2a85ab88b"
+      "source_sha256": "bb8757a5bba47e8df04228485e467e2daf23940d7d2e688294a42636ea76b5fd"
     },
     {
       "diagnostics": [],
@@ -3247,7 +3247,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "pred_le",
-          "statement": "le(pred(n), n)",
+          "statement": "le(nat.pred(n), n)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -3269,7 +3269,7 @@
           "is_axiom": true,
           "mode": "constructive",
           "name": "bulb_step",
-          "statement": "bulb(succ(k)) = bulb(pred(k))",
+          "statement": "bulb(succ(k)) = bulb(nat.pred(k))",
           "status": "trusted_axiom",
           "uses_sorry": false
         },
@@ -3286,7 +3286,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "3bc5e51289d477c18b7a30a5a7030fde689727e428e051cf7006b33e16dfacba"
+      "source_sha256": "fbdb22c3c086cbd7aa59a974d995cc4ac838fd64d96183139cf4b9a0291a8390"
     },
     {
       "diagnostics": [],
@@ -3309,7 +3309,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "pred_le",
-          "statement": "le(pred(n), n)",
+          "statement": "le(nat.pred(n), n)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -3371,7 +3371,7 @@
           "is_axiom": true,
           "mode": "constructive",
           "name": "siren_step",
-          "statement": "siren(succ(k)) = siren(pred(k))",
+          "statement": "siren(succ(k)) = siren(nat.pred(k))",
           "status": "trusted_axiom",
           "uses_sorry": false
         },
@@ -3385,7 +3385,7 @@
           "uses_sorry": true
         }
       ],
-      "source_sha256": "00f6466afb57bef62cfb7503d3aad3cd9285bed415f7f35954eb62d36fd7b682"
+      "source_sha256": "9659e3f0ab15eb90a0159f7c65584c53b53b63bcc26d94d0bd644333578d86d7"
     },
     {
       "diagnostics": [
@@ -3394,9 +3394,9 @@
             "line": 25,
             "path": "docs/book/code/ch12-mistakes.ctea"
           },
-          "message": "theorem `one_rung_short` failed: exact proof does not solve the goal: proof has type `bulb(k) = 0`, but expected `bulb(pred(k)) = 0`",
+          "message": "theorem `one_rung_short` failed: exact proof does not solve the goal: proof has type `bulb(k) = 0`, but expected `bulb(nat.pred(k)) = 0`",
           "notes": [
-            "target: bulb(pred(k)) = 0"
+            "target: bulb(nat.pred(k)) = 0"
           ],
           "severity": "error"
         },
@@ -3405,7 +3405,7 @@
             "line": 31,
             "path": "docs/book/code/ch12-mistakes.ctea"
           },
-          "message": "theorem `which_predicate` failed: cannot use theorem `strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`",
+          "message": "theorem `which_predicate` failed: cannot use theorem `nat.strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`",
           "notes": [
             "target: bulb(n) = 0"
           ],
@@ -3438,12 +3438,12 @@
           "is_axiom": true,
           "mode": "constructive",
           "name": "bulb_step",
-          "statement": "bulb(succ(k)) = bulb(pred(k))",
+          "statement": "bulb(succ(k)) = bulb(nat.pred(k))",
           "status": "trusted_axiom",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "69d7e139cfd18d9c896f1cf399246dfe06a55b3a4ba47cf09d7257fc175742de"
+      "source_sha256": "ea8713aa810341581080248e0f2cab4efe648c97d9ed1ea0bf2918c12771efb9"
     },
     {
       "diagnostics": [],
@@ -3466,7 +3466,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "pred_le",
-          "statement": "le(pred(n), n)",
+          "statement": "le(nat.pred(n), n)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -3531,7 +3531,7 @@
           "is_axiom": true,
           "mode": "constructive",
           "name": "siren_step",
-          "statement": "siren(succ(k)) = siren(pred(k))",
+          "statement": "siren(succ(k)) = siren(nat.pred(k))",
           "status": "trusted_axiom",
           "uses_sorry": false
         },
@@ -3548,7 +3548,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "cdf936da37c0f18bf2027ec4d11ac2c956d0cbe489a631dd4910e2d836942f60"
+      "source_sha256": "b61a21ee4b669dd5901398370414e186b2b3cfb315b946aad4789dafb57624d6"
     },
     {
       "diagnostics": [],
@@ -3561,7 +3561,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "and_intro_demo",
+          "name": "and_intro",
           "statement": "P -> Q -> P /\\ Q",
           "status": "accepted",
           "uses_sorry": false
@@ -3588,7 +3588,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "or_elim_demo",
+          "name": "or_elim",
           "statement": "(P -> R) -> (Q -> R) -> P \\/ Q -> R",
           "status": "accepted",
           "uses_sorry": false
@@ -3606,7 +3606,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "modus_tollens_demo",
+          "name": "modus_tollens",
           "statement": "(P -> Q) -> (not Q) -> not P",
           "status": "accepted",
           "uses_sorry": false
@@ -3660,13 +3660,13 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "classical",
-          "name": "em_demo",
+          "name": "em",
           "statement": "P \\/ (not P)",
           "status": "accepted",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "94dcd0a49d35fb7c8fd232b9ecc9ac2e008e002234ca7a35111364b0fc53797b"
+      "source_sha256": "5698246f3cb41d217a32fd5ebdaaa32d718ab990b1e8cda50b6dae8a6d238b99"
     },
     {
       "diagnostics": [
@@ -3785,7 +3785,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "55842b7e4417d9e79dbc7f4e6dbeb4b124091427fd6ad7aebd083fc1f57405c0"
+      "source_sha256": "6faa4c62c48d02bf784f8abf9bab22ecc9e64942172b6803bdb34b919a48d67a"
     },
     {
       "diagnostics": [],
@@ -3876,7 +3876,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "7f938b24f2c0f5e25fb567122076252373f6154373dddd0e985ddf31ce7bdd26"
+      "source_sha256": "b207896725a997a76615319afe277a78e17ccbcf8dc7a22e3480e1de82000b78"
     },
     {
       "diagnostics": [],
@@ -4059,25 +4059,25 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "subset_refl_demo",
+          "name": "subset_refl",
           "statement": "A subset A",
           "status": "accepted",
           "uses_sorry": false
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "inter_comm_demo",
+          "name": "inter_comm",
           "statement": "inter(A, B) = inter(B, A)",
           "status": "accepted",
           "uses_sorry": false
         },
         {
           "axiom_deps": [
-            "set_ext"
+            "set.set_ext"
           ],
           "is_axiom": false,
           "mode": "constructive",
@@ -4099,13 +4099,13 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "powerset_mono_demo",
+          "name": "powerset_mono",
           "statement": "A subset B -> powerset(A) subset powerset(B)",
           "status": "accepted",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "18bd399169e6200032f309bc79e9e0b595c4a9fce190acadb385aa5376a6e7a1"
+      "source_sha256": "916bc691d51ac3fbc9bbb09809eb9ffde1b848382e70415a02bef07546d87727"
     },
     {
       "diagnostics": [],
@@ -4181,7 +4181,7 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "eq_trans_demo",
+          "name": "eq_trans",
           "statement": "x = y -> y = z -> x = z",
           "status": "accepted",
           "uses_sorry": false
@@ -4232,7 +4232,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "630cd6a45016cd75841baa12c89a45b6f381a1e57f1fb7af5485c187b45516f7"
+      "source_sha256": "9fad4861d44b3531923fedda84ecef2565b8857387eac11c635e9a228fe3b9b1"
     },
     {
       "diagnostics": [],
@@ -4246,7 +4246,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "length_two_demo",
-          "statement": "length(cons(1, cons(2, nil))) = 2",
+          "statement": "list.length(list.cons(1, list.cons(2, list.nil))) = 2",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4255,7 +4255,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "sum_singleton",
-          "statement": "sum(cons(n, nil)) = n",
+          "statement": "sum(list.cons(n, list.nil)) = n",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4263,8 +4263,8 @@
           "axiom_deps": [],
           "is_axiom": false,
           "mode": "constructive",
-          "name": "length_append_demo",
-          "statement": "length(append(l1, l2)) = add(length(l1), length(l2))",
+          "name": "length_append",
+          "statement": "list.length(list.append(l1, l2)) = add(list.length(l1), list.length(l2))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4273,7 +4273,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "sum_append",
-          "statement": "sum(append(l1, l2)) = add(sum(l1), sum(l2))",
+          "statement": "sum(list.append(l1, l2)) = add(sum(l1), sum(l2))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4345,7 +4345,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "pred_le",
-          "statement": "le(pred(n), n)",
+          "statement": "le(nat.pred(n), n)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4367,7 +4367,7 @@
           "is_axiom": true,
           "mode": "constructive",
           "name": "g_step",
-          "statement": "g(succ(k)) = g(pred(k))",
+          "statement": "g(succ(k)) = g(nat.pred(k))",
           "status": "trusted_axiom",
           "uses_sorry": false
         },
@@ -4384,7 +4384,7 @@
           "uses_sorry": false
         }
       ],
-      "source_sha256": "326d02b98097dffcfa7261bc26a82c322837303cfa3b754dd4ad9579891e27d1"
+      "source_sha256": "bd580b89612a75ea1097721865234213209ff836ab49942f55c68898144934a1"
     },
     {
       "diagnostics": [],
@@ -4398,7 +4398,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "mother_total",
-          "statement": "Total(fun x y : Person => mother(x) = y)",
+          "statement": "fun.Total(fun x y : Person => mother(x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4407,7 +4407,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "mother_single_valued",
-          "statement": "SingleValued(fun x y : Person => mother(x) = y)",
+          "statement": "fun.SingleValued(fun x y : Person => mother(x) = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4416,7 +4416,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "age_total",
-          "statement": "Total(fun (x : Person) (n : Nat) => age(x) = n)",
+          "statement": "fun.Total(fun (x : Person) (n : Nat) => age(x) = n)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4425,7 +4425,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "age_single_valued",
-          "statement": "SingleValued(fun (x : Person) (n : Nat) => age(x) = n)",
+          "statement": "fun.SingleValued(fun (x : Person) (n : Nat) => age(x) = n)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4434,7 +4434,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "person_id_bijective",
-          "statement": "Bijective(fun x y : Person => x = y)",
+          "statement": "fun.Bijective(fun x y : Person => x = y)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4443,7 +4443,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "succ_graph_injective",
-          "statement": "Injective(fun n m : Nat => succ(n) = m)",
+          "statement": "fun.Injective(fun n m : Nat => succ(n) = m)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4452,12 +4452,12 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "use_compose",
-          "statement": "Surjective(F) -> Surjective(G) -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\\ G(y, z)",
+          "statement": "fun.Surjective(F) -> fun.Surjective(G) -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\\ G(y, z)",
           "status": "accepted",
           "uses_sorry": false
         }
       ],
-      "source_sha256": "bac0d768a5573f97595ce6858de555601668c4a0caf704fc1dbaa5613735a219"
+      "source_sha256": "4ffb37a8aba1401fb22c646f5d7c25b04f63bd434295724094e138023b17a9c0"
     },
     {
       "diagnostics": [],
@@ -4471,7 +4471,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_4_20",
-          "statement": "Divides(4, 20)",
+          "statement": "modular.Divides(4, 20)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4480,7 +4480,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_9_0",
-          "statement": "Divides(9, 0)",
+          "statement": "modular.Divides(9, 0)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4489,7 +4489,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_3_9",
-          "statement": "Divides(3, 9)",
+          "statement": "modular.Divides(3, 9)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4498,7 +4498,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_3_sum",
-          "statement": "Divides(3, add(12, 9))",
+          "statement": "modular.Divides(3, add(12, 9))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4507,7 +4507,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_3_sum_by_apply",
-          "statement": "Divides(3, add(12, 9))",
+          "statement": "modular.Divides(3, add(12, 9))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4516,7 +4516,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_3_6",
-          "statement": "Divides(3, 6)",
+          "statement": "modular.Divides(3, 6)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4525,7 +4525,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_6_18",
-          "statement": "Divides(6, 18)",
+          "statement": "modular.Divides(6, 18)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4534,7 +4534,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "divides_3_18",
-          "statement": "Divides(3, 18)",
+          "statement": "modular.Divides(3, 18)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4543,7 +4543,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_27_3_mod_12",
-          "statement": "ModEq(12, 27, 3)",
+          "statement": "modular.ModEq(12, 27, 3)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4552,7 +4552,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_3_27_mod_12",
-          "statement": "ModEq(12, 3, 27)",
+          "statement": "modular.ModEq(12, 3, 27)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4561,7 +4561,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_succ",
-          "statement": "ModEq(m, x, y) -> ModEq(m, succ(x), succ(y))",
+          "statement": "modular.ModEq(m, x, y) -> modular.ModEq(m, succ(x), succ(y))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4570,7 +4570,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_8_3_mod_5",
-          "statement": "ModEq(5, 8, 3)",
+          "statement": "modular.ModEq(5, 8, 3)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4579,7 +4579,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_9_4_mod_5",
-          "statement": "ModEq(5, 9, 4)",
+          "statement": "modular.ModEq(5, 9, 4)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4588,7 +4588,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_sum_demo",
-          "statement": "ModEq(5, add(8, 9), add(3, 4))",
+          "statement": "modular.ModEq(5, add(8, 9), add(3, 4))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4597,7 +4597,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_6_1_mod_5",
-          "statement": "ModEq(5, 6, 1)",
+          "statement": "modular.ModEq(5, 6, 1)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4606,7 +4606,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_36_demo",
-          "statement": "ModEq(5, mul(6, 6), mul(1, 1))",
+          "statement": "modular.ModEq(5, mul(6, 6), mul(1, 1))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4615,7 +4615,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_36_1_mod_5",
-          "statement": "ModEq(5, 36, 1)",
+          "statement": "modular.ModEq(5, 36, 1)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4624,18 +4624,18 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "modeq_12_0_mod_3",
-          "statement": "ModEq(3, 12, 0)",
+          "statement": "modular.ModEq(3, 12, 0)",
           "status": "accepted",
           "uses_sorry": false
         },
         {
           "axiom_deps": [
-            "modeq_zero_to_divides"
+            "modular.modeq_zero_to_divides"
           ],
           "is_axiom": false,
           "mode": "constructive",
           "name": "residue_zero_divides",
-          "statement": "ModEq(6, x, 0) -> Divides(6, x)",
+          "statement": "modular.ModEq(6, x, 0) -> modular.Divides(6, x)",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4644,7 +4644,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "even_plus_even",
-          "statement": "Divides(2, a) -> Divides(2, b) -> Divides(2, add(a, b))",
+          "statement": "modular.Divides(2, a) -> modular.Divides(2, b) -> modular.Divides(2, add(a, b))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4653,7 +4653,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "even_times_anything",
-          "statement": "Divides(2, a) -> Divides(2, mul(a, k))",
+          "statement": "modular.Divides(2, a) -> modular.Divides(2, mul(a, k))",
           "status": "accepted",
           "uses_sorry": false
         },
@@ -4662,7 +4662,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "exercise_divides_5_35",
-          "statement": "Divides(5, 35)",
+          "statement": "modular.Divides(5, 35)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -4671,7 +4671,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "exercise_modeq_23_3_mod_10",
-          "statement": "ModEq(10, 23, 3)",
+          "statement": "modular.ModEq(10, 23, 3)",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -4680,7 +4680,7 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "exercise_modeq_double",
-          "statement": "ModEq(m, x, y) -> ModEq(m, add(x, x), add(y, y))",
+          "statement": "modular.ModEq(m, x, y) -> modular.ModEq(m, add(x, x), add(y, y))",
           "status": "incomplete",
           "uses_sorry": true
         },
@@ -4689,12 +4689,12 @@
           "is_axiom": false,
           "mode": "constructive",
           "name": "exercise_divides_sum_of_multiples",
-          "statement": "Divides(d, add(mul(d, k), mul(d, j)))",
+          "statement": "modular.Divides(d, add(mul(d, k), mul(d, j)))",
           "status": "incomplete",
           "uses_sorry": true
         }
       ],
-      "source_sha256": "24d2adcce549187ed5ea3031b910658d1149a7477147842484b5312a351aa1a2"
+      "source_sha256": "7d6116ea725c8f0b48614e75b488dbe5fda0023196ee91bb49943b3df001c120"
     },
     {
       "diagnostics": [],

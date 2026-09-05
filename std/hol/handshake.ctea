@@ -1,0 +1,100 @@
+-- Degree counting for arbitrary finite incidence tables.
+import double_counting.ctea as D
+import std/hol/matrix@1 as M
+import std/hol/cardinality@1 as C
+import weighted_sums.ctea as W
+import sums.ctea as S
+mode constructive
+
+-- Connect a binary contribution row to a named unary function.
+theorem row_as_sum (A B : Type) (w : A -> B -> Nat) (a : A)
+  (f : B -> Nat) (ys : M.List B) :
+  (forall b : B, C.Member(b, ys) -> w(a, b) = f(b)) ->
+  M.row_sum(w, a, ys) = S.sum(C.map(f, ys)) := by
+  induction ys with
+  | nil =>
+      intro agrees
+      rewrite -> M.row_sum_nil
+      rewrite -> C.map_nil
+      simp
+      refl
+  | cons b tail ih =>
+      intro agrees
+      have at_head : w(a, b) = f(b) := agrees b (W.member_head {A := B; x := b; t := tail})
+      have at_tail : M.row_sum(w, a, tail) = S.sum(C.map(f, tail)) := by
+        apply ih
+        intro x
+        intro listed
+        exact agrees x (W.member_tail {A := B; x := b; y := x; t := tail} listed)
+      rewrite -> M.row_sum_cons
+      rewrite -> C.map_cons
+      rewrite -> S.sum_cons
+      rewrite -> at_head
+      rewrite -> at_tail
+      refl
+
+theorem rows_constant (A B : Type) (w : A -> B -> Nat)
+  (xs : M.List A) (ys : M.List B) (k : Nat) :
+  (forall a : A, C.Member(a, xs) -> M.row_sum(w, a, ys) = k) ->
+  M.rows_total(w, xs, ys) = mul(C.length(xs), k) := by
+  induction xs with
+  | nil =>
+      intro constant
+      rewrite -> M.rows_total_nil
+      rewrite -> C.length_nil
+      simp
+      refl
+  | cons a tail ih =>
+      intro constant
+      have at_head : M.row_sum(w, a, ys) = k := constant a (W.member_head {A := A; x := a; t := tail})
+      have at_tail : M.rows_total(w, tail, ys) = mul(C.length(tail), k) := by
+        apply ih
+        intro x
+        intro listed
+        exact constant x (W.member_tail {A := A; x := a; y := x; t := tail} listed)
+      rewrite -> M.rows_total_cons
+      rewrite -> at_head
+      rewrite -> at_tail
+      rewrite -> C.length_cons
+      simp
+      refl
+
+theorem columns_as_degrees (A B : Type) (w : A -> B -> Nat)
+  (degree : B -> Nat) (xs : M.List A) (ys : M.List B) :
+  (forall b : B, C.Member(b, ys) -> degree(b) = M.column_sum(w, xs, b)) ->
+  S.sum(C.map(degree, ys)) = M.columns_total(w, xs, ys) := by
+  induction ys with
+  | nil =>
+      intro degrees
+      rewrite -> C.map_nil
+      rewrite -> M.columns_total_nil
+      simp
+      refl
+  | cons b tail ih =>
+      intro degrees
+      have at_head : degree(b) = M.column_sum(w, xs, b) := degrees b (W.member_head {A := B; x := b; t := tail})
+      have at_tail : S.sum(C.map(degree, tail)) = M.columns_total(w, xs, tail) := by
+        apply ih
+        intro x
+        intro listed
+        exact degrees x (W.member_tail {A := B; x := b; y := x; t := tail} listed)
+      rewrite -> C.map_cons
+      rewrite -> S.sum_cons
+      rewrite -> M.columns_total_cons
+      rewrite -> at_head
+      rewrite -> at_tail
+      refl
+
+-- Each edge occurrence contributes two; degree counts incidences at a vertex.
+-- Loops and repeated edge occurrences are allowed. Evidence is only required
+-- on listed edges and vertices.
+theorem handshake (Edge Vertex : Type) (incidence : Edge -> Vertex -> Nat)
+  (degree : Vertex -> Nat) (edges : M.List Edge) (vertices : M.List Vertex) :
+  (forall e : Edge, C.Member(e, edges) -> M.row_sum(incidence, e, vertices) = 2) ->
+  (forall v : Vertex, C.Member(v, vertices) -> degree(v) = M.column_sum(incidence, edges, v)) ->
+  S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by
+  intro two_ends
+  intro degrees
+  rewrite -> columns_as_degrees {A := Edge; B := Vertex; w := incidence; degree := degree; xs := edges; ys := vertices} degrees
+  rewrite <- D.double_counting
+  exact rows_constant {A := Edge; B := Vertex; w := incidence; xs := edges; ys := vertices; k := 2} two_ends

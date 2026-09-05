@@ -1,0 +1,7 @@
+-- A first-order student client of a supplied constructive pigeonhole proof.
+import builtin:std/hol/pigeonhole.ctea as P
+import std/hol/finite@1 as Fin
+mode constructive
+theorem collision (A B : Type) (f : A -> B) (xs : Fin.List A) (ys : Fin.List B) (n : Nat) :
+  Fin.HasCard(xs, succ(n)) -> Fin.HasCard(ys, n) -> not (forall x y : A, f(x) = f(y) -> x = y) := by
+  exact P.pigeonhole {A := A; B := B; f := f; xs := xs; ys := ys; n := n}

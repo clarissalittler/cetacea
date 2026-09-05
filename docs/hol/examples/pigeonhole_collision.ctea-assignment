@@ -1,0 +1,6 @@
+version = 1
+profile = "fol+induction"
+allow_classical = true
+allowed_imports = ["builtin:std/hol/pigeonhole_classical.ctea", "builtin:std/hol/pigeonhole.ctea", "builtin:std/hol/counting.ctea", "builtin:std/nat.ctea", "std/hol/list@1", "std/hol/finite@1", "std/hol/cardinality@1"]
+allowed_theorems = ["builtin:std/hol/pigeonhole_classical.ctea::pigeonhole_collision"]
+required_imports = ["builtin:std/hol/pigeonhole_classical.ctea"]

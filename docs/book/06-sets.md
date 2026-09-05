@@ -145,13 +145,13 @@ moves* — is the standard opening for every subset proof you will ever
 write.
 
 The standard library (`std/set.ctea`, in the prelude you're already
-importing) has the common subset facts pre-proved — `subset_refl`,
-`subset_trans`, `subset_union_left`, `inter_subset_left`, and a dozen
+importing) has the common subset facts pre-proved — `set.subset_refl`,
+`set.subset_trans`, `set.subset_union_left`, `set.inter_subset_left`, and a dozen
 more — so the theorem above is also a one-liner, Chapter 4 style:
 
 ```text
 theorem cs_subset_union_library : CS subset union(CS, Math) := by
-  exact subset_union_left {T := Student; A := CS; B := Math}
+  exact set.subset_union_left {T := Student; A := CS; B := Math}
 ```
 
 ## 6.4 Element chasing
@@ -198,7 +198,7 @@ mechanical; the only skill is keeping your nerve.
 
 ## 6.5 Chains of subsets, and `have` again
 
-Subset is transitive — `subset_trans` in the library — and longer
+Subset is transitive — `set.subset_trans` in the library — and longer
 chains are where Chapter 5's `have` starts feeling like an old friend.
 Four sets, three hops:
 
@@ -211,16 +211,16 @@ theorem three_hops
   intro h2
   intro h3
   have hAC : A subset C
-  apply subset_trans
+  apply set.subset_trans
   exact h1
   exact h2
-  apply subset_trans
+  apply set.subset_trans
   exact hAC
   exact h3
 ```
 
 *First establish A ⊆ C; then chain it with the last hop.* Note that
-`apply subset_trans` finds the intermediate set by looking at which
+`apply set.subset_trans` finds the intermediate set by looking at which
 hypotheses you feed it — you never have to say "the middle one is `B`"
 out loud. (When the middle term appears in no hypothesis, inference
 can fail and ask you for explicit braces; you saw the pattern in
@@ -240,7 +240,7 @@ is honest about this — `std/set.ctea` declares it as an **axiom**, a
 statement accepted without proof:
 
 ```text
-axiom set_ext
+axiom set.set_ext
   (T : Type)
   (A B : Set T)
   : (forall x : T, x in A <-> x in B) -> A = B
@@ -252,18 +252,18 @@ whose proof touches one is labeled with it, forever, transitively.
 Run the examples file and look:
 
 ```text
-accepted theorem inter_union_dist (constructive; axioms: set_ext)
+accepted theorem inter_union_dist (constructive; axioms: set.set_ext)
 ```
 
 Nothing is hidden: this theorem is true *given* extensionality, and
 the checker will never let you forget the "given." (Chapter 10 has
 more to say about living with axioms.)
 
-Now the method. `set_ext` says: to prove `A = B`, prove
+Now the method. `set.set_ext` says: to prove `A = B`, prove
 `forall x, x in A <-> x in B`. That unlocks a four-line ritual —
 
 ```text
-apply set_ext      -- equality becomes a forall of iffs
+apply set.set_ext      -- equality becomes a forall of iffs
 intro x            -- take an arbitrary element
 simp               -- memberships compute (the table!)
 split              -- the iff becomes two implications
@@ -278,7 +278,7 @@ theorem inter_union_dist
   (T : Type)
   (A B C : Set T)
   : inter(A, union(B, C)) = union(inter(A, B), inter(A, C)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -328,7 +328,7 @@ theorem compl_union_demo
   (T : Type)
   (A B : Set T)
   : compl(union(A, B)) = inter(compl(A), compl(B)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   ...            -- see the examples file for the chase
@@ -345,24 +345,24 @@ file finishes the chapter with the fix: a `mode classical` line, a
 story on its sleeve:
 
 ```text
-accepted theorem compl_inter_demo (classical; axioms: set_ext)
+accepted theorem compl_inter_demo (classical; axioms: set.set_ext)
 ```
 
 One theorem, two disclosures: it leaned on excluded middle, and it
 leaned on extensionality. This is what "the checker keeps you honest"
 means in practice — compare `compl_union_demo`, whose accepted line
-says `(constructive; axioms: set_ext)`, and you can read off *which De
+says `(constructive; axioms: set.set_ext)`, and you can read off *which De
 Morgan law is deeper* from the bookkeeping alone.
 
 ## 6.7 The other road: mutual inclusion
 
 One more way to prove sets equal, no `<->` involved: show
 `A subset B` and `B subset A` separately, and let the library theorem
-`subset_antisymm` (itself proved from `set_ext`) combine them:
+`set.subset_antisymm` (itself proved from `set.set_ext`) combine them:
 
 ```text
 theorem inter_self (T : Type) (A : Set T) : inter(A, A) = A := by
-  apply subset_antisymm
+  apply set.subset_antisymm
   simp
   intro x
   intro hx
@@ -381,16 +381,16 @@ inclusion shines when the two directions need genuinely different
 arguments, or when you already own one of them as a lemma.
 
 Here is the library-lemma version: `A` and `A ∪ empty` are equal
-because one inclusion is `subset_union_left`, and the other follows
-from `union_subset`, `subset_refl`, and `empty_subset`:
+because one inclusion is `set.subset_union_left`, and the other follows
+from `set.union_subset`, `set.subset_refl`, and `set.empty_subset`:
 
 ```text
-theorem union_empty_right_demo (T : Type) (A : Set T) : A = union(A, empty(T)) := by
-  apply subset_antisymm
-  exact subset_union_left {T := T; A := A; B := empty(T)}
-  apply union_subset
-  exact subset_refl
-  exact empty_subset
+theorem union_empty_right (T : Type) (A : Set T) : A = union(A, empty(T)) := by
+  apply set.subset_antisymm
+  exact set.subset_union_left {T := T; A := A; B := empty(T)}
+  apply set.union_subset
+  exact set.subset_refl
+  exact set.empty_subset
 ```
 
 ## 6.8 Common mistakes
@@ -488,7 +488,7 @@ campus is declared at the top. Clear the `sorry` flags.
   complement. One inclusion is constructive; the other is
   double-negation elimination wearing a set costume, and the file
   grants `mode classical` for it. Expect your accepted line to read
-  `(classical; axioms: set_ext)` — and now you know exactly why.
+  `(classical; axioms: set.set_ext)` — and now you know exactly why.
 
 Solutions: [`code/ch06-solutions.ctea`](code/ch06-solutions.ctea).
 

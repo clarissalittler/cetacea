@@ -1,0 +1,21 @@
+-- Each theorem is deliberately false and must be rejected.
+import builtin:std/hol/sums.ctea as S
+import std/hol/list@1 as L
+
+mode constructive
+
+-- A repeated value is still another entry in the sum.
+theorem repeated_value_disappears : S.sum(L.cons(2, L.cons(2, L.nil))) = 2 := by
+  simp
+  refl
+
+-- Adding a new entry generally changes the total.
+theorem head_disappears (h : Nat) (xs : L.List Nat) :
+  S.sum(L.cons(h, xs)) = S.sum(xs) := by
+  rewrite -> S.sum_cons
+  refl
+
+-- The concatenation law keeps both group totals.
+theorem second_group_disappears (xs ys : L.List Nat) :
+  S.sum(L.append(xs, ys)) = S.sum(xs) := by
+  exact S.sum_append

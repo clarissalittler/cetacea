@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cetacea editor update test</title>
+<h1>Editor update test</h1>
+<p>Runs the packaged editor across a local update with isolated in-memory storage.</p>
+<pre id="results" role="status">Running…</pre>
+<iframe title="Editor under test" style="width:100%;height:650px"></iframe>
+<script type="module">
+const output = document.querySelector('#results');
+const frame = document.querySelector('iframe');
+const lines = [];
+const storage = new Map();
+window.updateStorage = {
+  fail: false,
+  getItem: key => storage.get(key) ?? null,
+  setItem(key, value) {
+    if (this.fail) throw new Error('Injected storage quota failure');
+    storage.set(key, value);
+  }
+};
+function assert(condition, message) { if (!condition) throw new Error(message); }
+function pass(message) { lines.push(`PASS: ${message}`); output.textContent = lines.join('\n'); }
+async function until(predicate, message) {
+  const deadline = performance.now() + 20000;
+  while (!predicate()) {
+    if (performance.now() > deadline) throw new Error(message);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+async function loadEditor() {
+  const previous = frame.contentDocument;
+  const html = await (await fetch('/')).text();
+  const setup = `<base href="${location.origin}/"><script>
+    Object.defineProperty(window, 'localStorage', {value: window.parent.updateStorage});
+  <\/script>`;
+  frame.srcdoc = html.replace('<head>', '<head>' + setup);
+  await until(() => frame.contentDocument !== previous
+    && frame.contentDocument?.querySelector('#status')?.textContent.includes('HOL certified'), 'Editor did not certify source');
+  return frame.contentDocument;
+}
+function edit(doc, source) {
+  doc.querySelector('#sourceEditor').value = source;
+  doc.querySelector('#sourceEditor').dispatchEvent(new frame.contentWindow.Event('input', {bubbles: true}));
+}
+function proof(name) { return `mode constructive\n\ntheorem ${name} (P : Prop) : P -> P := by\n  intro h\n  exact h\n`; }
+async function certified(doc, name) {
+  await until(() => doc.querySelector('#accepted').textContent.includes(`theorem ${name}`)
+    && doc.querySelector('#status').textContent.includes('HOL certified'), `${name} was not certified`);
+}
+try {
+  const initial = await (await fetch('/__bundle-test__/state')).json();
+  assert(!initial.updated, 'Restart the test server before running this test');
+  const doc = await loadEditor();
+  assert(doc.querySelector(`small[title="${initial.old}"]`), 'Initial editor build label is wrong');
+  edit(doc, proof('saved_before_update'));
+  await certified(doc, 'saved_before_update');
+  await until(() => JSON.parse(storage.get('cetacea.web.work.v1') ?? '{}').source === proof('saved_before_update'), 'Initial source was not saved');
+  window.updateStorage.fail = true;
+  const draft = proof('unsaved_during_update');
+  edit(doc, draft);
+  await certified(doc, 'unsaved_during_update');
+  await until(() => doc.querySelector('#saveStatus').textContent.includes('Autosave failed'), 'Save failure was not reported');
+  assert(JSON.parse(storage.get('cetacea.web.work.v1')).source === proof('saved_before_update'), 'Injected failure did not preserve prior save');
+  pass('Unsaved draft remains editable and certified while autosave reports failure');
+  const update = await fetch('/__bundle-test__/update', {method: 'POST', headers: {'X-Test-Token': initial.token}});
+  assert(update.ok, 'Update request failed');
+  assert(frame.contentDocument === doc && doc.querySelector('#sourceEditor').value === draft, 'Update replaced the page or lost the draft');
+  // A real editor input event stops the old worker and starts fresh checking.
+  edit(doc, draft + '\n');
+  await certified(doc, 'unsaved_during_update');
+  const currentDraft = draft + '\n';
+  assert(doc.querySelector('#sourceEditor').value === currentDraft, 'Post-update check changed draft');
+  let downloaded;
+  const win = frame.contentWindow;
+  const originalCreate = win.URL.createObjectURL;
+  const originalClick = win.HTMLAnchorElement.prototype.click;
+  try {
+    win.URL.createObjectURL = blob => { downloaded = blob; return originalCreate.call(win.URL, blob); };
+    win.HTMLAnchorElement.prototype.click = function() {};
+    doc.querySelector('#downloadButton').click();
+  } finally {
+    win.URL.createObjectURL = originalCreate;
+    win.HTMLAnchorElement.prototype.click = originalClick;
+  }
+  assert(downloaded && await downloaded.text() === currentDraft, 'Download did not contain exact unsaved draft');
+  pass('Old editor checks after update and downloads the exact unsaved draft');
+  window.updateStorage.fail = false;
+  doc.querySelector('#checkpointButton').click();
+  await until(() => JSON.parse(storage.get('cetacea.web.work.v1')).source === currentDraft
+    && !doc.querySelector('#saveStatus').textContent.includes('Autosave failed'), 'Saving did not recover');
+  const newDoc = await loadEditor();
+  assert(newDoc.querySelector(`small[title="${initial.new}"]`), 'Reload did not load new build');
+  assert(newDoc.querySelector('#sourceEditor').value === currentDraft, 'New editor did not restore exact draft');
+  await certified(newDoc, 'unsaved_during_update');
+  pass('Recovered save survives loading the new editor and is certified again');
+  const final = await (await fetch('/__bundle-test__/state')).json();
+  for (const build of [initial.old, initial.new]) {
+    for (const file of ['checker-worker.js', 'pkg/cetacea_wasm.wasm']) {
+      assert(final.requests.some(r => r.updated && r.path === `/assets/${build}/${file}`), 'Missing post-update fetch: ' + build + '/' + file);
+    }
+  }
+  pass('Both editor builds fetched matching workers and Wasm after the update');
+  output.textContent += '\nAll editor update checks passed.';
+} catch (error) {
+  output.textContent = lines.join('\n') + '\nFAIL: ' + error.message;
+}
+</script>

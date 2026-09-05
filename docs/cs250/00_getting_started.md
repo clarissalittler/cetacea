@@ -63,18 +63,19 @@ Three things to notice:
 To use the standard library:
 
 ```text
-import ../std/prelude.ctea
+import ../std/qualified_prelude.ctea
 ```
 
-The prelude pulls in `prop.ctea`, `fol.ctea`, `eq.ctea`, `nat.ctea`,
-and `set.ctea`. Then you can write `exact imp_trans`, `apply add_comm`,
-etc.
+The qualified prelude loads the standard-library modules under names such
+as `prop`, `fol`, `eq`, `nat`, `set`, `list`, `fun`, and `modular`. Write
+`exact prop.imp_trans` or `apply nat.add_comm` for a library theorem. Your
+own theorem can still be named `add_comm`; the qualifier tells them apart.
 
 Imports are resolved relative to the file you're in. Most of the
 runnable examples in `code/` import the prelude:
 
 ```text
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 ```
 
 ## The connective table

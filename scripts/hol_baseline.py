@@ -112,7 +112,8 @@ def check_one(checker: Path, path: Path) -> dict[str, Any]:
     negative = is_negative(path)
     expected_exit = 1 if negative else 0
     completed = subprocess.run(
-        [str(checker), "--json", relative(path)],
+        [sys.executable, str(ROOT / "scripts" / "run_limited.py"), "--",
+         str(checker), "--json", relative(path)],
         cwd=ROOT,
         check=False,
         text=True,

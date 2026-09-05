@@ -1,0 +1,69 @@
+import std/hol/reachability.ctea as G
+
+mode constructive
+
+data Stop
+| home
+| junction
+| campus
+
+def Road (a b : Stop) : Prop :=
+  (a = home /\ b = junction) \/ (a = junction /\ b = campus)
+
+theorem home_to_junction : Road(home, junction) := by
+  unfold Road
+  left
+  split
+  refl
+  refl
+
+theorem junction_to_campus : Road(junction, campus) := by
+  unfold Road
+  right
+  split
+  refl
+  refl
+
+theorem home_to_campus : G.Reaches(Road, home, campus) := by
+  apply G.reaches_trans {E := Road; b := junction}
+  apply G.reaches_edge {E := Road}
+  exact home_to_junction
+  apply G.reaches_edge {E := Road}
+  exact junction_to_campus
+
+-- An edge-preserved property propagates through the whole journey.
+theorem journey_preserves_invariant (S : Set Stop) :
+  home in S -> G.Closed(Road, S) -> campus in S := by
+  intro start
+  intro closed
+  exact G.reaches_invariant {E := Road; a := home; b := campus; S := S} home_to_campus start closed
+
+def CampusOnly : Set Stop := { x : Stop | x = campus }
+
+theorem campus_has_no_exit : G.Closed(Road, CampusOnly) := by
+  unfold G.Closed
+  intro x
+  intro y
+  intro at_campus
+  intro road
+  simp [CampusOnly] at at_campus
+  rewrite -> at_campus at road
+  simp [Road] at road
+  cases road with
+  | left first_road =>
+      have impossible : campus = home := first_road.left
+      contradiction
+  | right second_road =>
+      have impossible : campus = junction := second_road.left
+      contradiction
+
+theorem no_return : not G.Reaches(Road, campus, home) := by
+  intro return_journey
+  apply G.not_reaches_of_closed {E := Road; a := campus; b := home; S := CampusOnly}
+  simp [CampusOnly]
+  refl
+  exact campus_has_no_exit
+  simp [CampusOnly]
+  intro impossible
+  contradiction
+  exact return_journey

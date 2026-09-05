@@ -22,21 +22,21 @@ this book.
 
 Here's the toy that shows the problem in its purest form. A hallway
 of numbered light bulbs is wired oddly: bulb 0 is off, and each bulb
-`succ(k)` copies whatever bulb `pred(k)` shows — the bulb *two*
+`succ(k)` copies whatever bulb `nat.pred(k)` shows — the bulb *two*
 positions back (recall `pred` from `std/nat.ctea`: the predecessor,
-with `pred(0) = 0`). In Cetacea, with the trust machinery from
+with `nat.pred(0) = 0`). In Cetacea, with the trust machinery from
 Chapter 10 out in the open:
 
 ```text
 func bulb : Nat -> Nat
 
 axiom bulb_zero : bulb(0) = 0
-axiom bulb_step (k : Nat) : bulb(succ(k)) = bulb(pred(k))
+axiom bulb_step (k : Nat) : bulb(succ(k)) = bulb(nat.pred(k))
 ```
 
 Claim: every bulb is off — `bulb(n) = 0` for all `n`. Follow the
 wiring by hand: bulb 1 is `bulb(succ(0))`, which copies
-`bulb(pred(0)) = bulb(0)` — off. Bulb 2 copies `bulb(pred(1))`,
+`bulb(nat.pred(0)) = bulb(0)` — off. Bulb 2 copies `bulb(nat.pred(1))`,
 which is `bulb(0)` again — off. Bulb 3 copies bulb 1, bulb 4 copies
 bulb 2, bulb 5 copies bulb 3 — off, off, off: from here on, each
 bulb genuinely reaches *two* positions back. Every light in the
@@ -61,16 +61,16 @@ theorem one_rung_short (n : Nat) : bulb(n) = 0 := by
 ```
 
 ```text
-error: docs/book/code/ch12-mistakes.ctea:25: theorem `one_rung_short` failed: exact proof does not solve the goal: proof has type `bulb(k) = 0`, but expected `bulb(pred(k)) = 0`
-  note: target: bulb(pred(k)) = 0
+error: docs/book/code/ch12-mistakes.ctea:25: theorem `one_rung_short` failed: exact proof does not solve the goal: proof has type `bulb(k) = 0`, but expected `bulb(nat.pred(k)) = 0`
+  note: target: bulb(nat.pred(k)) = 0
 ```
 
 (The generic `help:` paragraph is trimmed, as usual by now.) There it
 is, stated more crisply than any prose could: the hypothesis
-is about `k`, the goal is about `pred(k)`, and they are different
+is about `k`, the goal is about `nat.pred(k)`, and they are different
 rungs. Ordinary induction gave us the rung below; the wiring reaches
 two below. This isn't a tactic problem — no rearrangement of `simp`s
-and `rewrite`s will conjure `bulb(pred(k)) = 0` out of
+and `rewrite`s will conjure `bulb(nat.pred(k)) = 0` out of
 `bulb(k) = 0`. We need a principle that hands the step case *more*.
 
 ## 12.3 Strong induction is a theorem (you could have proved it)
@@ -78,7 +78,7 @@ and `rewrite`s will conjure `bulb(pred(k)) = 0` out of
 In `std/nat.ctea`:
 
 ```text
-theorem strong_induction (P : Nat -> Prop) (n : Nat)
+theorem nat.strong_induction (P : Nat -> Prop) (n : Nat)
   : P(0)
     -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
     -> P(n)
@@ -96,13 +96,13 @@ Notice what this is **not**: it is not a new tactic, not a new
 primitive, not an axiom. It's a `theorem`, stated in the quantifier
 language of Chapter 4 and *proved* in the standard library — by
 ordinary Chapter 9 induction, constructively, from two little order
-lemmas (`le_zero_inv` and `le_succ_inv`, via a helper called
-`strong_induction_bounded`). Open `std/nat.ctea` and read the proof;
+lemmas (`nat.le_zero_inv` and `nat.le_succ_inv`, via a helper called
+`nat.strong_induction_bounded`). Open `std/nat.ctea` and read the proof;
 you have every tool it uses. This is the endgame the book has been
 building toward: the library doesn't just *contain* proof principles,
 it *manufactures* them, and "stronger" induction is a consequence of
 plain induction, not an extra assumption about numbers. Your `accepted`
-lines will confirm it — using `strong_induction` adds nothing to an
+lines will confirm it — using `nat.strong_induction` adds nothing to an
 `axioms:` list.
 
 Because it's a theorem, you invoke it like one: with `apply`. One
@@ -112,13 +112,13 @@ out, in the explicit-instantiation braces of Chapter 4:
 
 ```text
 theorem sub_self_strong (n : Nat) : sub(n, n) = 0 := by
-  apply strong_induction {P := fun m : Nat => sub(m, m) = 0; n := n}
+  apply nat.strong_induction {P := fun m : Nat => sub(m, m) = 0; n := n}
   refl
   intro k
   intro hk
   simp
   apply hk
-  exact le_refl
+  exact nat.le_refl
 ```
 
 This is Chapter 9's `sub_self_demo` re-proved, as a first contact
@@ -142,7 +142,7 @@ k : Nat, hk : forall m : Nat, le(m, k) -> sub(m, m) = 0  |-  sub(succ(k), succ(k
 `simp` computes the goal down to `sub(k, k) = 0`. Now spend the
 history: `apply hk` matches its conclusion against the goal
 (instantiating `m := k`) and leaves the toll, `|- le(k, k)`, which
-the library's `le_refl` pays. That last exchange is worth a beat:
+the library's `nat.le_refl` pays. That last exchange is worth a beat:
 strong induction made us *prove our target is low enough on the
 ladder* before handing over the fact. At `m = k` — the old induction
 hypothesis — the toll is trivial. The freedom to pick `m` lower is
@@ -163,7 +163,7 @@ theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
       simp
       exact ih
 
-theorem pred_le (n : Nat) : le(pred(n), n) := by
+theorem pred_le (n : Nat) : le(nat.pred(n), n) := by
   induction n with
   | zero =>
       simp
@@ -174,14 +174,14 @@ theorem pred_le (n : Nat) : le(pred(n), n) := by
 ```
 
 (The second's `succ` arm is sneaky-simple: `simp` computes
-`pred(succ(k))` to `k`, leaving `le(k, succ(k))` — the previous lemma
+`nat.pred(succ(k))` to `k`, leaving `le(k, succ(k))` — the previous lemma
 at `k`, no `ih` needed.)
 
 Now the theorem the chapter came for:
 
 ```text
 theorem all_bulbs_off (n : Nat) : bulb(n) = 0 := by
-  apply strong_induction {P := fun m : Nat => bulb(m) = 0; n := n}
+  apply nat.strong_induction {P := fun m : Nat => bulb(m) = 0; n := n}
   exact bulb_zero
   intro k
   intro hk
@@ -195,13 +195,13 @@ at the end. After `intro k`, `intro hk`, and the rewrite along the
 wiring equation, the state is
 
 ```text
-k : Nat, hk : forall m : Nat, le(m, k) -> bulb(m) = 0  |-  bulb(pred(k)) = 0
+k : Nat, hk : forall m : Nat, le(m, k) -> bulb(m) = 0  |-  bulb(nat.pred(k)) = 0
 ```
 
 — precisely the goal that stumped ordinary induction in Section 12.2.
 But `hk` is not one rung; it's the whole history. `apply hk`
-instantiates it at `m := pred(k)` and asks only that we prove the
-toll, `|- le(pred(k), k)` — and that's `pred_le`. Done. Compare the
+instantiates it at `m := nat.pred(k)` and asks only that we prove the
+toll, `|- le(nat.pred(k), k)` — and that's `pred_le`. Done. Compare the
 two proofs line by line: where `one_rung_short` had `exact ih` and
 died, `all_bulbs_off` has `apply hk; exact pred_le` and lives. Strong
 induction is exactly that trade — every use of the hypothesis now
@@ -229,16 +229,16 @@ book's whole ethic in one line of output.
 The mistakes file's first entry was dissected in Section 12.2. The
 second is the scaffolding error everyone makes once:
 
-**Forgetting to say what `P` is.** A bare `apply strong_induction`
+**Forgetting to say what `P` is.** A bare `apply nat.strong_induction`
 feels like it should work — the goal is right there:
 
 ```text
-error: docs/book/code/ch12-mistakes.ctea:31: theorem `which_predicate` failed: cannot use theorem `strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`
+error: docs/book/code/ch12-mistakes.ctea:31: theorem `which_predicate` failed: cannot use theorem `nat.strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`
   note: target: bulb(n) = 0
   help: Provide the predicate parameter
-    Theorem `strong_induction` has predicate parameter `P`, and predicate parameters are not inferred from the goal. Spell `P` out with a lambda.
+    Theorem `nat.strong_induction` has predicate parameter `P`, and predicate parameters are not inferred from the goal. Spell `P` out with a lambda.
     try:
-      apply strong_induction {P := fun m : Nat => ...}
+      apply nat.strong_induction {P := fun m : Nat => ...}
 ```
 
 The checker must match the conclusion `P(n)` against `bulb(n) = 0`,
@@ -283,7 +283,7 @@ to test finite mathematics against the same teaching standard.
 
 **What changed after the first draft.** The original ending listed
 polymorphic data and cardinality as missing. Chapters 13 and 14 are the
-executable result of removing those two limits: `List A` is a checked,
+executable result of removing those two limits: `list.List A` is a checked,
 versioned library type; `HasCard` expresses finite enumeration; and assignment
 policies keep concrete first-order exercises separate from genuinely
 higher-order `map`. Arithmetic still stops short of division (`div` and `mod`),

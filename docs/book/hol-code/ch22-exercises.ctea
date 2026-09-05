@@ -1,0 +1,25 @@
+import builtin:std/hol/probability_counts.ctea as P
+import builtin:std/hol/weighted_sums.ctea as W
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+mode constructive
+
+theorem ex22_1 (A : Type) (x : A) (xs : C.List A) :
+  not C.length(C.cons(x, xs)) = 0 := by
+  sorry
+
+theorem ex22_2(A : Type) (f g : A -> Nat) (xs : C.List A) :
+  (forall x : A, C.Member(x, xs) -> add(f(x), g(x)) = 1) ->
+  add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) = C.length(xs) := by
+  sorry
+
+theorem ex22_3 (A : Type) (f g h : A -> Nat) (xs : C.List A) (a b : Nat) :
+  (forall x : A, C.Member(x, xs) -> h(x) = add(f(x), g(x))) ->
+  S.sum(C.map(f, xs)) = a -> S.sum(C.map(g, xs)) = b ->
+  S.sum(C.map(h, xs)) = add(a, b) := by
+  sorry
+
+theorem ex22_4 (A : Type) (f : A -> Nat) (xs : C.List A) (k : Nat) :
+  (forall x : A, C.Member(x, xs) -> f(x) = k) ->
+  S.sum(C.map(f, xs)) = mul(C.length(xs), k) := by
+  sorry

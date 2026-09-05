@@ -137,6 +137,30 @@ button:disabled {
   padding: 16px;
 }
 
+.file-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.file-controls input,
+.file-controls select {
+  max-width: 100%;
+  min-height: 34px;
+}
+
+#saveStatus {
+  flex-basis: 100%;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+#saveStatus.error {
+  color: var(--error);
+}
+
 .editor-shell {
   position: relative;
   width: 100%;
@@ -756,4 +780,48 @@ pre {
   .library-badges {
     justify-content: flex-start;
   }
+}
+
+/* Keep section navigation available without adding permanent toolbar clutter. */
+.skip-links a {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  transform: translateY(-200%);
+  padding: 12px 16px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+}
+.skip-links a:focus {
+  transform: translateY(0);
+}
+:where(a, button, input, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Long source paths and theorem names must not set the page's minimum width. */
+.file-controls label,
+.toolbar-row,
+.project-controls {
+  min-width: 0;
+  max-width: 100%;
+}
+.file-controls label {
+  display: grid;
+  gap: 4px;
+}
+select {
+  min-width: 0;
+  max-width: 100%;
+}
+.meta,
+.status,
+.explain-meta,
+.accepted-item,
+.project-controls p {
+  overflow-wrap: anywhere;
 }

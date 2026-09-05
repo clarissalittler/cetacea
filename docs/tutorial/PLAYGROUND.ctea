@@ -5,7 +5,7 @@
 --
 -- Copy this file before editing if you want `git status` to stay clean.
 
-import ../../std/prelude.ctea
+import ../../std/qualified_prelude.ctea
 import ../../std/hol/counting.ctea as C
 import std/hol/cardinality@1 as H
 
@@ -81,7 +81,7 @@ theorem playground_equality_substitution (x y : Person) :
 
 theorem playground_product_member :
   pair(alice, bob) in prod(singleton(alice), singleton(bob)) := by
-  apply prod_member_intro
+  apply set.prod_member_intro
   simp
   refl
   simp
@@ -89,8 +89,8 @@ theorem playground_product_member :
 
 -- Ordinary functions are studied extensionally through relation graphs.
 theorem playground_mentor_graph_total :
-  Total(fun x y : Person => mentor(x) = y) := by
-  unfold Total
+  fun.Total(fun x y : Person => mentor(x) = y) := by
+  unfold fun.Total
   intro x
   exists mentor(x)
   refl
@@ -99,17 +99,17 @@ theorem playground_mentor_graph_total :
 -- Natural numbers and induction
 
 theorem playground_add_zero (n : Nat) : add(n, 0) = n := by
-  exact add_zero_right
+  exact nat.add_zero_right
 
 theorem playground_add_assoc (a b c : Nat) :
   add(add(a, b), c) = add(a, add(b, c)) := by
-  exact add_assoc
+  exact nat.add_assoc
 
 theorem playground_zero_le (n : Nat) : le(0, n) := by
-  exact zero_le
+  exact nat.zero_le
 
-theorem playground_three_divides_twelve : Divides(3, 12) := by
-  exact divides_3_12
+theorem playground_three_divides_twelve : modular.Divides(3, 12) := by
+  exact modular.divides_3_12
 
 -- -------------------------------------------------------------------------
 -- User datatypes, structural recursion, and structural induction

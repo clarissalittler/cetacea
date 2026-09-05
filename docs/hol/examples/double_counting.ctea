@@ -1,0 +1,75 @@
+-- Count workshop signups by day or by subject.
+import builtin:std/hol/double_counting.ctea as D
+import std/hol/matrix@1 as M
+import std/hol/list@1 as L
+mode constructive
+
+data Day
+| monday
+| tuesday
+
+data Subject
+| logic
+| graphs
+| counting
+
+defrec monday_signups (subject : Subject) : Nat
+| logic => 1
+| graphs => 2
+| counting => 3
+
+defrec tuesday_signups (subject : Subject) : Nat
+| logic => 4
+| graphs => 5
+| counting => 6
+
+defrec signups (day : Day) (subject : Subject) : Nat
+| monday => monday_signups(subject)
+| tuesday => tuesday_signups(subject)
+
+-- The List import and matrix package share one list type.
+def days : L.List Day := L.cons(monday, L.cons(tuesday, L.nil))
+def subjects : M.List Subject := M.cons(logic, M.cons(graphs, M.cons(counting, M.nil)))
+
+theorem monday_total : M.row_sum(signups, monday, subjects) = 6 := by
+  rewrite -> M.row_sum_cons
+  rewrite -> M.row_sum_cons
+  rewrite -> M.row_sum_cons
+  rewrite -> M.row_sum_nil
+  refl
+
+theorem tuesday_total : M.row_sum(signups, tuesday, subjects) = 15 := by
+  rewrite -> M.row_sum_cons
+  rewrite -> M.row_sum_cons
+  rewrite -> M.row_sum_cons
+  rewrite -> M.row_sum_nil
+  refl
+
+theorem graph_total : M.column_sum(signups, days, graphs) = 7 := by
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_nil
+  refl
+
+theorem totals_agree : M.rows_total(signups, days, subjects) = M.columns_total(signups, days, subjects) := by
+  exact D.double_counting {A := Day; B := Subject; w := signups; xs := days; ys := subjects}
+
+theorem by_day : M.rows_total(signups, days, subjects) = 21 := by
+  rewrite -> M.rows_total_cons
+  rewrite -> M.rows_total_cons
+  rewrite -> M.rows_total_nil
+  rewrite -> monday_total
+  rewrite -> tuesday_total
+  refl
+
+theorem by_subject : M.columns_total(signups, days, subjects) = 21 := by
+  rewrite <- totals_agree
+  exact by_day
+
+-- Lists retain occurrences: listing Monday twice counts its signups twice.
+theorem repeated_day : M.rows_total(signups, M.cons(monday, M.cons(monday, M.nil)), subjects) = 12 := by
+  rewrite -> M.rows_total_cons
+  rewrite -> M.rows_total_cons
+  rewrite -> M.rows_total_nil
+  rewrite all -> monday_total
+  refl

@@ -4,7 +4,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch03-exercises.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 

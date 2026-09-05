@@ -1,0 +1,30 @@
+-- Replace each sorry. Keep theorem names and statements.
+-- Chapter 19: double counting and the handshake identity.
+import std/hol/matrix@1 as M
+import std/hol/cardinality@1 as C
+import builtin:std/hol/double_counting.ctea as D
+import builtin:std/hol/weighted_sums.ctea as W
+import builtin:std/hol/handshake.ctea as H
+import builtin:std/hol/sums.ctea as S
+mode constructive
+
+-- Compute the sum of a row with no columns.
+theorem ex19_1 (A B : Type) (w : A -> B -> Nat) (a : A) :
+  M.row_sum(w, a, M.nil) = 0 := by
+  sorry
+
+-- Induct over the columns: a table with no rows has total zero.
+theorem ex19_2 (A B : Type) (w : A -> B -> Nat) (ys : M.List B) :
+  M.columns_total(w, M.nil, ys) = 0 := by
+  sorry
+
+theorem ex19_3 (A B : Type) (w : A -> B -> Nat) (a : A) (xs : M.List A) (ys : M.List B) :
+  M.columns_total(w, M.cons(a, xs), ys) = add(M.row_sum(w, a, ys), M.columns_total(w, xs, ys)) := by
+  sorry
+
+theorem ex19_4 (Edge Vertex : Type) (incidence : Edge -> Vertex -> Nat)
+  (degree : Vertex -> Nat) (edges : M.List Edge) (vertices : M.List Vertex) :
+  (forall e : Edge, C.Member(e, edges) -> M.row_sum(incidence, e, vertices) = 2) ->
+  (forall v : Vertex, C.Member(v, vertices) -> degree(v) = M.column_sum(incidence, edges, v)) ->
+  S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by
+  sorry

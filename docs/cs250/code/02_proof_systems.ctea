@@ -1,6 +1,6 @@
 -- Companion file for docs/cs250/02_proof_systems.md.
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 

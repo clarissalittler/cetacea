@@ -1,0 +1,27 @@
+import std/hol/sums.ctea as S
+import std/hol/list@1 as L
+
+mode constructive
+
+-- Values may repeat: summing a list does not require a set enumeration.
+theorem repeated_values : S.sum(L.cons(2, L.cons(2, L.nil))) = 4 := by
+  simp
+  refl
+
+-- Use the public law without unfolding the recursive definition.
+theorem total_two_groups (xs ys : L.List Nat) (m n : Nat) :
+  S.sum(xs) = m -> S.sum(ys) = n ->
+  S.sum(L.append(xs, ys)) = add(m, n) := by
+  intro total_xs
+  intro total_ys
+  rewrite -> S.sum_append
+  rewrite -> total_xs
+  rewrite -> total_ys
+  refl
+
+theorem total_three_groups (xs ys zs : L.List Nat) :
+  S.sum(L.append(L.append(xs, ys), zs)) =
+  add(add(S.sum(xs), S.sum(ys)), S.sum(zs)) := by
+  rewrite -> S.sum_append
+  rewrite -> S.sum_append
+  refl

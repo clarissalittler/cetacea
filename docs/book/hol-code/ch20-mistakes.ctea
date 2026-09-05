@@ -1,0 +1,21 @@
+-- Each attempted proof must be rejected.
+import builtin:std/modular.ctea as M
+mode constructive
+
+theorem wrong_multiplier : M.Divides(4, 20) := by
+  unfold M.Divides
+  exists 4
+  refl
+
+-- A zero divisor cannot produce a positive natural number.
+theorem zero_divides_one : M.Divides(0, 1) := by
+  unfold M.Divides
+  exists 1
+  refl
+
+-- Truncated subtraction being zero does not establish congruence.
+theorem subtraction_is_not_congruence : M.ModEq(5, 2, 9) := by
+  unfold M.ModEq
+  exists 0
+  exists 0
+  refl

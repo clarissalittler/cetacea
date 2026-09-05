@@ -4,7 +4,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch08-mistakes.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -15,9 +15,9 @@ pred AgeIs(Person, Nat)
 -- Mistake 1: offering the input as a witness for the output. The goal
 -- wants an age (a Nat); x is a Person.
 theorem witness_from_wrong_column
-  : (forall p : Person, exists n : Nat, AgeIs(p, n)) -> Total(AgeIs) := by
+  : (forall p : Person, exists n : Nat, AgeIs(p, n)) -> fun.Total(AgeIs) := by
   intro h
-  unfold Total
+  unfold fun.Total
   intro x
   exists x
   exact h x
@@ -26,9 +26,9 @@ theorem witness_from_wrong_column
 -- definitions differ only in WHICH argument is repeated — and the
 -- checker catches the swap at the exact spot the arguments cross.
 theorem single_valued_is_not_injective (A : Type) (G : A -> A -> Prop)
-  : SingleValued(G) -> Injective(G) := by
+  : fun.SingleValued(G) -> fun.Injective(G) := by
   intro h
-  unfold Injective
+  unfold fun.Injective
   intro x1
   intro x2
   intro y
@@ -38,8 +38,8 @@ theorem single_valued_is_not_injective (A : Type) (G : A -> A -> Prop)
 
 -- Mistake 3: "inverting" succ with truncated subtraction. sub(y, 1)
 -- looks like a predecessor, but at y = 0 it is 0, and succ(0) is not 0.
-theorem succ_surjective_wish : Surjective(fun x y : Nat => succ(x) = y) := by
-  unfold Surjective
+theorem succ_surjective_wish : fun.Surjective(fun x y : Nat => succ(x) = y) := by
+  unfold fun.Surjective
   intro y
   exists sub(y, 1)
   refl

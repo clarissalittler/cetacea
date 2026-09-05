@@ -1,0 +1,83 @@
+import std/hol/list@1 as L
+mode constructive
+
+def one : Nat := succ(0)
+def two : Nat := one
+
+theorem expose : one = two := by
+  unfold one
+  refl
+
+def Next (n : Nat) : Nat := succ(n)
+
+theorem parameterized (n : Nat) : Next(n) = succ(n) := by
+  unfold Next
+  refl
+
+theorem simplify_named (n : Nat) : Next(n) = succ(n) := by
+  simp [Next]
+  refl
+
+theorem under_binder : forall n : Nat, Next(n) = succ(n) := by
+  unfold Next
+  intro n
+  refl
+
+def OneSet (n : Nat) : Set Nat := singleton(n)
+
+theorem set_member (n : Nat) : n in OneSet(n) := by
+  unfold OneSet
+  simp
+  refl
+
+theorem predicate_argument (P : Nat -> Prop) : P(succ(0)) -> P(one) := by
+  intro h
+  unfold one
+  exact h
+
+theorem rewrite_after_unfold (x y : Nat) (P : Nat -> Prop) : succ(x) = y -> P(y) -> P(Next(x)) := by
+  intro e
+  intro h
+  unfold Next
+  rewrite -> e
+  exact h
+
+theorem rewrite_folded (x y : Nat) (P : Nat -> Prop) : succ(x) = y -> P(y) -> P(Next(x)) := by
+  intro e
+  intro h
+  rewrite -> e
+  exact h
+
+theorem rewrite_folded_backward (x y : Nat) (P : Nat -> Prop) : y = succ(x) -> P(y) -> P(Next(x)) := by
+  intro e
+  intro h
+  rewrite e
+  exact h
+
+theorem rewrite_folded_all (x y : Nat) (P : Nat -> Nat -> Prop) : succ(x) = y -> P(y, y) -> P(Next(x), succ(x)) := by
+  intro e
+  intro h
+  rewrite all -> e
+  exact h
+
+theorem rewrite_folded_hyp (x y : Nat) (P : Nat -> Prop) : succ(x) = y -> P(Next(x)) -> P(y) := by
+  intro e
+  intro h
+  rewrite -> e at h
+  exact h
+
+theorem rewrite_folded_hyp_all (x y : Nat) (P : Nat -> Nat -> Prop) : succ(x) = y -> P(Next(x), succ(x)) -> P(y, y) := by
+  intro e
+  intro h
+  rewrite all -> e at h
+  exact h
+
+-- A readable enumeration works directly with the checked constructor laws.
+def tail : L.List Nat := L.cons(1, L.nil)
+def enumeration : L.List Nat := L.cons(0, tail)
+
+theorem named_enumeration_length : L.length(enumeration) = 2 := by
+  rewrite -> L.length_cons {A := Nat; h := 0; t := tail}
+  rewrite -> L.length_cons {A := Nat; h := 1; t := (L.nil : L.List Nat)}
+  rewrite -> L.length_nil {A := Nat}
+  refl

@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch08-solutions.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -12,15 +12,15 @@ sort Person
 const alice : Person
 
 -- Exercise 8.1
-theorem ex8_1 : Total(fun x y : Nat => mul(x, x) = y) := by
-  unfold Total
+theorem ex8_1 : fun.Total(fun x y : Nat => mul(x, x) = y) := by
+  unfold fun.Total
   intro x
   exists mul(x, x)
   refl
 
 -- Exercise 8.2
-theorem ex8_2 : SingleValued(fun x y : Nat => mul(x, x) = y) := by
-  unfold SingleValued
+theorem ex8_2 : fun.SingleValued(fun x y : Nat => mul(x, x) = y) := by
+  unfold fun.SingleValued
   intro x
   intro y1
   intro y2
@@ -31,8 +31,8 @@ theorem ex8_2 : SingleValued(fun x y : Nat => mul(x, x) = y) := by
 
 -- Exercise 8.3. simp computes add(x, 2) to succ(succ(x)), and then
 -- succ_inj peels the successors two at a time.
-theorem ex8_3 : Injective(fun x y : Nat => add(x, 2) = y) := by
-  unfold Injective
+theorem ex8_3 : fun.Injective(fun x y : Nat => add(x, 2) = y) := by
+  unfold fun.Injective
   intro x1
   intro x2
   intro y
@@ -40,28 +40,28 @@ theorem ex8_3 : Injective(fun x y : Nat => add(x, 2) = y) := by
   intro h2
   simp at h1
   simp at h2
-  apply succ_inj
-  apply succ_inj
+  apply nat.succ_inj
+  apply nat.succ_inj
   rewrite -> h1
-  exact eq_symm h2
+  exact eq.eq_symm h2
 
 -- Exercise 8.4
-theorem ex8_4 : Surjective(fun x y : Nat => x = y) := by
-  unfold Surjective
+theorem ex8_4 : fun.Surjective(fun x y : Nat => x = y) := by
+  unfold fun.Surjective
   intro y
   exists y
   refl
 
 -- Exercise 8.5
-theorem ex8_5 : Total(fun x y : Person => y = alice) := by
-  unfold Total
+theorem ex8_5 : fun.Total(fun x y : Person => y = alice) := by
+  unfold fun.Total
   intro x
   exists alice
   refl
 
 -- Exercise 8.6
-theorem ex8_6 : SingleValued(fun x y : Person => y = alice) := by
-  unfold SingleValued
+theorem ex8_6 : fun.SingleValued(fun x y : Person => y = alice) := by
+  unfold fun.SingleValued
   intro x
   intro y1
   intro y2
@@ -74,9 +74,9 @@ theorem ex8_6 : SingleValued(fun x y : Person => y = alice) := by
 theorem ex8_7
   (F : Person -> Person -> Prop)
   (G : Person -> Person -> Prop)
-  : Surjective(F)
-    -> Surjective(G)
+  : fun.Surjective(F)
+    -> fun.Surjective(G)
     -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\ G(y, z) := by
   intro hf
   intro hg
-  exact compose_surjective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
+  exact fun.compose_surjective {A := Person; B := Person; C := Person; F := F; G := G} hf hg

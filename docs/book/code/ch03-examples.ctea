@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch03-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -17,7 +17,7 @@ theorem not_not_intro (P : Prop) : P -> not not P := by
 mode classical
 
 -- Section 3.3: excluded middle, proved with `by_cases`.
-theorem em_demo (P : Prop) : P \/ not P := by
+theorem em (P : Prop) : P \/ not P := by
   by_cases h : P
   left
   exact h
@@ -25,7 +25,7 @@ theorem em_demo (P : Prop) : P \/ not P := by
   exact h
 
 -- Section 3.4: double-negation elimination, proved with `by_contra`.
-theorem dne_demo (P : Prop) : not not P -> P := by
+theorem dne (P : Prop) : not not P -> P := by
   intro hnn
   by_contra hn
   apply hnn

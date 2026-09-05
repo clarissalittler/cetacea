@@ -1,0 +1,15 @@
+version = 1
+profile = "hol"
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+allowed_imports = ["std/hol/matrix@1", "std/hol/cardinality@1", "std/hol/list@1", "builtin:std/hol/double_counting.ctea", "builtin:std/hol/weighted_sums.ctea", "builtin:std/hol/handshake.ctea", "builtin:std/hol/sums.ctea", "builtin:std/nat.ctea"]
+required_imports = ["std/hol/matrix@1"]
+allowed_axioms = []
+
+required_theorem.ex19_1 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?0) : std/hol/matrix@1.row_sum(?2, ?3, std/hol/list@1.nil) = 0'
+required_theorem.ex19_2 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : std/hol/list@1.List ?1) : std/hol/matrix@1.columns_total(?2, std/hol/list@1.nil, ?3) = 0'
+required_theorem.ex19_3 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?0) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?1) : std/hol/matrix@1.columns_total(?2, std/hol/list@1.cons(?3, ?4), ?5) = add(std/hol/matrix@1.row_sum(?2, ?3, ?5), std/hol/matrix@1.columns_total(?2, ?4, ?5))'
+required_theorem.ex19_4 = '(?0 : Type) (?1 : Type) (?2 : ?0 -> ?1 -> Nat) (?3 : ?1 -> Nat) (?4 : std/hol/list@1.List ?0) (?5 : std/hol/list@1.List ?1) : (forall ?6 : ?0, std/hol/list@1.Member(?6, ?4) -> std/hol/matrix@1.row_sum(?2, ?6, ?5) = 2) -> (forall ?7 : ?1, std/hol/list@1.Member(?7, ?5) -> ?3(?7) = std/hol/matrix@1.column_sum(?2, ?4, ?7)) -> S.sum(std/hol/cardinality@1.map(?3, ?5)) = mul(std/hol/list@1.length(?4), 2)'

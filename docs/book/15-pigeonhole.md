@@ -54,13 +54,30 @@ exists x1 : A, exists x2 : A,
   (not x1 = x2) /\ f(x1) = f(x2)
 ```
 
-The negative theorem is the right constructive interface here. Refuting
-`forall x1 x2, ...` does not, in intuitionistic logic, automatically produce
-the two witnesses hidden by the failed universal. A positive theorem is a
-reasonable later exercise under classical mode, or with computational finite
-data that includes the decisions needed to search for a collision. We will
-not silently spend excluded middle just to make the conclusion resemble the
-English slogan.
+The base theorem keeps this constructive interface. Refuting a universal
+does not, in intuitionistic logic, automatically produce the two witnesses.
+The separate source library
+[`pigeonhole_classical.ctea`](../../std/hol/pigeonhole_classical.ctea) now
+exports `pigeonhole_collision`, with the two cardinality premises above and
+this positive existential conclusion. Import it with
+`import builtin:std/hol/pigeonhole_classical.ctea as P` and use it under
+`mode classical`.
+
+The proof argues that if no collision pair existed, every equal-output pair
+would have equal inputs. That would make the function injective, contradicting
+the constructive theorem. This uses classical contradiction twice, and its
+receipt records that use. The generic dependency remains in `hol` and has no
+axiom or incomplete-proof dependencies.
+
+The [collision example](../hol/examples/pigeonhole_collision.ctea) puts the
+two routes side by side. For a concrete colour-to-bit function it explicitly
+chooses `red` and `green`, proving their distinctness and equal outputs
+constructively. For an arbitrary function it applies `P.pigeonhole_collision`
+and uses `finite` to prove the two counts. This establishes existence without
+computing a pair. The accompanying
+[example policy](../hol/examples/pigeonhole_collision.ctea-assignment) grants
+the checked library theorem and explicitly permits classical reasoning;
+turning that permission off rejects the generic client.
 
 ## 15.2 The proof has three layers
 
@@ -310,8 +327,9 @@ proof has type `not (forall x1 : A, forall x2 : A, ...)`,
 but expected `exists x1 : A, exists x2 : A, ...`
 ```
 
-Changing modes may justify the logical conversion; it does not make the two
-types identical in constructive mode.
+Use `pigeonhole_collision` under classical mode for the generic positive
+conclusion, or supply and verify a concrete pair constructively. Merely
+changing modes does not turn the negative proof into an existential proof.
 
 ## 15.9 Exercises
 
@@ -330,20 +348,13 @@ Solutions: [`hol-code/ch15-solutions.ctea`](hol-code/ch15-solutions.ctea).
 
 ### What this chapter has measured
 
-The theorem is expressible and teachable on the current HOL architecture, and
-restricted FOL units still have a meaningful role. The experiment did not
-argue for a separate second prover. It did reveal the next library boundary.
-The final assembly is about forty lines; the reusable removal, inclusion, and
-map-witness infrastructure is roughly two hundred. Those lemmas should become
-a checked counting library before finite-union cardinality repeats them.
-
-Three surface repairs paid for themselves immediately: direct induction over
-imported `List A`, checked `map_nil`/`map_cons`, and fragment classification
-that hides only the internal predicate-valued implementation helper for `le`.
-Remaining friction is mostly elaboration: package theorem applications repeat
-many inferable parameters; `rewrite ... at h` is not available; and term
-variables cannot yet be generalized by `revert`. None is a logical obstacle,
-but all three lengthen the student proof.
+The constructive theorem and the positive classical corollary are both checked
+source libraries. Their receipts distinguish logical mode from the HOL
+requirements of generic mapping. Students can now use inferred theorem
+parameters, rewrite a named hypothesis, generalize a term with `revert`, and
+prove concrete enumerations with `finite`. The detailed component proofs
+remain available for studying the argument; routine clients can use the
+library interfaces.
 
 The next counting target should be finite-union cardinality. It can reuse the
 same inclusion bound and will tell us whether the removal lemma is the right

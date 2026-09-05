@@ -1,0 +1,124 @@
+-- A concrete three-vertex multigraph representation for degree-counting work.
+-- Each list entry is an edge occurrence. Parallel copies count separately.
+import builtin:std/hol/weighted_sums.ctea as W
+import std/hol/list@1 as L
+import builtin:std/nat.ctea as N
+mode constructive
+
+data Vertex
+| north
+| south
+| west
+
+data Edge
+| north_south
+| south_west
+| west_north
+| north_loop
+| south_loop
+| west_loop
+
+defrec ns_incidence (v : Vertex) : Nat
+| north => 1
+| south => 1
+| west => 0
+
+defrec sw_incidence (v : Vertex) : Nat
+| north => 0
+| south => 1
+| west => 1
+
+defrec wn_incidence (v : Vertex) : Nat
+| north => 1
+| south => 0
+| west => 1
+
+-- A loop has two endpoint incidences at the same vertex.
+defrec loop_incidence (v : Vertex) : Nat
+| north => 2
+| south => 0
+| west => 0
+
+defrec south_loop_incidence (v : Vertex) : Nat
+| north => 0
+| south => 2
+| west => 0
+
+defrec west_loop_incidence (v : Vertex) : Nat
+| north => 0
+| south => 0
+| west => 2
+
+defrec incidence (e : Edge) (v : Vertex) : Nat
+| north_south => ns_incidence(v)
+| south_west => sw_incidence(v)
+| west_north => wn_incidence(v)
+| north_loop => loop_incidence(v)
+| south_loop => south_loop_incidence(v)
+| west_loop => west_loop_incidence(v)
+
+defrec degree (edges : L.List Edge) (v : Vertex) : Nat
+| nil => 0
+| cons e t rec => add(incidence(e, v), rec)
+
+theorem edge_has_two_ends (e : Edge) :
+  add(incidence(e, north), add(incidence(e, south), incidence(e, west))) = 2 := by
+  induction e with
+  | north_south =>
+      simp
+      refl
+  | south_west =>
+      simp
+      refl
+  | west_north =>
+      simp
+      refl
+  | north_loop =>
+      simp
+      refl
+  | south_loop =>
+      simp
+      refl
+  | west_loop =>
+      simp
+      refl
+
+theorem loop_counts_twice : degree(L.cons(north_loop, L.nil), north) = 2 := by
+  simp
+  refl
+
+theorem parallel_edges_count_separately :
+  degree(L.cons(north_south, L.cons(north_south, L.nil)), south) = 2 := by
+  simp
+  refl
+
+-- Separate one new edge's three contributions from the three tail degrees.
+theorem add_three_pairs (a b c x y z : Nat) :
+  add(add(a, x), add(add(b, y), add(c, z))) =
+  add(add(a, add(b, c)), add(x, add(y, z))) := by
+  rewrite -> W.add_interchange {a := b; b := y; c := c; d := z}
+  exact W.add_interchange
+
+-- Handshake for every edge list in this three-vertex representation.
+theorem three_vertex_handshake (edges : L.List Edge) :
+  add(degree(edges, north), add(degree(edges, south), degree(edges, west))) =
+  add(L.length(edges), L.length(edges)) := by
+  induction edges with
+  | nil =>
+      rewrite all -> L.length_nil
+      simp
+      refl
+  | cons e t ih =>
+      rewrite all -> L.length_cons
+      simp
+      rewrite -> add_three_pairs
+      rewrite -> edge_has_two_ends
+      rewrite -> ih
+      refl
+
+-- The usual multiplication notation for the same count.
+theorem three_vertex_handshake_mul (edges : L.List Edge) :
+  add(degree(edges, north), add(degree(edges, south), degree(edges, west))) =
+  mul(L.length(edges), 2) := by
+  simp
+  exact three_vertex_handshake

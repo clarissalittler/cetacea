@@ -1,0 +1,59 @@
+import builtin:std/hol/probability_counts.ctea as P
+import builtin:std/hol/weighted_sums.ctea as W
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+mode constructive
+
+theorem ex22_1 (A : Type) (x : A) (xs : C.List A) :
+  not C.length(C.cons(x, xs)) = 0 := by
+  rewrite -> C.length_cons
+  intro zero_length
+  contradiction
+
+theorem ex22_2(A : Type) (f g : A -> Nat) (xs : C.List A) :
+  (forall x : A, C.Member(x, xs) -> add(f(x), g(x)) = 1) ->
+  add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) = C.length(xs) := by
+  induction xs with
+  | nil =>
+      intro partition
+      rewrite -> C.map_nil
+      rewrite -> C.map_nil
+      rewrite -> C.length_nil
+      simp
+      refl
+  | cons x t ih =>
+      intro partition
+      have head_member : C.Member(x, C.cons(x, t)) := W.member_head
+      have head : add(f(x), g(x)) = 1 := partition x head_member
+      have on_tail : forall y : A, C.Member(y, t) -> add(f(y), g(y)) = 1 := by
+        intro y
+        intro member
+        have in_list : C.Member(y, C.cons(x, t)) := W.member_tail {A := A; x := x; y := y; t := t} member
+        exact partition y in_list
+      have tail : add(S.sum(C.map(f, t)), S.sum(C.map(g, t))) = C.length(t) := ih on_tail
+      rewrite -> C.map_cons
+      rewrite -> C.map_cons
+      rewrite -> S.sum_cons
+      rewrite -> W.add_interchange
+      rewrite -> head
+      rewrite -> tail
+      rewrite -> C.length_cons
+      refl
+
+theorem ex22_3 (A : Type) (f g h : A -> Nat) (xs : C.List A) (a b : Nat) :
+  (forall x : A, C.Member(x, xs) -> h(x) = add(f(x), g(x))) ->
+  S.sum(C.map(f, xs)) = a -> S.sum(C.map(g, xs)) = b ->
+  S.sum(C.map(h, xs)) = add(a, b) := by
+  intro pointwise
+  intro first
+  intro second
+  have linear : S.sum(C.map(h, xs)) = add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) := by
+    exact P.numerator_add {A := A; f := f; g := g; h := h; xs := xs} pointwise
+  rewrite -> first at linear
+  rewrite -> second at linear
+  exact linear
+
+theorem ex22_4 (A : Type) (f : A -> Nat) (xs : C.List A) (k : Nat) :
+  (forall x : A, C.Member(x, xs) -> f(x) = k) ->
+  S.sum(C.map(f, xs)) = mul(C.length(xs), k) := by
+  exact W.sum_map_constant_on {A := A; f := f; xs := xs; k := k}

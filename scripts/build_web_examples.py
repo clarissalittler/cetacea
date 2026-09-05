@@ -26,6 +26,14 @@ OUTPUT = ROOT / "web" / "examples.js"
 
 # (id, label, path) in display order.
 EXAMPLES = [
+    ("pigeonhole-collision", "Pigeonhole: explicit and classical witnesses", "docs/hol/examples/pigeonhole_collision.ctea"),
+    ("finite-enumeration", "Finite enumeration: three colours", "docs/hol/examples/finite_enumeration.ctea"),
+    ("probability-counts", "Chapter 22: finite probability and tickets", "docs/book/hol-code/ch22-examples.ctea"),
+    ("recurrences", "Chapter 21: recurrences and closed forms", "docs/book/hol-code/ch21-examples.ctea"),
+    ("modular-arithmetic", "Chapter 20: divisibility and clocks", "docs/book/hol-code/ch20-examples.ctea"),
+    ("double-counting", "Chapter 19: counting twice", "docs/book/hol-code/ch19-examples.ctea"),
+    ("explicit-paths", "Chapter 18: explicit directed paths", "docs/book/hol-code/ch18-examples.ctea"),
+    ("finite-sums", "Chapter 17: finite sums", "docs/book/hol-code/ch17-examples.ctea"),
     (
         "hol-cardinality",
         "HOL Cardinality: map and transport",
@@ -41,6 +49,8 @@ EXAMPLES = [
     ("cs250_04", "CS250 - 04 Induction on Nat", "docs/cs250/code/04_induction_nat.ctea"),
     ("cs250_05", "CS250 - 05 Sets", "docs/cs250/code/05_sets.ctea"),
     ("cs250_06", "CS250 - 06 Relations", "docs/cs250/code/06_relations.ctea"),
+    ("cs250_07", "CS250 - 07 Structural induction", "docs/cs250/code/07_structural_induction.ctea"),
+    ("cs250_08", "CS250 - 08 Functions", "docs/cs250/code/08_functions.ctea"),
 ]
 
 IMPORT_LINE = re.compile(r"^(import\s+)((?:\.\./)+)(std/\S+)(.*)$")

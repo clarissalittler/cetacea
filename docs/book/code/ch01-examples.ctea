@@ -4,7 +4,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch01-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -19,7 +19,7 @@ theorem true_is_easy : True := by
 
 -- Section 1.5: and-introduction. If it is raining and you know class is
 -- meeting, you may conclude "it is raining AND class is meeting."
-theorem and_intro_demo (P Q : Prop) : P -> Q -> P /\ Q := by
+theorem and_intro (P Q : Prop) : P -> Q -> P /\ Q := by
   intro hp
   intro hq
   split

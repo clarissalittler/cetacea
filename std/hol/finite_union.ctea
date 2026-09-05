@@ -1,0 +1,267 @@
+-- Constructive union witnesses with explicit decisions for membership in ys.
+import counting.ctea
+
+mode constructive
+
+-- Equality decisions suffice to decide membership in any finite list.
+theorem member_decidable (A : Type) (xs : List A) :
+  (forall x y : A, x = y \/ not x = y) ->
+  forall x : A, Member(x, xs) \/ not Member(x, xs) := by
+  induction xs with
+  | nil =>
+      intro decide_eq
+      intro x
+      right
+      exact member_nil {A := A; x := x}
+  | cons h t ih =>
+      intro decide_eq
+      intro x
+      have decision : x = h \/ not x = h := decide_eq x h
+      cases decision with
+      | left same =>
+          left
+          apply (member_cons {A := A; x := x; h := h; t := t}).right
+          left
+          exact same
+      | right different =>
+          have tail_decision : Member(x, t) \/ not Member(x, t) := ih decide_eq x
+          cases tail_decision with
+          | left in_tail =>
+              left
+              apply (member_cons {A := A; x := x; h := h; t := t}).right
+              right
+              exact in_tail
+          | right not_in_tail =>
+              right
+              intro member
+              have alternatives : x = h \/ Member(x, t) := (member_cons {A := A; x := x; h := h; t := t}).left member
+              cases alternatives with
+              | left same =>
+                  exact different same
+              | right in_tail =>
+                  exact not_in_tail in_tail
+
+theorem union_enumeration
+  (A : Type) (xs ys : List A) :
+  Nodup(xs) -> Nodup(ys) ->
+  (forall x : A, Member(x, ys) \/ not Member(x, ys)) ->
+  exists zs : List A, Nodup(zs) /\
+    (forall x : A, Member(x, zs) <-> Member(x, xs) \/ Member(x, ys)) := by
+  induction xs with
+  | nil =>
+      intro nodup_xs
+      intro nodup_ys
+      intro decide
+      exists ys
+      split
+      exact nodup_ys
+      intro x
+      split
+      intro member
+      right
+      exact member
+      intro member
+      cases member with
+      | left empty =>
+          exfalso
+          exact member_nil {A := A; x := x} empty
+      | right present =>
+          exact present
+  | cons h t ih =>
+      intro nodup_xs
+      intro nodup_ys
+      intro decide
+      have parts : (not Member(h, t)) /\ Nodup(t) := by
+        apply (nodup_cons {A := A; h := h; t := t}).left
+        exact nodup_xs
+      have tail_union : exists zs : List A, Nodup(zs) /\ (forall x : A, Member(x, zs) <-> Member(x, t) \/ Member(x, ys)) := by
+        exact ih parts.right nodup_ys decide
+      cases tail_union with
+      | intro zs witness =>
+          have decision : Member(h, ys) \/ not Member(h, ys) := decide h
+          cases decision with
+          | left already_present =>
+              exists zs
+              split
+              exact witness.left
+              intro x
+              split
+              intro in_zs
+              have sides : Member(x, t) \/ Member(x, ys) := (witness.right x).left in_zs
+              cases sides with
+              | left in_t =>
+                  left
+                  apply (member_cons {A := A; x := x; h := h; t := t}).right
+                  right
+                  exact in_t
+              | right in_ys =>
+                  right
+                  exact in_ys
+
+              intro sides
+              apply (witness.right x).right
+              cases sides with
+              | left in_xs =>
+                  have head_or_tail : x = h \/ Member(x, t) := (member_cons {A := A; x := x; h := h; t := t}).left in_xs
+                  cases head_or_tail with
+                  | left same =>
+                      right
+                      rewrite -> same
+                      exact already_present
+                  | right in_t =>
+                      left
+                      exact in_t
+              | right in_ys =>
+                  right
+                  exact in_ys
+          | right absent =>
+              exists cons(h, zs)
+              split
+              apply (nodup_cons {A := A; h := h; t := zs}).right
+              split
+              intro in_zs
+              have sides : Member(h, t) \/ Member(h, ys) := (witness.right h).left in_zs
+              cases sides with
+              | left in_t =>
+                  exact parts.left in_t
+              | right in_ys =>
+                  exact absent in_ys
+              exact witness.left
+              intro x
+              split
+              intro in_result
+              have head_or_tail : x = h \/ Member(x, zs) := (member_cons {A := A; x := x; h := h; t := zs}).left in_result
+              cases head_or_tail with
+              | left same =>
+                  left
+                  apply (member_cons {A := A; x := x; h := h; t := t}).right
+                  left
+                  exact same
+              | right in_zs =>
+                  have sides : Member(x, t) \/ Member(x, ys) := (witness.right x).left in_zs
+                  cases sides with
+                  | left in_t =>
+                      left
+                      apply (member_cons {A := A; x := x; h := h; t := t}).right
+                      right
+                      exact in_t
+                  | right in_ys =>
+                      right
+                      exact in_ys
+              intro sides
+              apply (member_cons {A := A; x := x; h := h; t := zs}).right
+              cases sides with
+              | left in_xs =>
+                  have head_or_tail : x = h \/ Member(x, t) := (member_cons {A := A; x := x; h := h; t := t}).left in_xs
+                  cases head_or_tail with
+                  | left same =>
+                      left
+                      exact same
+                  | right in_t =>
+                      right
+                      apply (witness.right x).right
+                      left
+                      exact in_t
+              | right in_ys =>
+                  right
+                  apply (witness.right x).right
+                  right
+                  exact in_ys
+
+theorem union_enumeration_of_decidable_eq
+  (A : Type) (xs ys : List A) :
+  Nodup(xs) -> Nodup(ys) ->
+  (forall x y : A, x = y \/ not x = y) ->
+  exists zs : List A, Nodup(zs) /\
+    (forall x : A, Member(x, zs) <-> Member(x, xs) \/ Member(x, ys)) := by
+  intro nodup_xs
+  intro nodup_ys
+  intro decide_eq
+  apply union_enumeration {A := A; xs := xs; ys := ys}
+  exact nodup_xs
+  exact nodup_ys
+  exact member_decidable {A := A; xs := ys} decide_eq
+
+-- The union gets an actual duplicate-free witness and the usual size bound.
+theorem has_size_union_exists
+  (A : Type) (S T : Set A) (xs ys : List A) (m n : Nat) :
+  HasSize(S, xs, m) -> HasSize(T, ys, n) ->
+  (forall x : A, x in T \/ not x in T) ->
+  exists zs : List A,
+    HasSize(union(S, T), zs, length(zs)) /\ le(length(zs), add(m, n)) := by
+  intro size_s
+  intro size_t
+  intro decide_t
+  have decide_ys : forall x : A, Member(x, ys) \/ not Member(x, ys) := by
+    intro x
+    have decision : x in T \/ not x in T := decide_t x
+    cases decision with
+    | left present =>
+        left
+        exact (has_size_members {A := A; S := T; xs := ys; n := n} size_t x).right present
+    | right absent =>
+        right
+        intro member
+        apply absent
+        exact (has_size_members {A := A; S := T; xs := ys; n := n} size_t x).left member
+  have enumerated : exists zs : List A, Nodup(zs) /\ (forall x : A, Member(x, zs) <-> Member(x, xs) \/ Member(x, ys)) := by
+    apply union_enumeration {A := A; xs := xs; ys := ys}
+    exact has_size_nodup {A := A; S := S; xs := xs; n := m} size_s
+    exact has_size_nodup {A := A; S := T; xs := ys; n := n} size_t
+    exact decide_ys
+  cases enumerated with
+  | intro zs witness =>
+      have size_union : HasSize(union(S, T), zs, length(zs)) := by
+        apply has_size_intro {A := A; S := union(S, T); xs := zs; n := length(zs)}
+        exact witness.left
+        refl
+        intro x
+        split
+        intro member
+        have sides : Member(x, xs) \/ Member(x, ys) := (witness.right x).left member
+        simp
+        cases sides with
+        | left in_xs =>
+            left
+            exact (has_size_members {A := A; S := S; xs := xs; n := m} size_s x).left in_xs
+        | right in_ys =>
+            right
+            exact (has_size_members {A := A; S := T; xs := ys; n := n} size_t x).left in_ys
+        intro in_union
+        simp at in_union
+        apply (witness.right x).right
+        cases in_union with
+        | left in_s =>
+            left
+            exact (has_size_members {A := A; S := S; xs := xs; n := m} size_s x).right in_s
+        | right in_t =>
+            right
+            exact (has_size_members {A := A; S := T; xs := ys; n := n} size_t x).right in_t
+      exists zs
+      split
+      exact size_union
+      exact has_size_union_le {A := A; S := S; T := T; xs := xs; ys := ys; zs := zs; m := m; n := n; k := length(zs)} size_s size_t size_union
+
+theorem has_size_union_of_decidable_eq
+  (A : Type) (S T : Set A) (xs ys : List A) (m n : Nat) :
+  HasSize(S, xs, m) -> HasSize(T, ys, n) ->
+  (forall x y : A, x = y \/ not x = y) ->
+  exists zs : List A,
+    HasSize(union(S, T), zs, length(zs)) /\ le(length(zs), add(m, n)) := by
+  intro size_s
+  intro size_t
+  intro decide_eq
+  apply has_size_union_exists {A := A; S := S; T := T; xs := xs; ys := ys; m := m; n := n}
+  exact size_s
+  exact size_t
+  intro x
+  have decision : Member(x, ys) \/ not Member(x, ys) := member_decidable {A := A; xs := ys} decide_eq x
+  cases decision with
+  | left member =>
+      left
+      exact (has_size_members {A := A; S := T; xs := ys; n := n} size_t x).left member
+  | right absent =>
+      right
+      intro present
+      apply absent
+      exact (has_size_members {A := A; S := T; xs := ys; n := n} size_t x).right present

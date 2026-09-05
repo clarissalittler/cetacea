@@ -40,13 +40,13 @@ the second half of the chapter. All four take a graph
 `G : A -> B -> Prop` relating inputs in `A` to outputs in `B`:
 
 ```text
-def Total (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, exists y : B, G(x, y)
+def fun.Total (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, exists y : B, G(x, y)
 
-def SingleValued (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, forall y1 y2 : B, G(x, y1) -> G(x, y2) -> y1 = y2
+def fun.SingleValued (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, forall y1 y2 : B, G(x, y1) -> G(x, y2) -> y1 = y2
 ```
 
-`Total` is promise one: every input has at least one output.
-`SingleValued` is promise two, phrased the way equality lets us:
+`fun.Total` is promise one: every input has at least one output.
+`fun.SingleValued` is promise two, phrased the way equality lets us:
 if `x` yields `y1` and `x` yields `y2`, then `y1 = y2` — you can
 *claim* two outputs, but they were the same output all along. A graph
 with both properties deserves the word "function."
@@ -62,14 +62,14 @@ Its graph has two *different* types, person in and number out, so the
 lambda gives each binder its own annotation:
 
 ```text
-theorem age_graph_total : Total(fun (p : Person) (n : Nat) => age(p) = n) := by
-  unfold Total
+theorem age_graph_total : fun.Total(fun (p : Person) (n : Nat) => age(p) = n) := by
+  unfold fun.Total
   intro p
   exists age(p)
   refl
 ```
 
-After `unfold Total` the goal is
+After `unfold fun.Total` the goal is
 `forall x : Person, exists y : Nat, age(x) = y`. For an arbitrary
 person `p`, the witness is the term `age(p)` itself, and `refl` closes
 `age(p) = age(p)`.
@@ -90,8 +90,8 @@ And here is the pleasant theorem: a declared func's graph keeps both
 promises *provably*, with three-line proofs:
 
 ```text
-theorem mother_graph_total : Total(fun x y : Person => mother(x) = y) := by
-  unfold Total
+theorem mother_graph_total : fun.Total(fun x y : Person => mother(x) = y) := by
+  unfold fun.Total
   intro x
   exists mother(x)
   refl
@@ -103,8 +103,8 @@ own witness, and `refl` seals `mother(x) = mother(x)`. Chapter 4's
 
 ```text
 theorem mother_graph_single_valued
-  : SingleValued(fun x y : Person => mother(x) = y) := by
-  unfold SingleValued
+  : fun.SingleValued(fun x y : Person => mother(x) = y) := by
+  unfold fun.SingleValued
   intro x
   intro y1
   intro y2
@@ -130,14 +130,14 @@ Now the two properties that mathematicians actually gossip about.
 Again from `std/fun.ctea`:
 
 ```text
-def Injective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x1 x2 : A, forall y : B, G(x1, y) -> G(x2, y) -> x1 = x2
+def fun.Injective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x1 x2 : A, forall y : B, G(x1, y) -> G(x2, y) -> x1 = x2
 
-def Surjective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall y : B, exists x : A, G(x, y)
+def fun.Surjective (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall y : B, exists x : A, G(x, y)
 ```
 
 **Injective** — *no collisions*: if two inputs land on the same
 output, they were the same input. Squint at the definition next to
-`SingleValued` and you'll see they are mirror images — the same
+`fun.SingleValued` and you'll see they are mirror images — the same
 formula with the input and output columns swapped. (An injective
 function is one whose *reversed* graph is single-valued. This
 symmetry is beautiful and also a trap; it's Mistake 2.)
@@ -146,27 +146,27 @@ symmetry is beautiful and also a trap; it's Mistake 2.)
 The successor function `succ` is the book's favorite specimen,
 because it has one property and provably lacks the other. Injective
 first — if `succ(x1)` and `succ(x2)` are the same number, then
-`x1 = x2` — with the library fact `succ_inj` doing the peeling:
+`x1 = x2` — with the library fact `nat.succ_inj` doing the peeling:
 
 ```text
-theorem succ_graph_injective : Injective(fun x y : Nat => succ(x) = y) := by
-  unfold Injective
+theorem succ_graph_injective : fun.Injective(fun x y : Nat => succ(x) = y) := by
+  unfold fun.Injective
   intro x1
   intro x2
   intro y
   intro h1
   intro h2
-  apply succ_inj
+  apply nat.succ_inj
   rewrite -> h1
-  exact eq_symm h2
+  exact eq.eq_symm h2
 ```
 
 Trace the endgame, because it's a Chapter 5 étude. After the intros we
 hold `h1 : succ(x1) = y` and `h2 : succ(x2) = y`, owing `x1 = x2`.
-`apply succ_inj` works backwards — to prove the predecessors equal,
+`apply nat.succ_inj` works backwards — to prove the predecessors equal,
 prove `succ(x1) = succ(x2)`. Then `rewrite -> h1` replaces `succ(x1)`
 with `y`, leaving `y = succ(x2)` — which is `h2` *flipped*, so
-`eq_symm h2` pays exactly.
+`eq.eq_symm h2` pays exactly.
 
 Now the showpiece: `succ` is **not** surjective, because nothing maps
 to `0` — there is no natural number whose successor is zero. First,
@@ -175,22 +175,22 @@ that lemma, and its proof is the cleverest six lines in the chapter:
 ```text
 theorem succ_never_zero (k : Nat) : not (succ(k) = 0) := by
   intro h
-  apply congr_pred {A := Nat; P := fun n : Nat => le(succ(k), n); x := succ(k); y := 0}
+  apply eq.congr_pred {A := Nat; P := fun n : Nat => le(succ(k), n); x := succ(k); y := 0}
   exact h
-  exact le_refl {n := succ(k)}
+  exact nat.le_refl {n := succ(k)}
 ```
 
-Chapter 5 promised `congr_pred` — Leibniz's law as a *thing* — would
+Chapter 5 promised `eq.congr_pred` — Leibniz's law as a *thing* — would
 star in a clever proof; here it is. We assume `h : succ(k) = 0` and
 owe `False`. The scheme: find a property that `succ(k)` *has* and `0`
 *lacks*, then ride it across the equality. The property is
 `P := fun n => le(succ(k), n)` — "being at least succ(k)."
-`congr_pred` says `P` must transfer from `succ(k)` to its equal, `0` —
-but `P(succ(k))` is `le(succ(k), succ(k))`, true by `le_refl`, while
+`eq.congr_pred` says `P` must transfer from `succ(k)` to its equal, `0` —
+but `P(succ(k))` is `le(succ(k), succ(k))`, true by `nat.le_refl`, while
 `P(0)` is `le(succ(k), 0)`, which the checker *computes* straight down
 to `False` (Chapter 7's `le`-arithmetic again). So the `apply` matches
 our `False` goal, and the two remaining debts are the equality (`h`)
-and the true instance (`le_refl` — with explicit braces, since nothing
+and the true instance (`nat.le_refl` — with explicit braces, since nothing
 in a `False` goal hints at which number we mean). A truth, an
 equation, a contradiction: *ex falso*, delivered by substitution.
 
@@ -199,7 +199,7 @@ counterexample etiquette — assume surjectivity, demand a preimage for
 `0`, and feed it to the lemma:
 
 ```text
-theorem succ_not_surjective : not Surjective(fun x y : Nat => succ(x) = y) := by
+theorem succ_not_surjective : not fun.Surjective(fun x y : Nat => succ(x) = y) := by
   intro h
   simp at h
   cases h 0 with
@@ -225,15 +225,15 @@ is infinite.
 A graph that is both injective and surjective — no collisions, no
 gaps, a perfect pairing — is called **bijective**. The identity
 function is everyone's first example, and the library proves both
-halves (`id_injective`, `id_surjective`) and bundles them under the
-definition `Bijective`:
+halves (`fun.id_injective`, `fun.id_surjective`) and bundles them under the
+definition `fun.Bijective`:
 
 ```text
-theorem identity_bijective_demo : Bijective(fun x y : Person => x = y) := by
-  exact id_bijective {A := Person}
+theorem identity_bijective_demo : fun.Bijective(fun x y : Person => x = y) := by
+  exact fun.id_bijective {A := Person}
 ```
 
-`Bijective(G)` unfolds to `Injective(G) /\ Surjective(G)`, so a proof
+`fun.Bijective(G)` unfolds to `fun.Injective(G) /\ fun.Surjective(G)`, so a proof
 of a bijection is still a proof of the two promises. The definition
 just lets the theorem statement say the mathematical word directly.
 
@@ -248,8 +248,8 @@ carries the baton:
 exists y : B, F(x, y) /\ G(y, z)
 ```
 
-`std/fun.ctea` proves the two classics: `compose_injective` (two
-injective legs make an injective composite) and `compose_surjective`
+`std/fun.ctea` proves the two classics: `fun.compose_injective` (two
+injective legs make an injective composite) and `fun.compose_surjective`
 (likewise for surjective). Here's the injective one deployed, in the
 Chapter 4 own-the-shape style — arbitrary graphs on `Person`, and the
 library theorem invoked with its two premises handed over as
@@ -259,27 +259,27 @@ arguments:
 theorem compose_preserves_injective
   (F : Person -> Person -> Prop)
   (G : Person -> Person -> Prop)
-  : Injective(F)
-    -> Injective(G)
+  : fun.Injective(F)
+    -> fun.Injective(G)
     -> forall x1 x2 : Person, forall z : Person,
          (exists y : Person, F(x1, y) /\ G(y, z))
          -> (exists y : Person, F(x2, y) /\ G(y, z))
          -> x1 = x2 := by
   intro hf
   intro hg
-  exact compose_injective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
+  exact fun.compose_injective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
 ```
 
 One line of substance: instantiate, then apply to `hf` and `hg` —
 proof expressions take arguments just like Chapter 4's `h alice`, and
 here the arguments are whole *proofs*. Do also read the proof of
-`compose_injective` itself in `std/fun.ctea` — it's a `cases` inside a
+`fun.compose_injective` itself in `std/fun.ctea` — it's a `cases` inside a
 `cases` with a `have` at the bottom, every tool from Chapters 4 and 5
 in a dozen lines, and it's pleasant to watch a library earn its keep.
 
 The same theorem can be used with concrete graph lambdas. Since
 `succ_graph_injective` proves the successor graph injective,
-`succ_succ_graph_injective` instantiates `compose_injective` with
+`succ_succ_graph_injective` instantiates `fun.compose_injective` with
 `F := fun x y : Nat => succ(x) = y` and
 `G := fun y z : Nat => succ(y) = z`, then hands the same premise proof
 to both legs. The result says the two-step successor graph is
@@ -308,7 +308,7 @@ definitions.
 
 **Mistake 2: single-valued is not injective.** The mirror symmetry
 from Section 8.4, mistaken for sameness — the file tries to *derive*
-`Injective(G)` from `SingleValued(G)`, feeding the single-valuedness
+`fun.Injective(G)` from `fun.SingleValued(G)`, feeding the single-valuedness
 hypothesis the injectivity data:
 
 ```text
@@ -361,19 +361,19 @@ the `sorry` flags.
   is total — the witness names itself, like `mother_graph_total`.
 - **Exercise 8.2** ...and single-valued — one `rewrite`, one `exact`.
 - **Exercise 8.3** adding two is injective. Hint: `simp at h1` (and
-  `h2`) computes `add(x, 2)` into successors; then `apply succ_inj`
+  `h2`) computes `add(x, 2)` into successors; then `apply nat.succ_inj`
   *twice* and finish the Section 8.4 endgame.
 - **Exercise 8.4** the identity graph is surjective: every `y` is hit
   — by whom?
 - **Exercise 8.5** the constant graph `fun x y : Person => y = alice`
   is total...
 - **Exercise 8.6** ...and single-valued: both claimed outputs equal
-  `alice`, so they equal each other — `eq_symm`/`eq_trans` country, or
+  `alice`, so they equal each other — `eq.eq_symm`/`eq.eq_trans` country, or
   a well-aimed `rewrite ->`. (It is spectacularly *not* injective, but
   proving that would need two provably distinct Persons, which our
   little sort doesn't supply — sit with why.)
 - **Exercise 8.7** composition preserves surjectivity: mirror Section
-  8.6 with `compose_surjective`.
+  8.6 with `fun.compose_surjective`.
 
 Solutions: [`code/ch08-solutions.ctea`](code/ch08-solutions.ctea).
 

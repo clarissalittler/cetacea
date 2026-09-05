@@ -1,0 +1,16 @@
+-- Rewrite a hypothesis while preserving its checked justification.
+import std/hol/list@1 as L
+mode constructive
+
+theorem transport (x y : Nat) (P : Nat -> Prop) :
+  x = y -> P(x) -> P(y) := by
+  intro equality
+  intro member
+  rewrite -> equality at member
+  exact member
+
+theorem compute_length (xs : L.List Nat) :
+  L.length(L.cons(0, xs)) = 2 -> succ(L.length(xs)) = 2 := by
+  intro length
+  rewrite -> L.length_cons {A := Nat; h := 0; t := xs} at length
+  exact length

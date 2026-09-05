@@ -1,6 +1,6 @@
 -- Companion file for docs/cs250/03_first_order.md.
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -63,7 +63,7 @@ theorem rewrite_back
   : alice = bob -> P(bob) -> P(alice) := by
   intro h
   intro hp
-  apply eq_subst_left {A := Person; P := P; x := alice; y := bob}
+  apply eq.eq_subst_left {A := Person; P := P; x := alice; y := bob}
   exact h
   exact hp
 

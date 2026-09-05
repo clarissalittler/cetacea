@@ -1,0 +1,22 @@
+-- Replace each sorry; keep theorem names and statements.
+-- Chapter 20: divisibility and modular arithmetic over natural numbers.
+import builtin:std/modular.ctea as M
+mode constructive
+
+-- A divisibility proof supplies the multiplier.
+theorem ex20_1 : M.Divides(4, 20) := by
+  sorry
+
+-- A common divisor is preserved by this linear combination.
+theorem ex20_2 (d a b : Nat) :
+  M.Divides(d, a) -> M.Divides(d, b) -> M.Divides(d, add(a, mul(b, 3))) := by
+  sorry
+
+-- Congruent inputs give congruent values of x*x + 1.
+theorem ex20_3 (m x y : Nat) :
+  M.ModEq(m, x, y) -> M.ModEq(m, add(mul(x, x), 1), add(mul(y, y), 1)) := by
+  sorry
+
+-- With modulus zero, the two padded values are just the original values.
+theorem ex20_4 (x y : Nat) : M.ModEq(0, x, y) -> x = y := by
+  sorry

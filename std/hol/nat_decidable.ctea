@@ -1,0 +1,37 @@
+-- Constructive equality decisions for natural numbers.
+import ../nat.ctea as N
+
+mode constructive
+
+theorem nat_eq_decidable : forall n m : Nat, n = m \/ not n = m := by
+  intro n
+  induction n with
+  | zero =>
+      intro m
+      induction m with
+      | zero =>
+          left
+          refl
+      | succ m0 ih_m =>
+          right
+          intro same
+          contradiction
+  | succ n0 ih_n =>
+      intro m
+      induction m with
+      | zero =>
+          right
+          intro same
+          contradiction
+      | succ m0 ih_m =>
+          have decision : n0 = m0 \/ not n0 = m0 := ih_n m0
+          cases decision with
+          | left same =>
+              left
+              rewrite -> same
+              refl
+          | right different =>
+              right
+              intro same
+              apply different
+              exact N.succ_inj n0 m0 same

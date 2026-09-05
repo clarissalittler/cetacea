@@ -1,0 +1,32 @@
+-- Constructive natural-number sums over the shared polymorphic List package.
+import ../nat.ctea as nat
+import std/hol/list@1 as L
+
+mode constructive
+
+defrec sum (xs : L.List Nat) : Nat
+| nil => 0
+| cons h t rec => add(h, rec)
+
+theorem sum_nil : sum(L.nil) = 0 := by
+  simp
+  refl
+
+theorem sum_cons (h : Nat) (t : L.List Nat) :
+  sum(L.cons(h, t)) = add(h, sum(t)) := by
+  simp
+  refl
+
+theorem sum_append (xs ys : L.List Nat) :
+  sum(L.append(xs, ys)) = add(sum(xs), sum(ys)) := by
+  induction xs with
+  | nil =>
+      rewrite -> L.append_nil_left
+      simp
+      refl
+  | cons h t ih =>
+      rewrite -> L.append_cons
+      rewrite -> sum_cons
+      rewrite -> ih
+      rewrite -> nat.add_assoc
+      refl

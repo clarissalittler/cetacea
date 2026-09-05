@@ -1,0 +1,30 @@
+-- Chapter 21: recurrence equations and induction.
+import builtin:std/hol/recurrences.ctea as R
+import builtin:std/nat.ctea as N
+mode constructive
+
+-- An update rule alone does not determine the initial value.
+theorem missing_initial (f : Nat -> Nat) (d : Nat) :
+  (forall n : Nat, f(succ(n)) = add(d, f(n))) ->
+  forall n : Nat, f(n) = mul(n, d) := by
+  intro step
+  apply R.constant_step_closed {f := f; a := 0; d := d}
+  refl
+
+-- The initial value belongs to index zero, before any increment.
+theorem extra_tick (f : Nat -> Nat) (a d : Nat) :
+  f(0) = a ->
+  (forall n : Nat, f(succ(n)) = add(d, f(n))) ->
+  forall n : Nat, f(n) = add(a, mul(succ(n), d)) := by
+  intro initial
+  intro step
+  exact R.constant_step_closed {f := f; a := a; d := d} initial step
+
+-- Two checked values are not a universal proof.
+defrec delayed (n : Nat) : Nat
+| zero => 0
+| succ k rec => k
+
+theorem all_values_zero : forall n : Nat, delayed(n) = 0 := by
+  intro n
+  refl

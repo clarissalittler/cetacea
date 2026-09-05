@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch08-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -14,22 +14,22 @@ func age : Person -> Nat
 
 -- Section 8.1: a function is a relation that keeps two promises.
 -- The graph of age has mixed types: Person in, Nat out.
-theorem age_graph_total : Total(fun (p : Person) (n : Nat) => age(p) = n) := by
-  unfold Total
+theorem age_graph_total : fun.Total(fun (p : Person) (n : Nat) => age(p) = n) := by
+  unfold fun.Total
   intro p
   exists age(p)
   refl
 
 -- Section 8.3: a declared func's graph keeps both promises, provably.
-theorem mother_graph_total : Total(fun x y : Person => mother(x) = y) := by
-  unfold Total
+theorem mother_graph_total : fun.Total(fun x y : Person => mother(x) = y) := by
+  unfold fun.Total
   intro x
   exists mother(x)
   refl
 
 theorem mother_graph_single_valued
-  : SingleValued(fun x y : Person => mother(x) = y) := by
-  unfold SingleValued
+  : fun.SingleValued(fun x y : Person => mother(x) = y) := by
+  unfold fun.SingleValued
   intro x
   intro y1
   intro y2
@@ -39,27 +39,27 @@ theorem mother_graph_single_valued
   exact h2
 
 -- Section 8.4: the successor function is injective...
-theorem succ_graph_injective : Injective(fun x y : Nat => succ(x) = y) := by
-  unfold Injective
+theorem succ_graph_injective : fun.Injective(fun x y : Nat => succ(x) = y) := by
+  unfold fun.Injective
   intro x1
   intro x2
   intro y
   intro h1
   intro h2
-  apply succ_inj
+  apply nat.succ_inj
   rewrite -> h1
-  exact eq_symm h2
+  exact eq.eq_symm h2
 
 -- ...but not surjective: nothing maps to 0. First, a lemma — successors
 -- are never zero. (congr_pred carries the truth of le(succ(k), n)
 -- across the alleged equality succ(k) = 0, where it collapses to False.)
 theorem succ_never_zero (k : Nat) : not (succ(k) = 0) := by
   intro h
-  apply congr_pred {A := Nat; P := fun n : Nat => le(succ(k), n); x := succ(k); y := 0}
+  apply eq.congr_pred {A := Nat; P := fun n : Nat => le(succ(k), n); x := succ(k); y := 0}
   exact h
-  exact le_refl {n := succ(k)}
+  exact nat.le_refl {n := succ(k)}
 
-theorem succ_not_surjective : not Surjective(fun x y : Nat => succ(x) = y) := by
+theorem succ_not_surjective : not fun.Surjective(fun x y : Nat => succ(x) = y) := by
   intro h
   simp at h
   cases h 0 with
@@ -69,8 +69,8 @@ theorem succ_not_surjective : not Surjective(fun x y : Nat => succ(x) = y) := by
 
 -- Section 8.5: the identity function is bijective. The bundled definition
 -- expands to injective AND surjective, and both halves are in std/fun.ctea.
-theorem identity_bijective_demo : Bijective(fun x y : Person => x = y) := by
-  exact id_bijective {A := Person}
+theorem identity_bijective_demo : fun.Bijective(fun x y : Person => x = y) := by
+  exact fun.id_bijective {A := Person}
 
 -- Section 8.6: composition preserves injectivity. The composite graph
 -- relates x to z when some midpoint y has F(x, y) and G(y, z); the
@@ -78,15 +78,15 @@ theorem identity_bijective_demo : Bijective(fun x y : Person => x = y) := by
 theorem compose_preserves_injective
   (F : Person -> Person -> Prop)
   (G : Person -> Person -> Prop)
-  : Injective(F)
-    -> Injective(G)
+  : fun.Injective(F)
+    -> fun.Injective(G)
     -> forall x1 x2 : Person, forall z : Person,
          (exists y : Person, F(x1, y) /\ G(y, z))
          -> (exists y : Person, F(x2, y) /\ G(y, z))
          -> x1 = x2 := by
   intro hf
   intro hg
-  exact compose_injective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
+  exact fun.compose_injective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
 
 -- A concrete payoff: composing the successor graph with itself is injective.
 theorem succ_succ_graph_injective
@@ -94,7 +94,7 @@ theorem succ_succ_graph_injective
       (exists y : Nat, succ(x1) = y /\ succ(y) = z)
       -> (exists y : Nat, succ(x2) = y /\ succ(y) = z)
       -> x1 = x2 := by
-  exact compose_injective {
+  exact fun.compose_injective {
     A := Nat;
     B := Nat;
     C := Nat;

@@ -4,9 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Cetacea</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=3" />
   </head>
   <body>
+    <nav class="skip-links" aria-label="Skip to editor sections">
+      <a href="#sourceEditor">Skip to proof source</a>
+      <a href="#proofState">Skip to proof state</a>
+    </nav>
     <header class="topbar">
       <div class="brand">
         <span class="brand-mark">C</span>
@@ -21,6 +25,7 @@
         </label>
         <button id="resetSampleButton" type="button">Reset to sample</button>
         <button id="checkButton" type="button">Check</button>
+        <button id="cancelButton" type="button" disabled>Cancel check</button>
         <button id="resetButton" type="button">Reset Step</button>
         <button id="stepButton" type="button">Step</button>
       </div>
@@ -28,13 +33,49 @@
 
     <main class="workspace">
       <section class="editor-pane" aria-label="Source editor">
+        <div class="file-controls">
+          <label>File name <input id="fileName" value="proof.ctea" /></label>
+          <button id="openFileButton" type="button">Open .ctea</button>
+          <input id="proofFile" type="file" accept=".ctea,text/plain" hidden />
+          <button id="downloadButton" type="button">Download .ctea</button>
+          <button id="checkpointButton" type="button">Save checkpoint</button>
+          <label class="visually-hidden" for="recoverySelect">Saved checkpoints</label>
+          <select id="recoverySelect"></select>
+          <button id="restoreWorkButton" type="button">Restore checkpoint</button>
+          <div id="saveStatus" role="status" aria-live="polite"></div>
+          <button id="downloadSavedDataButton" type="button" hidden>Download saved data</button>
+          <button id="resumeAutosaveButton" type="button" hidden>Resume autosave with recovered work</button>
+        </div>
+        <details class="project-controls">
+          <summary>Project files</summary>
+          <div class="file-controls">
+            <button id="openProjectButton" type="button">Open project</button>
+            <input id="projectInput" type="file" accept=".ctea-project,application/json" hidden />
+            <button id="downloadProjectButton" type="button">Download project</button>
+            <label>Active file <select id="projectSelect"></select></label>
+            <label>File path <input id="projectPath" placeholder="lesson/helper.ctea" /></label>
+            <button id="addProjectFileButton" type="button">Add file</button>
+            <button id="renameProjectFileButton" type="button">Rename active file</button>
+          </div>
+          <p>Project downloads include every source file. Renaming a file does not rewrite its import statements.</p>
+        </details>
+        <details class="project-controls">
+          <summary>Assignment</summary>
+          <button id="openAssignmentButton" type="button">Open assignment</button>
+          <input id="assignmentInput" type="file" accept=".ctea-task,application/json" hidden />
+          <button id="clearAssignmentButton" type="button" disabled>Clear assignment</button>
+          <p id="assignmentStatus" role="status">No assignment selected.</p>
+          <ul id="assignmentViolations"></ul>
+          <p>Open the .ctea-task supplied by your instructor. This selection provides local feedback and applies to the active file. Your selection is saved with your work and rechecked after reload. Keep the original instructor task file for reference.</p>
+        </details>
         <div class="editor-shell">
           <pre id="sourceHighlights" aria-hidden="true"></pre>
-          <textarea id="sourceEditor" spellcheck="false"></textarea>
+          <p id="editorKeyboardHelp" class="visually-hidden">Tab moves to the next control; Shift+Tab moves to the previous control. Use Check to check the whole file, or Step to advance the selected proof.</p>
+          <textarea id="sourceEditor" aria-label="Proof source" aria-describedby="editorKeyboardHelp" spellcheck="false"></textarea>
         </div>
       </section>
 
-      <aside class="side-pane" aria-label="Proof state">
+      <aside id="proofState" class="side-pane" aria-label="Proof state" tabindex="-1">
         <div class="toolbar-row">
           <label for="theoremSelect">Theorem</label>
           <select id="theoremSelect"></select>
@@ -62,6 +103,7 @@
           <div class="library-controls">
             <input
               id="librarySearch"
+              aria-label="Search theorem names or statements"
               type="search"
               autocomplete="off"
               spellcheck="false"
@@ -90,6 +132,8 @@
                 Use <code>intro name</code> to move an implication or universal
                 binder into the context. Use <code>exact proof</code> when a
                 hypothesis or theorem already proves the goal.
+                Use <code>revert x</code> to generalize a term variable and its
+                dependent hypotheses before induction.
               </p>
               <pre>intro h
 exact h
@@ -186,6 +230,22 @@ unfold definition_name</pre>
 
             <details class="tutorial-item">
               <summary>
+                <span>Finite enumeration</span>
+                <code>finite</code>
+              </summary>
+              <p>
+                After importing <code>std/hol/finite@1</code>, use
+                <code>finite</code> to prove a concrete list's count,
+                membership, or duplicate-freedom. Coverage handles datatypes
+                whose constructors take no arguments. Load the three-colour
+                example to try it.
+              </p>
+              <pre>theorem count : F.HasCard(colours, 3) := by
+  finite</pre>
+            </details>
+
+            <details class="tutorial-item">
+              <summary>
                 <span>Nat and Classical</span>
                 <code>induction</code>
                 <code>by_cases</code>
@@ -214,7 +274,7 @@ by_contra h</pre>
         </section>
 
         <section class="panel">
-          <h2>Accepted</h2>
+          <h2>Declaration results</h2>
           <div id="accepted"></div>
         </section>
       </aside>

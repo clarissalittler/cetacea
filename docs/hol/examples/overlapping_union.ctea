@@ -1,0 +1,82 @@
+import builtin:std/hol/finite_union.ctea as U
+import std/hol/finite@1 as F
+
+mode constructive
+
+data Colour
+| red
+| blue
+
+def both : F.List Colour := F.cons(red, F.cons(blue, F.nil))
+def blues : F.List Colour := F.cons(blue, F.nil)
+
+-- Blue occurs in both inputs. Appending them would repeat it.
+theorem overlap_has_enumeration :
+  exists zs : F.List Colour, F.Nodup(zs) /\
+    (forall x : Colour, F.Member(x, zs) <-> F.Member(x, both) \/ F.Member(x, blues)) := by
+  apply U.union_enumeration {A := Colour; xs := both; ys := blues}
+  finite
+  finite
+  intro x
+  induction x with
+  | red =>
+      right
+      finite
+  | blue =>
+      left
+      finite
+
+-- A client can also obtain a set-relative size witness, rather than supply it.
+theorem construct_union_size
+  (A : Type) (S T : Set A) (xs ys : F.List A) (m n : Nat) :
+  U.HasSize(S, xs, m) -> U.HasSize(T, ys, n) ->
+  (forall x : A, x in T \/ not x in T) ->
+  exists zs : F.List A,
+    U.HasSize(union(S, T), zs, F.length(zs)) /\ le(F.length(zs), add(m, n)) := by
+  exact U.has_size_union_exists
+
+-- Prove equality decidable once, then reuse it for any list of colours.
+theorem colour_equality : forall x y : Colour, x = y \/ not x = y := by
+  intro x
+  induction x with
+  | red =>
+      intro y
+      induction y with
+      | red =>
+          left
+          refl
+      | blue =>
+          right
+          intro same
+          contradiction
+  | blue =>
+      intro y
+      induction y with
+      | red =>
+          right
+          intro same
+          contradiction
+      | blue =>
+          left
+          refl
+
+theorem any_colour_list_membership (xs : F.List Colour) :
+  forall x : Colour, F.Member(x, xs) \/ not F.Member(x, xs) := by
+  exact U.member_decidable {A := Colour; xs := xs} colour_equality
+
+theorem any_colour_union (xs ys : F.List Colour) :
+  F.Nodup(xs) -> F.Nodup(ys) ->
+  exists zs : F.List Colour, F.Nodup(zs) /\
+    (forall x : Colour, F.Member(x, zs) <-> F.Member(x, xs) \/ F.Member(x, ys)) := by
+  intro first
+  intro second
+  exact U.union_enumeration_of_decidable_eq {A := Colour; xs := xs; ys := ys} first second colour_equality
+
+theorem any_colour_set_union
+  (S T : Set Colour) (xs ys : F.List Colour) (m n : Nat) :
+  U.HasSize(S, xs, m) -> U.HasSize(T, ys, n) ->
+  exists zs : F.List Colour,
+    U.HasSize(union(S, T), zs, F.length(zs)) /\ le(F.length(zs), add(m, n)) := by
+  intro first
+  intro second
+  exact U.has_size_union_of_decidable_eq {A := Colour; S := S; T := T; xs := xs; ys := ys; m := m; n := n} first second colour_equality

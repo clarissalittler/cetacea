@@ -1,0 +1,54 @@
+-- Chapter 19: double counting and the handshake identity.
+import std/hol/matrix@1 as M
+import std/hol/cardinality@1 as C
+import builtin:std/hol/double_counting.ctea as D
+import builtin:std/hol/weighted_sums.ctea as W
+import builtin:std/hol/handshake.ctea as H
+import builtin:std/hol/sums.ctea as S
+mode constructive
+
+-- Compute the sum of a row with no columns.
+theorem ex19_1 (A B : Type) (w : A -> B -> Nat) (a : A) :
+  M.row_sum(w, a, M.nil) = 0 := by
+  exact M.row_sum_nil {A := A; B := B; w := w; a := a}
+
+-- Induct over the columns: a table with no rows has total zero.
+theorem ex19_2 (A B : Type) (w : A -> B -> Nat) (ys : M.List B) :
+  M.columns_total(w, M.nil, ys) = 0 := by
+  induction ys with
+  | nil =>
+      exact M.columns_total_nil {A := A; B := B; w := w; xs := M.nil}
+  | cons b tail ih =>
+      rewrite -> M.columns_total_cons
+      rewrite -> M.column_sum_nil
+      rewrite -> ih
+      simp
+      refl
+
+theorem ex19_3 (A B : Type) (w : A -> B -> Nat) (a : A) (xs : M.List A) (ys : M.List B) :
+  M.columns_total(w, M.cons(a, xs), ys) = add(M.row_sum(w, a, ys), M.columns_total(w, xs, ys)) := by
+  induction ys with
+  | nil =>
+      rewrite -> M.columns_total_nil
+      rewrite -> M.row_sum_nil
+      rewrite -> M.columns_total_nil
+      simp
+      refl
+  | cons b tail ih =>
+      rewrite -> M.columns_total_cons
+      rewrite -> M.column_sum_cons
+      rewrite -> ih
+      rewrite -> M.row_sum_cons
+      rewrite -> M.columns_total_cons
+      exact W.add_interchange
+
+theorem ex19_4 (Edge Vertex : Type) (incidence : Edge -> Vertex -> Nat)
+  (degree : Vertex -> Nat) (edges : M.List Edge) (vertices : M.List Vertex) :
+  (forall e : Edge, C.Member(e, edges) -> M.row_sum(incidence, e, vertices) = 2) ->
+  (forall v : Vertex, C.Member(v, vertices) -> degree(v) = M.column_sum(incidence, edges, v)) ->
+  S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by
+  intro two_ends
+  intro degrees
+  rewrite -> H.columns_as_degrees {A := Edge; B := Vertex; w := incidence; degree := degree; xs := edges; ys := vertices} degrees
+  rewrite <- D.double_counting
+  exact H.rows_constant {A := Edge; B := Vertex; w := incidence; xs := edges; ys := vertices; k := 2} two_ends

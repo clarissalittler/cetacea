@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch05-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -68,20 +68,20 @@ theorem rewrite_all_demo
 -- Section 5.4: symmetry and transitivity are theorems, not new rules.
 theorem identity_symm : clark = superman -> superman = clark := by
   intro h
-  exact eq_symm h
+  exact eq.eq_symm h
 
 theorem identity_chain
   : clark = superman -> superman = kal_el -> clark = kal_el := by
   intro h1
   intro h2
-  exact eq_trans h1 h2
+  exact eq.eq_trans h1 h2
 
 -- Section 5.4: lemmas compose with rewrite, inline.
 theorem rewrite_symm_inline
   : superman = clark -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hc
-  rewrite <- eq_symm h
+  rewrite <- eq.eq_symm h
   exact hc
 
 -- Section 5.5: have names a waypoint — the := form takes a proof directly.
@@ -90,7 +90,7 @@ theorem fly_by_stages
   intro h1
   intro h2
   intro hf
-  have h3 : clark = kal_el := eq_trans h1 h2
+  have h3 : clark = kal_el := eq.eq_trans h1 h2
   rewrite -> h3
   exact hf
 
@@ -103,7 +103,7 @@ theorem have_subgoal_demo
   intro h2
   intro hf
   have hck : clark = kal_el
-  exact eq_trans h1 h2.left
+  exact eq.eq_trans h1 h2.left
   rewrite -> hck
   exact hf
 
@@ -118,7 +118,7 @@ theorem mothers_agree
 theorem leibniz_demo : clark = superman -> Flies(clark) -> Flies(superman) := by
   intro h
   intro hf
-  exact congr_pred {A := Person; P := Flies; x := clark; y := superman} h hf
+  exact eq.congr_pred {A := Person; P := Flies; x := clark; y := superman} h hf
 
 -- Section 5.7: simp can use an equation as a left-to-right rewrite rule.
 theorem simp_rule_demo

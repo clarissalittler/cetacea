@@ -74,10 +74,10 @@ fun x y : Person => Knows(x, y) /\ Knows(y, x)
 ```
 
 Read: *the relation holding between x and y when each knows the
-other.* You saw a lambda flash by in Chapter 4's `forall_mono` braces;
+other.* You saw a lambda flash by in Chapter 4's `fol.forall_mono` braces;
 here they become everyday tools. Equality-as-a-relation is the lambda
 `fun x y : T => x = y`, the clock relation will be
-`fun x y : Nat => ModEq(12, x, y)`, and so on.
+`fun x y : Nat => modular.ModEq(12, x, y)`, and so on.
 
 One mechanical note before the proofs. A `def` is a *name* for a
 formula, and the checker keeps the name folded until you say
@@ -111,7 +111,7 @@ theorem eq_symmetric (T : Type) : Symmetric(fun x y : T => x = y) := by
   intro x
   intro y
   intro h
-  exact eq_symm h
+  exact eq.eq_symm h
 
 theorem eq_transitive (T : Type) : Transitive(fun x y : T => x = y) := by
   unfold Transitive
@@ -120,11 +120,11 @@ theorem eq_transitive (T : Type) : Transitive(fun x y : T => x = y) := by
   intro z
   intro h1
   intro h2
-  exact eq_trans h1 h2
+  exact eq.eq_trans h1 h2
 ```
 
 Symmetry and transitivity fall to the Chapter 5 lemmas — of course
-they do; `eq_symm` and `eq_trans` *are* those properties, we've merely
+they do; `eq.eq_symm` and `eq.eq_trans` *are* those properties, we've merely
 re-packaged them in the new vocabulary. Three passes, full marks: an
 **equivalence relation**, says Section 7.6.
 
@@ -134,8 +134,8 @@ Meet `le(n, m)` — "n is less than or equal to m" — a built-in relation
 on `Nat`. Like `add` in Chapter 5, `le` *computes* on concrete
 numbers: `simp` and `refl` reduce `le(0, 1)` to `True` and `le(1, 0)`
 to `False` without any help. (Its general theory lives in
-`std/nat.ctea`; today we need only `le_refl` and one fact with a
-wonderful name, `succ_not_le_zero`.)
+`std/nat.ctea`; today we need only `nat.le_refl` and one fact with a
+wonderful name, `nat.succ_not_le_zero`.)
 
 Reflexivity: everything is less-than-or-equal-to itself, and the
 library already knows:
@@ -144,7 +144,7 @@ library already knows:
 theorem le_reflexive : Reflexive(fun x y : Nat => le(x, y)) := by
   unfold Reflexive
   intro x
-  exact le_refl
+  exact nat.le_refl
 ```
 
 Symmetry is where it gets interesting — because `le` *isn't*
@@ -159,7 +159,7 @@ theorem le_not_symmetric : not Symmetric(fun x y : Nat => le(x, y)) := by
   have h01 : le(1, 0)
   apply h 0 1
   trivial
-  apply succ_not_le_zero {n := 0}
+  apply nat.succ_not_le_zero {n := 0}
   exact h01
 ```
 
@@ -179,18 +179,18 @@ h : forall x y : Nat, le(x, y) -> le(y, x)  |-  le(1, 0)
 ```
 To prove it, `apply h 0 1` — symmetry, specialized to the pair
 `(0, 1)`, promises `le(0, 1) -> le(1, 0)` — and the premise `le(0, 1)`
-*computes to* `True`, so the goal after the `apply` is literally
-`True`, and `trivial` collects. Back in the main goal we hold
-`h01 : le(1, 0)`, i.e. `1 ≤ 0`, and `succ_not_le_zero` — *no successor
+*computes to* `True`. The editor keeps `le(0, 1)` as the written goal
+and shows `Computes to: True` beneath it; `trivial` collects. Back in the main goal we hold
+`h01 : le(1, 0)`, i.e. `1 ≤ 0`, and `nat.succ_not_le_zero` — *no successor
 is ≤ 0* — turns it into the `False` we owed.
 
 Two things to notice. First, the counterexample is *inside* the proof:
 the pair `(0, 1)` appears nowhere in the statement, only in our
 `apply h 0 1`. Choosing it was the creative act; everything else was
 bookkeeping. Second — transitivity: `le` *does* have it, and the
-standard library provides it as `le_trans` in `std/nat.ctea`. But if
+standard library provides it as `nat.le_trans` in `std/nat.ctea`. But if
 you open that file you'll find its proof is a nested induction —
-Chapter 9's whole subject. For now we may *use* `le_trans` freely
+Chapter 9's whole subject. For now we may *use* `nat.le_trans` freely
 while owing the technique that proves it; the debt comes due two
 chapters from now.
 
@@ -239,50 +239,50 @@ subtract freely — by a lovely trick: *x and y are congruent mod m when
 each can be padded by a multiple of m to reach the same number*:
 
 ```text
-def ModEq (m : Nat) (x : Nat) (y : Nat) : Prop := exists a b : Nat, add(x, mul(m, a)) = add(y, mul(m, b))
+def modular.ModEq (m : Nat) (x : Nat) (y : Nat) : Prop := exists a b : Nat, add(x, mul(m, a)) = add(y, mul(m, b))
 ```
 
 And — this is the payoff — the library doesn't just define it, it
 *proves* the three properties, as honest theorems with no axioms:
-`modeq_refl`, `modeq_sym`, and `modeq_trans`. (Open `std/modular.ctea`
-and look at `modeq_trans`. It's a dozen `rewrite`s deep, Chapter 5
+`modular.modeq_refl`, `modular.modeq_sym`, and `modular.modeq_trans`. (Open `std/modular.ctea`
+and look at `modular.modeq_trans`. It's a dozen `rewrite`s deep, Chapter 5
 equational reasoning at full gallop, and every line is checkable. That
 proof is why this section can exist.) Our job is just to hold the
 certificates up against the Chapter 7 definitions:
 
 ```text
-theorem modeq_reflexive (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_reflexive (m : Nat) : Reflexive(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Reflexive
   intro x
-  exact modeq_refl
+  exact modular.modeq_refl
 
-theorem modeq_symmetric (m : Nat) : Symmetric(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_symmetric (m : Nat) : Symmetric(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Symmetric
   intro x
   intro y
   intro h
-  exact modeq_sym m x y h
+  exact modular.modeq_sym m x y h
 
-theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Transitive
   intro x
   intro y
   intro z
   intro h1
   intro h2
-  apply modeq_trans
+  apply modular.modeq_trans
   exact h1
   exact h2
 ```
 
-The middle proof passes `modeq_sym` its three term parameters
+The middle proof passes `modular.modeq_sym` its three term parameters
 positionally, then the proof `h`; this is the same left-to-right habit
 as applying a hypothesis to an argument. And the bundle, all three certificates
 stapled together, quantified over *every* modulus at once:
 
 ```text
 theorem modeq_equivalence (m : Nat)
-  : Equivalence(fun x y : Nat => ModEq(m, x, y)) := by
+  : Equivalence(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Equivalence
   split
   exact modeq_reflexive {m := m}
@@ -299,12 +299,12 @@ Your file now contains a machine-checked proof of it, for all moduli
 simultaneously, resting on a chain of `rewrite`s you could audit line
 by line if you doubted a single link.
 
-And because `ModEq` is just an `exists`, concrete congruences are
+And because `modular.ModEq` is just an `exists`, concrete congruences are
 Chapter 4 witness-hunting where `refl` does the arithmetic:
 
 ```text
-theorem clock_27_is_3 : ModEq(12, 27, 3) := by
-  unfold ModEq
+theorem clock_27_is_3 : modular.ModEq(12, 27, 3) := by
+  unfold modular.ModEq
   exists 0
   exists 2
   refl
@@ -315,7 +315,7 @@ and both roads reach 27. The `refl` at the end checks
 `add(27, mul(12, 0)) = add(3, mul(12, 2))` by pure computation — the
 witnesses were the only creative input.
 
-(For the road not taken: `Divides`, also in `std/modular.ctea`, is
+(For the road not taken: `modular.Divides`, also in `std/modular.ctea`, is
 reflexive and transitive but *not* symmetric — 3 divides 12, not vice
 versa. Relations like that, "orderings" rather than "samenesses," get
 the name *partial order* once you add antisymmetry. The exercises let
@@ -336,8 +336,8 @@ when you want to show that step.
 make an unrelated name occur in the goal:
 
 ```text
-error: docs/book/code/ch07-mistakes.ctea:17: theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => ModEq(m, x, y))`
-  note: target: Reflexive(fun x y : Nat => ModEq(m, x, y))
+error: docs/book/code/ch07-mistakes.ctea:17: theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => modular.ModEq(m, x, y))`
+  note: target: Reflexive(fun x y : Nat => modular.ModEq(m, x, y))
 ```
 
 Harmless, but common once a file juggles three look-alike definitions
@@ -371,14 +371,14 @@ Open [`code/ch07-exercises.ctea`](code/ch07-exercises.ctea) — the
 three property definitions are at the top of the file. Clear the
 `sorry` flags.
 
-- **Exercise 7.1** `ModEq(10, 23, 3)` — a concrete congruence: find
+- **Exercise 7.1** `modular.ModEq(10, 23, 3)` — a concrete congruence: find
   `a` and `b` with `23 + 10*a = 3 + 10*b`, and let `refl` check the
   arithmetic.
 - **Exercise 7.2** divisibility is reflexive — after the `unfold` and
-  `intro`, the library's `divides_refl` is exactly the goal.
+  `intro`, the library's `modular.divides_refl` is exactly the goal.
 - **Exercise 7.3** mutual liking is symmetric — Section 7.5's trick on
   a fresh relation.
-- **Exercise 7.4** divisibility is transitive — `apply divides_trans`
+- **Exercise 7.4** divisibility is transitive — `apply modular.divides_trans`
   and let your two hypotheses tell the checker what the middle number
   is.
 - **Exercises 7.5–7.7** *same mood* — the named relation

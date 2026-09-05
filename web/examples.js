@@ -7,6 +7,533 @@
 
 window.CETACEA_EXAMPLES = [
   {
+    id: "pigeonhole-collision",
+    label: "Pigeonhole: explicit and classical witnesses",
+    path: "docs/hol/examples/pigeonhole_collision.ctea",
+    source: `import builtin:std/hol/pigeonhole_classical.ctea as P
+import std/hol/finite@1 as F
+
+mode constructive
+
+data Colour
+| red
+| yellow
+| green
+
+data Bit
+| zero_bit
+| one_bit
+
+defrec encode (colour : Colour) : Bit
+| red => zero_bit
+| yellow => one_bit
+| green => zero_bit
+
+def colours : F.List Colour := F.cons(red, F.cons(yellow, F.cons(green, F.nil)))
+def bits : F.List Bit := F.cons(zero_bit, F.cons(one_bit, F.nil))
+
+-- For this particular function, we can exhibit the pair constructively.
+theorem explicit_collision :
+  exists x1 : Colour, exists x2 : Colour,
+    (not x1 = x2) /\\ encode(x1) = encode(x2) := by
+  exists red
+  exists green
+  split
+  intro same_colour
+  contradiction
+  refl
+
+-- The generic theorem supplies existence through classical reasoning.
+mode classical
+
+theorem some_collision (f : Colour -> Bit) :
+  exists x1 : Colour, exists x2 : Colour,
+    (not x1 = x2) /\\ f(x1) = f(x2) := by
+  apply P.pigeonhole_collision {xs := colours; ys := bits; n := 2}
+  finite
+  finite
+`,
+  },
+  {
+    id: "finite-enumeration",
+    label: "Finite enumeration: three colours",
+    path: "docs/hol/examples/finite_enumeration.ctea",
+    source: `import std/hol/finite@1 as F
+mode constructive
+
+data Traffic
+| red
+| yellow
+| green
+
+def colours : F.List Traffic := F.cons(red, F.cons(yellow, F.cons(green, F.nil)))
+
+theorem colours_nodup : F.Nodup(colours) := by
+  finite
+
+theorem colours_length : F.length(colours) = 3 := by
+  finite
+
+theorem colours_coverage : forall x : Traffic, F.Member(x, colours) := by
+  finite
+
+theorem three_colours : F.HasCard(colours, 3) := by
+  finite
+`,
+  },
+  {
+    id: "probability-counts",
+    label: "Chapter 22: finite probability and tickets",
+    path: "docs/book/hol-code/ch22-examples.ctea",
+    source: `-- Uniformly choose one of four ordered pairs of coin results.
+import builtin:std/hol/probability_counts.ctea as P
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+mode constructive
+
+data Outcome
+| hh
+| ht
+| th
+| tt
+
+def outcomes : C.List Outcome := C.cons(hh, C.cons(ht, C.cons(th, C.cons(tt, C.nil))))
+
+defrec first_head (outcome : Outcome) : Nat
+| hh => 1
+| ht => 1
+| th => 0
+| tt => 0
+
+defrec first_tail (outcome : Outcome) : Nat
+| hh => 0
+| ht => 0
+| th => 1
+| tt => 1
+
+defrec second_head (outcome : Outcome) : Nat
+| hh => 1
+| ht => 0
+| th => 1
+| tt => 0
+
+defrec heads (outcome : Outcome) : Nat
+| hh => 2
+| ht => 1
+| th => 1
+| tt => 0
+
+theorem sample_size : C.length(outcomes) = 4 := by
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_nil
+  refl
+
+theorem denominator_nonzero : not C.length(outcomes) = 0 := by
+  exact P.nonempty_denominator
+
+theorem complementary (outcome : Outcome) : add(first_head(outcome), first_tail(outcome)) = 1 := by
+  induction outcome with
+  | hh =>
+      refl
+  | ht =>
+      refl
+  | th =>
+      refl
+  | tt =>
+      refl
+
+theorem partition_total :
+  add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(first_tail, outcomes))) = C.length(outcomes) := by
+  apply P.complement_counts {A := Outcome; f := first_head; g := first_tail; xs := outcomes}
+  intro outcome
+  intro member
+  exact complementary
+
+-- The numerator of the first-head probability is 2; its denominator is 4.
+theorem first_head_count : S.sum(C.map(first_head, outcomes)) = 2 := by
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_nil
+  refl
+
+theorem second_head_count : S.sum(C.map(second_head, outcomes)) = 2 := by
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_nil
+  refl
+
+theorem head_contributions (outcome : Outcome) : heads(outcome) = add(first_head(outcome), second_head(outcome)) := by
+  induction outcome with
+  | hh =>
+      refl
+  | ht =>
+      refl
+  | th =>
+      refl
+  | tt =>
+      refl
+
+theorem total_heads : S.sum(C.map(heads, outcomes)) = 4 := by
+  have linear : S.sum(C.map(heads, outcomes)) = add(S.sum(C.map(first_head, outcomes)), S.sum(C.map(second_head, outcomes))) := by
+    apply P.numerator_add {A := Outcome; f := first_head; g := second_head; h := heads; xs := outcomes}
+    intro outcome
+    intro member
+    exact head_contributions
+  rewrite -> first_head_count at linear
+  rewrite -> second_head_count at linear
+  exact linear
+
+-- Listing hh twice changes the experiment: choose uniformly among five tickets.
+def tickets : C.List Outcome := C.cons(hh, outcomes)
+
+theorem ticket_count : C.length(tickets) = 5 := by
+  rewrite -> C.length_cons
+  rewrite -> sample_size
+  refl
+
+theorem ticket_first_heads : S.sum(C.map(first_head, tickets)) = 3 := by
+  rewrite -> C.map_cons
+  rewrite -> S.sum_cons
+  rewrite -> first_head_count
+  refl
+`,
+  },
+  {
+    id: "recurrences",
+    label: "Chapter 21: recurrences and closed forms",
+    path: "docs/book/hol-code/ch21-examples.ctea",
+    source: `-- A machine starts with two tokens and gains three tokens each tick.
+import builtin:std/hol/recurrences.ctea as R
+mode constructive
+
+defrec tokens (n : Nat) : Nat
+| zero => 2
+| succ k rec => add(3, rec)
+
+theorem tokens_closed (n : Nat) : tokens(n) = add(2, mul(n, 3)) := by
+  have all_ticks : forall k : Nat, tokens(k) = add(2, mul(k, 3)) := by
+    apply R.constant_step_closed {f := tokens; a := 2; d := 3}
+    refl
+    intro k
+    simp
+    refl
+  exact all_ticks n
+
+theorem after_four_ticks : tokens(4) = 14 := by
+  rewrite -> tokens_closed
+  refl
+
+-- An independently written formula describes the same sequence.
+def formula (n : Nat) : Nat := add(2, mul(n, 3))
+def advance (n previous : Nat) : Nat := add(3, previous)
+
+theorem two_descriptions (n : Nat) : tokens(n) = formula(n) := by
+  have all_ticks : forall k : Nat, tokens(k) = formula(k) := by
+    apply R.recurrence_unique {A := Nat; f := tokens; g := formula; step := advance}
+    refl
+    intro k
+    simp
+    refl
+    intro k
+    exact R.constant_step_successor {a := 2; d := 3; n := k}
+  exact all_ticks n
+
+-- Uniqueness also applies when the states are not numbers.
+data State
+| ready
+| busy
+
+defrec toggle (s : State) : State
+| ready => busy
+| busy => ready
+
+defrec machine (n : Nat) : State
+| zero => ready
+| succ k rec => toggle(rec)
+
+def transition (n : Nat) (s : State) : State := toggle(s)
+
+theorem state_sequence_unique (other : Nat -> State) :
+  other(0) = ready ->
+  (forall k : Nat, other(succ(k)) = toggle(other(k))) ->
+  forall n : Nat, machine(n) = other(n) := by
+  intro initial
+  intro next
+  apply R.recurrence_unique {A := State; f := machine; g := other; step := transition}
+  rewrite -> initial
+  refl
+  intro k
+  simp
+  refl
+  intro k
+  exact next k
+
+-- Agreement on a short prefix does not determine the remaining values.
+defrec delayed (n : Nat) : Nat
+| zero => 0
+| succ k rec => k
+
+theorem first_value : delayed(0) = 0 := by
+  refl
+
+theorem second_value : delayed(1) = 0 := by
+  refl
+
+theorem third_value : delayed(2) = 1 := by
+  refl
+`,
+  },
+  {
+    id: "modular-arithmetic",
+    label: "Chapter 20: divisibility and clocks",
+    path: "docs/book/hol-code/ch20-examples.ctea",
+    source: `-- Divisibility witnesses and a clock calculation.
+import builtin:std/modular.ctea as M
+mode constructive
+
+theorem four_divides_twenty : M.Divides(4, 20) := by
+  unfold M.Divides
+  exists 5
+  refl
+
+-- Add no cycles to 27 and two 12-hour cycles to 3.
+theorem clock_27_3 : M.ModEq(12, 27, 3) := by
+  unfold M.ModEq
+  exists 0
+  exists 2
+  refl
+
+theorem clock_reverse : M.ModEq(12, 3, 27) := by
+  exact M.modeq_sym {m := 12; x := 27; y := 3} clock_27_3
+
+-- Congruent symbolic inputs have congruent squares.
+theorem congruent_squares (m x y : Nat) :
+  M.ModEq(m, x, y) -> M.ModEq(m, mul(x, x), mul(y, y)) := by
+  intro same
+  exact M.modeq_mul {m := m; x := x; y := y; u := x; v := y} same same
+
+-- Truncated subtraction loses information when the second input is larger.
+theorem subtraction_trap : sub(2, 9) = 0 := by
+  refl
+
+theorem zero_divides_zero : M.Divides(0, 0) := by
+  exact M.divides_zero {a := 0}
+
+-- Congruence modulo zero is equality for this subtraction-free definition.
+theorem zero_modulus (x y : Nat) : M.ModEq(0, x, y) -> x = y := by
+  intro congruent
+  simp at congruent
+  cases congruent with
+  | intro a remaining =>
+      cases remaining with
+      | intro b equal =>
+          exact equal
+`,
+  },
+  {
+    id: "double-counting",
+    label: "Chapter 19: counting twice",
+    path: "docs/book/hol-code/ch19-examples.ctea",
+    source: `-- Two endpoints contribute two, even when they occupy the same vertex.
+import builtin:std/hol/endpoint_sums.ctea as E
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+import builtin:std/hol/handshake.ctea as H
+import std/hol/matrix@1 as M
+mode constructive
+
+data Vertex
+| home
+| away
+
+def vertices : C.List Vertex := C.cons(home, C.cons(away, C.nil))
+
+defrec home_end (v : Vertex) : Nat
+| home => 1
+| away => 0
+
+defrec away_end (v : Vertex) : Nat
+| home => 0
+| away => 1
+
+defrec bridge_incidence (v : Vertex) : Nat
+| home => 1
+| away => 1
+
+defrec loop_incidence (v : Vertex) : Nat
+| home => 2
+| away => 0
+
+theorem ordinary_edge_total : S.sum(C.map(bridge_incidence, vertices)) = 2 := by
+  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := away_end; incidence := bridge_incidence; a := home; b := away; vertices := vertices}
+  -- Duplicate-free enumeration and both endpoints present.
+  finite
+  finite
+  finite
+  -- Each indicator is one at its endpoint.
+  finite
+  finite
+  -- It is zero elsewhere; incidence adds the two indicators.
+  finite
+  finite
+  finite
+
+theorem loop_edge_total : S.sum(C.map(loop_incidence, vertices)) = 2 := by
+  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := loop_incidence; a := home; b := home; vertices := vertices}
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+
+-- Two bridge occurrences and a loop at home.
+data Edge
+| bridge
+| loop
+
+defrec incidence (e : Edge) (v : Vertex) : Nat
+| bridge => bridge_incidence(v)
+| loop => loop_incidence(v)
+
+def edges : M.List Edge := M.cons(bridge, M.cons(bridge, M.cons(loop, M.nil)))
+
+defrec degree (v : Vertex) : Nat
+| home => 4
+| away => 2
+
+theorem edge_total (e : Edge) : M.row_sum(incidence, e, vertices) = 2 := by
+  induction e with
+  | bridge =>
+      have row : M.row_sum(incidence, bridge, vertices) = S.sum(C.map(bridge_incidence, vertices)) := by
+        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := bridge; f := bridge_incidence; ys := vertices}
+        finite
+      rewrite -> row
+      exact ordinary_edge_total
+  | loop =>
+      have row : M.row_sum(incidence, loop, vertices) = S.sum(C.map(loop_incidence, vertices)) := by
+        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := loop; f := loop_incidence; ys := vertices}
+        finite
+      rewrite -> row
+      exact loop_edge_total
+
+theorem degree_counts (v : Vertex) : degree(v) = M.column_sum(incidence, edges, v) := by
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_nil
+  induction v with
+  | home =>
+      refl
+  | away =>
+      refl
+
+theorem handshake_total : S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by
+  apply H.handshake {Edge := Edge; Vertex := Vertex; incidence := incidence; degree := degree; edges := edges; vertices := vertices}
+  intro e
+  intro listed
+  exact edge_total e
+  intro v
+  intro listed
+  exact degree_counts v
+
+theorem edge_count : C.length(edges) = 3 := by
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_nil
+  refl
+
+theorem six_incidences : S.sum(C.map(degree, vertices)) = 6 := by
+  rewrite -> handshake_total
+  rewrite all -> edge_count
+  refl
+`,
+  },
+  {
+    id: "explicit-paths",
+    label: "Chapter 18: explicit directed paths",
+    path: "docs/book/hol-code/ch18-examples.ctea",
+    source: `-- Chapter 18 worked example: two directed road legs.
+import builtin:std/hol/paths.ctea as P
+import std/hol/graph@1 as G
+import std/hol/list@1 as L
+
+mode constructive
+
+data Stop
+| home
+| junction
+| campus
+
+def Road (a b : Stop) : Prop :=
+  (a = home /\\ b = junction) \\/ (a = junction /\\ b = campus)
+
+-- Empty lists represent staying at the start.
+theorem stay : G.ValidPath(Road, L.nil, home, home) := by
+  apply (G.path_nil {E := Road; a := home; b := home}).right
+  refl
+
+theorem first_leg : G.ValidPath(Road, L.cons(junction, L.nil), home, junction) := by
+  apply (G.path_cons {E := Road; h := junction; t := L.nil; a := home; b := junction}).right
+  split
+  unfold Road
+  finite
+  apply (G.path_nil {E := Road; a := junction; b := junction}).right
+  refl
+
+theorem second_leg : G.ValidPath(Road, L.cons(campus, L.nil), junction, campus) := by
+  apply (G.path_cons {E := Road; h := campus; t := L.nil; a := junction; b := campus}).right
+  split
+  unfold Road
+  finite
+  apply (G.path_nil {E := Road; a := campus; b := campus}).right
+  refl
+
+-- Two independently checked lists join at the same junction.
+theorem complete_journey :
+  G.ValidPath(Road, L.append(L.cons(junction, L.nil), L.cons(campus, L.nil)), home, campus) := by
+  exact P.path_append {E := Road; xs := L.cons(junction, L.nil); ys := L.cons(campus, L.nil)} home junction campus first_leg second_leg
+`,
+  },
+  {
+    id: "finite-sums",
+    label: "Chapter 17: finite sums",
+    path: "docs/book/hol-code/ch17-examples.ctea",
+    source: `-- Chapter 17: computation for a concrete list and laws for unknown lists.
+import builtin:std/hol/sums.ctea as S
+import std/hol/list@1 as L
+
+mode constructive
+
+theorem three_entries : S.sum(L.cons(2, L.cons(5, L.cons(2, L.nil)))) = 9 := by
+  simp
+  refl
+
+theorem one_more (h : Nat) (xs : L.List Nat) :
+  S.sum(L.cons(h, xs)) = add(h, S.sum(xs)) := by
+  exact S.sum_cons
+
+theorem two_groups (xs ys : L.List Nat) :
+  S.sum(L.append(xs, ys)) = add(S.sum(xs), S.sum(ys)) := by
+  exact S.sum_append
+
+theorem empty_group (xs : L.List Nat) :
+  S.sum(L.append(xs, L.nil)) = S.sum(xs) := by
+  rewrite -> L.append_nil_right
+  refl
+`,
+  },
+  {
     id: "hol-cardinality",
     label: "HOL Cardinality: map and transport",
     path: "docs/hol/examples/cardinality_map_length.ctea",
@@ -407,11 +934,11 @@ theorem inter_comm
     source: `-- Companion file for docs/cs250/01_propositional.md.
 -- Each theorem here corresponds to a snippet in the tutorial.
 
-import std/prelude.ctea
+import std/qualified_prelude.ctea
 
 mode constructive
 
-theorem and_intro_demo (P Q : Prop) : P -> Q -> P /\\ Q := by
+theorem and_intro (P Q : Prop) : P -> Q -> P /\\ Q := by
   intro hp
   intro hq
   split
@@ -427,7 +954,7 @@ theorem or_intro_left_demo (P Q : Prop) : P -> P \\/ Q := by
   left
   exact hp
 
-theorem or_elim_demo (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \\/ Q -> R := by
+theorem or_elim (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \\/ Q -> R := by
   intro hpr
   intro hqr
   intro hpq
@@ -445,7 +972,7 @@ theorem imp_intro_demo (P Q : Prop) : P -> P -> Q -> P := by
   intro hq
   exact hp1
 
-theorem modus_tollens_demo (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+theorem modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
   intro hpq
   intro hnq
   intro hp
@@ -486,12 +1013,12 @@ theorem imp_dist_and_fwd (P Q R : Prop) : (P -> Q /\\ R) -> (P -> Q) /\\ (P -> R
   split
   -- prove P -> Q
   intro hp
-  apply and_left
+  apply prop.and_left
   apply h
   exact hp
   -- prove P -> R
   intro hp
-  apply and_right
+  apply prop.and_right
   apply h
   exact hp
 
@@ -521,7 +1048,7 @@ theorem demorgan_hard (P Q : Prop) : not (P /\\ Q) -> not P \\/ not Q := by
   right
   exact hnq
 
-theorem em_demo (P : Prop) : P \\/ not P := by
+theorem em (P : Prop) : P \\/ not P := by
   by_cases h : P
   left
   exact h
@@ -535,7 +1062,7 @@ theorem em_demo (P : Prop) : P \\/ not P := by
     path: "docs/cs250/code/03_first_order.ctea",
     source: `-- Companion file for docs/cs250/03_first_order.md.
 
-import std/prelude.ctea
+import std/qualified_prelude.ctea
 
 mode constructive
 
@@ -598,7 +1125,7 @@ theorem rewrite_back
   : alice = bob -> P(bob) -> P(alice) := by
   intro h
   intro hp
-  apply eq_subst_left {A := Person; P := P; x := alice; y := bob}
+  apply eq.eq_subst_left {A := Person; P := P; x := alice; y := bob}
   exact h
   exact hp
 
@@ -728,7 +1255,7 @@ theorem zero_mymul_n (n : Nat) : mymul(0, n) = 0 := by
     path: "docs/cs250/code/05_sets.ctea",
     source: `-- Companion file for docs/cs250/05_sets.md.
 
-import std/prelude.ctea
+import std/qualified_prelude.ctea
 
 mode constructive
 
@@ -770,7 +1297,7 @@ theorem alice_in_tall_set : Tall(alice) -> alice in TallSet := by
   simp
   exact h
 
-theorem subset_refl_demo
+theorem subset_refl
   (T : Type)
   (A : Set T)
   : A subset A := by
@@ -779,11 +1306,11 @@ theorem subset_refl_demo
   intro hx
   exact hx
 
-theorem inter_comm_demo
+theorem inter_comm
   (T : Type)
   (A B : Set T)
   : inter(A, B) = inter(B, A) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -801,7 +1328,7 @@ theorem inter_union_distrib
   (T : Type)
   (A B C : Set T)
   : inter(A, union(B, C)) = union(inter(A, B), inter(A, C)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -838,11 +1365,11 @@ theorem subsets_carry
   : A subset B -> C subset A -> C subset B := by
   intro hAB
   intro hCA
-  apply subset_trans
+  apply set.subset_trans
   exact hCA
   exact hAB
 
-theorem powerset_mono_demo
+theorem powerset_mono
   (A B : Set Person)
   : A subset B -> powerset(A) subset powerset(B) := by
   intro hAB
@@ -862,7 +1389,7 @@ theorem powerset_mono_demo
     path: "docs/cs250/code/06_relations.ctea",
     source: `-- Companion file for docs/cs250/06_relations.md.
 
-import std/prelude.ctea
+import std/qualified_prelude.ctea
 
 mode constructive
 
@@ -901,14 +1428,14 @@ theorem equality_relation_equivalence : Equivalence(fun x y : Thing => x = y) :=
   intro x
   intro y
   intro h
-  exact eq_symm h
+  exact eq.eq_symm h
   unfold Transitive
   intro x
   intro y
   intro z
   intro h1
   intro h2
-  exact eq_trans h1 h2
+  exact eq.eq_trans h1 h2
 
 -- "If R is symmetric and transitive AND there's some witness y with
 -- R(x, y), then R(x, x)." The flawed argument from Module 1 §6 is
@@ -936,11 +1463,11 @@ theorem eq_refl_demo (A : Type) (x : A) : x = x := by
   refl
 
 theorem eq_sym_demo (A : Type) (x y : A) : x = y -> y = x := by
-  exact eq_symm
+  exact eq.eq_symm
 
-theorem eq_trans_demo (A : Type) (x y z : A)
+theorem eq_trans (A : Type) (x y z : A)
   : x = y -> y = z -> x = z := by
-  exact eq_trans
+  exact eq.eq_trans
 
 -- An axiomatic equivalence relation: a sketch of how you'd handle
 -- something like modular congruence.
@@ -966,6 +1493,250 @@ theorem cong_diag (a b c : Z) : Cong(a, b) -> Cong(a, c) -> Cong(b, c) := by
   apply cong_sym a b
   exact hab
   exact hac
+`,
+  },
+  {
+    id: "cs250_07",
+    label: "CS250 - 07 Structural induction",
+    path: "docs/cs250/code/07_structural_induction.ctea",
+    source: `-- Companion file for docs/cs250/07_structural_induction.md.
+
+import std/qualified_prelude.ctea
+
+mode constructive
+
+-- The prelude's std/list.ctea declares:
+--
+--   data List
+--   | nil
+--   | cons(Nat, List)
+--
+-- with \`length\` as a defrec, and \`append\` as an axiomatized binary function.
+-- \`refl\` computes defrec definitions directly:
+
+theorem length_two_demo : list.length(list.cons(1, list.cons(2, list.nil))) = 2 := by
+  refl
+
+-- A new recursive definition over List: the sum of the elements.
+defrec sum (l : list.List) : Nat
+| list.nil => 0
+| list.cons h t rec => add(h, rec)
+
+theorem sum_singleton (n : Nat) : sum(list.cons(n, list.nil)) = n := by
+  simp
+  refl
+
+-- Structural induction on List: the nil arm and the cons arm.
+-- In the cons arm, \`h\` and \`t\` name the constructor arguments and \`ih\` is
+-- the induction hypothesis for the recursive argument \`t\`.
+theorem length_append (l1 : list.List) (l2 : list.List)
+  : list.length(list.append(l1, l2)) = add(list.length(l1), list.length(l2)) := by
+  induction l1 with
+  | list.nil =>
+      refl
+  | list.cons h t ih =>
+      simp
+      rewrite -> ih
+      refl
+
+theorem sum_append (l1 : list.List) (l2 : list.List)
+  : sum(list.append(l1, l2)) = add(sum(l1), sum(l2)) := by
+  induction l1 with
+  | list.nil =>
+      refl
+  | list.cons h t ih =>
+      simp
+      rewrite -> ih
+      rewrite nat.add_assoc {n := h; m := sum(t); k := sum(l2)}
+      refl
+
+-- A user-declared inductive type: binary trees with Nat labels.
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+-- In the node arm, \`l\`, \`v\`, \`r\` bind the constructor arguments, and then
+-- \`recl\`, \`recr\` bind the recursive results for \`l\` and \`r\`, in order.
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r recl recr => succ(add(recl, recr))
+
+theorem size_leaf : size(leaf) = 0 := by
+  refl
+
+theorem size_node (l : Tree) (v : Nat) (r : Tree)
+  : size(node(l, v, r)) = succ(add(size(l), size(r))) := by
+  refl
+
+-- \`mirror\` swaps the two subtrees everywhere. \`defrec\` results can be any
+-- type, including the data type itself, so this is a direct definition and
+-- its equations compute (no axioms needed).
+defrec mirror (t : Tree) : Tree
+| leaf => leaf
+| node l v r recl recr => node(recr, v, recl)
+
+theorem mirror_leaf : mirror(leaf) = leaf := by
+  refl
+
+theorem mirror_node (l : Tree) (v : Nat) (r : Tree)
+  : mirror(node(l, v, r)) = node(mirror(r), v, mirror(l)) := by
+  refl
+
+-- Structural induction on Tree: the node arm gets one induction hypothesis
+-- per recursive argument, \`ihl\` for \`l\` and \`ihr\` for \`r\`.
+theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
+  induction t with
+  | leaf =>
+      refl
+  | node l v r ihl ihr =>
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      rewrite -> nat.add_comm {n := size(l); m := size(r)}
+      refl
+
+-- Strong induction on Nat, from std/nat.ctea:
+--
+--   strong_induction (P : Nat -> Prop) (n : Nat)
+--     : P(0)
+--       -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
+--       -> P(n)
+--
+-- First contact: a statement where the strong hypothesis is not even needed.
+theorem zero_le_all (n : Nat) : le(0, n) := by
+  apply nat.strong_induction {P := fun m : Nat => le(0, m); n := n}
+  simp
+  trivial
+  intro k
+  intro hk
+  simp
+  trivial
+
+-- Two order lemmas used by the real example below.
+theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
+  induction n with
+  | zero =>
+      simp
+      trivial
+  | succ k ih =>
+      simp
+      exact ih
+
+theorem pred_le (n : Nat) : le(nat.pred(n), n) := by
+  induction n with
+  | zero =>
+      simp
+      trivial
+  | succ k ih =>
+      simp
+      exact le_n_succ_n
+
+-- A recurrence that steps to the *predecessor of the predecessor*:
+-- g(succ(k)) looks up g at pred(k), which is not the immediate predecessor
+-- succ(k) - 1 = k. Ordinary induction gives P(k) only; strong induction gives
+-- P at every m <= k, which covers pred(k).
+func g : Nat -> Nat
+
+axiom g_zero : g(0) = 0
+axiom g_step (k : Nat) : g(succ(k)) = g(nat.pred(k))
+
+theorem g_always_zero (n : Nat) : g(n) = 0 := by
+  apply nat.strong_induction {P := fun m : Nat => g(m) = 0; n := n}
+  exact g_zero
+  intro k
+  intro hk
+  rewrite -> g_step {k := k}
+  apply hk
+  exact pred_le
+`,
+  },
+  {
+    id: "cs250_08",
+    label: "CS250 - 08 Functions",
+    path: "docs/cs250/code/08_functions.ctea",
+    source: `-- Companion file for docs/cs250/08_functions.md.
+
+import std/qualified_prelude.ctea
+
+mode constructive
+
+sort Person
+
+func mother : Person -> Person
+func age : Person -> Nat
+
+-- The graph of a declared \`func f : A -> B\` is the predicate lambda
+-- \`fun x y : A => f(x) = y\` when A and B are the same type, or
+-- \`fun (x : A) (y : B) => f(x) = y\` for mixed types.
+-- Every declared func is total and single-valued, and both facts are
+-- provable from its graph.
+
+theorem mother_total : fun.Total(fun x y : Person => mother(x) = y) := by
+  unfold fun.Total
+  intro x
+  exists mother(x)
+  refl
+
+theorem mother_single_valued
+  : fun.SingleValued(fun x y : Person => mother(x) = y) := by
+  unfold fun.SingleValued
+  intro x
+  intro y1
+  intro y2
+  intro h1
+  intro h2
+  rewrite <- h1
+  rewrite <- h2
+  refl
+
+theorem age_total : fun.Total(fun (x : Person) (n : Nat) => age(x) = n) := by
+  unfold fun.Total
+  intro x
+  exists age(x)
+  refl
+
+theorem age_single_valued
+  : fun.SingleValued(fun (x : Person) (n : Nat) => age(x) = n) := by
+  unfold fun.SingleValued
+  intro x
+  intro n1
+  intro n2
+  intro h1
+  intro h2
+  rewrite <- h1
+  rewrite <- h2
+  refl
+
+-- The identity function id(x) = x has graph \`fun x y : A => x = y\`.
+-- std/fun.ctea proves it bijective.
+theorem person_id_bijective : fun.Bijective(fun x y : Person => x = y) := by
+  exact fun.id_bijective {A := Person}
+
+-- The successor function on Nat is injective (but not surjective: nothing
+-- maps to 0).
+theorem succ_graph_injective : fun.Injective(fun n m : Nat => succ(n) = m) := by
+  unfold fun.Injective
+  intro x1
+  intro x2
+  intro y
+  intro h1
+  intro h2
+  apply nat.succ_inj
+  rewrite -> h2
+  exact h1
+
+-- Composition of graphs: relation composition, exactly as in the course.
+-- The composite graph of F : A -> B and G : B -> C relates x to z when some
+-- intermediate y has F(x, y) and G(y, z). std/fun.ctea proves the two
+-- composition theorems; this shows how to apply one.
+theorem use_compose
+  (F : Person -> Person -> Prop)
+  (G : Person -> Person -> Prop)
+  : fun.Surjective(F) -> fun.Surjective(G)
+    -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\\ G(y, z) := by
+  intro hf
+  intro hg
+  exact fun.compose_surjective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
 `,
   },
 ];

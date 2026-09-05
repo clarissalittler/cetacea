@@ -1,11 +1,11 @@
 -- Companion file for docs/cs250/01_propositional.md.
 -- Each theorem here corresponds to a snippet in the tutorial.
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
-theorem and_intro_demo (P Q : Prop) : P -> Q -> P /\ Q := by
+theorem and_intro (P Q : Prop) : P -> Q -> P /\ Q := by
   intro hp
   intro hq
   split
@@ -21,7 +21,7 @@ theorem or_intro_left_demo (P Q : Prop) : P -> P \/ Q := by
   left
   exact hp
 
-theorem or_elim_demo (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+theorem or_elim (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
   intro hpr
   intro hqr
   intro hpq
@@ -39,7 +39,7 @@ theorem imp_intro_demo (P Q : Prop) : P -> P -> Q -> P := by
   intro hq
   exact hp1
 
-theorem modus_tollens_demo (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+theorem modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
   intro hpq
   intro hnq
   intro hp
@@ -80,12 +80,12 @@ theorem imp_dist_and_fwd (P Q R : Prop) : (P -> Q /\ R) -> (P -> Q) /\ (P -> R) 
   split
   -- prove P -> Q
   intro hp
-  apply and_left
+  apply prop.and_left
   apply h
   exact hp
   -- prove P -> R
   intro hp
-  apply and_right
+  apply prop.and_right
   apply h
   exact hp
 
@@ -115,7 +115,7 @@ theorem demorgan_hard (P Q : Prop) : not (P /\ Q) -> not P \/ not Q := by
   right
   exact hnq
 
-theorem em_demo (P : Prop) : P \/ not P := by
+theorem em (P : Prop) : P \/ not P := by
   by_cases h : P
   left
   exact h

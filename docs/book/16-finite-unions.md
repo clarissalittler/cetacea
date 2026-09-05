@@ -1,5 +1,9 @@
 # Chapter 16 — Finite Unions Need Relative Evidence
 
+Follow-up: [Constructing a finite union with overlap](../CONSTRUCTIVE_UNIONS.md)
+now supplies an existential enumeration from explicit membership decisions.
+This chapter develops the `HasSize` interface and bound used by that construction.
+
 > **Companion files:**
 > [`hol-code/ch16-examples.ctea`](hol-code/ch16-examples.ctea) ·
 > [`hol-code/ch16-mistakes.ctea`](hol-code/ch16-mistakes.ctea) (intended to fail) ·

@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch12-exercises.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -18,7 +18,7 @@ theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
       simp
       exact ih
 
-theorem pred_le (n : Nat) : le(pred(n), n) := by
+theorem pred_le (n : Nat) : le(nat.pred(n), n) := by
   induction n with
   | zero =>
       simp
@@ -50,7 +50,7 @@ theorem ex12_2 (n : Nat) : echo(n) = 0 := by
 func siren : Nat -> Nat
 
 axiom siren_zero : siren(0) = 1
-axiom siren_step (k : Nat) : siren(succ(k)) = siren(pred(k))
+axiom siren_step (k : Nat) : siren(succ(k)) = siren(nat.pred(k))
 
 theorem ex12_3 (n : Nat) : siren(n) = 1 := by
   sorry

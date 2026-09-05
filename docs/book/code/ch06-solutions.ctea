@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch06-solutions.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -58,7 +58,7 @@ theorem ex6_5 (T : Type) (A B C : Set T)
 
 -- Exercise 6.6
 theorem ex6_6 (T : Type) (A : Set T) : union(A, A) = A := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -74,7 +74,7 @@ theorem ex6_6 (T : Type) (A : Set T) : union(A, A) = A := by
 
 -- Exercise 6.7
 theorem ex6_7 (T : Type) (A : Set T) : diff(A, empty(T)) = A := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -90,7 +90,7 @@ theorem ex6_7 (T : Type) (A : Set T) : diff(A, empty(T)) = A := by
 mode classical
 
 theorem ex6_8 (T : Type) (A : Set T) : compl(compl(A)) = A := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split

@@ -2,13 +2,22 @@
 
 ## Decision and scope
 
-Cetacea will investigate a constructive, simply typed higher-order logical core
+This document preserves the original architectural proposal and subsequent
+phase reports. The HOL replay now participates in production CLI and browser
+checking; it is no longer only a proposed experiment. The legacy elaborator
+and verdict dependencies have not been retired. See
+[STUDENT_READINESS.md](STUDENT_READINESS.md) for current completion evidence
+and remaining work, and [hol/ASSIGNMENT_MANIFESTS.md](hol/ASSIGNMENT_MANIFESTS.md)
+for executable policy syntax. Old counts and proposed syntax below are phase
+snapshots, not current release claims.
+
+The original decision was to investigate a constructive, simply typed higher-order logical core
 while preserving propositional, first-order, and first-order-with-induction
 fragments as enforceable teaching modes.
 
-This branch is an architectural experiment, not yet a commitment to replace the
-current checker. No existing syntax or course file should be removed until the
-prototype gate in this document passes.
+The migration preserves existing syntax and course files while narrowing the
+authoritative kernel boundary. Completed prototype gates do not by themselves
+establish classroom readiness.
 
 The intended destination is deliberately smaller than a general-purpose proof
 assistant:
@@ -228,7 +237,8 @@ asserted by source annotations.
 
 ### Course policies
 
-Extend the current strict checker with an assignment manifest:
+Original policy sketch (superseded by the implemented manifest format linked
+above; do not copy this sketch into a task file):
 
 ```text
 profile = "fol+induction"

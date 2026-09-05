@@ -38,7 +38,7 @@ The companion file is [`code/01_propositional.ctea`](code/01_propositional.ctea)
 ### Conjunction
 
 ```text
-theorem and_intro_demo (P Q : Prop) : P -> Q -> P /\ Q := by
+theorem and_intro (P Q : Prop) : P -> Q -> P /\ Q := by
   intro hp
   intro hq
   split
@@ -60,7 +60,7 @@ theorem or_intro_left_demo (P Q : Prop) : P -> P \/ Q := by
   left
   exact hp
 
-theorem or_elim_demo (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+theorem or_elim (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
   intro hpr
   intro hqr
   intro hpq
@@ -96,7 +96,7 @@ page.)
 rules for `→` ending in `False`.
 
 ```text
-theorem modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+theorem prop.modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
   intro hpq
   intro hnq
   intro hp
@@ -150,13 +150,13 @@ When the file is checked, this theorem is labeled `(classical)`.
 
 ### Excluded middle
 
-`em` and `dne` are in `std/prop.ctea`. If you import the prelude you
+`prop.em` and `prop.dne` are in `std/prop.ctea`. If you import the prelude you
 can just use them.
 
 ```text
 mode classical
 
-theorem em_demo (P : Prop) : P \/ not P := by
+theorem em (P : Prop) : P \/ not P := by
   by_cases h : P
   left
   exact h

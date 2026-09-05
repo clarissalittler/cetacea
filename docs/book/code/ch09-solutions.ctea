@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch09-solutions.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -43,7 +43,7 @@ theorem ex9_4 (n m : Nat) : le(n, add(n, m)) := by
 
 -- Exercise 9.5
 theorem ex9_5 (k n m : Nat) : add(k, add(n, m)) = add(k, add(m, n)) := by
-  rewrite -> add_comm {n := m; m := n}
+  rewrite -> nat.add_comm {n := m; m := n}
   refl
 
 -- Exercise 9.6

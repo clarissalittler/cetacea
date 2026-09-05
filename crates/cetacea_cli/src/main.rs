@@ -9,8 +9,7 @@ use std::process::{self, Command, Stdio};
 use std::thread;
 
 use cetacea_core::hol::{
-    run_linked_hol_smoke, DeclarationId, EvidenceStatus, LibraryPackageId,
-    PolicyViolation as HolReceiptPolicyViolation, ReceiptPolicy, TeachingProfile,
+    run_linked_hol_smoke, DeclarationId, EvidenceStatus, LibraryPackageId, TeachingProfile,
 };
 use cetacea_core::{
     check_file_at_path, check_file_at_path_with_hol_shadow, check_source_at_path,
@@ -25,6 +24,10 @@ use cetacea_core::{
 };
 
 use assignment::{parse_manifest, AssignmentManifest};
+use cetacea_core::assignment::TeachingPolicy as HolTeachingPolicy;
+use cetacea_core::assignment::{
+    check_receipt_requirements, AssignmentViolation as HolPolicyViolation, ReceiptRequirements,
+};
 
 /// Stack reserved for the checking thread. Both engines walk terms and
 /// proofs recursively, and numerals lower to unary successor towers, so a
@@ -141,47 +144,22 @@ impl CheckPolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct HolTeachingPolicy {
-    profile: TeachingProfile,
-    allow_classical: bool,
-    allow_extensionality: bool,
-    allow_choice: bool,
-    allow_axioms: bool,
-    allow_incomplete: bool,
-}
-
-impl HolTeachingPolicy {
-    fn profile_label(self) -> &'static str {
-        match self.profile {
-            TeachingProfile::Prop => "prop",
-            TeachingProfile::FirstOrder => "fol",
-            TeachingProfile::FirstOrderInductive => "fol+induction",
-            TeachingProfile::HigherOrder => "hol",
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 struct LoadedAssignment {
     path: PathBuf,
     manifest: AssignmentManifest,
+    allowed_theorem_identities: Vec<String>,
     allowed_imports: BTreeSet<PathBuf>,
     allowed_package_imports: BTreeSet<String>,
+    allowed_bundled_imports: BTreeSet<String>,
+    required_bundled_imports: Vec<String>,
     required_imports: Vec<(String, PathBuf)>,
     required_package_imports: Vec<String>,
 }
 
 impl LoadedAssignment {
     fn teaching_policy(&self) -> HolTeachingPolicy {
-        HolTeachingPolicy {
-            profile: self.manifest.profile,
-            allow_classical: self.manifest.allow_classical,
-            allow_extensionality: self.manifest.allow_extensionality,
-            allow_choice: self.manifest.allow_choice,
-            allow_axioms: self.manifest.allow_new_axioms,
-            allow_incomplete: self.manifest.allow_incomplete,
-        }
+        self.manifest.teaching_policy()
     }
 }
 
@@ -341,7 +319,14 @@ fn load_assignment(path: &Path) -> Result<LoadedAssignment, String> {
         .expect("canonical manifest path should have a parent");
     let mut allowed_imports = BTreeSet::new();
     let mut allowed_package_imports = BTreeSet::new();
+    let mut allowed_bundled_imports = BTreeSet::new();
+    let mut required_bundled_imports = Vec::new();
     for import in &manifest.allowed_imports {
+        if import.starts_with("builtin:") {
+            validate_bundled_import(import)?;
+            allowed_bundled_imports.insert(import.clone());
+            continue;
+        }
         if let Some(package) = LibraryPackageId::from_logical_id(import) {
             let logical_id = package.to_string();
             if !allowed_package_imports.insert(logical_id.clone()) {
@@ -362,6 +347,12 @@ fn load_assignment(path: &Path) -> Result<LoadedAssignment, String> {
     let mut required_imports = Vec::new();
     let mut required_package_imports = Vec::new();
     for import in &manifest.required_imports {
+        if import.starts_with("builtin:") {
+            validate_bundled_import(import)?;
+            allowed_bundled_imports.insert(import.clone());
+            required_bundled_imports.push(import.clone());
+            continue;
+        }
         if let Some(package) = LibraryPackageId::from_logical_id(import) {
             let logical_id = package.to_string();
             if required_package_imports.contains(&logical_id) {
@@ -385,14 +376,48 @@ fn load_assignment(path: &Path) -> Result<LoadedAssignment, String> {
         allowed_imports.insert(resolved.clone());
         required_imports.push((import.clone(), resolved));
     }
+    let mut allowed_theorem_identities = Vec::new();
+    for name in &manifest.allowed_theorems {
+        let (library, export) = name.rsplit_once("::").expect("validated grant identity");
+        let identity = if LibraryPackageId::from_logical_id(library).is_some() {
+            name.clone()
+        } else if library.starts_with("builtin:") {
+            validate_bundled_import(library)?;
+            name.clone()
+        } else {
+            format!(
+                "{}::{export}",
+                resolve_manifest_import(base, "theorem grant", library)?.display()
+            )
+        };
+        if allowed_theorem_identities.contains(&identity) {
+            return Err(format!(
+                "theorem grant `{name}` repeats the same resolved export"
+            ));
+        }
+        allowed_theorem_identities.push(identity);
+    }
     Ok(LoadedAssignment {
+        allowed_theorem_identities,
         path: canonical_path,
         manifest,
         allowed_imports,
         allowed_package_imports,
+        allowed_bundled_imports,
+        required_bundled_imports,
         required_imports,
         required_package_imports,
     })
+}
+
+fn validate_bundled_import(import: &str) -> Result<(), String> {
+    if cetacea_core::stdlib::bundled_source(import).is_some() {
+        Ok(())
+    } else {
+        Err(format!(
+            "unknown bundled standard-library import `{import}`"
+        ))
+    }
 }
 
 fn resolve_manifest_import(base: &Path, role: &str, import: &str) -> Result<PathBuf, String> {
@@ -540,65 +565,18 @@ fn print_hol_certification(report: &HolShadowReport) {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct HolPolicyViolation {
-    declaration: String,
-    kind: &'static str,
-    message: String,
-}
-
 fn check_hol_policy_violations(
     report: &HolShadowReport,
     config: HolTeachingPolicy,
     assignment: Option<&LoadedAssignment>,
 ) -> Vec<HolPolicyViolation> {
-    let mut policy = ReceiptPolicy::new(config.profile);
-    if config.allow_classical {
-        policy.allow_classical();
-    }
-    if config.allow_extensionality {
-        policy.allow_extensionality();
-    }
-    if config.allow_choice {
-        policy.allow_choice();
-    }
-    if config.allow_axioms {
-        policy.allow_any_axiom();
-    }
-    if config.allow_incomplete {
-        policy.allow_incomplete();
-    }
-
-    let mut violations = Vec::new();
+    let requirements = assignment.map(|assignment| ReceiptRequirements {
+        allowed_theorem_identities: &assignment.allowed_theorem_identities,
+        allowed_axioms: &assignment.manifest.allowed_axioms,
+        required_theorems: &assignment.manifest.required_theorems,
+    });
+    let mut violations = check_receipt_requirements(report, config, requirements);
     if let Some(assignment) = assignment {
-        for name in &assignment.manifest.allowed_axioms {
-            match report.theorems.iter().find(|theorem| theorem.name == *name) {
-                Some(theorem)
-                    if theorem.hol_status == EvidenceStatus::TrustedAxiom
-                        && theorem.is_imported =>
-                {
-                    policy.allow_axiom(theorem.receipt.id());
-                }
-                Some(theorem) if theorem.hol_status != EvidenceStatus::TrustedAxiom => {
-                    violations.push(HolPolicyViolation {
-                        declaration: name.clone(),
-                        kind: "allowed_axiom",
-                        message: "manifest entry does not name a trusted axiom".to_string(),
-                    });
-                }
-                Some(_) => violations.push(HolPolicyViolation {
-                    declaration: name.clone(),
-                    kind: "allowed_axiom",
-                    message: "manifest may allow only imported trusted axioms".to_string(),
-                }),
-                None => violations.push(HolPolicyViolation {
-                    declaration: name.clone(),
-                    kind: "allowed_axiom",
-                    message: "manifest entry does not resolve to a checked declaration".to_string(),
-                }),
-            }
-        }
-
         for path in &report.imported_files {
             if !assignment.allowed_imports.contains(path) {
                 let displayed = display_diagnostic_path(&path.to_string_lossy());
@@ -610,6 +588,11 @@ fn check_hol_policy_violations(
             }
         }
         for path in &report.imported_virtual_files {
+            if assignment.allowed_bundled_imports.contains(path)
+                && cetacea_core::stdlib::bundled_source(path).is_some()
+            {
+                continue;
+            }
             violations.push(HolPolicyViolation {
                 declaration: path.clone(),
                 kind: "import",
@@ -637,6 +620,15 @@ fn check_hol_policy_violations(
                 });
             }
         }
+        for identity in &assignment.required_bundled_imports {
+            if !report.imported_virtual_files.contains(identity) {
+                violations.push(HolPolicyViolation {
+                    declaration: identity.clone(),
+                    kind: "required_import",
+                    message: format!("required bundled import `{identity}` was not loaded"),
+                });
+            }
+        }
         for (written, resolved) in &assignment.required_imports {
             if !report.imported_files.contains(resolved) {
                 violations.push(HolPolicyViolation {
@@ -646,45 +638,6 @@ fn check_hol_policy_violations(
                 });
             }
         }
-
-        for required in &assignment.manifest.required_theorems {
-            match report
-                .theorems
-                .iter()
-                .find(|theorem| !theorem.is_imported && theorem.name == required.name)
-            {
-                None => violations.push(HolPolicyViolation {
-                    declaration: required.name.clone(),
-                    kind: "required_theorem",
-                    message: "required root theorem is missing".to_string(),
-                }),
-                Some(theorem) if theorem.signature != required.signature => {
-                    violations.push(HolPolicyViolation {
-                        declaration: required.name.clone(),
-                        kind: "theorem_signature",
-                        message: format!(
-                            "signature does not match manifest: expected `{}`, found `{}`",
-                            required.signature, theorem.signature
-                        ),
-                    });
-                }
-                Some(_) => {}
-            }
-        }
-    }
-
-    for theorem in report
-        .theorems
-        .iter()
-        .filter(|theorem| !theorem.is_imported)
-    {
-        violations.extend(policy.check(&theorem.receipt).into_iter().map(|violation| {
-            HolPolicyViolation {
-                declaration: theorem.name.clone(),
-                kind: hol_policy_violation_kind(violation),
-                message: describe_hol_policy_violation(report, violation),
-            }
-        }));
     }
     violations.sort_by(|left, right| {
         (&left.declaration, left.kind, &left.message).cmp(&(
@@ -695,43 +648,6 @@ fn check_hol_policy_violations(
     });
     violations.dedup();
     violations
-}
-
-fn hol_policy_violation_kind(violation: HolReceiptPolicyViolation) -> &'static str {
-    match violation {
-        HolReceiptPolicyViolation::StatementFragmentExceeds { .. } => "statement_fragment",
-        HolReceiptPolicyViolation::DependencyFragmentExceeds { .. } => "dependency_fragment",
-        HolReceiptPolicyViolation::FeatureNotAllowed(_) => "feature",
-        HolReceiptPolicyViolation::FeatureFragmentExceeds { .. } => "feature_fragment",
-        HolReceiptPolicyViolation::TrustedAxiomNotAllowed(_) => "trusted_axiom",
-        HolReceiptPolicyViolation::IncompleteNotAllowed(_) => "incomplete",
-        HolReceiptPolicyViolation::DependencyNotAllowed(_) => "dependency",
-    }
-}
-
-fn describe_hol_policy_violation(
-    report: &HolShadowReport,
-    violation: HolReceiptPolicyViolation,
-) -> String {
-    let named = |id: DeclarationId| {
-        report
-            .receipt_names
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(|| format!("declaration {}", id.0))
-    };
-    match violation {
-        HolReceiptPolicyViolation::TrustedAxiomNotAllowed(id) => {
-            format!("trusted axiom `{}` is not allowed", named(id))
-        }
-        HolReceiptPolicyViolation::IncompleteNotAllowed(id) => {
-            format!("incomplete declaration `{}` is not allowed", named(id))
-        }
-        HolReceiptPolicyViolation::DependencyNotAllowed(id) => {
-            format!("declaration dependency `{}` is not allowed", named(id))
-        }
-        other => other.to_string(),
-    }
 }
 
 fn print_hol_policy_violations(
@@ -1155,6 +1071,7 @@ struct TuiApp {
     saved_lines: Option<Vec<String>>,
     outline: SourceOutline,
     check_result: CheckResult,
+    library: EditorLibrary,
     goals: GoalStepResult,
     explanation: ExplanationResult,
     status: String,
@@ -1195,6 +1112,7 @@ impl TuiApp {
             saved_lines,
             outline: initial_outline,
             check_result: CheckResult::default(),
+            library: EditorLibrary::default(),
             goals: GoalStepResult::default(),
             explanation: ExplanationResult::default(),
             status: if force_hol_shadow {
@@ -1221,7 +1139,7 @@ impl TuiApp {
     fn refresh_analysis(&mut self) {
         let source = self.source();
         self.outline = outline(&source);
-        let (check_result, hol_shadow) =
+        let (check_result, hol_shadow, library) =
             check_editor_source(&source, &self.path, self.hol_shadow_forced);
         if hol_shadow != self.hol_shadow {
             self.status = if hol_shadow {
@@ -1232,6 +1150,7 @@ impl TuiApp {
         }
         self.hol_shadow = hol_shadow;
         self.check_result = check_result;
+        self.library = library;
         let position = Position {
             line: self.cursor_line + 1,
             column: self.cursor_col + 1,
@@ -1658,14 +1577,7 @@ impl TuiApp {
     }
 
     fn search_results(&self) -> Vec<&cetacea_core::CheckedTheorem> {
-        let mut matches = self
-            .check_result
-            .theorems
-            .iter()
-            .filter(|theorem| theorem_matches_search(theorem, &self.search_query))
-            .collect::<Vec<_>>();
-        matches.sort_by_key(|theorem| (theorem.is_imported, theorem.name.clone()));
-        matches
+        self.library.search(&self.search_query)
     }
 
     fn draw(&mut self, stdout: &mut io::Stdout, rows: usize, cols: usize) -> io::Result<()> {
@@ -1824,6 +1736,9 @@ impl TuiApp {
                 }
             }
             push_wrapped(lines, &format!("  |- {}", goal.target), width);
+            if let Some(computed) = &goal.computed_target {
+                push_wrapped(lines, &format!("  Computes to: {computed}"), width);
+            }
             if !goal.hints.is_empty() {
                 lines.push("  Hints:".to_string());
                 for hint in goal.hints.iter().take(4) {
@@ -2184,6 +2099,7 @@ struct InteractiveState {
     hol_shadow: bool,
     outline: SourceOutline,
     last_check: CheckResult,
+    library: EditorLibrary,
     selected_theorem: Option<String>,
     next_tactic_index: usize,
     current_goals: Option<GoalStepResult>,
@@ -2197,6 +2113,7 @@ impl InteractiveState {
             hol_shadow: force_hol_shadow,
             outline: SourceOutline::default(),
             last_check: CheckResult::default(),
+            library: EditorLibrary::default(),
             selected_theorem: None,
             next_tactic_index: 0,
             current_goals: None,
@@ -2205,8 +2122,10 @@ impl InteractiveState {
 
     fn reload(&mut self) {
         self.outline = load_outline(&self.path);
-        let (last_check, hol_shadow) = check_editor_path(&self.path, self.hol_shadow_forced);
+        let (last_check, hol_shadow, library) =
+            check_editor_path(&self.path, self.hol_shadow_forced);
         self.last_check = last_check;
+        self.library = library;
         self.hol_shadow = hol_shadow;
         if self
             .selected_theorem
@@ -2294,8 +2213,10 @@ fn handle_interactive_command(state: &mut InteractiveState, line: &str) -> bool 
             true
         }
         "c" | "check" => {
-            let (last_check, hol_shadow) = check_editor_path(&state.path, state.hol_shadow_forced);
+            let (last_check, hol_shadow, library) =
+                check_editor_path(&state.path, state.hol_shadow_forced);
             state.last_check = last_check;
+            state.library = library;
             state.hol_shadow = hol_shadow;
             if !diagnostics_have_errors(&state.last_check.diagnostics) {
                 print_accepted(&state.last_check);
@@ -2591,6 +2512,9 @@ fn print_goal(index: usize, goal: &GoalSnapshot) {
     }
     println!("  Target:");
     println!("    |- {}", goal.target);
+    if let Some(computed) = &goal.computed_target {
+        println!("    Computes to: {computed}");
+    }
     if !goal.hints.is_empty() {
         println!("  Hints:");
         for hint in goal.hints.iter().take(6) {
@@ -2638,13 +2562,7 @@ fn search_theorems(state: &mut InteractiveState, query: &str) {
     if diagnostics_have_errors(&state.last_check.diagnostics) {
         println!("The last check had diagnostics; search results may be incomplete.");
     }
-    let mut matches = state
-        .last_check
-        .theorems
-        .iter()
-        .filter(|theorem| theorem_matches_search(theorem, query))
-        .collect::<Vec<_>>();
-    matches.sort_by_key(|theorem| (theorem.is_imported, theorem.name.clone()));
+    let matches = state.library.search(query);
 
     if matches.is_empty() {
         println!("No matching theorems.");
@@ -2792,6 +2710,26 @@ fn check_result_json(
     hol_violations: &[HolPolicyViolation],
     assignment: Option<&LoadedAssignment>,
 ) -> String {
+    let outcomes = result
+        .theorem_outcomes
+        .iter()
+        .map(|outcome| {
+            format!(
+                r#"{{"name":{},"statement":{},"status":{},"line":{},"path":{},"is_imported":{}}}"#,
+                json_string(&outcome.name),
+                json_string(&outcome.statement),
+                json_string(&outcome.status),
+                outcome.line,
+                outcome
+                    .source_path
+                    .as_ref()
+                    .map(|p| json_string(&p.to_string_lossy()))
+                    .unwrap_or_else(|| "null".into()),
+                outcome.is_imported,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     let theorems = result
         .theorems
         .iter()
@@ -2839,7 +2777,7 @@ fn check_result_json(
         })
         .unwrap_or_default();
     format!(
-        r#"{{"ok":{ok},"policy":{{"deny_sorry":{},"deny_root_axioms":{},"deny_classical":{}}},"theorems":[{theorems}],"diagnostics":[{diagnostics}],"policy_violations":[{violations}]{shadow}{hol_policy}{assignment}}}"#,
+        r#"{{"ok":{ok},"policy":{{"deny_sorry":{},"deny_root_axioms":{},"deny_classical":{}}},"theorems":[{theorems}],"theorem_outcomes":[{outcomes}],"diagnostics":[{diagnostics}],"policy_violations":[{violations}]{shadow}{hol_policy}{assignment}}}"#,
         policy.deny_sorry, policy.deny_root_axioms, policy.deny_classical,
     )
 }
@@ -2878,6 +2816,13 @@ fn assignment_manifest_json(assignment: &LoadedAssignment) -> String {
         .map(|name| json_string(name))
         .collect::<Vec<_>>()
         .join(",");
+    let allowed_theorems = assignment
+        .manifest
+        .allowed_theorems
+        .iter()
+        .map(|name| json_string(name))
+        .collect::<Vec<_>>()
+        .join(",");
     let required = assignment
         .manifest
         .required_theorems
@@ -2893,7 +2838,7 @@ fn assignment_manifest_json(assignment: &LoadedAssignment) -> String {
         .join(",");
     let path = display_diagnostic_path(&assignment.path.to_string_lossy());
     format!(
-        r#"{{"path":{},"version":{},"allowed_imports":[{}],"required_imports":[{}],"allowed_axioms":[{}],"required_theorems":[{}]}}"#,
+        r#"{{"path":{},"version":{},"allowed_imports":[{}],"required_imports":[{}],"allowed_axioms":[{}],"allowed_theorems":[{allowed_theorems}],"required_theorems":[{}]}}"#,
         json_string(&path),
         assignment.manifest.version,
         imports,
@@ -3200,47 +3145,100 @@ fn diagnostic_label(diagnostic: &Diagnostic) -> &'static str {
     }
 }
 
-fn fail_closed_hol_result(report: HolShadowReport) -> CheckResult {
-    report.certified()
+#[derive(Default)]
+struct EditorLibrary {
+    entries: Vec<(CheckedTheorem, Option<DeclarationId>)>,
+}
+
+impl EditorLibrary {
+    fn legacy(result: &CheckResult) -> Self {
+        Self {
+            entries: result.theorems.iter().cloned().map(|t| (t, None)).collect(),
+        }
+    }
+
+    fn search(&self, query: &str) -> Vec<&CheckedTheorem> {
+        let mut matches = self
+            .entries
+            .iter()
+            .filter(|(t, _)| theorem_matches_search(t, query))
+            .collect::<Vec<_>>();
+        matches.sort_by_key(|(t, _)| (t.is_imported, t.name.clone()));
+        let mut seen = BTreeSet::new();
+        matches
+            .into_iter()
+            .filter(|(t, id)| !t.is_imported || id.is_none_or(|id| seen.insert(id)))
+            .map(|(t, _)| t)
+            .collect()
+    }
+}
+
+fn editor_hol_analysis(report: HolShadowReport) -> (CheckResult, bool, EditorLibrary) {
+    let result = report.certified();
+    let mut library = EditorLibrary::legacy(&result);
+    for (theorem, identity) in &mut library.entries {
+        *identity = report
+            .theorems
+            .iter()
+            .find(|t| t.name == theorem.name)
+            .map(|t| t.receipt.id());
+    }
+    library
+        .entries
+        .extend(report.package_theorems.iter().map(|t| {
+            (
+                CheckedTheorem {
+                    name: t.name.clone(),
+                    statement: t.statement.clone(),
+                    mode_used: t.hol_mode_used,
+                    is_axiom: t.hol_status == EvidenceStatus::TrustedAxiom,
+                    is_imported: true,
+                    uses_sorry: t.hol_status == EvidenceStatus::Incomplete
+                        || !t.incomplete_deps.is_empty(),
+                    axiom_deps: t.axiom_deps.clone(),
+                    status: match t.hol_status {
+                        EvidenceStatus::Checked => DeclarationStatus::Accepted,
+                        EvidenceStatus::Incomplete => DeclarationStatus::Incomplete,
+                        EvidenceStatus::TrustedAxiom => DeclarationStatus::TrustedAxiom,
+                    },
+                },
+                Some(t.receipt.id()),
+            )
+        }));
+    (result, true, library)
 }
 
 /// Check a file for the editor modes. `use_hol` is the default since the
 /// H7 cutover; `false` (from `--legacy-only`) runs the teaching checker
 /// alone unless the file imports a logical package, which only the kernel
 /// can check. Returns the result and whether the kernel certified it.
-fn check_editor_path(path: &Path, use_hol: bool) -> (CheckResult, bool) {
+fn check_editor_path(path: &Path, use_hol: bool) -> (CheckResult, bool, EditorLibrary) {
     if use_hol {
-        return (
-            fail_closed_hol_result(check_file_at_path_with_hol_shadow(path)),
-            true,
-        );
+        return editor_hol_analysis(check_file_at_path_with_hol_shadow(path));
     }
     let legacy = check_file_at_path(path);
     if legacy.requires_hol_shadow {
-        (
-            fail_closed_hol_result(check_file_at_path_with_hol_shadow(path)),
-            true,
-        )
+        editor_hol_analysis(check_file_at_path_with_hol_shadow(path))
     } else {
-        (legacy, false)
+        let library = EditorLibrary::legacy(&legacy);
+        (legacy, false, library)
     }
 }
 
-fn check_editor_source(source: &str, path: &Path, use_hol: bool) -> (CheckResult, bool) {
+fn check_editor_source(
+    source: &str,
+    path: &Path,
+    use_hol: bool,
+) -> (CheckResult, bool, EditorLibrary) {
     if use_hol {
-        return (
-            fail_closed_hol_result(check_source_at_path_with_hol_shadow(source, path)),
-            true,
-        );
+        return editor_hol_analysis(check_source_at_path_with_hol_shadow(source, path));
     }
     let legacy = check_source_at_path(source, path);
     if legacy.requires_hol_shadow {
-        (
-            fail_closed_hol_result(check_source_at_path_with_hol_shadow(source, path)),
-            true,
-        )
+        editor_hol_analysis(check_source_at_path_with_hol_shadow(source, path))
     } else {
-        (legacy, false)
+        let library = EditorLibrary::legacy(&legacy);
+        (legacy, false, library)
     }
 }
 
@@ -3260,6 +3258,147 @@ fn indent_block(text: &str, prefix: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn virtual_assignments_match_native_classroom_policy_outcomes() {
+        use cetacea_core::assignment::VirtualAssignment;
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for (source_path, manifest_path, expected) in [
+            (
+                "docs/hol/pilot/pigeonhole_client.ctea",
+                "docs/hol/pilot/pigeonhole_client.ctea-assignment",
+                true,
+            ),
+            (
+                "docs/book/hol-code/ch13-solutions.ctea",
+                "docs/book/hol-code/ch13-solutions.ctea-assignment",
+                true,
+            ),
+            (
+                "docs/book/hol-code/ch14-solutions.ctea",
+                "docs/book/hol-code/ch14-solutions.ctea-assignment",
+                true,
+            ),
+            (
+                "docs/book/hol-code/ch14-solutions.ctea",
+                "docs/book/hol-code/ch14-solutions-fol.ctea-assignment",
+                false,
+            ),
+            (
+                "docs/book/hol-code/ch15-solutions.ctea",
+                "docs/book/hol-code/ch15-solutions.ctea-assignment",
+                true,
+            ),
+            (
+                "docs/book/hol-code/ch15-solutions.ctea",
+                "docs/book/hol-code/ch15-solutions-fol.ctea-assignment",
+                false,
+            ),
+            (
+                "docs/book/hol-code/ch16-solutions.ctea",
+                "docs/book/hol-code/ch16-solutions.ctea-assignment",
+                true,
+            ),
+        ] {
+            let source = fs::read_to_string(root.join(source_path)).unwrap();
+            let manifest = fs::read_to_string(root.join(manifest_path)).unwrap();
+            let native_assignment = load_assignment(&root.join(manifest_path)).unwrap();
+            let native_report = check_file_at_path_with_hol_shadow(root.join(source_path));
+            let native_violations = check_hol_policy_violations(
+                &native_report,
+                native_assignment.teaching_policy(),
+                Some(&native_assignment),
+            );
+            let native_ok = native_report.is_match()
+                && !native_report
+                    .legacy
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.severity == DiagnosticSeverity::Error)
+                && native_violations.is_empty();
+            let virtual_assignment =
+                VirtualAssignment::new(manifest_path, &manifest, vec![]).unwrap();
+            let result = virtual_assignment
+                .check(
+                    source_path,
+                    &[cetacea_core::VirtualFile {
+                        path: source_path.into(),
+                        source,
+                    }],
+                )
+                .unwrap();
+            assert_eq!(
+                native_ok, expected,
+                "native: {manifest_path}: {native_violations:?}"
+            );
+            assert_eq!(
+                result.accepted(),
+                native_ok,
+                "virtual: {manifest_path}: {:?}; {:?}",
+                result.violations,
+                result.report.legacy.diagnostics
+            );
+            let native_kinds: BTreeSet<_> = native_violations
+                .iter()
+                .map(|v| (v.declaration.clone(), v.kind))
+                .collect();
+            let virtual_kinds: BTreeSet<_> = result
+                .violations
+                .iter()
+                .map(|v| (v.declaration.clone(), v.kind))
+                .collect();
+            assert_eq!(virtual_kinds, native_kinds, "{manifest_path}");
+        }
+    }
+
+    #[test]
+    fn editor_library_groups_aliases_without_merging_equal_statements() {
+        let source = "import std/hol/list@1 as L\nimport std/hol/list@1 as R\n\ntheorem first (P : Prop) : P -> P := by\n  intro h\n  exact h\n\ntheorem second (P : Prop) : P -> P := by\n  intro h\n  exact h\n";
+        let (result, hol, library) = check_editor_source(source, Path::new("search.ctea"), true);
+        assert!(hol);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            result.theorems.len(),
+            2,
+            "library exports are not source declarations"
+        );
+        assert_eq!(library.search("append_nil_right").len(), 1);
+        assert_eq!(
+            library.search("R.append_nil_right")[0].name,
+            "R.append_nil_right"
+        );
+        assert_eq!(
+            library.search("L.append_nil_right")[0].name,
+            "L.append_nil_right"
+        );
+        assert_eq!(
+            library
+                .search("P -> P")
+                .iter()
+                .filter(|t| !t.is_imported)
+                .count(),
+            2
+        );
+        assert!(library.search("not_a_theorem").is_empty());
+        let (_, _, replaced) = check_editor_source("", Path::new("search.ctea"), true);
+        assert!(
+            replaced.search("append_nil_right").is_empty(),
+            "old imports must not survive edits"
+        );
+    }
+
+    #[test]
+    fn failed_import_does_not_publish_search_entries() {
+        let files = [cetacea_core::VirtualFile {
+            path: "broken.ctea".into(),
+            source: "import std/hol/list@1 as L\ntheorem broken : False := by\n  refl\n".into(),
+        }];
+        let report =
+            cetacea_core::check_file_with_imports_and_hol_shadow("import broken.ctea\n", &files);
+        let (result, _, library) = editor_hol_analysis(report);
+        assert!(diagnostics_have_errors(&result.diagnostics));
+        assert!(library.search("").is_empty());
+    }
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| value.to_string()).collect()
@@ -3615,7 +3754,7 @@ theorem root_right (A : Type) (xs : L.List A) :
 
         let legacy = check_file_at_path(&root_path);
         assert!(legacy.requires_hol_shadow);
-        let (editor_check, editor_hol) = check_editor_path(&root_path, false);
+        let (editor_check, editor_hol, _) = check_editor_path(&root_path, false);
         assert!(editor_hol);
         assert!(editor_check.diagnostics.is_empty());
 
@@ -3876,10 +4015,13 @@ allowed_axioms = ["local_trust"]
         )
         .expect("manifest should parse");
         let assignment = LoadedAssignment {
+            allowed_theorem_identities: Vec::new(),
             path: PathBuf::from("assignment.ctea-assignment"),
             manifest,
             allowed_imports: BTreeSet::new(),
             allowed_package_imports: BTreeSet::new(),
+            allowed_bundled_imports: BTreeSet::new(),
+            required_bundled_imports: Vec::new(),
             required_imports: Vec::new(),
             required_package_imports: Vec::new(),
         };
@@ -4047,6 +4189,7 @@ theorem excluded_middle (P : Prop) : P \/ not P := by
             }],
             diagnostics: Vec::new(),
             requires_hol_shadow: false,
+            theorem_outcomes: Vec::new(),
         };
         assert!(check_policy_violations(&result, CheckPolicy::strict()).is_empty());
     }

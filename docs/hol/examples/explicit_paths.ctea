@@ -1,0 +1,39 @@
+import builtin:std/hol/paths.ctea as P
+import std/hol/graph@1 as G
+import std/hol/list@1 as L
+
+mode constructive
+
+data Stop
+| home
+| junction
+| campus
+
+def Road (a b : Stop) : Prop :=
+  (a = home /\ b = junction) \/ (a = junction /\ b = campus)
+
+-- Empty lists represent staying at the start.
+theorem stay : G.ValidPath(Road, L.nil, home, home) := by
+  apply (G.path_nil {E := Road; a := home; b := home}).right
+  refl
+
+theorem first_leg : G.ValidPath(Road, L.cons(junction, L.nil), home, junction) := by
+  apply (G.path_cons {E := Road; h := junction; t := L.nil; a := home; b := junction}).right
+  split
+  unfold Road
+  finite
+  apply (G.path_nil {E := Road; a := junction; b := junction}).right
+  refl
+
+theorem second_leg : G.ValidPath(Road, L.cons(campus, L.nil), junction, campus) := by
+  apply (G.path_cons {E := Road; h := campus; t := L.nil; a := junction; b := campus}).right
+  split
+  unfold Road
+  finite
+  apply (G.path_nil {E := Road; a := campus; b := campus}).right
+  refl
+
+-- Two independently checked lists join at the same junction.
+theorem complete_journey :
+  G.ValidPath(Road, L.append(L.cons(junction, L.nil), L.cons(campus, L.nil)), home, campus) := by
+  exact P.path_append {E := Road; xs := L.cons(junction, L.nil); ys := L.cons(campus, L.nil)} home junction campus first_leg second_leg

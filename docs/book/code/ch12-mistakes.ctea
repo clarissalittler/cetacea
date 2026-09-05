@@ -4,14 +4,14 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch12-mistakes.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
 func bulb : Nat -> Nat
 
 axiom bulb_zero : bulb(0) = 0
-axiom bulb_step (k : Nat) : bulb(succ(k)) = bulb(pred(k))
+axiom bulb_step (k : Nat) : bulb(succ(k)) = bulb(nat.pred(k))
 
 -- Mistake 1: ordinary induction is one rung short. The induction
 -- hypothesis speaks about k, but after rewriting with bulb_step the
@@ -28,5 +28,5 @@ theorem one_rung_short (n : Nat) : bulb(n) = 0 := by
 -- predicate cannot be inferred from the goal; spell it out as a
 -- lambda.
 theorem which_predicate (n : Nat) : bulb(n) = 0 := by
-  apply strong_induction
+  apply nat.strong_induction
   exact bulb_zero

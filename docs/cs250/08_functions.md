@@ -15,11 +15,11 @@ The companion file is [`code/08_functions.ctea`](code/08_functions.ctea).
 graph:
 
 ```text
-def Total        (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, exists y : B, G(x, y)
-def SingleValued (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, forall y1 y2 : B, G(x, y1) -> G(x, y2) -> y1 = y2
-def Injective    (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x1 x2 : A, forall y : B, G(x1, y) -> G(x2, y) -> x1 = x2
-def Surjective   (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall y : B, exists x : A, G(x, y)
-def Bijective    (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := Injective(G) /\ Surjective(G)
+def fun.Total        (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, exists y : B, G(x, y)
+def fun.SingleValued (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x : A, forall y1 y2 : B, G(x, y1) -> G(x, y2) -> y1 = y2
+def fun.Injective    (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall x1 x2 : A, forall y : B, G(x1, y) -> G(x2, y) -> x1 = x2
+def fun.Surjective   (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := forall y : B, exists x : A, G(x, y)
+def fun.Bijective    (A : Type) (B : Type) (G : A -> B -> Prop) : Prop := fun.Injective(G) /\ fun.Surjective(G)
 ```
 
 These are the course definitions, translated one-for-one: total and
@@ -43,8 +43,8 @@ Any declared `func` is automatically total and single-valued in the
 model, and both facts are *provable* about its graph:
 
 ```text
-theorem mother_total : Total(fun x y : Person => mother(x) = y) := by
-  unfold Total
+theorem mother_total : fun.Total(fun x y : Person => mother(x) = y) := by
+  unfold fun.Total
   intro x
   exists mother(x)
   refl
@@ -58,27 +58,27 @@ Single-valuedness is two rewrites — if `mother(x) = y1` and
 ## The identity function
 
 The identity function's graph relates `x` to `y` exactly when `x = y`.
-The library proves `id_injective` and `id_surjective`, and packages the
-bundle as `id_bijective`:
+The library proves `fun.id_injective` and `fun.id_surjective`, and packages the
+bundle as `fun.id_bijective`:
 
 ```text
-theorem person_id_bijective : Bijective(fun x y : Person => x = y) := by
-  exact id_bijective {A := Person}
+theorem person_id_bijective : fun.Bijective(fun x y : Person => x = y) := by
+  exact fun.id_bijective {A := Person}
 ```
 
 For a proof written out by hand rather than by library reference, here
-is successor-is-injective, which reduces to `succ_inj` from
+is successor-is-injective, which reduces to `nat.succ_inj` from
 `std/nat.ctea`:
 
 ```text
-theorem succ_graph_injective : Injective(fun n m : Nat => succ(n) = m) := by
-  unfold Injective
+theorem succ_graph_injective : fun.Injective(fun n m : Nat => succ(n) = m) := by
+  unfold fun.Injective
   intro x1
   intro x2
   intro y
   intro h1
   intro h2
-  apply succ_inj
+  apply nat.succ_inj
   rewrite -> h2
   exact h1
 ```
@@ -93,9 +93,9 @@ Composition of functions is relation composition: the composite of
 `y` has `F(x, y)` and `G(y, z)`. The library proves the two classic
 preservation theorems in this style:
 
-- `compose_injective`: if `F` and `G` are injective, the composite
+- `fun.compose_injective`: if `F` and `G` are injective, the composite
   relation is injective.
-- `compose_surjective`: if `F` and `G` are surjective, every `z : C` is
+- `fun.compose_surjective`: if `F` and `G` are surjective, every `z : C` is
   hit by the composite — `exists x, exists y, F(x, y) /\ G(y, z)`.
 
 Applying them is a matter of supplying the graphs:
@@ -104,14 +104,14 @@ Applying them is a matter of supplying the graphs:
 theorem use_compose
   (F : Person -> Person -> Prop)
   (G : Person -> Person -> Prop)
-  : Surjective(F) -> Surjective(G)
+  : fun.Surjective(F) -> fun.Surjective(G)
     -> forall z : Person, exists x : Person, exists y : Person, F(x, y) /\ G(y, z) := by
   intro hf
   intro hg
-  exact compose_surjective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
+  exact fun.compose_surjective {A := Person; B := Person; C := Person; F := F; G := G} hf hg
 ```
 
-The proof of `compose_surjective` in `std/fun.ctea` is worth reading: it
+The proof of `fun.compose_surjective` in `std/fun.ctea` is worth reading: it
 is two nested `cases ... | intro ...` eliminations (get the preimage `y`
 of `z` under `G`, then the preimage `x` of `y` under `F`) followed by
 two `exists` introductions — precisely the informal proof from the
@@ -125,5 +125,5 @@ course, step for step.
 - Prove that the constant-zero graph `fun n m : Nat => m = 0`... wait —
   is that even single-valued? Total? State and prove (or refute with a
   countermodel note) each of the four properties for it.
-- Read `compose_injective` in `std/fun.ctea` and reconstruct the
+- Read `fun.compose_injective` in `std/fun.ctea` and reconstruct the
   paper proof it encodes.

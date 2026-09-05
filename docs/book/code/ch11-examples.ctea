@@ -3,18 +3,18 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch11-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
 -- Section 11.2: the Chapter 10 cliffhanger, resolved. append(l, nil)
 -- is stuck as a computation, but structural induction on l unsticks it
 -- one constructor at a time.
-theorem append_nil_demo (l : List) : append(l, nil) = l := by
+theorem append_nil (l : list.List) : list.append(l, list.nil) = l := by
   induction l with
-  | nil =>
+  | list.nil =>
       refl
-  | cons h t ih =>
+  | list.cons h t ih =>
       simp
       rewrite -> ih
       refl
@@ -22,12 +22,12 @@ theorem append_nil_demo (l : List) : append(l, nil) = l := by
 -- Section 11.3: length of an append. The proof skeleton is identical
 -- -- structural induction proofs follow the data, not the theorem.
 -- This is `length_append` in std/list.ctea.
-theorem length_append_demo (l1 : List) (l2 : List)
-  : length(append(l1, l2)) = add(length(l1), length(l2)) := by
+theorem length_append (l1 : list.List) (l2 : list.List)
+  : list.length(list.append(l1, l2)) = add(list.length(l1), list.length(l2)) := by
   induction l1 with
-  | nil =>
+  | list.nil =>
       refl
-  | cons h t ih =>
+  | list.cons h t ih =>
       simp
       rewrite -> ih
       refl
@@ -63,5 +63,5 @@ theorem mirror_size_demo (t : Tree) : size(mirror(t)) = size(t) := by
       simp
       rewrite -> ihl
       rewrite -> ihr
-      rewrite -> add_comm {n := size(l); m := size(r)}
+      rewrite -> nat.add_comm {n := size(l); m := size(r)}
       refl

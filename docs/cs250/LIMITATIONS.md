@@ -4,12 +4,14 @@ This is a current list of friction points for using Cetacea with the CS
 250 tutorials. The most severe bugs from the first draft have been
 fixed; see the resolved section at the end for historical context.
 
-Scope note: this document describes the frozen first-order CS 250 corpus and
+Scope note: this document describes the first-order CS 250 corpus and
 its monomorphic `std/` library. On the `hol` branch, the experimental
-[`Proofs, Checked` Chapters 13–14](../book/README.md#chapters) add checked
+[`Proofs, Checked` Chapters 13–17](../book/README.md#chapters) add checked
 `List A`, finite-cardinality evidence, and bijection transport under explicit
 `fol+induction`/`hol` assignment policies. The limitations below remain
 accurate for the original tutorial files unless a section says otherwise.
+Use [STUDENT_READINESS.md](../STUDENT_READINESS.md) for project-wide status,
+including browser assignments, projects, recovery and remaining verification.
 
 ## Current rough edges students may hit
 
@@ -110,11 +112,12 @@ in `std/nat.ctea`, the Module 8 sequence/recursion material, Module 9
 recurrences, and Module 10 structural induction material are now largely
 expressible; see the new `07_structural_induction.md` tutorial.
 
-What is still missing is *polymorphism*: data types take no type
-parameters, so there is no `List A` — `std/list.ctea`'s `List` is a
-list of `Nat`, and a list of something else is a second, unrelated
-declaration. Grammar/BNF examples with mutually recursive types are also
-out, since data types cannot refer to each other.
+User-declared data types still take no type parameters. The tutorial's
+`std/list.ctea` therefore defines a monomorphic list of `Nat`. The public
+logical package `std/hol/list@1` separately provides `List A`, with structural
+induction and source `defrec` over applications such as `List Nat`. These are
+distinct list types; use aliases when importing both. User-declared mutually
+recursive types are still unavailable.
 
 ### 5. Truth tables are not enumerated, but countermodels are reported
 
@@ -212,8 +215,9 @@ declarations as names like `nat.add_comm`.
 
 The standard library now includes `std/qualified_prelude.ctea`, which imports
 the main library modules under aliases such as `nat`, `set`, `list`, and `eq`.
-Some course and book files still use the legacy prelude and `_demo` suffixes
-until they are migrated. Built-in names such as `add`, `mul`, `sub`, and `le`
+The course and book source files use this qualified prelude, so a student
+proof can be named `add_comm` while the library theorem is `nat.add_comm`.
+Built-in names such as `add`, `mul`, `sub`, and `le`
 still cannot be reused for local functions or predicates.
 
 This is simple and readable at the current project size, but larger
@@ -407,8 +411,10 @@ are now implemented:
   suggestions are no longer shown.
 - The TUI has undo/redo (Ctrl-Z / Ctrl-Y), and the browser UI autosaves
   to localStorage, re-checks live, marks error lines inline, and has a
-  load-example menu. The browser UI deploys automatically to GitHub
-  Pages.
+  load-example menu. It also supports multi-file projects, assignment tasks,
+  checkpoints and worker cancellation. A GitHub Pages workflow is configured
+  to require CI before publishing an identified bundle; remote deployment has
+  not been verified in this local review. See [WEB_DISTRIBUTION.md](../WEB_DISTRIBUTION.md).
 - Induction arm binders must be fresh: shadowing an existing variable or
   hypothesis is rejected, for structural arms and for the Nat
   `| succ k ih` arm alike.

@@ -98,33 +98,25 @@ outer `cons` with the right-to-left direction of `nodup_cons`:
 ```text
 theorem one_nodup :
   F.Nodup(F.cons(only, F.nil)) := by
-  apply (F.nodup_cons {
-    A := One;
-    h := only;
-    t := (F.nil : F.List One)
-  }).right
+  apply F.nodup_cons.right
   split
   intro member
   exact F.member_nil {A := One; x := only} member
   exact F.nodup_nil {A := One}
 ```
 
-Why the type annotation on `F.nil`? The empty list alone contains no element
-from which the checker could infer `A`. In this context we mean the empty list
-of `One`, so we say so. Context often infers the type automatically, but a bare
-polymorphic `nil` is deliberately ambiguous.
+Here `apply` reads the type, head, and tail from the goal. Once the head
+`only` fixes the element type as `One`, it can also type the empty tail.
+A standalone polymorphic `nil` still needs enough context to determine its
+element type.
 
 Length is computation exposed through checked equations:
 
 ```text
 theorem one_length :
   F.length(F.cons(only, F.nil)) = 1 := by
-  rewrite -> F.length_cons {
-    A := One;
-    h := only;
-    t := (F.nil : F.List One)
-  }
-  rewrite -> F.length_nil {A := One}
+  rewrite -> F.length_cons
+  rewrite -> F.length_nil
   refl
 ```
 
@@ -137,12 +129,7 @@ theorem one_coverage :
   intro x
   induction x with
   | only =>
-      apply (F.member_cons {
-        A := One;
-        x := only;
-        h := only;
-        t := (F.nil : F.List One)
-      }).right
+      apply F.member_cons.right
       left
       trivial
 ```
@@ -152,11 +139,7 @@ Now the final count is almost anticlimactic:
 ```text
 theorem one_has_card :
   F.HasCard(F.cons(only, F.nil), 1) := by
-  apply F.has_card_intro {
-    A := One;
-    xs := F.cons(only, F.nil);
-    n := 1
-  }
+  apply F.has_card_intro
   exact one_nodup
   exact one_length
   exact one_coverage
@@ -174,11 +157,11 @@ arm, membership chooses the tail twice and then the head:
 
 ```text
 | green =>
-    apply (F.member_cons { ... }).right
+    apply F.member_cons.right
     right
-    apply (F.member_cons { ... }).right
+    apply F.member_cons.right
     right
-    apply (F.member_cons { ... }).right
+    apply F.member_cons.right
     left
     trivial
 ```
@@ -252,6 +235,32 @@ data. Datatype induction and constructor disjointness add induction, not
 higher-order quantification. The checker classifies the completed exercises
 accordingly.
 
+### Routine enumerations
+
+Once the component proofs are familiar, `finite` can construct them for a
+concrete list of constructors:
+
+```text
+data Traffic
+| red
+| yellow
+| green
+
+def colours : F.List Traffic := F.cons(red, F.cons(yellow, F.cons(green, F.nil)))
+
+theorem traffic_count : F.HasCard(colours, 3) := by
+  finite
+```
+
+This is in the companion examples file. The tactic uses the same checked list
+laws and datatype cases as the manual proofs. It also handles individual
+`Nodup`, length, membership, and coverage goals. It rejects duplicate entries,
+missing constructors, and incorrect counts. Coverage automation currently
+handles datatypes whose constructors have no arguments; it does not assume
+that an arbitrary datatype is finite. The proof search is bounded and reports
+failure when it cannot finish. Successful proofs still receive their ordinary
+constructive `fol+induction` receipts.
+
 ## 13.7 Common mistakes
 
 Run [`hol-code/ch13-mistakes.ctea`](hol-code/ch13-mistakes.ctea), which is
@@ -289,8 +298,8 @@ biconditionals used to characterize `Nodup` and `Member`:
 error: docs/book/hol-code/ch13-mistakes.ctea:27: theorem `simp_nodup` failed: simp rule `F.nodup_cons` must prove a term equality
 ```
 
-For now, use `.left` or `.right` explicitly. This is a limitation of the tactic
-surface, not of the logic.
+Use `.left` or `.right` for a manual proof, or `finite` for a concrete
+enumeration. General biconditional simplification remains separate.
 
 ## 13.8 Exercises
 
@@ -313,13 +322,11 @@ Solutions: [`hol-code/ch13-solutions.ctea`](hol-code/ch13-solutions.ctea).
 
 ### What this chapter has measured
 
-The final packaging proof is pleasant. Consuming `HasCard` is pleasant. The
-constructor-by-constructor enumeration proof is not yet pleasant: it repeats
-long nested list terms, explicit schema arguments, and manual navigation
-through biconditionals. That is now a measured textbook problem with a checked
-acceptance case, not a speculative complaint. Any future enumeration tactic or
-library combinator must shorten Exercise 13.3 while preserving its trust-free
-`fol+induction` receipt.
+The manual component proofs explain what a finite count certifies. They remain
+useful exercises, but routine applications can now use `finite`, including
+with a readable term abbreviation for the enumeration. The tactic constructs
+a proof rather than trusting a count, and the checked acceptance example
+retains its constructive, trust-free `fol+induction` receipt.
 
 ---
 

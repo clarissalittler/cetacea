@@ -165,18 +165,18 @@ declare them with `data`. The standard library's `std/list.ctea`
 (loaded by the prelude) declares lists of naturals like this:
 
 ```text
-data List
-| nil
-| cons(Nat, List)
+data list.List
+| list.nil
+| list.cons(Nat, list.List)
 ```
 
-Read it like the rules for `Nat` in Section 9.2: `nil` — the empty
-list — is a `List`; and if `h` is a `Nat` and `t` is a `List`, then
-`cons(h, t)` — "`h` stuck on the front of `t`" — is a `List`. The
-list `[7, 4]` is `cons(7, cons(4, nil))`: same tower-building as
+Read it like the rules for `Nat` in Section 9.2: `list.nil` — the empty
+list — is a `list.List`; and if `h` is a `Nat` and `t` is a `list.List`, then
+`list.cons(h, t)` — "`h` stuck on the front of `t`" — is a `list.List`. The
+list `[7, 4]` is `list.cons(7, list.cons(4, list.nil))`: same tower-building as
 numerals, except each layer carries a value. (One honest limitation:
 Cetacea's data types are *monomorphic* — this is specifically a list
-of `Nat`s, and there is no `List Person`. More in Chapter 12.)
+of `Nat`s, and there is no `list.List Person`. More in Chapter 12.)
 
 Everything from Sections 10.2–10.3 now replays, one-for-one, on your
 new data. `defrec` over a `data` type takes one arm per constructor;
@@ -185,24 +185,24 @@ per *recursive* argument's already-computed result. The library
 defines `length` that way, and it computes:
 
 ```text
-theorem length_demo : length(cons(7, cons(4, nil))) = 2 := by
+theorem length : length(list.cons(7, list.cons(4, list.nil))) = 2 := by
   refl
 ```
 
 Here's our own — the sum of a list's elements:
 
 ```text
-defrec sum (l : List) : Nat
-| nil => 0
-| cons h t rec => add(h, rec)
+defrec sum (l : list.List) : Nat
+| list.nil => 0
+| list.cons h t rec => add(h, rec)
 
-theorem sum_demo : sum(cons(1, cons(2, cons(3, nil)))) = 6 := by
+theorem sum_demo : sum(list.cons(1, list.cons(2, list.cons(3, list.nil)))) = 6 := by
   refl
 ```
 
-In the `cons` arm: `h` and `t` are the constructor's two arguments,
+In the `list.cons` arm: `h` and `t` are the constructor's two arguments,
 and `rec` is `sum(t)` — one recursive result, because exactly one of
-`cons`'s arguments (`t`) is a `List`. That bookkeeping — *arguments
+`list.cons`'s arguments (`t`) is a `list.List`. That bookkeeping — *arguments
 first, then one `rec` per recursive argument* — matters more when a
 constructor has several recursive arguments, as Chapter 11's trees
 will.
@@ -212,17 +212,17 @@ is the `addl` pattern verbatim — recursion on the first list, second
 list riding along:
 
 ```text
-defrec append (l : List) (r : List) : List
-| nil => r
-| cons h t rec => cons(h, rec)
+defrec list.append (l : list.List) (r : list.List) : list.List
+| list.nil => r
+| list.cons h t rec => list.cons(h, rec)
 ```
 
 so its defining equations are *theorems*, provable by `refl` (the
-library proves them as `append_nil` and `append_cons`):
+library proves them as `list.append_nil` and `list.append_cons`):
 
 ```text
-theorem append_cons_demo (h : Nat) (t : List) (l : List)
-  : append(cons(h, t), l) = cons(h, append(t, l)) := by
+theorem append_cons (h : Nat) (t : list.List) (l : list.List)
+  : list.append(list.cons(h, t), l) = list.cons(h, list.append(t, l)) := by
   refl
 ```
 
@@ -230,11 +230,11 @@ A `defrec` can even cross worlds — number in, list out. `replicate`
 builds the list of `n` copies of `x`:
 
 ```text
-defrec replicate (n : Nat) (x : Nat) : List
-| zero => nil
-| succ k rec => cons(x, rec)
+defrec replicate (n : Nat) (x : Nat) : list.List
+| zero => list.nil
+| succ k rec => list.cons(x, rec)
 
-theorem replicate_two : replicate(2, 9) = cons(9, cons(9, nil)) := by
+theorem replicate_two : replicate(2, 9) = list.cons(9, list.cons(9, list.nil)) := by
   refl
 ```
 
@@ -255,8 +255,8 @@ the CS 250 course this book shadows), congruence and divisibility are
 defined honestly:
 
 ```text
-def Divides (a : Nat) (b : Nat) : Prop := exists k : Nat, b = mul(a, k)
-def ModEq (m : Nat) (x : Nat) (y : Nat) : Prop := exists a b : Nat, add(x, mul(m, a)) = add(y, mul(m, b))
+def modular.Divides (a : Nat) (b : Nat) : Prop := exists k : Nat, b = mul(a, k)
+def modular.ModEq (m : Nat) (x : Nat) (y : Nat) : Prop := exists a b : Nat, add(x, mul(m, a)) = add(y, mul(m, b))
 ```
 
 and a dozen theorems about them are proved from scratch. But one —
@@ -266,7 +266,7 @@ doesn't have yet. Rather than fake it, the library says so, in the
 open:
 
 ```text
-axiom modeq_zero_to_divides (m x : Nat) : ModEq(m, x, 0) -> Divides(m, x)
+axiom modular.modeq_zero_to_divides (m x : Nat) : modular.ModEq(m, x, 0) -> modular.Divides(m, x)
 ```
 
 What does using it cost? Run the examples file and compare these two
@@ -274,12 +274,12 @@ What does using it cost? Run the examples file and compare these two
 
 ```text
 accepted theorem divides_5_20_direct (constructive)
-accepted theorem divides_5_20_via_modeq (constructive; axioms: modeq_zero_to_divides)
+accepted theorem divides_5_20_via_modeq (constructive; axioms: modular.modeq_zero_to_divides)
 ```
 
 The first proof exhibits the witness directly (`5 * 4 = 20`, `refl`
 does the arithmetic). The second applies the axiom bridge, then proves
-the remaining premise `ModEq(5, 20, 0)` — and the checker
+the remaining premise `modular.ModEq(5, 20, 0)` — and the checker
 *permanently stamps the receipt*.
 Any theorem that uses an axiom, directly or through other theorems,
 carries an `axioms:` list on its accepted line. This is Chapter 3's
@@ -294,7 +294,7 @@ commitments* (set extensionality) and *documented gaps* (the one
 above). What they are not for is skipping work — every axiom you
 write is a permanent asterisk on every theorem downstream of it. When
 you're tempted, remember the pattern of this chapter: Cetacea's
-`defrec` got binary parameters precisely so that `append` could stop
+`defrec` got binary parameters precisely so that `list.append` could stop
 being four axioms and start being a definition. Trust, replaced by
 construction, one release at a time.
 
@@ -303,23 +303,22 @@ construction, one release at a time.
 Run [`code/ch10-mistakes.ctea`](code/ch10-mistakes.ctea) — intended
 to fail.
 
-**Mistake 1: redeclaring a name the library owns.** The prelude puts
-everything — yours and the library's — in one global namespace, and
-`length` is taken:
+**Mistake 1: redeclaring the library's qualified name.** With the qualified
+prelude, you can define your own `length`. The existing `list.length` remains
+owned by the imported library:
 
 ```text
-error: docs/book/code/ch10-mistakes.ctea:13: cannot redeclare `length` as a recursive definition
+error: docs/book/code/ch10-mistakes.ctea:13: cannot redeclare `list.length` as a recursive definition
 ```
 
-When this bites, you were usually about to redefine something that
-already exists (use the library's!) or reusing a good name for a new
-idea (pick another — this book's `_demo` suffixes are one convention).
+Use `list.length` when you want the library definition, or an unqualified name
+for your own definition. The qualifier makes the distinction explicit.
 
-**Mistake 2: miscounting a `defrec` arm's binders.** The `cons` arm
+**Mistake 2: miscounting a `defrec` arm's binders.** The `list.cons` arm
 below binds `h` and `rec` but forgets the tail `t`:
 
 ```text
-error: docs/book/code/ch10-mistakes.ctea:22: recursive definition case `cons` expects 3 binder(s), but got 2
+error: docs/book/code/ch10-mistakes.ctea:22: recursive definition case `list.cons` expects 3 binder(s), but got 2
   note: bind the 2 constructor argument(s) first, then 1 recursive result(s)
 ```
 
@@ -328,20 +327,20 @@ filled in: two constructor arguments, then one recursive result —
 three names, in that order.
 
 **Mistake 3: expecting `refl` to do induction's job.** The Section
-10.3 slogan, violated on purpose. `append` recurses on its first
-argument, so `append(l, nil)` is stuck while `l` is symbolic:
+10.3 slogan, violated on purpose. `list.append` recurses on its first
+argument, so `list.append(l, list.nil)` is stuck while `l` is symbolic:
 
 ```text
-error: docs/book/code/ch10-mistakes.ctea:28: theorem `append_nil_right` failed: refl cannot prove `append(l, nil) = l` because the sides are not identical
-  note: target: append(l, nil) = l
+error: docs/book/code/ch10-mistakes.ctea:28: theorem `append_nil_right` failed: refl cannot prove `list.append(l, list.nil) = l` because the sides are not identical
+  note: target: list.append(l, list.nil) = l
 ```
 
 (Trimmed: the same `help:` advice you saw in Section 9.4 — and no,
 `simp` doesn't save this one either.) This is `addl_zero_right` all
 over again — the free direction is
-`append(nil, l) = l`; the other one costs an induction. But wait:
+`list.append(list.nil, l) = l`; the other one costs an induction. But wait:
 an induction on *what*? `l` isn't a number. It's a list... which is
-built from `nil` by `cons`... which means it should have a ladder of
+built from `list.nil` by `list.cons`... which means it should have a ladder of
 its own. Hold that thought for one page.
 
 ## 10.7 Exercises
@@ -357,10 +356,10 @@ first decide: computation, or climb?
   definitions, related by induction; model it on `double_is_add`.
 - **Exercise 10.4** `length(replicate(n, x)) = n` — a theorem
   spanning both worlds: induct on the number, get a fact about lists.
-- **Exercise 10.5** `Divides(3, 12)`, by hand: `unfold Divides`, name
+- **Exercise 10.5** `modular.Divides(3, 12)`, by hand: `unfold modular.Divides`, name
   the witness, `refl`.
-- **Exercise 10.6** `Divides(3, 12)` again, via
-  `apply modeq_zero_to_divides {m := 3; x := 12}` and a congruence
+- **Exercise 10.6** `modular.Divides(3, 12)` again, via
+  `apply modular.modeq_zero_to_divides {m := 3; x := 12}` and a congruence
   proof (two witnesses this time). Then read your two accepted lines
   and find the asterisk.
 
@@ -371,4 +370,4 @@ Solutions: [`code/ch10-solutions.ctea`](code/ch10-solutions.ctea).
 *Next: [Chapter 11 — Structural Induction](11-structural-induction.md),
 where the cliffhanger resolves: every `data` type comes with its own
 induction principle, read straight off the declaration — and
-`append(l, nil) = l` falls in six lines.*
+`list.append(l, list.nil) = l` falls in six lines.*

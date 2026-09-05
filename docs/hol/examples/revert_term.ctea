@@ -1,0 +1,22 @@
+-- Generalize a parameter after discovering the induction invariant.
+mode constructive
+
+theorem generalize (x : Nat) (P : Nat -> Prop) (Q : Prop) :
+  Q -> P(x) -> P(x) := by
+  intro independent
+  intro dependent
+  revert x
+  intro x
+  intro dependent
+  exact dependent
+
+-- Reverting m makes the induction hypothesis universal in m.
+theorem induction_example (n m : Nat) : add(n, m) = add(n, m) := by
+  revert m
+  induction n with
+  | zero =>
+      intro m
+      refl
+  | succ k ih =>
+      intro m
+      refl

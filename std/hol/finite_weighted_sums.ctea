@@ -1,0 +1,36 @@
+-- Sums over a checked enumeration of a finite set.
+import weighted_sums.ctea as W
+import counting.ctea as F
+import std/hol/cardinality@1 as C
+import sums.ctea as S
+mode constructive
+
+theorem sum_on_set_constant
+  (A : Type) (f : A -> Nat) (V : Set A) (xs : C.List A) (n k : Nat) :
+  F.HasSize(V, xs, n) ->
+  (forall x : A, x in V -> f(x) = k) ->
+  S.sum(C.map(f, xs)) = mul(n, k) := by
+  intro size
+  intro constant
+  have list_total : S.sum(C.map(f, xs)) = mul(C.length(xs), k) := by
+    apply W.sum_map_constant_on {A := A; f := f; xs := xs; k := k}
+    intro x
+    intro listed
+    have in_set : x in V := (F.has_size_members {A := A; S := V; xs := xs; n := n} size x).left listed
+    exact constant x in_set
+  have length : C.length(xs) = n := F.has_size_length {A := A; S := V; xs := xs; n := n} size
+  rewrite <- length
+  exact list_total
+
+theorem sum_on_set_congr
+  (A : Type) (f g : A -> Nat) (V : Set A) (xs : C.List A) (n : Nat) :
+  F.HasSize(V, xs, n) ->
+  (forall x : A, x in V -> f(x) = g(x)) ->
+  S.sum(C.map(f, xs)) = S.sum(C.map(g, xs)) := by
+  intro size
+  intro same
+  apply W.sum_map_congr_on {A := A; f := f; g := g; xs := xs}
+  intro x
+  intro listed
+  have in_set : x in V := (F.has_size_members {A := A; S := V; xs := xs; n := n} size x).left listed
+  exact same x in_set

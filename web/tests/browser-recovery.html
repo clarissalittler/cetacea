@@ -1,0 +1,561 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cetacea browser recovery tests</title>
+<h1>Browser recovery tests</h1>
+<p>Runs the real editor and worker in an isolated frame. No saved student source is changed.</p>
+<pre id="results" role="status">Running…</pre>
+<iframe title="Editor under test" style="width:100%;height:600px"></iframe>
+<script type="module">
+const results = document.querySelector('#results');
+const frame = document.querySelector('iframe');
+const lines = [];
+const storagePrefix = `cetacea.test.${crypto.randomUUID()}.`;
+const storageKeys = new Set();
+window.cetaceaTestStorage = {
+  get: key => window.localStorage.getItem(storagePrefix + key),
+  set: (key, value) => {
+    storageKeys.add(key);
+    window.localStorage.setItem(storagePrefix + key, value);
+  }
+};
+function assert(condition, message) { if (!condition) throw new Error(message); }
+async function until(predicate, message, timeout = 20000) {
+  const deadline = performance.now() + timeout;
+  while (!predicate()) {
+    if (performance.now() > deadline) throw new Error(message);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+function pass(message) { lines.push(`PASS: ${message}`); results.textContent = lines.join('\n'); }
+try {
+  const html = await (await fetch(`../index.html?test=${Date.now()}`, {cache: 'no-store'})).text();
+  // Install test doubles before the real app module loads. All UI rendering,
+  // queueing, cancellation, and recovery code remains the production code.
+  const setup = `<base href="${new URL('../', location.href)}"><script>
+    window.addEventListener('storage', event => {
+      const prefix = ${JSON.stringify(storagePrefix)};
+      if (event.key?.startsWith(prefix)) {
+        window.dispatchEvent(new StorageEvent('storage', {key: event.key.slice(prefix.length)}));
+      }
+    });
+    Object.defineProperty(window, 'localStorage', {value: {
+      getItem(key) { return window.parent.cetaceaTestStorage.get(key) ?? null; }, setItem(key, value) {
+        if (window.failStorage) throw new Error('injected quota failure');
+        window.savedSource = key === 'cetacea.web.work.v1' ? JSON.parse(value).source : value;
+        window.parent.cetaceaTestStorage.set(key, value);
+      }
+    }});
+    const NativeWorker = Worker;
+    window.stallNextWorker = false;
+    window.failNextWorker = false;
+    window.Worker = function(url, options) {
+      if (window.missingWasmNextWorker) {
+        window.missingWasmNextWorker = false;
+        const realWorker = new URL(url, document.baseURI).href;
+        const code = "onmessage = async event => { self.fetch = async () => new Response('', {status: 404, statusText: 'Not Found'}); await import(" + JSON.stringify(realWorker) + "); await self.onmessage(event); };";
+        const blob = URL.createObjectURL(new Blob([code], {type: 'text/javascript'}));
+        const worker = new NativeWorker(blob, {type: 'module'});
+        URL.revokeObjectURL(blob);
+        return worker;
+      }
+      if (window.stallNextWorker || window.failNextWorker) {
+        const code = window.failNextWorker
+          ? "onmessage = () => { throw new Error('injected worker failure'); };"
+          : "onmessage = () => { while (true) {} };";
+        window.stallNextWorker = window.failNextWorker = false;
+        const blob = URL.createObjectURL(new Blob([code], {type: 'text/javascript'}));
+        const worker = new NativeWorker(blob);
+        URL.revokeObjectURL(blob);
+        return worker;
+      }
+      return new NativeWorker(url, options);
+    };
+  <\/script>`;
+  frame.srcdoc = html.replace('<head>', '<head>' + setup).replace('./examples.js', `./examples.js?test=${Date.now()}`)
+    .replace('./styles.css', `./styles.css?test=${Date.now()}`)
+    .replace('./app.js', `./app.js?test=${Date.now()}`);
+  await until(() => frame.contentDocument?.querySelector('#status')?.textContent.includes('HOL certified'), 'Initial check failed');
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  const editor = doc.querySelector('#sourceEditor');
+  const status = doc.querySelector('#status');
+  const cancel = doc.querySelector('#cancelButton');
+  const check = doc.querySelector('#checkButton');
+  const accepted = doc.querySelector('#accepted');
+  const sourceBeforeSkip = editor.value;
+  for (const target of ['sourceEditor', 'proofState']) {
+    doc.querySelector(`.skip-links a[href="#${target}"]`).click();
+    assert(doc.activeElement === doc.getElementById(target), 'Skip link did not focus its target');
+    assert(frame.contentDocument === doc && editor.value === sourceBeforeSkip, 'Skip link escaped the editor or changed source');
+  }
+  pass('skip links retain the embedded editor and source despite its base URL');
+  function edit(name) {
+    editor.value = `mode constructive\n\ntheorem ${name} (P : Prop) : P -> P := by\n  intro h\n  exact h\n`;
+    editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  }
+  win.stallNextWorker = true;
+  edit('cancelled');
+  assert(!accepted.textContent.includes('and_comm'), 'Old certification survived edit');
+  await until(() => !cancel.disabled, 'Cancel did not become available');
+  cancel.click();
+  assert(status.textContent.includes('cancelled'), 'Cancel did not report cancellation');
+  await until(() => editor.value === win.savedSource, 'Cancellation lost saved source');
+  check.click();
+  await until(() => accepted.textContent.includes('theorem cancelled'), 'Check did not recover after cancellation');
+  pass('busy worker can be cancelled; source is preserved and Check recovers');
+
+  win.stallNextWorker = true;
+  edit('timeout');
+  await until(() => status.textContent.includes('too long'), 'Stalled worker did not time out');
+  await until(() => editor.value === win.savedSource, 'Timeout lost saved source');
+  check.click();
+  await until(() => accepted.textContent.includes('theorem timeout'), 'Check did not recover after timeout');
+  pass('ten-second timeout stops busy work and Check recovers');
+
+  win.failNextWorker = true;
+  edit('worker_failure');
+  await until(() => status.textContent.includes('unexpectedly'), 'Worker failure was not reported');
+  check.click();
+  await until(() => accepted.textContent.includes('theorem worker_failure'), 'Check did not recover after worker failure');
+  pass('worker exception leaves source editable and permits retry');
+
+  win.missingWasmNextWorker = true;
+  edit('missing_build');
+  await until(() => status.textContent.includes('Could not load the checker'), 'Missing Wasm was not reported');
+  assert(status.textContent.includes('Download your source or project before reloading'), 'Missing build omitted backup guidance');
+  assert(editor.value.includes('theorem missing_build') && !editor.disabled, 'Missing build lost or disabled source');
+  assert(!doc.querySelector('#downloadButton').disabled && !doc.querySelector('#downloadProjectButton').disabled, 'Missing build disabled downloads');
+  check.click();
+  await until(() => accepted.textContent.includes('theorem missing_build'), 'Check did not recover after missing build');
+  pass('missing checker assets preserve editable source and downloads, explain backup/reload, and allow retry');
+
+  win.stallNextWorker = true;
+  edit('obsolete');
+  await until(() => !cancel.disabled, 'Old work did not start');
+  edit('latest');
+  await until(() => accepted.textContent.includes('theorem latest'), 'Edit did not replace busy old work');
+  assert(!accepted.textContent.includes('obsolete'), 'Obsolete theorem shown as accepted');
+  await until(() => doc.querySelector('#proofExplanation').textContent.includes('latest'), 'Explanation did not follow latest edit');
+  await until(() => editor.value === win.savedSource, 'Latest source was not saved');
+  pass('editing interrupts old work and updates acceptance and explanations');
+  editor.value = 'import std/hol/list@1 as L\nimport std/hol/list@1 as R\n';
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  const search = doc.querySelector('#librarySearch');
+  search.value = 'append_nil_right';
+  search.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => doc.querySelector('#theoremLibrary').textContent.includes('R.append_nil_right'), 'Package aliases missing from library');
+  assert(doc.querySelectorAll('#theoremLibrary .library-item').length === 1, 'Duplicate package theorem entries');
+  search.value = 'R.append_nil_right';
+  search.dispatchEvent(new win.Event('input', {bubbles: true}));
+  assert(doc.querySelector('#theoremLibrary button').textContent === 'R.append_nil_right', 'Alias query did not preserve usable spelling');
+  doc.querySelector('#theoremLibrary button').focus();
+  search.dispatchEvent(new win.Event('input', {bubbles: true}));
+  assert(doc.activeElement === doc.querySelector('#theoremLibrary button'), 'Library refresh lost keyboard focus');
+  search.value = 'no_matching_theorem';
+  search.dispatchEvent(new win.Event('input', {bubbles: true}));
+  assert(doc.activeElement === search, 'Removed library entry did not return focus to search');
+  search.value = 'R.append_nil_right';
+  search.dispatchEvent(new win.Event('input', {bubbles: true}));
+  pass('package theorem search groups aliases and retains the requested spelling');
+  const insertionSource = 'theorem helper : True := by\n  trivial\n\ntheorem practice : True := by';
+  editor.value = insertionSource;
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  editor.setSelectionRange(editor.value.length, editor.value.length);
+  editor.dispatchEvent(new win.Event('select', {bubbles: true}));
+  search.value = 'helper';
+  search.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => doc.querySelector('#theoremLibrary button')?.textContent === 'helper', 'Helper theorem missing for insertion');
+  search.focus();
+  doc.querySelector('#theoremLibrary button').click();
+  assert(editor.value === insertionSource + '\n  apply helper', 'Insertion lost the saved cursor line or proof indentation');
+  assert(doc.activeElement === editor, 'Tactic insertion did not restore editor focus');
+  await until(() => accepted.textContent.includes('theorem practice'), 'Inserted tactic did not certify');
+  pass('theorem insertion uses the saved source position, indents the first tactic and restores editor focus');
+  editor.value = 'theorem good : True := by\n  trivial\ntheorem bad : False := by\n  refl\n';
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('failed: bad (line 3)'), 'Failed theorem outcome missing');
+  assert(accepted.textContent.includes('theorem good'), 'Successful theorem outcome missing');
+  assert(!accepted.textContent.includes('theorem bad'), 'Failed theorem presented as accepted');
+  await until(() => doc.querySelector('#goals').textContent.includes('Proof failed'), 'Failed tactic incorrectly shown as complete');
+  await until(() => doc.querySelector('.diagnostic-jump'), 'Active-file error has no navigation button');
+  const beforeJump = editor.value;
+  const jump = doc.querySelector('.diagnostic-jump');
+  const jumpLine = Number(jump.textContent.match(/\d+/)[0]);
+  jump.click();
+  assert(doc.activeElement === editor, 'Diagnostic navigation did not focus source');
+  assert(editor.value === beforeJump, 'Diagnostic navigation modified source');
+  assert(editor.value.slice(0, editor.selectionStart).split('\n').length === jumpLine, 'Diagnostic navigation selected the wrong line');
+  pass('declaration results show failures alongside successful proofs');
+  editor.value = await (await fetch('../../docs/hol/examples/rewrite_hypotheses.ctea')).text();
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem compute_length'), 'Hypothesis-rewrite example did not check');
+  const rewriteCursor = editor.value.indexOf('  exact length');
+  editor.setSelectionRange(rewriteCursor, rewriteCursor);
+  editor.dispatchEvent(new win.Event('select', {bubbles: true}));
+  await until(() => doc.querySelector('#goals').textContent.includes('length : succ(L.length(xs))'), 'Rewritten hypothesis missing from proof state');
+  assert(!doc.querySelector('#goals').textContent.includes('length : L.length(L.cons'), 'Old binding still displayed under the same name');
+  pass('rewriting a hypothesis checks and updates the displayed proof context');
+  editor.value = await (await fetch('../../docs/hol/examples/revert_term.ctea')).text();
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem generalize'), 'Term-generalization example did not check');
+  const revertCursor = editor.value.indexOf('  intro x');
+  editor.setSelectionRange(revertCursor, revertCursor);
+  editor.dispatchEvent(new win.Event('select', {bubbles: true}));
+  await until(() => doc.querySelector('#goals').textContent.includes('forall x : Nat'), 'Generalized goal missing');
+  assert(doc.querySelector('#goals').textContent.includes('independent : Q'), 'Independent hypothesis disappeared');
+  assert(!doc.querySelector('#goals').textContent.includes('dependent : P(x)'), 'Dependent hypothesis was not generalized');
+  await until(() => doc.querySelector('#proofExplanation').textContent.includes('generalize (constructive)'), 'Explanation did not follow the cursor to the earlier theorem');
+  pass('term reversion generalizes dependencies and retains independent context');
+  assert(doc.querySelector('#exampleSelect').textContent.includes('Finite enumeration: three colours'), 'Finite example missing from menu');
+  assert(doc.body.textContent.includes('Finite enumeration'), 'Finite tactic help missing');
+  editor.value = await (await fetch('../../docs/hol/examples/finite_enumeration.ctea')).text();
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem three_colours'), 'Finite enumeration did not check');
+  await until(() => doc.querySelector('#proofExplanation').textContent.includes('finite-enumeration proof'), 'Finite tactic explanation missing');
+  editor.value = editor.value.replace('F.HasCard(colours, 3)', 'F.HasCard(colours, 4)');
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('failed: three_colours'), 'Wrong finite count was not rejected');
+  assert(!accepted.textContent.includes('theorem three_colours'), 'Invalid finite count retained acceptance');
+  pass('finite enumeration checks, explains its proof, and rejects a wrong count');
+  editor.value = await (await fetch('../../docs/hol/examples/pigeonhole_collision.ctea')).text();
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem some_collision'), 'Classical collision example did not check');
+  await until(() => doc.querySelector('#proofExplanation').textContent.includes('some_collision (classical)'), 'Classical witness explanation missing');
+  assert(accepted.textContent.includes('theorem explicit_collision'), 'Constructive collision example missing');
+  editor.value = editor.value.replace('mode classical', 'mode constructive');
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('failed: some_collision'), 'Classical theorem was accepted in constructive mode');
+  assert(accepted.textContent.includes('theorem explicit_collision'), 'Constructive pair was lost after mode rejection');
+  await until(() => doc.querySelector('#goals').textContent.includes('Proof failed'), 'Mode-rejected proof shown as complete');
+  await until(() => doc.querySelector('#proofExplanation').textContent.includes('some_collision (failed)'), 'Mode-rejected proof explanation shown as successful');
+  pass('collision witnesses check and classical use is rejected in constructive mode');
+  editor.value = await (await fetch('../../docs/hol/examples/goal_computation.ctea')).text();
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem not_symmetric'), 'Computation example did not check');
+  const trueCursor = editor.value.indexOf('  trivial');
+  editor.setSelectionRange(trueCursor, trueCursor);
+  editor.dispatchEvent(new win.Event('select', {bubbles: true}));
+  await until(() => doc.querySelector('#goals').textContent.includes('Computes to: True'), 'True computation preview missing');
+  assert(doc.querySelector('#goals').textContent.includes('|- le(0, 1)'), 'Written premise was lost');
+  await until(() => doc.querySelector('#proofExplanation').textContent.includes('Computes to: True'), 'Explanation computation preview missing');
+  const falseCursor = editor.value.indexOf('  exact h');
+  editor.setSelectionRange(falseCursor, falseCursor);
+  editor.dispatchEvent(new win.Event('select', {bubbles: true}));
+  await until(() => doc.querySelector('#goals').textContent.includes('Computes to: False'), 'False computation preview missing');
+  assert(doc.querySelector('#goals').textContent.includes('|- le(1, 0)'), 'False preview replaced the written goal');
+  assert(!doc.querySelector('#goals').textContent.includes('Complete'), 'False computation closed the goal');
+  pass('computation previews preserve written goals and appear in explanations');
+  const examples = doc.querySelector('#exampleSelect');
+  examples.value = 'cs250_07';
+  examples.dispatchEvent(new win.Event('change', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem length_append'), 'Qualified structural-induction example did not check');
+  assert(editor.value.includes('std/qualified_prelude.ctea'), 'Example still uses the legacy prelude');
+  assert(editor.value.includes('theorem length_append '), 'Student theorem still needs a collision suffix');
+  examples.value = 'cs250_08';
+  examples.dispatchEvent(new win.Event('change', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem use_compose'), 'Qualified function example did not check');
+  assert(editor.value.includes('fun.Total(fun '), 'Qualified names and lambda syntax not both exercised');
+  editor.setSelectionRange(0, 0);
+  editor.dispatchEvent(new win.Event('select', {bubbles: true}));
+  await until(() => doc.querySelector('#goals').textContent.includes('Move the cursor into a theorem'), 'Outside-theorem cursor did not show guidance');
+  assert(!doc.querySelector('#diagnostics').textContent.includes('no theorem contains'), 'Normal cursor position reported as an error');
+  assert(accepted.textContent.includes('theorem use_compose'), 'Cursor movement erased checked declarations');
+  pass('classroom examples use qualified libraries while retaining student theorem names');
+  const original = editor.value;
+  doc.querySelector('#checkpointButton').click();
+  doc.querySelector('#resetSampleButton').click();
+  await until(() => accepted.textContent.includes('theorem and_comm'), 'Sample did not load');
+  doc.querySelector('#recoverySelect').value = '0';
+  doc.querySelector('#restoreWorkButton').click();
+  await until(() => accepted.textContent.includes('theorem use_compose'), 'Checkpoint did not recheck');
+  assert(editor.value === original, 'Checkpoint restore changed source');
+  win.failStorage = true;
+  edit('unsaved_work');
+  await until(() => doc.querySelector('#saveStatus').textContent.includes('Autosave failed'), 'Storage failure was hidden');
+  await until(() => accepted.textContent.includes('theorem unsaved_work'), 'Storage failure prevented checking');
+  win.failStorage = false;
+  doc.querySelector('#checkpointButton').click();
+  await until(() => !doc.querySelector('#saveStatus').textContent.includes('failed'), 'Storage did not recover');
+  pass('checkpoints restore replaced work; storage failures stay visible without blocking proofs');
+  const transfer = new win.DataTransfer();
+  const openedSource = '-- Unicode: ∀\nmode constructive\ntheorem opened : True := by\n  trivial\n';
+  transfer.items.add(new win.File([openedSource], 'homework.ctea', {type: 'text/plain'}));
+  const proofFile = doc.querySelector('#proofFile');
+  proofFile.files = transfer.files;
+  proofFile.dispatchEvent(new win.Event('change', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem opened'), 'Opened file did not check');
+  assert(editor.value === openedSource, 'Opening changed file contents');
+  const createURL = win.URL.createObjectURL;
+  const clickLink = win.HTMLAnchorElement.prototype.click;
+  let downloadedBlob;
+  let downloadedName;
+  try {
+    win.URL.createObjectURL = blob => { downloadedBlob = blob; return createURL.call(win.URL, blob); };
+    win.HTMLAnchorElement.prototype.click = function() { downloadedName = this.download; };
+    doc.querySelector('#downloadButton').click();
+  } finally {
+    win.URL.createObjectURL = createURL;
+    win.HTMLAnchorElement.prototype.click = clickLink;
+  }
+  assert(await downloadedBlob.text() === openedSource, 'Download changed file contents');
+  assert(downloadedName === 'homework.ctea', 'Download lost the file name');
+  const invalid = new win.DataTransfer();
+  invalid.items.add(new win.File(['a\0b'], 'binary.ctea'));
+  proofFile.files = invalid.files;
+  proofFile.dispatchEvent(new win.Event('change', {bubbles: true}));
+  await until(() => doc.querySelector('#saveStatus').textContent.includes('binary'), 'Invalid file was not reported');
+  assert(editor.value === openedSource, 'Invalid file replaced current work');
+  pass('file opening and download preserve UTF-8 source and names; invalid files preserve current work');
+  const {CheckerClient} = await import(`../checker-client.mjs?project=${Date.now()}`);
+  const projectClient = new CheckerClient();
+  try {
+    const {readProjectArchive, serializeProjectArchive} = await import('../project-files.mjs');
+    const originalProject = {root: 'lesson/main.ctea', files: [
+      {path: 'lesson/main.ctea', source: 'import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n'},
+      {path: 'lesson/helper.ctea', source: '-- Unicode ∀\ntheorem helper : True := by\n  trivial\n'}
+    ]};
+    const project = await readProjectArchive(new win.File(
+      [serializeProjectArchive(originalProject)], 'homework.ctea-project'));
+    assert(JSON.stringify(project) === JSON.stringify(originalProject), 'Project archive changed source or paths');
+    const run = (operation, options = {}) => projectClient.run('project', [project, operation, options]);
+    assert((await run('check')).hol_certified, 'Worker project did not certify');
+    assert((await run('outline')).theorems[0].name === 'answer', 'Project outline failed');
+    assert((await run('goals', {line: 3, column: 1})).goals[0].target === 'True', 'Project goals failed');
+    assert((await run('tactic', {theorem: 'answer', tacticIndex: 0})).completed, 'Project stepping failed');
+    assert((await run('explain', {theorem: 'answer'})).completed, 'Project explanation failed');
+    const good = project.files[1].source;
+    project.files[1].source = 'theorem helper : False := by\n  trivial\n';
+    assert(!(await run('check')).hol_certified, 'Changed dependency retained certification');
+    project.files[1].source = good;
+    project.files.push(project.files[1]);
+    let rejected = false;
+    try { await run('check'); } catch (error) { rejected = error.message.includes('duplicate'); }
+    assert(rejected, 'Duplicate project paths were accepted');
+    project.files.pop();
+    assert((await run('check')).hol_certified, 'Project worker did not recover after rejection');
+  } finally { projectClient.stop(); }
+  pass('project worker checks nested modules across all analysis operations and recovers from invalid projects');
+  const assignmentClient = new CheckerClient();
+  try {
+    const project = {root: 'lesson/main.ctea', files: [
+      {path: 'lesson/main.ctea', source: 'import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n'}
+    ]};
+    const assignment = {path: 'lesson/task.ctea-assignment',
+      source: "version = 1\nprofile = 'prop'\nrequired_imports = ['helper.ctea']\nallowed_theorems = ['helper.ctea::helper']\nrequired_theorem.answer = 'True'\n",
+      files: [{path: 'lesson/helper.ctea', source: '-- Unicode ∀\ntheorem helper : True := by\n  trivial\n'}]};
+    const run = (operation, options = {}) => assignmentClient.run('project', [project, operation, {...options, assignment}]);
+    const checked = await run('check');
+    assert(checked.hol_certified && checked.assignment.accepted, 'Pinned assignment was not accepted');
+    assert((await run('outline')).theorems[0].name === 'answer', 'Assignment outline failed');
+    assert((await run('goals', {line: 3, column: 1})).goals[0].target === 'True', 'Assignment goals failed');
+    assert((await run('tactic', {theorem: 'answer', tacticIndex: 0})).completed, 'Assignment stepping failed');
+    assert((await run('explain', {theorem: 'answer'})).completed, 'Assignment explanation failed');
+    const manifest = assignment.source;
+    assignment.source = manifest.replace("answer = 'True'", "answer = 'False'");
+    const wrong = await run('check');
+    assert(wrong.hol_certified && !wrong.assignment.accepted && wrong.assignment.violations.some(v => v.kind === 'theorem_signature'), 'Assignment requirements were confused with proof certification');
+    assignment.source = manifest;
+    project.files.push(assignment.files[0]);
+    for (const operation of ['check', 'outline', 'goals', 'tactic', 'explain']) {
+      let rejected = false;
+      try { await run(operation, {theorem: 'answer', line: 3}); } catch (error) { rejected = error.message.includes('collides'); }
+      assert(rejected, `Student substitution was accepted by ${operation}`);
+    }
+    project.files.pop();
+    assert((await run('check')).assignment.accepted, 'Assignment worker did not recover after rejection');
+  } finally { assignmentClient.stop(); }
+  pass('assignment worker enforces pinned libraries and required signatures across all analysis operations');
+  editor.value = 'import helper.ctea as H\ntheorem answer : True := by\n  exact H.helper\n';
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  const task = {format: 'cetacea-assignment', version: 1, path: 'task.ctea-assignment',
+    source: "version = 1\nprofile = 'prop'\nrequired_imports = ['helper.ctea']\nallowed_theorems = ['helper.ctea::helper']\nrequired_theorem.answer = 'True'\n",
+    files: [{path: 'helper.ctea', source: 'theorem helper : True := by\n  trivial\n'}]};
+  const taskInput = doc.querySelector('#assignmentInput');
+  function openTask(value) {
+    const transfer = new win.DataTransfer();
+    transfer.items.add(new win.File([JSON.stringify(value)], 'lesson.ctea-task'));
+    taskInput.files = transfer.files;
+    taskInput.dispatchEvent(new win.Event('change', {bubbles: true}));
+  }
+  openTask(task);
+  await until(() => doc.querySelector('#assignmentStatus').textContent.includes('Assignment satisfied.'), 'Assignment UI did not accept pinned proof');
+  assert(status.textContent.includes('HOL certified'), 'Assignment lost proof certification');
+  openTask({...task, source: task.source.replace("answer = 'True'", "answer = 'False'")});
+  await until(() => doc.querySelector('#assignmentStatus').textContent.includes('Assignment not satisfied.'), 'Changed assignment retained acceptance');
+  assert(status.textContent.includes('HOL certified') && doc.querySelector('#assignmentViolations').textContent.includes('answer'), 'Separate assignment feedback missing');
+  openTask({...task, source: 'invalid manifest'});
+  await until(() => doc.querySelector('#assignmentStatus').textContent.includes('selection is unchanged'), 'Malformed task was not rejected');
+  check.click();
+  await until(() => doc.querySelector('#assignmentStatus').textContent.includes('Assignment not satisfied.'), 'Malformed task replaced selected assignment');
+  await until(() => JSON.parse(window.cetaceaTestStorage.get('cetacea.web.work.v1'))?.assignment?.source.includes("answer = 'False'"), 'Assignment selection was not saved');
+  const assignmentReload = document.createElement('iframe');
+  assignmentReload.title = 'Assignment reload under test';
+  document.body.append(assignmentReload);
+  try {
+    assignmentReload.srcdoc = frame.srcdoc;
+    await until(() => assignmentReload.contentDocument?.querySelector('#assignmentStatus')?.textContent.includes('Assignment not satisfied.'), 'Reload did not recheck selected assignment');
+    const reloaded = assignmentReload.contentDocument;
+    assert(reloaded.querySelector('#status').textContent.includes('HOL certified'), 'Reload conflated proof and assignment outcomes');
+    assert(reloaded.querySelector('#assignmentStatus').textContent.includes('lesson.ctea-task'), 'Reload lost assignment provenance');
+    assert(reloaded.querySelector('#sourceEditor').value === editor.value, 'Assignment reload changed student source');
+  } finally { assignmentReload.remove(); }
+  pass('assignment selection and original task filename survive reload and are rechecked');
+  doc.querySelector('#clearAssignmentButton').focus();
+  doc.querySelector('#clearAssignmentButton').click();
+  assert(doc.activeElement === doc.querySelector('#openAssignmentButton'), 'Clearing the focused assignment control lost keyboard focus');
+  assert(doc.querySelector('#assignmentStatus').textContent.includes('No assignment'), 'Assignment did not clear');
+  await until(() => status.textContent.includes('Check failed'), 'Cleared pinned helper remained available');
+  doc.querySelector('#recoverySelect').value = '0';
+  doc.querySelector('#restoreWorkButton').click();
+  await until(() => doc.querySelector('#assignmentStatus').textContent.includes('Assignment not satisfied.'), 'Checkpoint did not restore and recheck assignment');
+  doc.querySelector('#clearAssignmentButton').click();
+  await until(() => status.textContent.includes('Check failed'), 'Restored assignment did not clear');
+  pass('assignment controls check pinned proofs, separate policy failures, preserve selection on invalid input and clear libraries');
+  const {serializeProjectArchive, parseProjectArchive} = await import('../project-files.mjs');
+  const classroomProject = {root: 'lesson/main.ctea', files: [
+    {path: 'lesson/main.ctea', source: 'import helper.ctea as H\ntheorem homework : True := by\n  exact H.helper\n'},
+    {path: 'lesson/helper.ctea', source: 'theorem helper : True := by\n  trivial\n'}
+  ]};
+  const projectTransfer = new win.DataTransfer();
+  projectTransfer.items.add(new win.File([serializeProjectArchive(classroomProject)], 'class.ctea-project'));
+  const projectInput = doc.querySelector('#projectInput');
+  projectInput.files = projectTransfer.files;
+  projectInput.dispatchEvent(new win.Event('change', {bubbles: true}));
+  await until(() => accepted.textContent.includes('theorem homework'), 'Project did not open in editor');
+  const selectFile = path => {
+    doc.querySelector('#projectSelect').value = path;
+    doc.querySelector('#projectSelect').dispatchEvent(new win.Event('change', {bubbles: true}));
+  };
+  selectFile('lesson/helper.ctea');
+  await until(() => accepted.textContent.includes('theorem helper'), 'Supporting file did not check');
+  editor.value = 'theorem helper : False := by\n  trivial\n';
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  selectFile('lesson/main.ctea');
+  await until(() => status.textContent.includes('Check failed'), 'Broken supporting file did not invalidate root');
+  assert(!accepted.textContent.includes('theorem homework'), 'Old root certification survived dependency edit');
+  selectFile('lesson/helper.ctea');
+  await until(() => editor.value.includes('False'), 'Supporting edit was lost');
+  editor.value = classroomProject.files[1].source;
+  editor.dispatchEvent(new win.Event('input', {bubbles: true}));
+  selectFile('lesson/main.ctea');
+  await until(() => accepted.textContent.includes('theorem homework'), 'Repaired dependency did not restore checking');
+  doc.querySelector('#checkpointButton').click();
+  doc.querySelector('#resetSampleButton').click();
+  await until(() => accepted.textContent.includes('theorem and_comm'), 'Could not leave project');
+  doc.querySelector('#recoverySelect').value = '0';
+  doc.querySelector('#restoreWorkButton').click();
+  await until(() => accepted.textContent.includes('theorem homework'), 'Project checkpoint did not restore');
+  assert(doc.querySelector('#projectSelect').options.length === 2, 'Checkpoint lost supporting files');
+  let projectBlob;
+  try {
+    win.URL.createObjectURL = blob => { projectBlob = blob; return createURL.call(win.URL, blob); };
+    win.HTMLAnchorElement.prototype.click = function() {};
+    doc.querySelector('#downloadProjectButton').click();
+  } finally {
+    win.URL.createObjectURL = createURL;
+    win.HTMLAnchorElement.prototype.click = clickLink;
+  }
+  assert(JSON.stringify(parseProjectArchive(await projectBlob.text())) === JSON.stringify(classroomProject), 'Project download lost data');
+  const badProject = new win.DataTransfer();
+  badProject.items.add(new win.File(['{"format":"wrong"}'], 'bad.ctea-project'));
+  projectInput.files = badProject.files;
+  projectInput.dispatchEvent(new win.Event('change', {bubbles: true}));
+  await until(() => doc.querySelector('#saveStatus').textContent.includes('Unsupported'), 'Bad project was not rejected');
+  assert(editor.value === classroomProject.files[0].source, 'Bad archive replaced active source');
+  assert(doc.querySelector('#projectSelect').options.length === 2, 'Bad archive removed supporting files');
+  frame.srcdoc = frame.srcdoc;
+  await until(() => frame.contentDocument !== doc && frame.contentDocument?.querySelector('#accepted')?.textContent.includes('theorem homework'), 'Autosaved project did not reload and recheck');
+  assert(frame.contentDocument.querySelector('#projectSelect').options.length === 2, 'Reload lost supporting files');
+  pass('editor projects preserve dependencies through edits, checkpoints, download, invalid imports and reload');
+  const reloaded = frame.contentDocument;
+  reloaded.querySelector('.project-controls').open = true;
+  reloaded.querySelector('#projectPath').value = 'lesson/extra.ctea';
+  reloaded.querySelector('#addProjectFileButton').click();
+  await until(() => reloaded.querySelector('#projectSelect').value === 'lesson/extra.ctea', 'Adding a project file failed');
+  const extraEditor = reloaded.querySelector('#sourceEditor');
+  extraEditor.value = 'theorem extra : True := by\n  trivial\n';
+  extraEditor.dispatchEvent(new frame.contentWindow.Event('input', {bubbles: true}));
+  await until(() => reloaded.querySelector('#accepted').textContent.includes('theorem extra'), 'New project file did not check');
+  reloaded.querySelector('#projectPath').value = 'lesson/renamed.ctea';
+  reloaded.querySelector('#renameProjectFileButton').click();
+  await until(() => reloaded.querySelector('#projectSelect').value === 'lesson/renamed.ctea'
+    && reloaded.querySelector('#accepted').textContent.includes('theorem extra'), 'Renamed file did not retain its proof');
+  reloaded.querySelector('#projectPath').value = 'lesson/main.ctea';
+  reloaded.querySelector('#renameProjectFileButton').click();
+  assert(reloaded.querySelector('#saveStatus').textContent.includes('Duplicate'), 'Duplicate rename was not rejected');
+  assert(reloaded.querySelector('#projectSelect').options.length === 3, 'Rename lost a file');
+  assert(reloaded.querySelector('#projectSelect').value === 'lesson/renamed.ctea', 'Failed rename changed active file');
+  pass('project file creation and renaming preserve source and reject collisions');
+  const damagedSave = JSON.stringify({version: 1, source: 42, name: 'damaged.ctea', note: String.fromCharCode(0xd800), history: [null, {
+    source: classroomProject.files[0].source, name: 'main.ctea', project: classroomProject,
+    savedAt: '2026-09-04T00:00:00Z'
+  }]}).replace('\\u' + 'd800', String.fromCharCode(0xd800));
+  window.cetaceaTestStorage.set('cetacea.web.work.v1', damagedSave);
+  frame.srcdoc = frame.srcdoc;
+  await until(() => frame.contentDocument !== reloaded
+    && frame.contentDocument?.querySelector('#saveStatus')?.textContent.includes('Autosave is paused'), 'Damaged save recovery was not shown');
+  const recoveryDoc = frame.contentDocument;
+  const recoveryWin = frame.contentWindow;
+  assert(!recoveryDoc.querySelector('#downloadSavedDataButton').hidden, 'Original saved data cannot be downloaded');
+  recoveryDoc.querySelector('#recoverySelect').value = '0';
+  recoveryDoc.querySelector('#restoreWorkButton').click();
+  await until(() => recoveryDoc.querySelector('#accepted').textContent.includes('theorem homework'), 'Intact project checkpoint did not recover');
+  assert(recoveryDoc.querySelector('#projectSelect').options.length === 2, 'Recovery dropped supporting files');
+  assert(window.cetaceaTestStorage.get('cetacea.web.work.v1') === damagedSave, 'Recovery overwrote damaged data before resuming');
+  const recoveryURL = recoveryWin.URL.createObjectURL;
+  const recoveryClick = recoveryWin.HTMLAnchorElement.prototype.click;
+  let rawBlob;
+  try {
+    recoveryWin.URL.createObjectURL = blob => { rawBlob = blob; return recoveryURL.call(recoveryWin.URL, blob); };
+    recoveryWin.HTMLAnchorElement.prototype.click = function() {};
+    recoveryDoc.querySelector('#downloadSavedDataButton').click();
+  } finally {
+    recoveryWin.URL.createObjectURL = recoveryURL;
+    recoveryWin.HTMLAnchorElement.prototype.click = recoveryClick;
+  }
+  assert(JSON.parse(await rawBlob.text()).raw === damagedSave, 'Recovery download changed original saved data');
+  recoveryDoc.querySelector('#resumeAutosaveButton').click();
+  await until(() => recoveryDoc.querySelector('#resumeAutosaveButton').hidden, 'Autosave did not resume');
+  assert(JSON.parse(window.cetaceaTestStorage.get('cetacea.web.work.v1')).recoveryData === damagedSave, 'Resuming discarded original data');
+  frame.srcdoc = frame.srcdoc;
+  await until(() => frame.contentDocument !== recoveryDoc
+    && frame.contentDocument?.querySelector('#accepted')?.textContent.includes('theorem homework'), 'Recovered work did not survive reload');
+  assert(!frame.contentDocument.querySelector('#downloadSavedDataButton').hidden, 'Reload lost original-data download');
+  pass('damaged saves expose intact project checkpoints and preserve original data through download, resume and reload');
+  const firstTab = frame.contentDocument;
+  const secondFrame = document.createElement('iframe');
+  secondFrame.title = 'Concurrent editor under test';
+  document.body.append(secondFrame);
+  secondFrame.srcdoc = frame.srcdoc;
+  try {
+    await until(() => secondFrame.contentDocument?.querySelector('#accepted')?.textContent.includes('theorem homework'), 'Second editor did not load shared work');
+    const secondTab = secondFrame.contentDocument;
+    const firstSource = 'theorem first_tab : True := by\n  trivial\n';
+    const secondSource = 'theorem second_tab : True := by\n  trivial\n';
+    for (const [tab, source] of [[firstTab, firstSource], [secondTab, secondSource]]) {
+      const input = tab.querySelector('#sourceEditor');
+      input.value = source;
+      input.dispatchEvent(new tab.defaultView.Event('input', {bubbles: true}));
+    }
+    await until(() => [firstTab, secondTab].some(tab => tab.querySelector('#saveStatus').textContent.includes('another tab')), 'Concurrent saves did not report a conflict');
+    const saved = JSON.parse(window.cetaceaTestStorage.get('cetacea.web.work.v1')).source;
+    assert(saved === firstSource || saved === secondSource, 'Concurrent save corrupted the source');
+    const loser = saved === firstSource ? secondTab : firstTab;
+    const losingSource = saved === firstSource ? secondSource : firstSource;
+    assert(loser.querySelector('#sourceEditor').value === losingSource, 'Conflict discarded the unsaved draft');
+    assert(loser.querySelector('#saveStatus').textContent.includes('another tab'), 'Unsaved tab is not identified');
+    await until(() => firstTab.querySelector('#accepted').textContent.includes('theorem first_tab')
+      && secondTab.querySelector('#accepted').textContent.includes('theorem second_tab'), 'Save conflict stopped proof checking');
+    loser.querySelector('#checkpointButton').click();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert(JSON.parse(window.cetaceaTestStorage.get('cetacea.web.work.v1')).source === saved, 'Paused tab overwrote the newer save');
+  } finally { secondFrame.remove(); }
+  pass('concurrent editors serialize saves, preserve both drafts and keep checking after a save conflict');
+  results.textContent += '\nAll browser recovery tests passed.';
+} catch (error) {
+  results.textContent = lines.join('\n') + '\nFAIL: ' + error.message + '\nExplanation state: ' + JSON.stringify({displayed: frame.contentDocument.querySelector('#proofExplanation')?.dataset.theorem, selected: frame.contentDocument.querySelector('#theoremSelect')?.value});
+  throw error;
+} finally {
+  for (const key of storageKeys) window.localStorage.removeItem(storagePrefix + key);
+}
+</script>

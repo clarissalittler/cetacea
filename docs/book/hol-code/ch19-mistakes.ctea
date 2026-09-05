@@ -1,0 +1,30 @@
+-- Chapter 19: double counting and the handshake identity.
+import std/hol/matrix@1 as M
+import std/hol/cardinality@1 as C
+import builtin:std/hol/double_counting.ctea as D
+import builtin:std/hol/weighted_sums.ctea as W
+import builtin:std/hol/handshake.ctea as H
+import builtin:std/hol/sums.ctea as S
+mode constructive
+
+-- Empty columns contribute zero, regardless of the weight function.
+theorem empty_is_one (A B : Type) (w : A -> B -> Nat) (a : A) :
+  M.row_sum(w, a, M.nil) = 1 := by
+  rewrite -> M.row_sum_nil
+  refl
+
+-- Swapping the order of counting preserves the total; it does not double it.
+theorem extra_incidence (A B : Type) (w : A -> B -> Nat) (xs : M.List A) (ys : M.List B) :
+  M.rows_total(w, xs, ys) = succ(M.columns_total(w, xs, ys)) := by
+  exact D.double_counting {A := A; B := B; w := w; xs := xs; ys := ys}
+
+-- A row-sum premise is essential. Arbitrary incidences need not contribute two.
+theorem missing_edge_evidence (Edge Vertex : Type) (incidence : Edge -> Vertex -> Nat)
+  (degree : Vertex -> Nat) (edges : M.List Edge) (vertices : M.List Vertex) :
+  (forall v : Vertex, C.Member(v, vertices) -> degree(v) = M.column_sum(incidence, edges, v)) ->
+  S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by
+  intro degrees
+  apply H.handshake {Edge := Edge; Vertex := Vertex; incidence := incidence; degree := degree; edges := edges; vertices := vertices}
+  intro e
+  intro listed
+  refl

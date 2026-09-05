@@ -74,10 +74,10 @@ Computation handles more than concrete numerals. The additive
 identities hold by pure evaluation, even with a variable in play:
 
 ```text
-theorem add_zero_left_demo (n : Nat) : add(0, n) = n := by
+theorem add_zero_left (n : Nat) : add(0, n) = n := by
   refl
 
-theorem add_zero_right_demo (n : Nat) : add(n, 0) = n := by
+theorem add_zero_right (n : Nat) : add(n, 0) = n := by
   refl
 ```
 
@@ -167,7 +167,7 @@ negative — with equations `sub(0, m) = 0`, `sub(n, 0) = n`, and
 the ladder.)
 
 ```text
-theorem sub_self_demo (n : Nat) : sub(n, n) = 0 := by
+theorem sub_self (n : Nat) : sub(n, n) = 0 := by
   induction n with
   | zero =>
       refl
@@ -197,12 +197,12 @@ claim at `k` is exactly what `ih` hands you for free.
 
 ## 9.7 Commutativity: the real work
 
-Now the opening claim, for real. This proof is `add_comm` in
-`std/nat.ctea`; here it is with a `_demo` name, since the prelude
-already owns the real one:
+Now the opening claim, for real. This proof is `nat.add_comm` in
+`std/nat.ctea`. The qualified prelude keeps that library theorem under
+`nat.add_comm`, so our own proof can use the short name `add_comm`:
 
 ```text
-theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
+theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
   induction n with
   | zero =>
       simp
@@ -327,15 +327,15 @@ the skill is telling them apart.
   closes with `simp` then `trivial` (recall `le(0, m)` computes to
   `True`).
 - **Exercise 9.3** `sub(add(n, m), n) = m` — adding then subtracting
-  cancels. Pure `sub_self_demo` energy.
+  cancels. Pure `sub_self` energy.
 - **Exercise 9.4** `le(n, add(n, m))` — a part is at most the whole.
 - **Exercise 9.5** `add(k, add(n, m)) = add(k, add(m, n))` — no
-  induction: rewrite with the library's `add_comm`, instantiated as
-  `add_comm {n := m; m := n}` so it says exactly `add(m, n) = add(n, m)`.
+  induction: rewrite with the library's `nat.add_comm`, instantiated as
+  `nat.add_comm {n := m; m := n}` so it says exactly `add(m, n) = add(n, m)`.
 - **Exercise 9.6 (challenge)** associativity:
-  `add(add(n, m), p) = add(n, add(m, p))`. It's `add_assoc` in
+  `add(add(n, m), p) = add(n, add(m, p))`. It's `nat.add_assoc` in
   `std/nat.ctea` — write your own by induction on `n` before peeking.
-  (Yes, `exact add_assoc` would "work." You'd be cheating yourself out
+  (Yes, `exact nat.add_assoc` would "work." You'd be cheating yourself out
   of the second-best induction proof in the book.)
 
 Solutions: [`code/ch09-solutions.ctea`](code/ch09-solutions.ctea).

@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch04-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -47,7 +47,7 @@ theorem exists_weaken
       exact hw.left
 
 -- Section 4.5: the two rule pairs working together.
-theorem exists_mono_demo
+theorem exists_mono
   : (forall x : Person, Happy(x) -> Rich(x))
     -> (exists x : Person, Happy(x))
     -> exists x : Person, Rich(x) := by
@@ -96,4 +96,4 @@ theorem use_the_library
   : (forall x : Person, Happy(x) -> Rich(x))
     -> (forall x : Person, Happy(x))
     -> forall x : Person, Rich(x) := by
-  exact forall_mono {A := Person; P := Happy; Q := Rich}
+  exact fol.forall_mono {A := Person; P := Happy; Q := Rich}

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, hol]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -33,6 +34,14 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test browser checker lifecycle
+        run: node --test web/tests/*.test.mjs
+
       - name: Run tests
         run: cargo test
 
@@ -41,6 +50,9 @@ jobs:
 
       - name: Build the Wasm module
         run: cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
+
+      - name: Test bounded checker process runner
+        run: python3 scripts/test_run_limited.py
 
       - name: Check Cetacea corpus
         run: scripts/check_all.sh
@@ -54,5 +66,14 @@ jobs:
       - name: Check kernel dependency boundary
         run: python3 scripts/check_kernel_boundary.py
 
+      - name: Verify browser assignment fixtures against native grading
+        run: python3 scripts/browser_assignment_parity.py --check
+
       - name: Verify bundled browser examples are current
         run: python3 scripts/build_web_examples.py --check
+
+      - name: Test reproducible web packaging
+        run: python3 scripts/test_build_web.py
+
+      - name: Build identified web distribution after checks
+        run: python3 scripts/build_web.py --output target/web-distribution

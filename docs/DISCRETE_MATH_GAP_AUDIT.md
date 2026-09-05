@@ -1,5 +1,19 @@
 # Cetacea and an Undergraduate Discrete-Mathematics Sequence
 
+This is the original gap-audit snapshot and implementation proposal. Its test
+counts, coverage table and phase descriptions record the state reviewed then.
+For current status, use [STUDENT_READINESS.md](STUDENT_READINESS.md). Since this
+audit, term/hypothesis reversion, imported polymorphic-list recursion,
+browser projects and assignment enforcement, finite sums through Chapter 17,
+and a closed-set reachability API have landed. Constructive overlapping-union
+witnesses now follow from explicit membership decisions; see
+[CONSTRUCTIVE_UNIONS.md](CONSTRUCTIVE_UNIONS.md). Explicit path lists now have a
+public package and a source-written concatenation proof; see
+[REACHABILITY.md](REACHABILITY.md). The handshake theorem, executable union
+operations and a complete discrete-mathematics sequence remain open.
+Historical statements below such as "no hypothesis generalization" or
+"browser manifest enforcement remains" are not current limitations.
+
 ## Audit summary
 
 Cetacea has substantially achieved the narrower goal in the original design
@@ -88,7 +102,7 @@ At the time of the audit:
 - Propositional proof systems, quantifiers, equality, set algebra, relation
   properties, and introductory induction are a particularly good fit.
 
-## Curriculum coverage
+## Curriculum coverage at the original audit
 
 | Area | Current state | Main gap |
 |---|---|---|

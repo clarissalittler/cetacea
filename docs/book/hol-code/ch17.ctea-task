@@ -1,0 +1,7 @@
+{
+  "format": "cetacea-assignment",
+  "version": 1,
+  "path": "docs/book/hol-code/ch17-solutions.ctea-assignment",
+  "source": "version = 1\nprofile = \"fol+induction\"\nallow_classical = false\nallow_extensionality = false\nallow_choice = false\nallow_new_axioms = false\nallow_incomplete = false\nallowed_imports = [\"builtin:std/hol/sums.ctea\", \"builtin:std/nat.ctea\", \"std/hol/list@1\"]\nrequired_imports = [\"builtin:std/hol/sums.ctea\", \"std/hol/list@1\"]\nallowed_axioms = []\n\nrequired_theorem.ex17_1 = 'S.sum(std/hol/list@1.cons(3, std/hol/list@1.cons(0, std/hol/list@1.cons(3, std/hol/list@1.nil)))) = 6'\nrequired_theorem.ex17_2 = '(?0 : std/hol/list@1.List Nat) (?1 : Nat) : S.sum(?0) = ?1 -> S.sum(std/hol/list@1.cons(4, ?0)) = add(4, ?1)'\nrequired_theorem.ex17_3 = '(?0 : std/hol/list@1.List Nat) (?1 : std/hol/list@1.List Nat) (?2 : Nat) (?3 : Nat) : S.sum(?0) = ?2 -> S.sum(?1) = ?3 -> S.sum(std/hol/list@1.append(?0, ?1)) = add(?2, ?3)'\nrequired_theorem.ex17_4 = '(?0 : std/hol/list@1.List Nat) (?1 : std/hol/list@1.List Nat) (?2 : std/hol/list@1.List Nat) : S.sum(std/hol/list@1.append(std/hol/list@1.append(?0, ?1), ?2)) = add(S.sum(?0), add(S.sum(?1), S.sum(?2)))'\n",
+  "files": []
+}

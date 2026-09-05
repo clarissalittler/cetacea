@@ -15,7 +15,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,14 +36,8 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
-      - name: Build WebAssembly checker
-        run: cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
-
-      - name: Assemble site
-        run: |
-          mkdir -p site/pkg
-          cp -r web/. site/
-          cp target/wasm32-unknown-unknown/release/cetacea_wasm.wasm site/pkg/
+      - name: Build identified web distribution
+        run: python3 scripts/build_web.py --output site
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

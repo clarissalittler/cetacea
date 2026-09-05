@@ -230,6 +230,24 @@ impl<'a> CompatibilityLowerer<'a> {
         })
     }
 
+    // A nested binder may shadow a surface name. De Bruijn indices still
+    // distinguish it from the outer parameter; root declarations stay unique.
+    pub(crate) fn bind_scoped_term(
+        &mut self,
+        name: String,
+        ty: CoreType,
+    ) -> Result<(), LoweringError> {
+        self.require_first_order_type(&ty, "legacy term binder")?;
+        self.types.validate(&ty)?;
+        self.bindings.push(LocalBinding {
+            name,
+            ty: ty.clone(),
+            parameter_types: Vec::new(),
+            result_type: ty,
+        });
+        Ok(())
+    }
+
     pub fn bind_proposition_parameter(
         &mut self,
         name: impl Into<String>,

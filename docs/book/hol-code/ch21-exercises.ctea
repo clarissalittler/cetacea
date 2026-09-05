@@ -1,0 +1,28 @@
+-- Replace every sorry, keeping theorem names and statements.
+-- Chapter 21: recurrence equations and induction.
+import builtin:std/hol/recurrences.ctea as R
+import builtin:std/nat.ctea as N
+mode constructive
+
+-- Specialize a general closed form at four ticks.
+theorem ex21_1 (f : Nat -> Nat) :
+  f(0) = 2 ->
+  (forall n : Nat, f(succ(n)) = add(3, f(n))) -> f(4) = 14 := by
+  sorry
+
+theorem ex21_2 (a d n : Nat) :
+  add(a, mul(succ(n), d)) = add(d, add(a, mul(n, d))) := by
+  sorry
+
+theorem ex21_3 (f : Nat -> Nat) (a d : Nat) :
+  f(0) = a ->
+  (forall n : Nat, f(succ(n)) = add(d, f(n))) ->
+  forall n : Nat, f(n) = add(a, mul(n, d)) := by
+  sorry
+
+theorem ex21_4 (A : Type) (f g : Nat -> A) (step : Nat -> A -> A) :
+  f(0) = g(0) ->
+  (forall n : Nat, f(succ(n)) = step(n, f(n))) ->
+  (forall n : Nat, g(succ(n)) = step(n, g(n))) ->
+  forall n : Nat, f(n) = g(n) := by
+  sorry

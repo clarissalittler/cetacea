@@ -1,0 +1,116 @@
+-- Two endpoints contribute two, even when they occupy the same vertex.
+import builtin:std/hol/endpoint_sums.ctea as E
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+import builtin:std/hol/handshake.ctea as H
+import std/hol/matrix@1 as M
+mode constructive
+
+data Vertex
+| home
+| away
+
+def vertices : C.List Vertex := C.cons(home, C.cons(away, C.nil))
+
+defrec home_end (v : Vertex) : Nat
+| home => 1
+| away => 0
+
+defrec away_end (v : Vertex) : Nat
+| home => 0
+| away => 1
+
+defrec bridge_incidence (v : Vertex) : Nat
+| home => 1
+| away => 1
+
+defrec loop_incidence (v : Vertex) : Nat
+| home => 2
+| away => 0
+
+theorem ordinary_edge_total : S.sum(C.map(bridge_incidence, vertices)) = 2 := by
+  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := away_end; incidence := bridge_incidence; a := home; b := away; vertices := vertices}
+  -- Duplicate-free enumeration and both endpoints present.
+  finite
+  finite
+  finite
+  -- Each indicator is one at its endpoint.
+  finite
+  finite
+  -- It is zero elsewhere; incidence adds the two indicators.
+  finite
+  finite
+  finite
+
+theorem loop_edge_total : S.sum(C.map(loop_incidence, vertices)) = 2 := by
+  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := loop_incidence; a := home; b := home; vertices := vertices}
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+
+-- Two bridge occurrences and a loop at home.
+data Edge
+| bridge
+| loop
+
+defrec incidence (e : Edge) (v : Vertex) : Nat
+| bridge => bridge_incidence(v)
+| loop => loop_incidence(v)
+
+def edges : M.List Edge := M.cons(bridge, M.cons(bridge, M.cons(loop, M.nil)))
+
+defrec degree (v : Vertex) : Nat
+| home => 4
+| away => 2
+
+theorem edge_total (e : Edge) : M.row_sum(incidence, e, vertices) = 2 := by
+  induction e with
+  | bridge =>
+      have row : M.row_sum(incidence, bridge, vertices) = S.sum(C.map(bridge_incidence, vertices)) := by
+        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := bridge; f := bridge_incidence; ys := vertices}
+        finite
+      rewrite -> row
+      exact ordinary_edge_total
+  | loop =>
+      have row : M.row_sum(incidence, loop, vertices) = S.sum(C.map(loop_incidence, vertices)) := by
+        apply H.row_as_sum {A := Edge; B := Vertex; w := incidence; a := loop; f := loop_incidence; ys := vertices}
+        finite
+      rewrite -> row
+      exact loop_edge_total
+
+theorem degree_counts (v : Vertex) : degree(v) = M.column_sum(incidence, edges, v) := by
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_cons
+  rewrite -> M.column_sum_nil
+  induction v with
+  | home =>
+      refl
+  | away =>
+      refl
+
+theorem handshake_total : S.sum(C.map(degree, vertices)) = mul(C.length(edges), 2) := by
+  apply H.handshake {Edge := Edge; Vertex := Vertex; incidence := incidence; degree := degree; edges := edges; vertices := vertices}
+  intro e
+  intro listed
+  exact edge_total e
+  intro v
+  intro listed
+  exact degree_counts v
+
+theorem edge_count : C.length(edges) = 3 := by
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_cons
+  rewrite -> C.length_nil
+  refl
+
+theorem six_incidences : S.sum(C.map(degree, vertices)) = 6 := by
+  rewrite -> handshake_total
+  rewrite all -> edge_count
+  refl

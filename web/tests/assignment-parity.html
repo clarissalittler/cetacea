@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cetacea assignment grading parity</title>
+<h1>Browser/native assignment grading parity</h1>
+<p>Checks the release Wasm through the production worker against native CLI results. Student storage is untouched.</p>
+<pre id="results" role="status">Running…</pre>
+<script type="module">
+import {CheckerClient} from '../checker-client.mjs';
+const output = document.querySelector('#results');
+const client = new CheckerClient();
+const lines = [];
+try {
+  const response = await fetch(`./assignment-parity.json?run=${Date.now()}`, {cache: 'no-store'});
+  if (!response.ok) throw new Error(`Fixture load failed: ${response.status}`);
+  const cases = await response.json();
+  for (const fixture of cases) {
+    const result = await client.run('project', [fixture.project, 'check', {assignment: fixture.assignment}]);
+    const violations = [...new Set(result.assignment.violations.map(v => JSON.stringify([v.declaration, v.kind])))].map(v => JSON.parse(v));
+    const sort = entries => entries.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+    const actual = {accepted: result.assignment.accepted, certified: result.hol_certified, violations: sort(violations)};
+    if (JSON.stringify(actual) !== JSON.stringify(fixture.expected)) {
+      throw new Error(`${fixture.name}\nExpected ${JSON.stringify(fixture.expected)}\nActual ${JSON.stringify(actual)}`);
+    }
+    lines.push(`PASS: ${fixture.name}`);
+    output.textContent = lines.join('\n');
+  }
+  output.textContent += `\nAll ${cases.length} browser/native grading cases passed.`;
+} catch (error) {
+  output.textContent = lines.join('\n') + '\nFAIL: ' + error.message;
+} finally { client.stop(); }
+</script>

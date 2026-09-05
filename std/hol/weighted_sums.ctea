@@ -1,0 +1,139 @@
+-- Checked finite sums of contributions indexed by arbitrary list elements.
+import sums.ctea as S
+import std/hol/cardinality@1 as C
+import ../nat.ctea as N
+mode constructive
+
+-- Rearrange four contributions while preserving their multiplicities.
+theorem add_interchange (a b c d : Nat) :
+  add(add(a, b), add(c, d)) = add(add(a, c), add(b, d)) := by
+  rewrite -> N.add_assoc
+  rewrite <- N.add_assoc {n := b; m := c; k := d}
+  rewrite -> N.add_comm {n := b; m := c}
+  rewrite -> N.add_assoc {n := c; m := b; k := d}
+  rewrite <- N.add_assoc
+  refl
+
+-- A head is in its cons list; every tail member is in the same list.
+theorem member_head (A : Type) (x : A) (t : C.List A) :
+  C.Member(x, C.cons(x, t)) := by
+  apply (C.member_cons {A := A; x := x; h := x; t := t}).right
+  left
+  refl
+
+theorem member_tail (A : Type) (x y : A) (t : C.List A) :
+  C.Member(y, t) -> C.Member(y, C.cons(x, t)) := by
+  intro member
+  apply (C.member_cons {A := A; x := y; h := x; t := t}).right
+  right
+  exact member
+
+-- Only listed items need to satisfy the contribution equation.
+theorem sum_map_add_on
+  (A : Type) (f g h : A -> Nat) (xs : C.List A) :
+  (forall x : A, C.Member(x, xs) -> h(x) = add(f(x), g(x))) ->
+  S.sum(C.map(h, xs)) = add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) := by
+  induction xs with
+  | nil =>
+      intro pointwise
+      rewrite -> C.map_nil
+      rewrite -> C.map_nil
+      rewrite -> C.map_nil
+      simp
+      refl
+  | cons x t ih =>
+      intro pointwise
+      have head_member : C.Member(x, C.cons(x, t)) := member_head
+      have head : h(x) = add(f(x), g(x)) := pointwise x head_member
+      have on_tail : forall y : A, C.Member(y, t) -> h(y) = add(f(y), g(y)) := by
+        intro y
+        intro member
+        have in_list : C.Member(y, C.cons(x, t)) := member_tail {A := A; x := x; y := y; t := t} member
+        exact pointwise y in_list
+      have tails : S.sum(C.map(h, t)) = add(S.sum(C.map(f, t)), S.sum(C.map(g, t))) := ih on_tail
+      rewrite -> C.map_cons
+      rewrite -> C.map_cons
+      rewrite -> C.map_cons
+      rewrite -> S.sum_cons
+      rewrite -> head
+      rewrite -> tails
+      exact add_interchange
+
+-- A constant contribution is required only on this enumeration.
+theorem sum_map_constant_on
+  (A : Type) (f : A -> Nat) (xs : C.List A) (k : Nat) :
+  (forall x : A, C.Member(x, xs) -> f(x) = k) ->
+  S.sum(C.map(f, xs)) = mul(C.length(xs), k) := by
+  induction xs with
+  | nil =>
+      intro constant
+      rewrite -> C.map_nil
+      rewrite -> C.length_nil
+      simp
+      refl
+  | cons x t ih =>
+      intro constant
+      have head_member : C.Member(x, C.cons(x, t)) := member_head
+      have head : f(x) = k := constant x head_member
+      have on_tail : forall y : A, C.Member(y, t) -> f(y) = k := by
+        intro y
+        intro member
+        have in_list : C.Member(y, C.cons(x, t)) := member_tail {A := A; x := x; y := y; t := t} member
+        exact constant y in_list
+      have tail : S.sum(C.map(f, t)) = mul(C.length(t), k) := ih on_tail
+      rewrite -> C.map_cons
+      rewrite -> S.sum_cons
+      rewrite -> head
+      rewrite -> tail
+      rewrite -> C.length_cons
+      simp
+      refl
+
+-- Changing contributions outside the list cannot change its total.
+theorem sum_map_congr_on
+  (A : Type) (f g : A -> Nat) (xs : C.List A) :
+  (forall x : A, C.Member(x, xs) -> f(x) = g(x)) ->
+  S.sum(C.map(f, xs)) = S.sum(C.map(g, xs)) := by
+  induction xs with
+  | nil =>
+      intro same
+      rewrite -> C.map_nil
+      rewrite -> C.map_nil
+      refl
+  | cons x t ih =>
+      intro same
+      have head_member : C.Member(x, C.cons(x, t)) := member_head
+      have head : f(x) = g(x) := same x head_member
+      have on_tail : forall y : A, C.Member(y, t) -> f(y) = g(y) := by
+        intro y
+        intro member
+        have in_list : C.Member(y, C.cons(x, t)) := member_tail {A := A; x := x; y := y; t := t} member
+        exact same y in_list
+      have tail : S.sum(C.map(f, t)) = S.sum(C.map(g, t)) := ih on_tail
+      rewrite -> C.map_cons
+      rewrite -> C.map_cons
+      rewrite -> S.sum_cons
+      rewrite -> head
+      rewrite -> tail
+      refl
+
+-- The original global-premise interfaces remain convenient wrappers.
+theorem sum_map_add
+  (A : Type) (f g h : A -> Nat) (xs : C.List A) :
+  (forall x : A, h(x) = add(f(x), g(x))) ->
+  S.sum(C.map(h, xs)) = add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) := by
+  intro pointwise
+  apply sum_map_add_on {A := A; f := f; g := g; h := h; xs := xs}
+  intro x
+  intro member
+  exact pointwise x
+
+theorem sum_map_constant
+  (A : Type) (f : A -> Nat) (xs : C.List A) (k : Nat) :
+  (forall x : A, f(x) = k) ->
+  S.sum(C.map(f, xs)) = mul(C.length(xs), k) := by
+  intro constant
+  apply sum_map_constant_on {A := A; f := f; xs := xs; k := k}
+  intro x
+  intro member
+  exact constant x

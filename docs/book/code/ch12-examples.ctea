@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch12-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -11,13 +11,13 @@ mode constructive
 -- Chapter 9's sub_self_demo, proved with the stronger principle: the
 -- step goal hands us P(m) for EVERY m <= k, and we use it at m = k.
 theorem sub_self_strong (n : Nat) : sub(n, n) = 0 := by
-  apply strong_induction {P := fun m : Nat => sub(m, m) = 0; n := n}
+  apply nat.strong_induction {P := fun m : Nat => sub(m, m) = 0; n := n}
   refl
   intro k
   intro hk
   simp
   apply hk
-  exact le_refl
+  exact nat.le_refl
 
 -- Section 12.4: two order lemmas, by ordinary Chapter 9 induction.
 -- Neither is in std/nat.ctea, so we prove them here.
@@ -30,7 +30,7 @@ theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
       simp
       exact ih
 
-theorem pred_le (n : Nat) : le(pred(n), n) := by
+theorem pred_le (n : Nat) : le(nat.pred(n), n) := by
   induction n with
   | zero =>
       simp
@@ -45,10 +45,10 @@ theorem pred_le (n : Nat) : le(pred(n), n) := by
 func bulb : Nat -> Nat
 
 axiom bulb_zero : bulb(0) = 0
-axiom bulb_step (k : Nat) : bulb(succ(k)) = bulb(pred(k))
+axiom bulb_step (k : Nat) : bulb(succ(k)) = bulb(nat.pred(k))
 
 theorem all_bulbs_off (n : Nat) : bulb(n) = 0 := by
-  apply strong_induction {P := fun m : Nat => bulb(m) = 0; n := n}
+  apply nat.strong_induction {P := fun m : Nat => bulb(m) = 0; n := n}
   exact bulb_zero
   intro k
   intro hk

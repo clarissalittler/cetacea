@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch05-solutions.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -29,7 +29,7 @@ theorem ex5_2 (n : Nat) : add(n, 2) = succ(succ(n)) := by
 -- Exercise 5.3
 theorem ex5_3 : superman = clark -> clark = superman := by
   intro h
-  exact eq_symm h
+  exact eq.eq_symm h
 
 -- Exercise 5.4. The one-line finish `exact eq_trans h1 h2` also works;
 -- the have makes the waypoint visible.
@@ -37,7 +37,7 @@ theorem ex5_4
   : clark = superman -> superman = kal_el -> clark = kal_el := by
   intro h1
   intro h2
-  have h3 : clark = kal_el := eq_trans h1 h2
+  have h3 : clark = kal_el := eq.eq_trans h1 h2
   exact h3
 
 -- Exercise 5.5

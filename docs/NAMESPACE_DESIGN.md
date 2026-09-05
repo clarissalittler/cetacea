@@ -1,9 +1,13 @@
 # Namespace Design Note
 
-Cetacea currently has one global top-level environment. Imports load every
-declaration into that environment, so course files use suffixes such as
-`add_comm_demo` to avoid colliding with library names. This note sketches the
-design needed before implementing namespaces and qualified imports.
+The namespace and import-alias surface described here is implemented. Teaching
+files now use `std/qualified_prelude.ctea`, leaving short names available for
+student declarations. Unaliased imports remain supported for compatibility.
+The internal-model sections below preserve the original design sketch; the
+current implementation stores canonical names as strings and resolves them
+through environment/context helpers. See [USAGE.md](USAGE.md) for the current
+syntax and [CLASSROOM_NAMESPACE_MIGRATION.md](CLASSROOM_NAMESPACE_MIGRATION.md)
+for migration evidence.
 
 ## Goals
 
@@ -165,11 +169,11 @@ subject to the same ambiguity rules.
 6. Done: add import aliases (`import path.ctea as alias`) that check the
    imported file as declarations under the alias namespace while leaving
    unaliased imports compatible.
-7. Started: add `std/qualified_prelude.ctea`, which imports the current
+7. Done: add `std/qualified_prelude.ctea`, which imports the current
    standard-library modules under aliases (`nat.add_comm`, `list.length`,
    `modular.modeq_refl`, etc.) while keeping the legacy prelude unchanged.
-8. Update book and course examples to use real qualified names instead of
-   `_demo` suffixes when the imported library owns the short theorem name.
+8. Done: migrate book, course, and tutorial sources to the qualified prelude;
+   remove collision-driven `_demo` suffixes while qualifying library calls.
 
 ## Acceptance Tests
 

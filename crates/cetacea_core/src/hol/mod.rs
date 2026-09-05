@@ -12,6 +12,7 @@ pub mod declarations;
 pub mod finite_library;
 pub mod fragments;
 pub mod graph_library;
+pub(crate) mod graph_surface;
 mod h35_cardinality;
 pub mod h3_examples;
 pub mod inductive;
@@ -19,6 +20,8 @@ pub mod library;
 pub mod library_registry;
 mod linked_smoke;
 pub mod lowering;
+pub mod matrix_library;
+pub(crate) mod matrix_surface;
 pub mod prelude;
 pub mod proofs;
 pub mod recursion;
@@ -36,7 +39,9 @@ pub use fragments::{
     EvidenceStatus, FragmentError, FragmentMetadata, PolicyViolation, ProofFeature, ProofReceipt,
     ReceiptPolicy, StatementFragment, TeachingProfile,
 };
-pub use graph_library::{GraphLibrary, GraphLibraryNames, PathConcatenationTheorem};
+pub use graph_library::{
+    GraphLibrary, GraphLibraryNames, PathConcatenationTheorem, RelationPathLibrary,
+};
 pub use h35_cardinality::{
     install_cardinality_transport, install_cardinality_transport_named,
     CardinalityTransportLibrary, CardinalityTransportNames,
@@ -51,11 +56,12 @@ pub use inductive::{
 };
 pub use library::{ListLength, ListLibrary, ListLibraryNames};
 pub use library_registry::{
-    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary,
-    InstalledLibraryPackage, InstalledListLibrary, LibraryDeclaration, LibraryDeclarationKind,
-    LibraryPackageId, LibraryPackageProvenance, LibraryPackageRecord, LibraryPackageSource,
-    BUILTIN_CARDINALITY_V1_MODULE, BUILTIN_CARDINALITY_V1_NAMESPACE, BUILTIN_FINITE_V1_MODULE,
-    BUILTIN_FINITE_V1_NAMESPACE, BUILTIN_LIST_V1_MODULE, BUILTIN_LIST_V1_NAMESPACE,
+    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary, InstalledGraphLibrary,
+    InstalledLibraryPackage, InstalledListLibrary, InstalledMatrixLibrary, LibraryDeclaration,
+    LibraryDeclarationKind, LibraryPackageId, LibraryPackageProvenance, LibraryPackageRecord,
+    LibraryPackageSource, BUILTIN_CARDINALITY_V1_MODULE, BUILTIN_CARDINALITY_V1_NAMESPACE,
+    BUILTIN_FINITE_V1_MODULE, BUILTIN_FINITE_V1_NAMESPACE, BUILTIN_LIST_V1_MODULE,
+    BUILTIN_LIST_V1_NAMESPACE,
 };
 pub use linked_smoke::{run_linked_hol_smoke, LinkedHolSmokeReport};
 pub use lowering::{CompatibilityLowerer, LoweringError};

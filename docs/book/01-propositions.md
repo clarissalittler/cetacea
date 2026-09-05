@@ -230,7 +230,7 @@ you conclude the conjunction `P /\ Q`? Of course — but now let's see
 what "of course" looks like as checkable steps.
 
 ```text
-theorem and_intro_demo (P Q : Prop) : P -> Q -> P /\ Q := by
+theorem and_intro (P Q : Prop) : P -> Q -> P /\ Q := by
   intro hp
   intro hq
   split

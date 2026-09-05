@@ -7,7 +7,7 @@ use super::types::{CoreType, TypeError, TypeParameter, TypeSignature};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ConstantId(pub u32);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub enum CoreTerm {
     /// A de Bruijn index: zero is the nearest enclosing binder.
     Bound(u32),
@@ -76,6 +76,182 @@ pub enum CoreTerm {
         domain: CoreType,
         body: Box<CoreTerm>,
     },
+}
+
+// Terms can contain long unary numeral spines. Clone on the heap so copying
+// an already checked term does not require one host stack frame per node.
+impl Clone for CoreTerm {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Bound(index) => return Self::Bound(*index),
+            Self::Constant(id) => return Self::Constant(*id),
+            Self::Truth => return Self::Truth,
+            Self::Falsity => return Self::Falsity,
+            _ => {}
+        }
+        let mut tasks = vec![(self, false)];
+        let mut values: Vec<CoreTerm> = Vec::new();
+        while let Some((term, finish)) = tasks.pop() {
+            if !finish {
+                tasks.push((term, true));
+                match term {
+                    Self::Pair(left, right)
+                    | Self::SetUnion(left, right)
+                    | Self::SetIntersection(left, right)
+                    | Self::SetDifference(left, right)
+                    | Self::SetProduct(left, right)
+                    | Self::And(left, right)
+                    | Self::Or(left, right)
+                    | Self::Implies(left, right) => {
+                        tasks.push((right, false));
+                        tasks.push((left, false));
+                    }
+                    Self::Apply { function, argument } => {
+                        tasks.push((argument, false));
+                        tasks.push((function, false));
+                    }
+                    Self::Membership { element, set, .. } => {
+                        tasks.push((set, false));
+                        tasks.push((element, false));
+                    }
+                    Self::Equality { left, right, .. } | Self::Subset { left, right, .. } => {
+                        tasks.push((right, false));
+                        tasks.push((left, false));
+                    }
+                    Self::First(body)
+                    | Self::Second(body)
+                    | Self::SingletonSet(body)
+                    | Self::SetComplement(body)
+                    | Self::Lambda { body, .. }
+                    | Self::SetBuilder { body, .. }
+                    | Self::Forall { body, .. }
+                    | Self::Exists { body, .. } => tasks.push((body, false)),
+                    Self::Powerset { set, .. } => tasks.push((set, false)),
+                    _ => {}
+                }
+                continue;
+            }
+            let mut pop = || Box::new(values.pop().expect("cloned child"));
+            let cloned = match term {
+                Self::Bound(index) => Self::Bound(*index),
+                Self::Constant(id) => Self::Constant(*id),
+                Self::TypeApplication {
+                    constant,
+                    arguments,
+                } => Self::TypeApplication {
+                    constant: *constant,
+                    arguments: arguments.clone(),
+                },
+                Self::Truth => Self::Truth,
+                Self::Falsity => Self::Falsity,
+                Self::Pair(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::Pair(left, right)
+                }
+                Self::SetUnion(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::SetUnion(left, right)
+                }
+                Self::SetIntersection(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::SetIntersection(left, right)
+                }
+                Self::SetDifference(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::SetDifference(left, right)
+                }
+                Self::SetProduct(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::SetProduct(left, right)
+                }
+                Self::And(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::And(left, right)
+                }
+                Self::Or(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::Or(left, right)
+                }
+                Self::Implies(..) => {
+                    let right = pop();
+                    let left = pop();
+                    Self::Implies(left, right)
+                }
+                Self::First(..) => Self::First(pop()),
+                Self::Second(..) => Self::Second(pop()),
+                Self::SingletonSet(..) => Self::SingletonSet(pop()),
+                Self::SetComplement(..) => Self::SetComplement(pop()),
+                Self::Lambda { parameter_type, .. } => Self::Lambda {
+                    parameter_type: parameter_type.clone(),
+                    body: pop(),
+                },
+                Self::SetBuilder { element_type, .. } => Self::SetBuilder {
+                    element_type: element_type.clone(),
+                    body: pop(),
+                },
+                Self::Forall { domain, .. } => Self::Forall {
+                    domain: domain.clone(),
+                    body: pop(),
+                },
+                Self::Exists { domain, .. } => Self::Exists {
+                    domain: domain.clone(),
+                    body: pop(),
+                },
+                Self::Powerset { element_type, .. } => Self::Powerset {
+                    element_type: element_type.clone(),
+                    set: pop(),
+                },
+                Self::EmptySet { element_type } => Self::EmptySet {
+                    element_type: element_type.clone(),
+                },
+                Self::UniverseSet { element_type } => Self::UniverseSet {
+                    element_type: element_type.clone(),
+                },
+                Self::Apply { .. } => {
+                    let argument = pop();
+                    let function = pop();
+                    Self::Apply { function, argument }
+                }
+                Self::Membership { element_type, .. } => {
+                    let set = pop();
+                    let element = pop();
+                    Self::Membership {
+                        element_type: element_type.clone(),
+                        element,
+                        set,
+                    }
+                }
+                Self::Subset { element_type, .. } => {
+                    let right = pop();
+                    let left = pop();
+                    Self::Subset {
+                        element_type: element_type.clone(),
+                        left,
+                        right,
+                    }
+                }
+                Self::Equality { ty, .. } => {
+                    let right = pop();
+                    let left = pop();
+                    Self::Equality {
+                        ty: ty.clone(),
+                        left,
+                        right,
+                    }
+                }
+            };
+            values.push(cloned);
+        }
+        debug_assert_eq!(values.len(), 1);
+        values.pop().expect("cloned term")
+    }
 }
 
 impl CoreTerm {
@@ -502,12 +678,13 @@ impl TermContext {
 
 /// Resource limits for the term layer.
 ///
-/// Every traversal in this module is recursive, and definitional equality
+/// Some traversals in this module are recursive, and definitional equality
 /// with beta reduction is non-elementary, so without limits a small hostile
 /// term can exhaust the native or Wasm stack (an abort, not an error) or run
 /// for an unbounded time. These counters turn both into ordinary `TermError`
-/// rejections. They bound resources only; they never change which terms are
-/// judged equal or well typed.
+/// rejections. The checker additionally charges these traversals against its
+/// aggregate work allowance. Limits reject unfinished computations without
+/// introducing new equalities or typing rules.
 ///
 /// `MAX_TERM_DEPTH` must stay comfortably below what the host stack can
 /// carry: the CLI checks on a 256 MiB thread and the Wasm build links with a
@@ -528,6 +705,7 @@ struct DepthGuard;
 
 impl DepthGuard {
     fn enter(what: &str) -> Result<Self, TermError> {
+        crate::work_budget::spend().map_err(TermError::new)?;
         TERM_DEPTH.with(|depth| {
             let current = depth.get();
             if current >= MAX_TERM_DEPTH {
@@ -555,6 +733,7 @@ fn reset_normalization_budget() {
 }
 
 fn spend_normalization_step() -> Result<(), TermError> {
+    crate::work_budget::spend().map_err(TermError::new)?;
     NORMALIZATION_STEPS.with(|steps| {
         let used = steps.get() + 1;
         if used > MAX_NORMALIZATION_STEPS {
@@ -574,6 +753,36 @@ pub fn infer_type(
     term: &CoreTerm,
 ) -> Result<CoreType, TermError> {
     let _depth = DepthGuard::enter("term")?;
+    let mut functions = Vec::new();
+    let mut guards = Vec::new();
+    let mut base = term;
+    while let CoreTerm::Apply { function, argument } = base {
+        if !matches!(
+            function.as_ref(),
+            CoreTerm::Constant(_) | CoreTerm::TypeApplication { .. }
+        ) {
+            break;
+        }
+        functions.push(infer_type(types, constants, context, function)?);
+        guards.push(DepthGuard::enter("term")?);
+        base = argument;
+    }
+    if !functions.is_empty() {
+        let mut argument_type = infer_type(types, constants, context, base)?;
+        for function_type in functions.into_iter().rev() {
+            let CoreType::Arrow(domain, codomain) = function_type else {
+                return Err(TermError::new(format!("application expects a function, but the function position has type `{function_type:?}`")));
+            };
+            if *domain != argument_type {
+                return Err(TermError::new(format!(
+                    "application argument has type `{argument_type:?}`, but expected `{domain:?}`"
+                )));
+            }
+            argument_type = *codomain;
+        }
+        return Ok(argument_type);
+    }
+
     match term {
         CoreTerm::Bound(index) => Ok(context.lookup(*index)?.clone()),
         CoreTerm::Constant(id) => constants.monomorphic_constant_type(*id),
@@ -841,6 +1050,12 @@ pub fn instantiate_binder(
 fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTerm, TermError> {
     let _depth = DepthGuard::enter("normalization")?;
     spend_normalization_step()?;
+    if rigid_application(constants, term).is_some() {
+        return normalize_rigid_applications(constants, term);
+    }
+    if matches!(term, CoreTerm::Apply { .. } | CoreTerm::Lambda { .. }) {
+        return normalize_application_structure(constants, term);
+    }
     match term {
         CoreTerm::Bound(_) | CoreTerm::Truth | CoreTerm::Falsity => Ok(term.clone()),
         CoreTerm::Constant(id) => {
@@ -862,27 +1077,7 @@ fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTer
                 Ok(term.clone())
             }
         }
-        CoreTerm::Lambda {
-            parameter_type,
-            body,
-        } => Ok(CoreTerm::lambda(
-            parameter_type.clone(),
-            normalize_typed(constants, body)?,
-        )),
-        CoreTerm::Apply { function, argument } => {
-            let function = normalize_typed(constants, function)?;
-            let argument = normalize_typed(constants, argument)?;
-            if let CoreTerm::Lambda { body, .. } = function {
-                normalize_typed(constants, &substitute_top(&argument, &body)?)
-            } else {
-                let application = CoreTerm::apply(function, argument);
-                if let Some(reduced) = reduce_structural_application(constants, &application)? {
-                    normalize_typed(constants, &reduced)
-                } else {
-                    Ok(application)
-                }
-            }
-        }
+        CoreTerm::Lambda { .. } | CoreTerm::Apply { .. } => unreachable!("handled above"),
         CoreTerm::Pair(left, right) => Ok(CoreTerm::pair(
             normalize_typed(constants, left)?,
             normalize_typed(constants, right)?,
@@ -989,6 +1184,142 @@ fn normalize_typed(constants: &TermSignature, term: &CoreTerm) -> Result<CoreTer
             normalize_typed(constants, body)?,
         )),
     }
+}
+
+// Applications and lambda bodies form deep recursor computations. Keep their
+// continuations on the heap while retaining the same depth and step guards.
+fn normalize_application_structure(
+    constants: &TermSignature,
+    term: &CoreTerm,
+) -> Result<CoreTerm, TermError> {
+    enum Task {
+        Visit(CoreTerm),
+        Apply,
+        Lambda(CoreType),
+        Rigid(Vec<CoreTerm>),
+        Exit(DepthGuard),
+    }
+    let mut tasks = vec![Task::Visit(term.clone())];
+    let mut values = Vec::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Exit(guard) => drop(guard),
+            Task::Visit(term) => {
+                let guard = DepthGuard::enter("normalization")?;
+                spend_normalization_step()?;
+                tasks.push(Task::Exit(guard));
+                if rigid_application(constants, &term).is_some() {
+                    let mut heads = Vec::new();
+                    let mut base = term;
+                    while rigid_application(constants, &base).is_some() {
+                        spend_normalization_step()?;
+                        spend_normalization_step()?;
+                        let CoreTerm::Apply { function, argument } = base else {
+                            unreachable!()
+                        };
+                        heads.push(*function);
+                        base = *argument;
+                    }
+                    tasks.push(Task::Rigid(heads));
+                    tasks.push(Task::Visit(base));
+                    continue;
+                }
+                match term {
+                    CoreTerm::Apply { function, argument } => {
+                        tasks.push(Task::Apply);
+                        tasks.push(Task::Visit(*argument));
+                        tasks.push(Task::Visit(*function));
+                    }
+                    CoreTerm::Lambda {
+                        parameter_type,
+                        body,
+                    } => {
+                        tasks.push(Task::Lambda(parameter_type));
+                        tasks.push(Task::Visit(*body));
+                    }
+                    other => values.push(normalize_typed(constants, &other)?),
+                }
+            }
+            Task::Rigid(heads) => {
+                let mut base = values.pop().expect("normalized rigid base");
+                for head in heads.into_iter().rev() {
+                    base = CoreTerm::apply(head, base);
+                }
+                values.push(base);
+            }
+            Task::Lambda(parameter_type) => {
+                let body = values.pop().expect("normalized lambda body");
+                values.push(CoreTerm::lambda(parameter_type, body));
+            }
+            Task::Apply => {
+                let argument = values.pop().expect("normalized argument");
+                let function = values.pop().expect("normalized function");
+                let reduced = if let CoreTerm::Lambda { body, .. } = function {
+                    Some(substitute_top(&argument, &body)?)
+                } else {
+                    let application = CoreTerm::apply(function, argument);
+                    if let Some(reduced) = reduce_structural_application(constants, &application)? {
+                        Some(reduced)
+                    } else {
+                        values.push(application);
+                        None
+                    }
+                };
+                if let Some(reduced) = reduced {
+                    // A reduction replaces this application; it does not add
+                    // another enclosing term level. Keep outer guards, but
+                    // release this redex's guard before visiting its reduct.
+                    // Reduction steps remain bounded independently.
+                    let Some(Task::Exit(guard)) = tasks.pop() else {
+                        unreachable!("application continuation owns an exit guard")
+                    };
+                    drop(guard);
+                    tasks.push(Task::Visit(reduced));
+                }
+            }
+        }
+    }
+    debug_assert_eq!(values.len(), 1);
+    Ok(values.pop().expect("normalized application structure"))
+}
+
+/// An opaque constant cannot beta-, delta-, or structurally reduce at its
+/// first argument. This includes successor constructors, whose long chains
+/// otherwise consume a full normalization frame for every unary digit.
+fn rigid_application<'a>(
+    constants: &TermSignature,
+    term: &'a CoreTerm,
+) -> Option<(&'a CoreTerm, &'a CoreTerm)> {
+    let CoreTerm::Apply { function, argument } = term else {
+        return None;
+    };
+    let CoreTerm::Constant(id) = function.as_ref() else {
+        return None;
+    };
+    (constants.transparent_definition(*id).is_none()
+        && !constants.structural_reductions.contains_key(id))
+    .then_some((function, argument))
+}
+
+fn normalize_rigid_applications(
+    constants: &TermSignature,
+    term: &CoreTerm,
+) -> Result<CoreTerm, TermError> {
+    let mut heads = Vec::new();
+    let mut base = term;
+    while let Some((head, argument)) = rigid_application(constants, base) {
+        // Charge both application and constant traversal, including the first
+        // application already charged by the caller (a conservative extra step).
+        spend_normalization_step()?;
+        spend_normalization_step()?;
+        heads.push(head);
+        base = argument;
+    }
+    let mut normalized = normalize_typed(constants, base)?;
+    for head in heads.into_iter().rev() {
+        normalized = CoreTerm::apply(head.clone(), normalized);
+    }
+    Ok(normalized)
 }
 
 fn reduce_set_membership(
@@ -1167,17 +1498,13 @@ fn reduce_structural_application(
             "checked structural reduction has inconsistent binder metadata",
         ));
     }
-    let mut instantiated = substitute_term_types(&arm.body, &type_substitution);
-    for binder_type in &arm.binder_types {
-        instantiated = CoreTerm::lambda(
-            substitute_core_type(binder_type, &type_substitution),
-            instantiated,
-        );
-    }
-    for value in values.iter().rev() {
-        instantiated = CoreTerm::apply(instantiated, value.clone());
-    }
-    Ok(Some(instantiated))
+    let body = substitute_term_types(&arm.body, &type_substitution);
+    // Arm values are nearest-binder first; the shared simultaneous
+    // substitution takes declaration order. Substitute directly instead of
+    // creating administrative lambdas whose bodies and unused arguments would
+    // all be normalized before beta reduction.
+    values.reverse();
+    Ok(Some(instantiate_term_parameters(&body, &values)?))
 }
 
 fn term_application_spine<'a>(
@@ -1671,6 +1998,26 @@ fn substitute_top(argument: &CoreTerm, body: &CoreTerm) -> Result<CoreTerm, Term
 }
 
 fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<CoreTerm, TermError> {
+    let mut heads = Vec::new();
+    let mut base = term;
+    while let CoreTerm::Apply { function, argument } = base {
+        if !matches!(
+            function.as_ref(),
+            CoreTerm::Constant(_) | CoreTerm::TypeApplication { .. }
+        ) {
+            break;
+        }
+        heads.push(function.as_ref());
+        base = argument;
+    }
+    if !heads.is_empty() {
+        let mut substituted = substitute(base, target, replacement)?;
+        for head in heads.into_iter().rev() {
+            substituted = CoreTerm::apply(head.clone(), substituted);
+        }
+        return Ok(substituted);
+    }
+
     let _depth = DepthGuard::enter("substitution")?;
     match term {
         CoreTerm::Bound(index) if *index == target => Ok(replacement.clone()),
@@ -1780,10 +2127,34 @@ fn substitute(term: &CoreTerm, target: u32, replacement: &CoreTerm) -> Result<Co
 
 fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermError> {
     let _depth = DepthGuard::enter("shift")?;
+    if amount == 0 {
+        return Ok(term.clone());
+    }
+    // Constant-headed unary chains contain no variables in their heads.
+    // Shift their base once, then rebuild without one stack frame per digit.
+    let mut heads = Vec::new();
+    let mut base = term;
+    while let CoreTerm::Apply { function, argument } = base {
+        if !matches!(
+            function.as_ref(),
+            CoreTerm::Constant(_) | CoreTerm::TypeApplication { .. }
+        ) {
+            break;
+        }
+        heads.push(function.as_ref());
+        base = argument;
+    }
+    if !heads.is_empty() {
+        let mut shifted = shift(base, amount, cutoff)?;
+        for head in heads.into_iter().rev() {
+            shifted = CoreTerm::apply(head.clone(), shifted);
+        }
+        return Ok(shifted);
+    }
     match term {
         CoreTerm::Bound(index) if *index >= cutoff => {
             let shifted = i64::from(*index) + i64::from(amount);
-            if shifted < 0 || shifted > i64::from(u32::MAX) {
+            if shifted < i64::from(cutoff) || shifted > i64::from(u32::MAX) {
                 return Err(TermError::new("invalid de Bruijn index shift"));
             }
             Ok(CoreTerm::Bound(shifted as u32))
@@ -1886,6 +2257,13 @@ fn shift(term: &CoreTerm, amount: i32, cutoff: u32) -> Result<CoreTerm, TermErro
     }
 }
 
+/// Move a term out of enclosing binders only if it does not refer to them.
+/// The cutoff check in `shift` also prevents capture inside nested binders.
+pub(super) fn shift_out_of_binders(term: &CoreTerm, count: u32) -> Result<CoreTerm, TermError> {
+    let amount = i32::try_from(count).map_err(|_| TermError::new("too many binders"))?;
+    shift(term, -amount, 0)
+}
+
 pub(super) fn shift_under_new_binder(term: &CoreTerm) -> Result<CoreTerm, TermError> {
     shift(term, 1, 0)
 }
@@ -1894,6 +2272,25 @@ pub(super) fn shift_under_new_binder(term: &CoreTerm) -> Result<CoreTerm, TermEr
 mod tests {
     use super::*;
     use crate::hol::types::{TypeConstructorId, TypeParameter};
+
+    #[test]
+    fn outward_shifts_reject_escaping_variables_and_nested_capture() {
+        assert!(shift_out_of_binders(&CoreTerm::Bound(0), 1).is_err());
+        assert!(shift_out_of_binders(&CoreTerm::Bound(1), 2).is_err());
+        assert_eq!(
+            shift_out_of_binders(&CoreTerm::Bound(2), 2).unwrap(),
+            CoreTerm::Bound(0)
+        );
+        let local = CoreTerm::lambda(CoreType::Prop, CoreTerm::Bound(0));
+        assert_eq!(shift_out_of_binders(&local, 1).unwrap(), local);
+        let escaping = CoreTerm::lambda(CoreType::Prop, CoreTerm::Bound(1));
+        assert!(shift_out_of_binders(&escaping, 1).is_err());
+        let outer = CoreTerm::lambda(CoreType::Prop, CoreTerm::Bound(2));
+        assert_eq!(
+            shift_out_of_binders(&outer, 1).unwrap(),
+            CoreTerm::lambda(CoreType::Prop, CoreTerm::Bound(1))
+        );
+    }
 
     fn signatures() -> (TypeSignature, TermSignature, CoreType, ConstantId) {
         let mut types = TypeSignature::new();
@@ -1940,6 +2337,59 @@ mod tests {
                 &CoreTerm::Constant(zero),
             ),
             Ok(true)
+        );
+    }
+
+    #[test]
+    fn long_constant_spines_preserve_types_and_binder_scope() {
+        let (types, mut constants, nat, _) = signatures();
+        let successor = constants
+            .declare(
+                &types,
+                "successor",
+                CoreType::arrow(nat.clone(), nat.clone()),
+            )
+            .unwrap();
+        let wrap = |mut base: CoreTerm| {
+            for _ in 0..729 {
+                base = CoreTerm::apply(CoreTerm::Constant(successor), base);
+            }
+            base
+        };
+        let context = TermContext::new().with_bound(nat.clone());
+        let open = wrap(CoreTerm::Bound(0));
+        assert_eq!(
+            infer_type(&types, &constants, &context, &open).unwrap(),
+            nat.clone()
+        );
+        assert!(infer_type(&types, &constants, &context, &wrap(CoreTerm::Truth)).is_err());
+        assert!(shift_out_of_binders(&open, 1).is_err());
+        let shifted = shift_under_new_binder(&open).unwrap();
+        assert_eq!(shift_out_of_binders(&shifted, 1).unwrap(), open);
+        let captured = CoreTerm::lambda(nat, shifted);
+        assert!(shift_out_of_binders(&captured, 1).is_err());
+    }
+
+    #[test]
+    fn constructor_chains_normalize_under_lambdas_without_recursive_frames() {
+        let (types, mut constants, nat, zero) = signatures();
+        let successor = constants
+            .declare(
+                &types,
+                "successor",
+                CoreType::arrow(nat.clone(), nat.clone()),
+            )
+            .unwrap();
+        let mut body = CoreTerm::Bound(0);
+        let mut expected = CoreTerm::Constant(zero);
+        for _ in 0..99 {
+            body = CoreTerm::apply(CoreTerm::Constant(successor), body);
+            expected = CoreTerm::apply(CoreTerm::Constant(successor), expected);
+        }
+        let applied = CoreTerm::apply(CoreTerm::lambda(nat, body), CoreTerm::Constant(zero));
+        assert_eq!(
+            normalize(&types, &constants, &TermContext::new(), &applied).unwrap(),
+            expected,
         );
     }
 
@@ -2622,6 +3072,12 @@ mod resource_limit_tests {
                     error.message.contains("budget") || error.message.contains("nesting depth"),
                     "{}",
                     error.message
+                );
+                // Explicit continuation guards must unwind too. A failed
+                // normalization must not poison the next check on this thread.
+                assert_eq!(
+                    normalize(&types, &constants, &context, &CoreTerm::Truth).unwrap(),
+                    CoreTerm::Truth,
                 );
             })
             .expect("spawn")

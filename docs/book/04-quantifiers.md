@@ -165,7 +165,7 @@ The quintessential quantifier argument: "every happy person is rich;
 someone is happy; therefore someone is rich."
 
 ```text
-theorem exists_mono_demo
+theorem exists_mono
   : (forall x : Person, Happy(x) -> Rich(x))
     -> (exists x : Person, Happy(x))
     -> exists x : Person, Rich(x) := by
@@ -241,8 +241,8 @@ quantifiers: knowing that universal happiness *fails* hands you no
 particular unhappy person — to produce the witness that constructive
 `exists` demands, you'd need something like excluded middle to hunt
 them down. (Cetacea's standard library ships the two constructive
-directions as `forall_not_to_not_exists` and
-`not_exists_to_forall_not`; more on the library in Section 4.8.)
+directions as `fol.forall_not_to_not_exists` and
+`fol.not_exists_to_forall_not`; more on the library in Section 4.8.)
 
 ## 4.7 Order of quantifiers: the study partners, formally
 
@@ -287,9 +287,9 @@ actual logical content of the distinction, enforced mechanically.
 Everything we proved today was about `Person`, `Happy`, `Rich` — but
 none of it *used* anything about persons or happiness. The proofs are
 pure shape. Cetacea's standard library (`std/fol.ctea`, loaded by the
-`import ../../../std/prelude.ctea` line our companion files always
+`import ../../../std/qualified_prelude.ctea` line our companion files always
 start with) states the shapes once, over an arbitrary type `A` and
-arbitrary predicates, under names like `forall_mono`, `exists_mono`,
+arbitrary predicates, under names like `fol.forall_mono`, `fol.exists_mono`,
 and the negation lemmas from Section 4.6.
 
 To use a library shape at your own domain, name the instantiation in
@@ -300,12 +300,12 @@ theorem use_the_library
   : (forall x : Person, Happy(x) -> Rich(x))
     -> (forall x : Person, Happy(x))
     -> forall x : Person, Rich(x) := by
-  exact forall_mono {A := Person; P := Happy; Q := Rich}
+  exact fol.forall_mono {A := Person; P := Happy; Q := Rich}
 ```
 
-One line: this theorem is `forall_mono` with `A := Person`,
+One line: this theorem is `fol.forall_mono` with `A := Person`,
 `P := Happy`, `Q := Rich`. (Cetacea can often infer instantiations from
-the goal, so a bare `exact forall_mono` frequently works too — the
+the goal, so a bare `exact fol.forall_mono` frequently works too — the
 explicit braces are for when inference needs help, and for readers.)
 This is the moment the course quietly changes character: you're no
 longer only *making* moves, you're starting to *collect* them.

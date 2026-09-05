@@ -120,18 +120,18 @@ theorem eq_refl_demo (A : Type) (x : A) : x = x := by
   refl
 
 theorem eq_sym_demo (A : Type) (x y : A) : x = y -> y = x := by
-  exact eq_symm
+  exact eq.eq_symm
 
-theorem eq_trans_demo (A : Type) (x y z : A)
+theorem eq_trans (A : Type) (x y z : A)
   : x = y -> y = z -> x = z := by
-  exact eq_trans
+  exact eq.eq_trans
 
 theorem equality_relation_equivalence : Equivalence(fun x y : Thing => x = y) := by
   unfold Equivalence
   ...
 ```
 
-`eq_symm` and `eq_trans` are imported from `std/eq.ctea`; the
+`eq.eq_symm` and `eq.eq_trans` are imported from `std/eq.ctea`; the
 companion file fills in the omitted proof body.
 
 If you have your own equivalence relation (say, modular congruence,

@@ -1,6 +1,6 @@
 -- Companion file for docs/cs250/07_structural_induction.md.
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -13,40 +13,40 @@ mode constructive
 -- with `length` as a defrec, and `append` as an axiomatized binary function.
 -- `refl` computes defrec definitions directly:
 
-theorem length_two_demo : length(cons(1, cons(2, nil))) = 2 := by
+theorem length_two_demo : list.length(list.cons(1, list.cons(2, list.nil))) = 2 := by
   refl
 
 -- A new recursive definition over List: the sum of the elements.
-defrec sum (l : List) : Nat
-| nil => 0
-| cons h t rec => add(h, rec)
+defrec sum (l : list.List) : Nat
+| list.nil => 0
+| list.cons h t rec => add(h, rec)
 
-theorem sum_singleton (n : Nat) : sum(cons(n, nil)) = n := by
+theorem sum_singleton (n : Nat) : sum(list.cons(n, list.nil)) = n := by
   simp
   refl
 
 -- Structural induction on List: the nil arm and the cons arm.
 -- In the cons arm, `h` and `t` name the constructor arguments and `ih` is
 -- the induction hypothesis for the recursive argument `t`.
-theorem length_append_demo (l1 : List) (l2 : List)
-  : length(append(l1, l2)) = add(length(l1), length(l2)) := by
+theorem length_append (l1 : list.List) (l2 : list.List)
+  : list.length(list.append(l1, l2)) = add(list.length(l1), list.length(l2)) := by
   induction l1 with
-  | nil =>
+  | list.nil =>
       refl
-  | cons h t ih =>
+  | list.cons h t ih =>
       simp
       rewrite -> ih
       refl
 
-theorem sum_append (l1 : List) (l2 : List)
-  : sum(append(l1, l2)) = add(sum(l1), sum(l2)) := by
+theorem sum_append (l1 : list.List) (l2 : list.List)
+  : sum(list.append(l1, l2)) = add(sum(l1), sum(l2)) := by
   induction l1 with
-  | nil =>
+  | list.nil =>
       refl
-  | cons h t ih =>
+  | list.cons h t ih =>
       simp
       rewrite -> ih
-      rewrite add_assoc {n := h; m := sum(t); k := sum(l2)}
+      rewrite nat.add_assoc {n := h; m := sum(t); k := sum(l2)}
       refl
 
 -- A user-declared inductive type: binary trees with Nat labels.
@@ -91,7 +91,7 @@ theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
       simp
       rewrite -> ihl
       rewrite -> ihr
-      rewrite -> add_comm {n := size(l); m := size(r)}
+      rewrite -> nat.add_comm {n := size(l); m := size(r)}
       refl
 
 -- Strong induction on Nat, from std/nat.ctea:
@@ -103,7 +103,7 @@ theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
 --
 -- First contact: a statement where the strong hypothesis is not even needed.
 theorem zero_le_all (n : Nat) : le(0, n) := by
-  apply strong_induction {P := fun m : Nat => le(0, m); n := n}
+  apply nat.strong_induction {P := fun m : Nat => le(0, m); n := n}
   simp
   trivial
   intro k
@@ -121,7 +121,7 @@ theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
       simp
       exact ih
 
-theorem pred_le (n : Nat) : le(pred(n), n) := by
+theorem pred_le (n : Nat) : le(nat.pred(n), n) := by
   induction n with
   | zero =>
       simp
@@ -137,10 +137,10 @@ theorem pred_le (n : Nat) : le(pred(n), n) := by
 func g : Nat -> Nat
 
 axiom g_zero : g(0) = 0
-axiom g_step (k : Nat) : g(succ(k)) = g(pred(k))
+axiom g_step (k : Nat) : g(succ(k)) = g(nat.pred(k))
 
 theorem g_always_zero (n : Nat) : g(n) = 0 := by
-  apply strong_induction {P := fun m : Nat => g(m) = 0; n := n}
+  apply nat.strong_induction {P := fun m : Nat => g(m) = 0; n := n}
   exact g_zero
   intro k
   intro hk

@@ -12,7 +12,7 @@ The companion file is
 [`code/07_structural_induction.ctea`](code/07_structural_induction.ctea).
 
 One restriction up front: data types are **monomorphic**. There is no
-`List A` for arbitrary `A` — the standard library's `List` is a list of
+`list.List A` for arbitrary `A` — the standard library's `list.List` is a list of
 `Nat`, full stop. For course-sized examples that's usually enough; see
 `LIMITATIONS.md`.
 
@@ -33,9 +33,9 @@ The standard library already declares lists of naturals in
 `std/list.ctea`, imported by the prelude:
 
 ```text
-data List
-| nil
-| cons(Nat, List)
+data list.List
+| list.nil
+| list.cons(Nat, list.List)
 ```
 
 ## Recursive definitions with `defrec`
@@ -47,12 +47,12 @@ one name per *recursive* argument, holding the already-computed
 recursive result:
 
 ```text
-defrec sum (l : List) : Nat
-| nil => 0
-| cons h t rec => add(h, rec)
+defrec sum (l : list.List) : Nat
+| list.nil => 0
+| list.cons h t rec => add(h, rec)
 ```
 
-In the `cons` arm, `h` and `t` are the constructor arguments and `rec`
+In the `list.cons` arm, `h` and `t` are the constructor arguments and `rec`
 is `sum(t)`. For `Tree` there are two recursive arguments, so two
 recursive-result binders, in order:
 
@@ -67,7 +67,7 @@ normalizes both sides of an equality by itself, so pure computation
 facts close in one step, no `simp` needed:
 
 ```text
-theorem length_two_demo : length(cons(1, cons(2, nil))) = 2 := by
+theorem length_two_demo : list.length(list.cons(1, list.cons(2, list.nil))) = 2 := by
   refl
 
 theorem size_node (l : Tree) (v : Nat) (r : Tree)
@@ -77,16 +77,16 @@ theorem size_node (l : Tree) (v : Nat) (r : Tree)
 
 `defrec` is still *unary* — it recurses over one argument, and the arm
 bodies are terms built from the binders. Binary operations like
-`append` are introduced as functions with their textbook recursion
+`list.append` are introduced as functions with their textbook recursion
 equations as axioms, just as in tutorial 04. `std/list.ctea` does
 exactly that:
 
 ```text
-func append : List -> List -> List
+func list.append : list.List -> list.List -> list.List
 
-axiom append_nil (l : List) : append(nil, l) = l
-axiom append_cons (h : Nat) (t : List) (l : List)
-  : append(cons(h, t), l) = cons(h, append(t, l))
+axiom list.append_nil (l : list.List) : list.append(list.nil, l) = l
+axiom list.append_cons (h : Nat) (t : list.List) (l : list.List)
+  : list.append(list.cons(h, t), l) = list.cons(h, list.append(t, l))
 ```
 
 ## Structural induction on lists
@@ -94,22 +94,22 @@ axiom append_cons (h : Nat) (t : List) (l : List)
 `induction l with` takes one arm per constructor, in declaration order.
 The arm binds the constructor arguments, then one induction hypothesis
 per recursive argument. This is the Module 10 structural-induction rule,
-verbatim: to prove `P(l)` for all lists, prove `P(nil)` and prove
-`P(cons(h, t))` assuming `P(t)`.
+verbatim: to prove `P(l)` for all lists, prove `P(list.nil)` and prove
+`P(list.cons(h, t))` assuming `P(t)`.
 
 The classic first theorem — length distributes over append — is
-`length_append` in `std/list.ctea`; here it is re-derived:
+`list.length_append` in `std/list.ctea`; here it is re-derived:
 
 ```text
-theorem length_append_demo (l1 : List) (l2 : List)
-  : length(append(l1, l2)) = add(length(l1), length(l2)) := by
+theorem length_append (l1 : list.List) (l2 : list.List)
+  : list.length(list.append(l1, l2)) = add(list.length(l1), list.length(l2)) := by
   induction l1 with
-  | nil =>
-      rewrite -> append_nil {l := l2}
+  | list.nil =>
+      rewrite -> list.append_nil {l := l2}
       simp
       refl
-  | cons h t ih =>
-      rewrite -> append_cons {h := h; t := t; l := l2}
+  | list.cons h t ih =>
+      rewrite -> list.append_cons {h := h; t := t; l := l2}
       simp
       rewrite -> ih
       refl
@@ -118,7 +118,7 @@ theorem length_append_demo (l1 : List) (l2 : List)
 The shape of each arm: rewrite with the recursion equation for that
 constructor, let `simp` compute the `defrec` and arithmetic parts, then
 use the induction hypothesis. The companion file proves `sum_append` the
-same way (it needs one extra `rewrite add_assoc` at the end — try to see
+same way (it needs one extra `rewrite nat.add_assoc` at the end — try to see
 why before peeking).
 
 Note the binders `h`, `t`, `ih` must be *fresh* names: reusing a name
@@ -144,14 +144,14 @@ theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
       simp
       rewrite -> ihl
       rewrite -> ihr
-      rewrite -> add_comm {n := size(l); m := size(r)}
+      rewrite -> nat.add_comm {n := size(l); m := size(r)}
       refl
 ```
 
 Here `mirror` (swap the subtrees, everywhere) is an ordinary `defrec` —
 recursive definitions can return any type, including the data type
 itself — so `simp` computes its equations directly and no axioms are
-involved. The final `add_comm` step is the mathematical heart of the
+involved. The final `nat.add_comm` step is the mathematical heart of the
 proof: mirroring swaps the sizes of the two subtrees, and addition
 doesn't care.
 
@@ -159,23 +159,23 @@ doesn't care.
 
 Module 9's recurrences often need *strong* (course-of-values)
 induction: to prove `P(succ(k))` you may assume `P(m)` for **every**
-`m <= k`, not just for `k`. This is `strong_induction` in
+`m <= k`, not just for `k`. This is `nat.strong_induction` in
 `std/nat.ctea`:
 
 ```text
-strong_induction (P : Nat -> Prop) (n : Nat)
+nat.strong_induction (P : Nat -> Prop) (n : Nat)
   : P(0)
     -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
     -> P(n)
 ```
 
 It is a theorem, not a tactic — derived from ordinary induction via
-`strong_induction_bounded` — so you use it with `apply`, giving `P` as a
+`nat.strong_induction_bounded` — so you use it with `apply`, giving `P` as a
 predicate lambda explicitly (the checker cannot infer it from the goal):
 
 ```text
 theorem zero_le_all (n : Nat) : le(0, n) := by
-  apply strong_induction {P := fun m : Nat => le(0, m); n := n}
+  apply nat.strong_induction {P := fun m : Nat => le(0, m); n := n}
   simp
   trivial
   intro k
@@ -190,13 +190,13 @@ hypothesis.
 
 That example never uses `hk`. Where strong induction earns its keep is a
 recurrence that reaches back further than one step. The companion file
-axiomatizes `g(succ(k)) = g(pred(k))` — the recursion looks up `g` at
-`pred(k)`, which is *not* the immediate predecessor of `succ(k)` — and
+axiomatizes `g(succ(k)) = g(nat.pred(k))` — the recursion looks up `g` at
+`nat.pred(k)`, which is *not* the immediate predecessor of `succ(k)` — and
 proves `g(n) = 0`:
 
 ```text
 theorem g_always_zero (n : Nat) : g(n) = 0 := by
-  apply strong_induction {P := fun m : Nat => g(m) = 0; n := n}
+  apply nat.strong_induction {P := fun m : Nat => g(m) = 0; n := n}
   exact g_zero
   intro k
   intro hk
@@ -206,18 +206,18 @@ theorem g_always_zero (n : Nat) : g(n) = 0 := by
 ```
 
 Ordinary induction would hand you `P(k)` only; `apply hk` works for any
-`m` once you show `le(m, k)`, which `pred_le : le(pred(n), n)` supplies.
-The library also has `strong_induction_bounded`, `le_zero_inv`, and
-`le_succ_inv` — the order lemmas its own proof is built from.
+`m` once you show `le(m, k)`, which `pred_le : le(nat.pred(n), n)` supplies.
+The library also has `nat.strong_induction_bounded`, `nat.le_zero_inv`, and
+`nat.le_succ_inv` — the order lemmas its own proof is built from.
 
 ## Try it
 
-- Prove `append_nil_length` from `std/list.ctea` yourself: no induction
+- Prove `list.append_nil_length` from `std/list.ctea` yourself: no induction
   needed.
 - Define `defrec depth (t : Tree) : Nat` (the depth of a tree) and prove
   `depth(node(leaf, v, leaf)) = 1` by `refl`.
 - Prove `mirror(mirror(t)) = t` by structural induction on `t` — `simp`
   computes the `mirror` equations for you.
-- Prove `le(length(l), length(append(l, l2)))`... is harder than it
+- Prove `le(list.length(l), list.length(list.append(l, l2)))`... is harder than it
   looks — you'll want lemmas relating `le` and `add` first. Good
   stretch exercise.

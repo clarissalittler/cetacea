@@ -1,0 +1,21 @@
+-- The legacy List and the package List A coexist under explicit namespaces.
+import ../../../std/prelude.ctea
+import ../../../std/hol/counting.ctea as Counting
+
+mode constructive
+
+theorem legacy_empty_length : length(nil) = 0 := by
+  refl
+
+theorem generic_empty_length : Counting.length((Counting.nil : Counting.List Nat)) = 0 := by
+  exact Counting.length_nil {A := Nat}
+
+theorem both_list_types (xs : List) (ys : Counting.List Nat) :
+  length(xs) = length(xs) /\ Counting.length(ys) = Counting.length(ys) := by
+  split
+  refl
+  refl
+
+theorem counted_length (S : Set Nat) (xs : Counting.List Nat) (n : Nat) :
+  Counting.HasSize(S, xs, n) -> Counting.length(xs) = n := by
+  exact Counting.has_size_length {A := Nat; S := S; xs := xs; n := n}

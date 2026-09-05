@@ -20,8 +20,8 @@ use super::inductive::{
     InductiveConstructorSpec, InductiveError, InductiveFieldType, InductiveSignature, InductiveSpec,
 };
 use super::library_registry::{
-    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary, InstalledListLibrary,
-    LibraryPackageId,
+    HolLibraryRegistry, InstalledCardinalityLibrary, InstalledFiniteLibrary, InstalledGraphLibrary,
+    InstalledListLibrary, InstalledMatrixLibrary, LibraryPackageId,
 };
 use super::lowering::{CompatibilityLowerer, LoweringError};
 use super::prelude::CompatibilityPrelude;
@@ -30,7 +30,7 @@ use super::recursion::{StructuralArmSpec, StructuralDefinitionSpec};
 use super::spike::{SpikeElaborator, SpikeError};
 use super::terms::{
     definitionally_equal, instantiate_binder, instantiate_term_parameters_under_binders, normalize,
-    shift_under_new_binder, ConstantId, CoreTerm, TermContext,
+    shift_out_of_binders, shift_under_new_binder, ConstantId, CoreTerm, TermContext,
 };
 use super::theorems::{HolTheoremStatus, TheoremId};
 use super::types::{CoreType, TypeConstructorId, TypeParameter};
@@ -1602,6 +1602,162 @@ impl CompatibilityElaborator {
         Ok(installed)
     }
 
+    pub fn import_builtin_graph_v1(
+        &mut self,
+        namespace: Option<&str>,
+    ) -> Result<InstalledGraphLibrary, CompatibilityDeclarationError> {
+        let mut staged = self.clone();
+        let lists = staged.import_builtin_list_v1(namespace)?;
+        let installed = staged.libraries.install_builtin_graph_v1(
+            &mut staged.core,
+            staged.prelude.nat_type(),
+            staged.prelude.zero(),
+            staged.prelude.successor(),
+            staged.prelude.addition(),
+        )?;
+        if staged.library_aliases.iter().any(|registration| {
+            registration.package == LibraryPackageId::GraphV1
+                && registration.namespace.as_deref() == namespace
+        }) {
+            return Ok(installed);
+        }
+        let qualify =
+            |name: &str| namespace.map_or_else(|| name.to_string(), |ns| format!("{ns}.{name}"));
+        for name in ["ValidPath", "path_nil", "path_cons"] {
+            staged.ensure_name_free(&qualify(name))?;
+        }
+        let parameter = lists.lists.element_parameter;
+        let element = CoreType::Parameter(parameter);
+        let edge = super::graph_library::GraphLibrary::edge_type(element.clone());
+        let list = lists.lists.list_type(element.clone());
+        staged.finish_symbol(SymbolRegistration {
+            name: qualify("ValidPath"),
+            constant: installed.paths.valid_path,
+            type_parameters: vec![parameter],
+            parameter_types: vec![edge.clone(), list.clone(), element.clone(), element.clone()],
+            result_type: CoreType::Prop,
+        })?;
+        for (name, params, statement) in super::graph_surface::path_surface_schemas(namespace) {
+            let (theorem, core_params) = if name == "path_nil" {
+                (
+                    installed.path_nil,
+                    vec![edge.clone(), element.clone(), element.clone()],
+                )
+            } else {
+                (
+                    installed.path_cons,
+                    vec![
+                        edge.clone(),
+                        element.clone(),
+                        list.clone(),
+                        element.clone(),
+                        element.clone(),
+                    ],
+                )
+            };
+            staged.bind_checked_theorem_alias(
+                qualify(name),
+                theorem,
+                params,
+                &statement,
+                vec![parameter],
+                core_params,
+            )?;
+        }
+        staged.library_aliases.push(LibraryAliasRegistration {
+            package: LibraryPackageId::GraphV1,
+            namespace: namespace.map(str::to_string),
+        });
+        *self = staged;
+        Ok(installed)
+    }
+
+    pub fn import_builtin_matrix_v1(
+        &mut self,
+        namespace: Option<&str>,
+    ) -> Result<InstalledMatrixLibrary, CompatibilityDeclarationError> {
+        let mut staged = self.clone();
+        let lists = staged.import_builtin_list_v1(namespace)?;
+        let installed = staged.libraries.install_builtin_matrix_v1(
+            &mut staged.core,
+            staged.prelude.nat_type(),
+            staged.prelude.zero(),
+            staged.prelude.successor(),
+            staged.prelude.addition(),
+        )?;
+        if staged
+            .library_aliases
+            .iter()
+            .any(|r| r.package == LibraryPackageId::MatrixV1 && r.namespace.as_deref() == namespace)
+        {
+            return Ok(installed);
+        }
+        let qualify =
+            |name: &str| namespace.map_or_else(|| name.to_string(), |ns| format!("{ns}.{name}"));
+        for decl in &installed.record.declarations {
+            staged.ensure_name_free(&qualify(&decl.logical_name))?;
+        }
+        let parameters = vec![
+            installed.matrix.row_parameter,
+            installed.matrix.column_parameter,
+        ];
+        let a = CoreType::Parameter(parameters[0]);
+        let b = CoreType::Parameter(parameters[1]);
+        let nat = staged.prelude.nat_type();
+        let w = CoreType::arrow(a.clone(), CoreType::arrow(b.clone(), nat.clone()));
+        let la = lists.lists.list_type(a.clone());
+        let lb = lists.lists.list_type(b.clone());
+        let signatures = [
+            vec![w.clone(), a.clone(), lb.clone()],
+            vec![w.clone(), la.clone(), b.clone()],
+            vec![w.clone(), la.clone(), lb.clone()],
+            vec![w.clone(), la.clone(), lb.clone()],
+        ];
+        for ((name, constant), signature) in super::matrix_library::MatrixLibrary::EXPORTS
+            .into_iter()
+            .zip(installed.matrix.constants())
+            .zip(signatures)
+        {
+            staged.finish_symbol(SymbolRegistration {
+                name: qualify(name),
+                constant,
+                type_parameters: parameters.clone(),
+                parameter_types: signature,
+                result_type: nat.clone(),
+            })?;
+        }
+        for ((name, params, statement), equation) in
+            super::matrix_surface::matrix_surface_schemas(namespace)
+                .into_iter()
+                .zip(&installed.matrix.equations)
+        {
+            let mut core_params = vec![w.clone()];
+            for param in params.iter().skip(3) {
+                core_params.push(match param.name.as_str() {
+                    "a" => a.clone(),
+                    "b" => b.clone(),
+                    "xs" => la.clone(),
+                    "ys" => lb.clone(),
+                    _ => unreachable!(),
+                });
+            }
+            staged.bind_checked_theorem_alias(
+                qualify(name),
+                equation.theorem,
+                params,
+                &statement,
+                parameters.clone(),
+                core_params,
+            )?;
+        }
+        staged.library_aliases.push(LibraryAliasRegistration {
+            package: LibraryPackageId::MatrixV1,
+            namespace: namespace.map(str::to_string),
+        });
+        *self = staged;
+        Ok(installed)
+    }
+
     pub fn lowering_scope(&self) -> Result<CompatibilityLowerer<'_>, LoweringError> {
         let mut lowerer =
             CompatibilityLowerer::new(self.core.types(), self.core.constants(), &self.prelude)?;
@@ -2786,77 +2942,7 @@ impl LegacyProofLowerer<'_> {
                 eq_proof,
                 proof_body,
                 target,
-            } => {
-                let equality = self.lower(eq_proof)?;
-                let normalized = self.normalize(&equality.proposition)?;
-                let CoreTerm::Equality { ty, left, right } = normalized else {
-                    return Err(LoweringError::new(
-                        "legacy equality substitution needs an equality proof",
-                    ));
-                };
-                let proof_body = self.lower(proof_body)?;
-                let target = self.lowerer.lower_proof_formula(target)?;
-                if let Some(motive) =
-                    self.find_rewrite_motive(&proof_body.proposition, &left, &right, &ty, &target)?
-                {
-                    return Ok(LoweredLegacyProof {
-                        proof: HolDraftProof::EqualityElim {
-                            proof_equality: Box::new(equality.proof),
-                            motive,
-                            proof_left: Box::new(proof_body.proof),
-                        },
-                        proposition: target,
-                    });
-                }
-                if let Some(motive) =
-                    self.find_rewrite_motive(&proof_body.proposition, &right, &left, &ty, &target)?
-                {
-                    let shifted_left = shift_under_new_binder(&left)?;
-                    let symmetry_motive = CoreTerm::lambda(
-                        ty.clone(),
-                        CoreTerm::equality(ty.clone(), CoreTerm::Bound(0), shifted_left),
-                    );
-                    let symmetry = HolDraftProof::EqualityElim {
-                        proof_equality: Box::new(equality.proof),
-                        motive: symmetry_motive,
-                        proof_left: Box::new(HolDraftProof::EqualityRefl((*left).clone())),
-                    };
-                    return Ok(LoweredLegacyProof {
-                        proof: HolDraftProof::EqualityElim {
-                            proof_equality: Box::new(symmetry),
-                            motive,
-                            proof_left: Box::new(proof_body.proof),
-                        },
-                        proposition: target,
-                    });
-                }
-                if definitionally_equal(
-                    self.environment.core.types(),
-                    self.environment.core.constants(),
-                    &self.lowerer.core_context(),
-                    &proof_body.proposition,
-                    &target,
-                )? {
-                    // Legacy simplification may normalize the rewritten goal
-                    // back to the displayed source. Keep the explicit equality
-                    // dependency with a constant motive instead of erasing a
-                    // potentially trusted or incomplete theorem reference.
-                    let motive =
-                        CoreTerm::lambda(ty, shift_under_new_binder(&proof_body.proposition)?);
-                    return Ok(LoweredLegacyProof {
-                        proof: HolDraftProof::EqualityElim {
-                            proof_equality: Box::new(equality.proof),
-                            motive,
-                            proof_left: Box::new(proof_body.proof),
-                        },
-                        proposition: target,
-                    });
-                }
-                Err(LoweringError::new(format!(
-                    "cannot reconstruct the legacy equality rewrite from `{:?}` to `{:?}` using `{:?} = {:?}` as a single explicit HOL motive",
-                    proof_body.proposition, target, left, right
-                )))
-            }
+            } => self.lower_equality_substitution(eq_proof, proof_body, target),
             LegacyDraftProof::Convert { proof_body, target } => {
                 let proof_body = self.lower(proof_body)?;
                 let target = self.lowerer.lower_proof_formula(target)?;
@@ -3008,6 +3094,87 @@ impl LegacyProofLowerer<'_> {
                 arms,
             } => self.lower_data_induction(var_name, data_name, target, arms),
         }
+    }
+
+    // Keep the large equality reconstruction workspace out of every recursive
+    // lowering frame; only equality-substitution nodes need these temporaries.
+    fn lower_equality_substitution(
+        &mut self,
+        eq_proof: &LegacyDraftProof,
+        proof_body: &LegacyDraftProof,
+        target: &Formula,
+    ) -> Result<LoweredLegacyProof, LoweringError> {
+        let equality = self.lower(eq_proof)?;
+        let normalized = self.normalize(&equality.proposition)?;
+        let CoreTerm::Equality { ty, left, right } = normalized else {
+            return Err(LoweringError::new(
+                "legacy equality substitution needs an equality proof",
+            ));
+        };
+        let proof_body = self.lower(proof_body)?;
+        let target = self.lowerer.lower_proof_formula(target)?;
+        if let Some(motive) =
+            self.find_rewrite_motive(&proof_body.proposition, &left, &right, &ty, &target)?
+        {
+            return Ok(LoweredLegacyProof {
+                proof: HolDraftProof::EqualityElim {
+                    proof_equality: Box::new(equality.proof),
+                    motive,
+                    proof_left: Box::new(proof_body.proof),
+                },
+                proposition: target,
+            });
+        }
+        if let Some(motive) =
+            self.find_rewrite_motive(&proof_body.proposition, &right, &left, &ty, &target)?
+        {
+            let shifted_left = shift_under_new_binder(&left)?;
+            let symmetry_motive = CoreTerm::lambda(
+                ty.clone(),
+                CoreTerm::equality(ty.clone(), CoreTerm::Bound(0), shifted_left),
+            );
+            let symmetry = HolDraftProof::EqualityElim {
+                proof_equality: Box::new(equality.proof),
+                motive: symmetry_motive,
+                proof_left: Box::new(HolDraftProof::EqualityRefl((*left).clone())),
+            };
+            return Ok(LoweredLegacyProof {
+                proof: HolDraftProof::EqualityElim {
+                    proof_equality: Box::new(symmetry),
+                    motive,
+                    proof_left: Box::new(proof_body.proof),
+                },
+                proposition: target,
+            });
+        }
+        if definitionally_equal(
+            self.environment.core.types(),
+            self.environment.core.constants(),
+            &self.lowerer.core_context(),
+            &proof_body.proposition,
+            &target,
+        )? {
+            // Legacy simplification may normalize the rewritten goal
+            // back to the displayed source. Keep the explicit equality
+            // dependency with a constant motive instead of erasing a
+            // potentially trusted or incomplete theorem reference.
+            let motive = CoreTerm::lambda(ty, shift_under_new_binder(&proof_body.proposition)?);
+            return Ok(LoweredLegacyProof {
+                proof: HolDraftProof::EqualityElim {
+                    proof_equality: Box::new(equality.proof),
+                    motive,
+                    proof_left: Box::new(proof_body.proof),
+                },
+                proposition: target,
+            });
+        }
+        if let Some(replayed) = self.try_arithmetic_rewrite(&equality, &proof_body, &target)? {
+            return Ok(replayed);
+        }
+        Err(LoweringError::new(format!(
+                    "cannot reconstruct the legacy equality rewrite from `{:?}` to `{:?}` using `{:?} = {:?}` as a single explicit HOL motive",
+                    proof_body.proposition, target, left, right
+                )))
     }
 
     fn lower_nat_induction(
@@ -3330,7 +3497,89 @@ impl LegacyProofLowerer<'_> {
         })
     }
 
+    // Keep this fallback out of the recursive lowering frame: constructing
+    // arithmetic conversions there increases stack use for every proof node.
+    fn try_arithmetic_rewrite(
+        &self,
+        equality: &LoweredLegacyProof,
+        proof_body: &LoweredLegacyProof,
+        target: &CoreTerm,
+    ) -> Result<Option<LoweredLegacyProof>, LoweringError> {
+        let (_, arithmetic_equality) = self.compatibility_arithmetic_path(&equality.proposition)?;
+        if arithmetic_equality != equality.proposition {
+            let converted = self.lower_compatibility_conversion(
+                LoweredLegacyProof {
+                    proof: equality.proof.clone(),
+                    proposition: equality.proposition.clone(),
+                },
+                arithmetic_equality,
+            )?;
+            if let CoreTerm::Equality { ty, left, right } =
+                self.normalize(&converted.proposition)?
+            {
+                for reverse in [false, true] {
+                    let (from, to) = if reverse {
+                        (&right, &left)
+                    } else {
+                        (&left, &right)
+                    };
+                    if let Some(motive) =
+                        self.find_rewrite_motive(&proof_body.proposition, from, to, &ty, target)?
+                    {
+                        let proof_equality = if reverse {
+                            HolDraftProof::EqualityElim {
+                                proof_equality: Box::new(converted.proof.clone()),
+                                motive: CoreTerm::lambda(
+                                    ty.clone(),
+                                    CoreTerm::equality(
+                                        ty.clone(),
+                                        CoreTerm::Bound(0),
+                                        shift_under_new_binder(&left)?,
+                                    ),
+                                ),
+                                proof_left: Box::new(HolDraftProof::EqualityRefl((*left).clone())),
+                            }
+                        } else {
+                            converted.proof.clone()
+                        };
+                        return Ok(Some(LoweredLegacyProof {
+                            proof: HolDraftProof::EqualityElim {
+                                proof_equality: Box::new(proof_equality),
+                                motive,
+                                proof_left: Box::new(proof_body.proof.clone()),
+                            },
+                            proposition: target.clone(),
+                        }));
+                    }
+                }
+            }
+        }
+        Ok(None)
+    }
+
     fn find_rewrite_motive(
+        &self,
+        source: &CoreTerm,
+        from: &CoreTerm,
+        to: &CoreTerm,
+        ty: &CoreType,
+        target: &CoreTerm,
+    ) -> Result<Option<CoreTerm>, LoweringError> {
+        if let Some(motive) = self.find_raw_rewrite_motive(source, from, to, ty, target)? {
+            return Ok(Some(motive));
+        }
+        // A theorem/hypothesis may retain a transparent named term while the
+        // rewrite equality has already unfolded it. The resulting motive is
+        // still checked by ordinary kernel definitional equality.
+        let normalized_source = self.normalize(source)?;
+        let normalized_from = self.normalize(from)?;
+        if normalized_source == *source && normalized_from == *from {
+            return Ok(None);
+        }
+        self.find_raw_rewrite_motive(&normalized_source, &normalized_from, to, ty, target)
+    }
+
+    fn find_raw_rewrite_motive(
         &self,
         source: &CoreTerm,
         from: &CoreTerm,
@@ -3984,7 +4233,7 @@ impl LegacyProofLowerer<'_> {
 
     fn under_term_binder(&self, name: &str, ty: CoreType) -> Result<Self, LoweringError> {
         let mut scope = self.clone();
-        scope.lowerer.bind_term_parameter(name.to_string(), ty)?;
+        scope.lowerer.bind_scoped_term(name.to_string(), ty)?;
         for (_, proposition) in &mut scope.hypotheses {
             *proposition = shift_under_new_binder(proposition)?;
         }
@@ -4216,16 +4465,20 @@ fn symmetry_proof(
 }
 
 /// Collect only terms whose free variables are available in the current proof
-/// context. Arithmetic below a term/formula binder is handled when the legacy
-/// proof introduces that binder, so a synthesized theorem reference never
-/// escapes the scope of one of its arguments.
+/// context. Below binders, collect only subterms independent of those binders
+/// and shift them back into the proof context. Binder-dependent arithmetic
+/// remains for the proof that introduces its variables.
 fn collect_unbound_core_terms_postorder(term: &CoreTerm, terms: &mut Vec<CoreTerm>) {
+    collect_unbound_core_terms_at_depth(term, 0, terms);
+}
+
+fn collect_unbound_core_terms_at_depth(term: &CoreTerm, depth: u32, terms: &mut Vec<CoreTerm>) {
     let unary = |child: &CoreTerm, terms: &mut Vec<CoreTerm>| {
-        collect_unbound_core_terms_postorder(child, terms)
+        collect_unbound_core_terms_at_depth(child, depth, terms)
     };
     let binary = |left: &CoreTerm, right: &CoreTerm, terms: &mut Vec<CoreTerm>| {
-        collect_unbound_core_terms_postorder(left, terms);
-        collect_unbound_core_terms_postorder(right, terms);
+        collect_unbound_core_terms_at_depth(left, depth, terms);
+        collect_unbound_core_terms_at_depth(right, depth, terms);
     };
     match term {
         CoreTerm::Bound(_)
@@ -4235,10 +4488,12 @@ fn collect_unbound_core_terms_postorder(term: &CoreTerm, terms: &mut Vec<CoreTer
         | CoreTerm::UniverseSet { .. }
         | CoreTerm::Truth
         | CoreTerm::Falsity => {}
-        CoreTerm::Lambda { .. }
-        | CoreTerm::SetBuilder { .. }
-        | CoreTerm::Forall { .. }
-        | CoreTerm::Exists { .. } => {}
+        CoreTerm::Lambda { body, .. }
+        | CoreTerm::SetBuilder { body, .. }
+        | CoreTerm::Forall { body, .. }
+        | CoreTerm::Exists { body, .. } => {
+            collect_unbound_core_terms_at_depth(body, depth + 1, terms)
+        }
         CoreTerm::Apply { function, argument } => binary(function, argument, terms),
         CoreTerm::Pair(left, right)
         | CoreTerm::SetUnion(left, right)
@@ -4257,7 +4512,11 @@ fn collect_unbound_core_terms_postorder(term: &CoreTerm, terms: &mut Vec<CoreTer
             binary(left, right, terms)
         }
     }
-    terms.push(term.clone());
+    if depth == 0 {
+        terms.push(term.clone());
+    } else if let Ok(term) = shift_out_of_binders(term, depth) {
+        terms.push(term);
+    }
 }
 
 /// Replay the legacy kernel's conversion of a constructor equality to

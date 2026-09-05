@@ -4,28 +4,28 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch11-mistakes.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
 -- Mistake 1: arms out of declaration order. List declares nil first,
 -- so the nil arm must come first.
-theorem arms_out_of_order (l : List) : append(l, nil) = l := by
+theorem arms_out_of_order (l : list.List) : list.append(l, list.nil) = l := by
   induction l with
-  | cons h t ih =>
+  | list.cons h t ih =>
       simp
       rewrite -> ih
       refl
-  | nil =>
+  | list.nil =>
       refl
 
 -- Mistake 2: forgetting the induction hypothesis binder. The cons arm
 -- binds the head, the tail, AND the hypothesis about the tail.
-theorem missing_binders (l : List) : append(l, nil) = l := by
+theorem missing_binders (l : list.List) : list.append(l, list.nil) = l := by
   induction l with
-  | nil =>
+  | list.nil =>
       refl
-  | cons h t =>
+  | list.cons h t =>
       simp
       refl
 

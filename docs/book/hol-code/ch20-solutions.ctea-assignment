@@ -1,0 +1,15 @@
+version = 1
+profile = "fol+induction"
+allow_classical = false
+allow_extensionality = false
+allow_choice = false
+allow_new_axioms = false
+allow_incomplete = false
+allowed_imports = ["builtin:std/modular.ctea", "builtin:std/nat.ctea", "builtin:std/eq.ctea"]
+required_imports = ["builtin:std/modular.ctea"]
+allowed_axioms = []
+
+required_theorem.ex20_1 = 'M.Divides(4, 20)'
+required_theorem.ex20_2 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : M.Divides(?0, ?1) -> M.Divides(?0, ?2) -> M.Divides(?0, add(?1, mul(?2, 3)))'
+required_theorem.ex20_3 = '(?0 : Nat) (?1 : Nat) (?2 : Nat) : M.ModEq(?0, ?1, ?2) -> M.ModEq(?0, add(mul(?1, ?1), 1), add(mul(?2, ?2), 1))'
+required_theorem.ex20_4 = '(?0 : Nat) (?1 : Nat) : M.ModEq(0, ?0, ?1) -> ?0 = ?1'

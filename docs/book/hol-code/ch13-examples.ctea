@@ -16,11 +16,7 @@ data One
 -- separately keeps the mathematical jobs visible.
 theorem one_nodup :
   F.Nodup(F.cons(only, F.nil)) := by
-  apply (F.nodup_cons {
-    A := One;
-    h := only;
-    t := (F.nil : F.List One)
-  }).right
+  apply F.nodup_cons.right
   split
   intro member
   exact F.member_nil {A := One; x := only} member
@@ -28,12 +24,8 @@ theorem one_nodup :
 
 theorem one_length :
   F.length(F.cons(only, F.nil)) = 1 := by
-  rewrite -> F.length_cons {
-    A := One;
-    h := only;
-    t := (F.nil : F.List One)
-  }
-  rewrite -> F.length_nil {A := One}
+  rewrite -> F.length_cons
+  rewrite -> F.length_nil
   refl
 
 theorem one_coverage :
@@ -41,22 +33,13 @@ theorem one_coverage :
   intro x
   induction x with
   | only =>
-      apply (F.member_cons {
-        A := One;
-        x := only;
-        h := only;
-        t := (F.nil : F.List One)
-      }).right
+      apply F.member_cons.right
       left
       trivial
 
 theorem one_has_card :
   F.HasCard(F.cons(only, F.nil), 1) := by
-  apply F.has_card_intro {
-    A := One;
-    xs := F.cons(only, F.nil);
-    n := 1
-  }
+  apply F.has_card_intro
   exact one_nodup
   exact one_length
   exact one_coverage
@@ -75,3 +58,14 @@ theorem has_card_components
   split
   exact F.has_card_length {A := A; xs := xs; n := n} cardinality
   exact F.has_card_coverage {A := A; xs := xs; n := n} cardinality
+
+-- Routine enumeration can now be checked without repeating these cases.
+data Traffic
+| red
+| yellow
+| green
+
+def colours : F.List Traffic := F.cons(red, F.cons(yellow, F.cons(green, F.nil)))
+
+theorem traffic_count : F.HasCard(colours, 3) := by
+  finite

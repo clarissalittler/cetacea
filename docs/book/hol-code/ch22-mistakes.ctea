@@ -1,0 +1,24 @@
+import builtin:std/hol/probability_counts.ctea as P
+import builtin:std/hol/weighted_sums.ctea as W
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+mode constructive
+
+-- Empty sample spaces do not provide a probability denominator.
+theorem empty_denominator : not C.length((C.nil : C.List Nat)) = 0 := by
+  exact P.nonempty_denominator
+
+-- Two event indicators need not be complementary.
+theorem overlapping_events (A : Type) (f g : A -> Nat) (xs : C.List A) :
+  add(S.sum(C.map(f, xs)), S.sum(C.map(g, xs))) = C.length(xs) := by
+  apply P.complement_counts {A := A; f := f; g := g; xs := xs}
+  intro x
+  intro member
+  refl
+
+-- A constant payoff k contributes once per ticket, not once altogether.
+theorem constant_is_total (A : Type) (f : A -> Nat) (xs : C.List A) (k : Nat) :
+  (forall x : A, C.Member(x, xs) -> f(x) = k) ->
+  S.sum(C.map(f, xs)) = k := by
+  intro constant
+  exact P.constant_numerator {A := A; f := f; xs := xs; k := k} constant

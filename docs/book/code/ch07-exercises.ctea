@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch07-exercises.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -24,12 +24,12 @@ def SameMood (x y : Person) : Prop := Happy(x) <-> Happy(y)
 
 -- Exercise 7.1 (warm-up). A concrete congruence: find the two witnesses.
 -- You want a and b with 23 + 10*a = 3 + 10*b.
-theorem ex7_1 : ModEq(10, 23, 3) := by
+theorem ex7_1 : modular.ModEq(10, 23, 3) := by
   sorry
 
 -- Exercise 7.2. Divisibility is reflexive. The library lemma
 -- divides_refl from std/modular.ctea does the heavy lifting.
-theorem ex7_2 : Reflexive(fun x y : Nat => Divides(x, y)) := by
+theorem ex7_2 : Reflexive(fun x y : Nat => modular.Divides(x, y)) := by
   sorry
 
 -- Exercise 7.3. Mutual liking is symmetric, whatever Likes itself does.
@@ -38,7 +38,7 @@ theorem ex7_3 : Symmetric(fun x y : Person => Likes(x, y) /\ Likes(y, x)) := by
 
 -- Exercise 7.4. Divisibility is transitive — apply divides_trans and
 -- let the hypotheses fill in the middle number.
-theorem ex7_4 : Transitive(fun x y : Nat => Divides(x, y)) := by
+theorem ex7_4 : Transitive(fun x y : Nat => modular.Divides(x, y)) := by
   sorry
 
 -- Exercises 7.5–7.7. "Same mood" — agreeing about happiness — is an

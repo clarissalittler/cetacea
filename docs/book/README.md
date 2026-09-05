@@ -21,6 +21,10 @@ you want a pure reference manual for the language, that is
 translations of CS 250 modules, see [`docs/cs250/`](../cs250/README.md).
 This book is the slow, friendly path.
 
+The companion files use `std/qualified_prelude.ctea`: library names have
+module prefixes, such as `nat.add_comm` and `list.length`. Your own proof can
+use a short name such as `add_comm` without colliding with the library.
+
 ## What you need
 
 Build the checker once, from the repository root:
@@ -101,11 +105,23 @@ of each.
 | 14 | [Bijections and the HOL Boundary](14-bijections.md) |
 | 15 | [Pigeonhole, One Element at a Time](15-pigeonhole.md) |
 | 16 | [Finite Unions Need Relative Evidence](16-finite-unions.md) |
+| 17 | [Adding Up Finite Lists](17-finite-sums.md) |
+| 18 | [Joining Directed Paths](18-directed-paths.md) |
+| 19 | [Counting Twice](19-double-counting.md) |
+| 20 | [Divisibility and Clock Arithmetic](20-modular-arithmetic.md) |
+| 21 | [Recurrences and Closed Forms](21-recurrences.md) |
+| 22 | [Finite Probability by Counting](22-finite-probability.md) |
 
-Chapters 13–16 require the `hol` branch. Their assignment manifests distinguish
+Chapters 13–19 require the `hol` branch. Their assignment manifests distinguish
 concrete `fol+induction` work from the genuinely higher-order act of passing a
 function to generic `map`; Chapter 16 then returns to a wholly restricted
 set/list-counting vertical.
+
+For the next counting step, [Finite sums](../FINITE_SUMS.md) introduces the
+shared list-sum library and checked examples for combining group totals.
+[Reachability](../REACHABILITY.md) introduces directed journeys and preserved
+properties through a checked road example. Chapter 18 develops explicit directed
+path lists and their concatenation proof.
 
 ## A word of encouragement
 
@@ -117,3 +133,18 @@ feedback from a tuner. Second, every proof in this book was rejected by
 the checker at least once while being written. Rejection is the normal
 state of a proof in progress. The only proof that never fails is the
 one you never run.
+
+Chapter 19 connects row and column totals to vertex degrees, with checked
+loop and parallel-edge examples and a native/browser assignment.
+
+Chapter 20 develops divisibility witnesses and modular arithmetic; its assignment
+uses `fol+induction` and includes the zero-modulus boundary case.
+
+Chapter 21 develops constant-step recurrences and uniqueness, with numeric and
+state-machine clients and a `fol+induction` assignment.
+
+Chapter 22 develops finite uniform probability through checked event counts
+and expectation numerators, with a `hol` assignment. It distinguishes uniform
+outcomes from repeated tickets and makes the nonzero-denominator requirement
+explicit; rational division and general probability measures remain outside
+the checker.

@@ -21,6 +21,13 @@ use super::terms::{shift_under_new_binder, ConstantId, CoreTerm};
 use super::theorems::TheoremId;
 use super::types::CoreType;
 
+#[path = "graph_package.rs"]
+mod graph_package;
+pub use graph_package::InstalledGraphLibrary;
+#[path = "matrix_package.rs"]
+mod matrix_package;
+pub use matrix_package::InstalledMatrixLibrary;
+
 pub const BUILTIN_LIST_V1_MODULE: &str = "std/hol/list";
 pub const BUILTIN_LIST_V1_NAMESPACE: &str = "@library.list.v1";
 pub const BUILTIN_CARDINALITY_V1_MODULE: &str = "std/hol/cardinality";
@@ -101,17 +108,27 @@ pub enum LibraryPackageId {
     ListV1,
     CardinalityV1,
     FiniteV1,
+    GraphV1,
+    MatrixV1,
 }
 
 impl LibraryPackageId {
     /// Every registered package, in a stable order for diagnostics.
-    pub const ALL: [Self; 3] = [Self::ListV1, Self::CardinalityV1, Self::FiniteV1];
+    pub const ALL: [Self; 5] = [
+        Self::ListV1,
+        Self::CardinalityV1,
+        Self::FiniteV1,
+        Self::GraphV1,
+        Self::MatrixV1,
+    ];
 
     pub fn from_logical_id(logical_id: &str) -> Option<Self> {
         match logical_id {
             "std/hol/list@1" => Some(Self::ListV1),
             "std/hol/cardinality@1" => Some(Self::CardinalityV1),
             "std/hol/finite@1" => Some(Self::FiniteV1),
+            "std/hol/graph@1" => Some(Self::GraphV1),
+            "std/hol/matrix@1" => Some(Self::MatrixV1),
             _ => None,
         }
     }
@@ -123,6 +140,8 @@ impl fmt::Display for LibraryPackageId {
             Self::ListV1 => write!(f, "{BUILTIN_LIST_V1_MODULE}@1"),
             Self::CardinalityV1 => write!(f, "{BUILTIN_CARDINALITY_V1_MODULE}@1"),
             Self::FiniteV1 => write!(f, "{BUILTIN_FINITE_V1_MODULE}@1"),
+            Self::GraphV1 => write!(f, "std/hol/graph@1"),
+            Self::MatrixV1 => write!(f, "std/hol/matrix@1"),
         }
     }
 }
@@ -211,6 +230,8 @@ pub enum InstalledLibraryPackage {
     ListV1(InstalledListLibrary),
     CardinalityV1(InstalledCardinalityLibrary),
     FiniteV1(InstalledFiniteLibrary),
+    GraphV1(InstalledGraphLibrary),
+    MatrixV1(InstalledMatrixLibrary),
 }
 
 impl InstalledLibraryPackage {
@@ -219,6 +240,8 @@ impl InstalledLibraryPackage {
             Self::ListV1(installed) => &installed.record,
             Self::CardinalityV1(installed) => &installed.record,
             Self::FiniteV1(installed) => &installed.record,
+            Self::GraphV1(installed) => &installed.record,
+            Self::MatrixV1(installed) => &installed.record,
         }
     }
 }

@@ -1,0 +1,35 @@
+import builtin:std/hol/nat_decidable.ctea as D
+import builtin:std/hol/finite_union.ctea as U
+import std/hol/list@1 as L
+
+mode constructive
+
+theorem numeric_membership (xs : L.List Nat) :
+  forall x : Nat, L.Member(x, xs) \/ not L.Member(x, xs) := by
+  exact U.member_decidable {A := Nat; xs := xs} D.nat_eq_decidable
+
+theorem numeric_union (xs ys : L.List Nat) :
+  L.Nodup(xs) -> L.Nodup(ys) ->
+  exists zs : L.List Nat, L.Nodup(zs) /\
+    (forall x : Nat, L.Member(x, zs) <-> L.Member(x, xs) \/ L.Member(x, ys)) := by
+  intro first
+  intro second
+  exact U.union_enumeration_of_decidable_eq {A := Nat; xs := xs; ys := ys} first second D.nat_eq_decidable
+
+theorem numeric_set_union
+  (S T : Set Nat) (xs ys : L.List Nat) (m n : Nat) :
+  U.HasSize(S, xs, m) -> U.HasSize(T, ys, n) ->
+  exists zs : L.List Nat,
+    U.HasSize(union(S, T), zs, L.length(zs)) /\ le(L.length(zs), add(m, n)) := by
+  intro first
+  intro second
+  exact U.has_size_union_of_decidable_eq {A := Nat; S := S; T := T; xs := xs; ys := ys; m := m; n := n} first second D.nat_eq_decidable
+
+-- A decision offers two alternatives; it does not assert that the numbers agree.
+theorem distinct_numerals : not 2 = 3 := by
+  have decision : 2 = 3 \/ not 2 = 3 := D.nat_eq_decidable 2 3
+  cases decision with
+  | left same =>
+      contradiction
+  | right different =>
+      exact different

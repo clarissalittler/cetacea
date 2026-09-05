@@ -1,0 +1,22 @@
+-- Chapter 17: computation for a concrete list and laws for unknown lists.
+import builtin:std/hol/sums.ctea as S
+import std/hol/list@1 as L
+
+mode constructive
+
+theorem three_entries : S.sum(L.cons(2, L.cons(5, L.cons(2, L.nil)))) = 9 := by
+  simp
+  refl
+
+theorem one_more (h : Nat) (xs : L.List Nat) :
+  S.sum(L.cons(h, xs)) = add(h, S.sum(xs)) := by
+  exact S.sum_cons
+
+theorem two_groups (xs ys : L.List Nat) :
+  S.sum(L.append(xs, ys)) = add(S.sum(xs), S.sum(ys)) := by
+  exact S.sum_append
+
+theorem empty_group (xs : L.List Nat) :
+  S.sum(L.append(xs, L.nil)) = S.sum(xs) := by
+  rewrite -> L.append_nil_right
+  refl

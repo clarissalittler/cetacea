@@ -1,0 +1,68 @@
+import std/hol/list@1 as L
+mode constructive
+
+theorem length_step (xs : L.List Nat) : L.length(L.cons(0, xs)) = succ(L.length(xs)) := by
+  rewrite -> L.length_cons
+  refl
+
+theorem partial_arguments (xs : L.List Nat) : L.length(L.cons(0, xs)) = succ(L.length(xs)) := by
+  rewrite -> L.length_cons {A := Nat}
+  refl
+
+theorem in_hypothesis (xs : L.List Nat) : L.length(L.cons(0, xs)) = 2 -> succ(L.length(xs)) = 2 := by
+  intro h
+  rewrite -> L.length_cons at h
+  exact h
+
+def enumeration : L.List Nat := L.cons(0, L.cons(1, L.nil))
+
+theorem length_enumeration : L.length(enumeration) = 2 := by
+  rewrite -> L.length_cons
+  rewrite -> L.length_cons
+  rewrite -> L.length_nil
+  refl
+
+import std/hol/finite@1 as F
+
+theorem one_nodup : F.Nodup(F.cons(0, F.nil)) := by
+  apply F.nodup_cons.right
+  split
+  intro member
+  exact F.member_nil {A := Nat; x := 0} member
+  exact F.nodup_nil {A := Nat}
+
+theorem head_member : F.Member(0, F.cons(0, F.nil)) := by
+  apply F.member_cons.right
+  left
+  refl
+
+theorem card_from_parts (xs : F.List Nat) :
+  F.Nodup(xs) -> F.length(xs) = 1 -> (forall x : Nat, F.Member(x, xs)) -> F.HasCard(xs, 1) := by
+  intro nodup
+  intro length
+  intro covers
+  apply F.has_card_intro
+  exact nodup
+  exact length
+  exact covers
+
+theorem backward_with_head (xs : L.List Nat) : succ(L.length(xs)) = L.length(L.cons(0, xs)) := by
+  rewrite <- L.length_cons {h := 0}
+  refl
+
+theorem all_occurrences (xs : L.List Nat) (P : Nat -> Nat -> Prop) :
+  P(succ(L.length(xs)), succ(L.length(xs))) -> P(L.length(L.cons(0, xs)), L.length(L.cons(0, xs))) := by
+  intro h
+  rewrite all -> L.length_cons
+  exact h
+
+import std/hol/cardinality@1 as C
+
+theorem mapped_length (f : Nat -> Nat) (xs : L.List Nat) : C.length(C.map(f, xs)) = L.length(xs) := by
+  apply C.map_length
+
+theorem rewrite_map (f : Nat -> Nat) (xs : L.List Nat) (P : Nat -> Prop) :
+  P(L.length(xs)) -> P(C.length(C.map(f, xs))) := by
+  intro h
+  rewrite -> C.map_length
+  exact h

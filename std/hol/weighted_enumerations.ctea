@@ -1,0 +1,211 @@
+-- Removing one occurrence and comparing finite weighted enumerations.
+import weighted_sums.ctea as W
+import counting.ctea as F
+import std/hol/cardinality@1 as C
+import sums.ctea as S
+import ../nat.ctea as N
+mode constructive
+
+-- A membership proof selects an occurrence without decidable equality.
+-- The remainder is duplicate-free, omits a, and retains every other member.
+theorem remove_weighted_member
+  (A : Type) (f : A -> Nat) (a : A) (ys : C.List A) :
+  C.Nodup(ys) -> C.Member(a, ys) ->
+  exists zs : C.List A,
+    C.Nodup(zs) /\
+    (not C.Member(a, zs) /\
+      ((forall x : A, C.Member(x, ys) <-> x = a \/ C.Member(x, zs)) /\
+        S.sum(C.map(f, ys)) = add(f(a), S.sum(C.map(f, zs))))) := by
+  induction ys with
+  | nil =>
+      intro nodup
+      intro member
+      exfalso
+      exact C.member_nil {A := A; x := a} member
+  | cons h t ih =>
+      intro nodup
+      intro member
+      have nd : (not C.Member(h, t)) /\ C.Nodup(t) := (C.nodup_cons {A := A; h := h; t := t}).left nodup
+      have place : a = h \/ C.Member(a, t) := (C.member_cons {A := A; x := a; h := h; t := t}).left member
+      cases place with
+      | left same =>
+          exists t
+          split
+          exact nd.right
+          split
+          rewrite all -> same
+          exact nd.left
+          split
+          intro x
+          rewrite all -> same
+          exact C.member_cons {A := A; x := x; h := h; t := t}
+          rewrite all -> same
+          rewrite -> C.map_cons
+          rewrite -> S.sum_cons
+          refl
+      | right in_tail =>
+          cases ih nd.right in_tail with
+          | intro zs removed =>
+              have old_members : forall x : A, C.Member(x, t) <-> x = a \/ C.Member(x, zs) := removed.right.right.left
+              have h_not_a : not h = a := by
+                intro same
+                apply nd.left
+                rewrite all -> same
+                exact in_tail
+              exists C.cons(h, zs)
+              split
+              apply (C.nodup_cons {A := A; h := h; t := zs}).right
+              split
+              intro h_in_zs
+              apply nd.left
+              apply (old_members h).right
+              right
+              exact h_in_zs
+              exact removed.left
+              split
+              intro a_in_new
+              have choices : a = h \/ C.Member(a, zs) := (C.member_cons {A := A; x := a; h := h; t := zs}).left a_in_new
+              cases choices with
+              | left same =>
+                  apply h_not_a
+                  rewrite all -> same
+                  refl
+              | right a_in_zs =>
+                  exact removed.right.left a_in_zs
+              split
+              intro x
+              split
+              intro in_old
+              have choices : x = h \/ C.Member(x, t) := (C.member_cons {A := A; x := x; h := h; t := t}).left in_old
+              cases choices with
+              | left same =>
+                  right
+                  apply (C.member_cons {A := A; x := x; h := h; t := zs}).right
+                  left
+                  exact same
+              | right in_t =>
+                  have choices2 : x = a \/ C.Member(x, zs) := (old_members x).left in_t
+                  cases choices2 with
+                  | left same =>
+                      left
+                      exact same
+                  | right in_zs =>
+                      right
+                      exact W.member_tail {A := A; x := h; y := x; t := zs} in_zs
+              intro in_new
+              apply (C.member_cons {A := A; x := x; h := h; t := t}).right
+              cases in_new with
+              | left same =>
+                  right
+                  apply (old_members x).right
+                  left
+                  exact same
+              | right in_cons =>
+                  have choices : x = h \/ C.Member(x, zs) := (C.member_cons {A := A; x := x; h := h; t := zs}).left in_cons
+                  cases choices with
+                  | left same =>
+                      left
+                      exact same
+                  | right in_zs =>
+                      right
+                      apply (old_members x).right
+                      right
+                      exact in_zs
+              rewrite -> C.map_cons
+              rewrite -> C.map_cons
+              rewrite -> S.sum_cons
+              rewrite -> removed.right.right.right
+              rewrite <- N.add_assoc
+              rewrite -> N.add_comm {n := f(h); m := f(a)}
+              rewrite -> N.add_assoc
+              refl
+
+-- The same members, each occurring once, have the same weighted total.
+theorem sum_same_members
+  (A : Type) (f : A -> Nat) (xs : C.List A) :
+  forall ys : C.List A,
+  C.Nodup(xs) -> C.Nodup(ys) ->
+  (forall x : A, C.Member(x, xs) <-> C.Member(x, ys)) ->
+  S.sum(C.map(f, xs)) = S.sum(C.map(f, ys)) := by
+  induction xs with
+  | nil =>
+      intro ys
+      intro nd_xs
+      intro nd_ys
+      intro same_members
+      have empty_total : S.sum(C.map(f, ys)) = mul(C.length(ys), 0) := by
+        apply W.sum_map_constant_on {A := A; f := f; xs := ys; k := 0}
+        intro x
+        intro member
+        exfalso
+        have impossible : C.Member(x, C.nil) := (same_members x).right member
+        exact C.member_nil {A := A; x := x} impossible
+      rewrite -> C.map_nil
+      rewrite -> S.sum_nil
+      rewrite -> empty_total
+      refl
+  | cons h t ih =>
+      intro ys
+      intro nd_xs
+      intro nd_ys
+      intro same_members
+      have nd : (not C.Member(h, t)) /\ C.Nodup(t) := (C.nodup_cons {A := A; h := h; t := t}).left nd_xs
+      have head_in_xs : C.Member(h, C.cons(h, t)) := W.member_head
+      have head_in_ys : C.Member(h, ys) := (same_members h).left head_in_xs
+      cases remove_weighted_member {A := A; f := f; a := h; ys := ys} nd_ys head_in_ys with
+      | intro zs removed =>
+          have coverage : forall x : A, C.Member(x, t) <-> C.Member(x, zs) := by
+            intro x
+            split
+            intro in_t
+            have in_xs : C.Member(x, C.cons(h, t)) := W.member_tail {A := A; x := h; y := x; t := t} in_t
+            have in_ys : C.Member(x, ys) := (same_members x).left in_xs
+            have choices : x = h \/ C.Member(x, zs) := (removed.right.right.left x).left in_ys
+            cases choices with
+            | left equal_head =>
+                exfalso
+                apply nd.left
+                rewrite <- equal_head
+                exact in_t
+            | right in_zs =>
+                exact in_zs
+            intro in_zs
+            have in_ys : C.Member(x, ys) := by
+              apply (removed.right.right.left x).right
+              right
+              exact in_zs
+            have in_xs : C.Member(x, C.cons(h, t)) := (same_members x).right in_ys
+            have choices : x = h \/ C.Member(x, t) := (C.member_cons {A := A; x := x; h := h; t := t}).left in_xs
+            cases choices with
+            | left equal_head =>
+                exfalso
+                apply removed.right.left
+                rewrite <- equal_head
+                exact in_zs
+            | right in_t =>
+                exact in_t
+          have tails : S.sum(C.map(f, t)) = S.sum(C.map(f, zs)) := ih zs nd.right removed.left coverage
+          rewrite -> C.map_cons
+          rewrite -> S.sum_cons
+          rewrite -> removed.right.right.right
+          rewrite -> tails
+          refl
+
+-- A finite-set sum is independent of which checked enumeration is supplied.
+theorem sum_enumeration_independent
+  (A : Type) (f : A -> Nat) (V : Set A) (xs ys : C.List A) (m n : Nat) :
+  F.HasSize(V, xs, m) -> F.HasSize(V, ys, n) ->
+  S.sum(C.map(f, xs)) = S.sum(C.map(f, ys)) := by
+  intro size_xs
+  intro size_ys
+  apply sum_same_members {A := A; f := f; xs := xs} ys
+  exact F.has_size_nodup {A := A; S := V; xs := xs; n := m} size_xs
+  exact F.has_size_nodup {A := A; S := V; xs := ys; n := n} size_ys
+  intro x
+  split
+  intro in_xs
+  have in_set : x in V := (F.has_size_members {A := A; S := V; xs := xs; n := m} size_xs x).left in_xs
+  exact (F.has_size_members {A := A; S := V; xs := ys; n := n} size_ys x).right in_set
+  intro in_ys
+  have in_set : x in V := (F.has_size_members {A := A; S := V; xs := ys; n := n} size_ys x).left in_ys
+  exact (F.has_size_members {A := A; S := V; xs := xs; n := m} size_xs x).right in_set

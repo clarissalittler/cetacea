@@ -132,7 +132,7 @@ we'll see the surprisingly helpful error it produces.
 *which* side, any conclusion you draw must survive both possibilities:
 
 ```text
-theorem or_elim_demo (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+theorem or_elim (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
   intro hpr
   intro hqr
   intro h
@@ -212,7 +212,7 @@ With negation unmasked, **modus tollens** — from `P -> Q` and `not Q`,
 conclude `not P` — turns out to be nothing but arrow-shuffling:
 
 ```text
-theorem modus_tollens_demo (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+theorem modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
   intro hpq
   intro hnq
   intro hp

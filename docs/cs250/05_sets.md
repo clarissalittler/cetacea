@@ -7,7 +7,7 @@ the basic constructors are `empty(T)`, `singleton(x)`, `union(A, B)`,
 written `pair(x, y)`. You can also write nonempty finite sets as
 `{alice, bob}`. Membership is `x in A`, subset is `A subset B`,
 equality of sets is plain `=`. Set extensionality is an axiom
-(`set_ext` in `std/set.ctea`). The standard library proves a small
+(`set.set_ext` in `std/set.ctea`). The standard library proves a small
 algebra of set-theoretic identities.
 
 Set-builder notation is supported:
@@ -29,7 +29,7 @@ sets.
 The companion file is [`code/05_sets.ctea`](code/05_sets.ctea).
 
 ```text
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -93,7 +93,7 @@ theorem alice_in_tall_set : Tall(alice) -> alice in TallSet := by
 ```
 
 ```text
-theorem subset_refl_demo
+theorem subset_refl
   (T : Type)
   (A : Set T)
   : A subset A := by
@@ -107,15 +107,15 @@ theorem subset_refl_demo
 
 ## Set extensionality
 
-`set_ext` is an axiom: from `forall x, x in A <-> x in B`, conclude
+`set.set_ext` is an axiom: from `forall x, x in A <-> x in B`, conclude
 `A = B`. This is the standard way to prove two sets are equal.
 
 ```text
-theorem inter_comm_demo
+theorem inter_comm
   (T : Type)
   (A B : Set T)
   : inter(A, B) = inter(B, A) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -129,8 +129,8 @@ theorem inter_comm_demo
   exact hx.left
 ```
 
-This is in the standard library as `inter_comm`. Re-deriving it gives
-you a feel for the rhythm: `apply set_ext`, `intro x`, `simp`, then
+This is in the standard library as `set.inter_comm`. Re-deriving it gives
+you a feel for the rhythm: `apply set.set_ext`, `intro x`, `simp`, then
 prove the biconditional in each direction.
 
 The full `std/set.ctea` is worth reading as a small textbook on its
@@ -155,7 +155,7 @@ theorem inter_union_distrib
   (T : Type)
   (A B C : Set T)
   : inter(A, union(B, C)) = union(inter(A, B), inter(A, C)) := by
-  apply set_ext
+  apply set.set_ext
   intro x
   simp
   split
@@ -196,7 +196,7 @@ Cetacea makes you commit to which direction at each step.
 For powersets, `simp` turns membership into subset:
 
 ```text
-theorem powerset_mono_demo
+theorem powerset_mono
   (A B : Set Person)
   : A subset B -> powerset(A) subset powerset(B) := by
   intro hAB
@@ -215,7 +215,7 @@ theorem powerset_mono_demo
 - Module 1 Exercise 9: `A ⊆ B -> P(A) ⊆ P(B)` is now direct:
   `A subset B -> powerset(A) subset powerset(B)`. The proof is the same
   element-subset argument as on paper.
-- Re-prove `union_comm` from scratch (without using the imported
+- Re-prove `set.union_comm` from scratch (without using the imported
   version).
 - Module 1 Exercise 10 (inclusion-exclusion) is **not** doable directly
   in Cetacea — it requires arithmetic on cardinalities and Cetacea has

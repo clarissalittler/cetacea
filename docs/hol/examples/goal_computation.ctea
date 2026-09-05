@@ -1,0 +1,17 @@
+mode constructive
+
+-- Applying h preserves the premise le(0, 1); its preview says True.
+theorem not_symmetric :
+  (forall x y : Nat, le(x, y) -> le(y, x)) -> False := by
+  intro h
+  apply h 0 1
+  trivial
+
+-- A False preview is not itself a proof. This theorem supplies the premise.
+theorem impossible_assumption : le(1, 0) -> le(1, 0) := by
+  intro h
+  exact h
+
+theorem symbolic (n m : Nat) : n = m -> n = m := by
+  intro h
+  exact h

@@ -84,7 +84,7 @@ where `h : P`, one where `h : not P`. It's `cases` on an invisible
 two-case triviality:
 
 ```text
-theorem em_demo (P : Prop) : P \/ not P := by
+theorem em (P : Prop) : P \/ not P := by
   by_cases h : P
   left
   exact h
@@ -114,7 +114,7 @@ changes the goal to `False`. Now the dare from Chapter 2 falls in four
 lines:
 
 ```text
-theorem dne_demo (P : Prop) : not not P -> P := by
+theorem dne (P : Prop) : not not P -> P := by
   intro hnn
   by_contra hn
   apply hnn
@@ -226,7 +226,7 @@ the checker track it for you.
 The rules of the game:
 
 - Files start in `mode constructive`. Classical tactics (`by_cases`,
-  `by_contra`) and classical library theorems (`em`, `dne`) are
+  `by_contra`) and classical library theorems (`prop.em`, `prop.dne`) are
   rejected, with an error naming the offending rule.
 - `mode classical` unlocks them for everything after that line.
 - The checker reports what each proof **actually used** — permission
@@ -245,8 +245,8 @@ Run the file and read the verdicts:
 
 ```text
 accepted theorem not_not_intro (constructive)
-accepted theorem em_demo (classical)
-accepted theorem dne_demo (classical)
+accepted theorem em (classical)
+accepted theorem dne (classical)
 accepted theorem demorgan_hard (classical)
 accepted theorem contrapositive_rev (classical)
 accepted theorem mode_is_measured (constructive)

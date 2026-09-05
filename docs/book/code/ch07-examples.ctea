@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch07-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -31,7 +31,7 @@ theorem eq_symmetric (T : Type) : Symmetric(fun x y : T => x = y) := by
   intro x
   intro y
   intro h
-  exact eq_symm h
+  exact eq.eq_symm h
 
 theorem eq_transitive (T : Type) : Transitive(fun x y : T => x = y) := by
   unfold Transitive
@@ -40,13 +40,13 @@ theorem eq_transitive (T : Type) : Transitive(fun x y : T => x = y) := by
   intro z
   intro h1
   intro h2
-  exact eq_trans h1 h2
+  exact eq.eq_trans h1 h2
 
 -- Section 7.4: le is reflexive...
 theorem le_reflexive : Reflexive(fun x y : Nat => le(x, y)) := by
   unfold Reflexive
   intro x
-  exact le_refl
+  exact nat.le_refl
 
 -- ...but NOT symmetric, and we can prove that it isn't.
 theorem le_not_symmetric : not Symmetric(fun x y : Nat => le(x, y)) := by
@@ -55,7 +55,7 @@ theorem le_not_symmetric : not Symmetric(fun x y : Nat => le(x, y)) := by
   have h01 : le(1, 0)
   apply h 0 1
   trivial
-  apply succ_not_le_zero {n := 0}
+  apply nat.succ_not_le_zero {n := 0}
   exact h01
 
 -- Section 7.5: building a symmetric relation out of an unruly one.
@@ -71,31 +71,31 @@ theorem mutual_knowing_symmetric
 
 -- Section 7.6: the payoff — congruence mod m is an equivalence relation.
 -- ModEq(m, x, y) and its refl/sym/trans theorems come from std/modular.ctea.
-theorem modeq_reflexive (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_reflexive (m : Nat) : Reflexive(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Reflexive
   intro x
-  exact modeq_refl
+  exact modular.modeq_refl
 
-theorem modeq_symmetric (m : Nat) : Symmetric(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_symmetric (m : Nat) : Symmetric(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Symmetric
   intro x
   intro y
   intro h
-  exact modeq_sym m x y h
+  exact modular.modeq_sym m x y h
 
-theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_transitive (m : Nat) : Transitive(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Transitive
   intro x
   intro y
   intro z
   intro h1
   intro h2
-  apply modeq_trans
+  apply modular.modeq_trans
   exact h1
   exact h2
 
 -- The whole bundle in one statement: an equivalence relation.
-theorem modeq_equivalence (m : Nat) : Equivalence(fun x y : Nat => ModEq(m, x, y)) := by
+theorem modeq_equivalence (m : Nat) : Equivalence(fun x y : Nat => modular.ModEq(m, x, y)) := by
   unfold Equivalence
   split
   exact modeq_reflexive {m := m}
@@ -105,8 +105,8 @@ theorem modeq_equivalence (m : Nat) : Equivalence(fun x y : Nat => ModEq(m, x, y
 
 -- Section 7.6: a concrete residue fact — 27 o'clock is 3 o'clock.
 -- The witnesses say: 27 + 12*0 and 3 + 12*2 are the same number.
-theorem clock_27_is_3 : ModEq(12, 27, 3) := by
-  unfold ModEq
+theorem clock_27_is_3 : modular.ModEq(12, 27, 3) := by
+  unfold modular.ModEq
   exists 0
   exists 2
   refl

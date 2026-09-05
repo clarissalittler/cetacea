@@ -26,6 +26,9 @@ compatibility, and argument type compatibility.
 - `docs/book`: the in-progress course text, exercises, solutions, deliberate
   failures, and assignment policies.
 - `docs/USAGE.md`: language and proving guide.
+- `docs/STUDENT_READINESS.md`: current completion checklist and verified limits.
+- `docs/BROWSER_ASSIGNMENTS.md`: assignment loading, grading parity and trust boundaries.
+- `docs/WEB_DISTRIBUTION.md`: reproducible browser bundles and deployment checks.
 - `docs/DESIGN_AND_CODE.md`: implementation and design guide.
 - `docs/DISCRETE_MATH_GAP_AUDIT.md`: curriculum coverage audit and staged
   course-readiness plan.
@@ -41,6 +44,12 @@ compatibility, and argument type compatibility.
   including disjoint-union addition and the union upper bound.
 - `std/hol/pigeonhole.ctea`: the checked constructive pigeonhole principle
   and its propositional-injectivity map lemmas over `HasCard`.
+- `std/hol/probability_counts.ctea`: checked complement counts and expectation
+  numerators for finite uniform sampling; [Chapter 22](docs/book/22-finite-probability.md)
+  supplies coin/ticket examples and a native/browser assignment.
+- `std/hol/pigeonhole_classical.ctea`: a positive collision-witness theorem
+  with explicitly tracked classical reasoning. The [example](docs/hol/examples/pigeonhole_collision.ctea)
+  also exhibits a concrete pair constructively.
 - `examples/prop.ctea`: constructive and classical propositional examples.
 - `examples/fol.ctea`: first-order examples.
 - `examples/fol_advanced.ctea`: harder first-order examples — quantifier
@@ -94,11 +103,13 @@ kernel cannot replay is reported as a failed declaration and the file is not
 certified. `--legacy-only` runs the teaching checker alone for debugging and
 never certifies a file; it is refused together with `--hol-profile` or
 `--assignment`, which need kernel receipts. Exact logical imports such as
-`import std/hol/list@1 as L`, `import std/hol/finite@1 as F`, or
-`import std/hol/cardinality@1 as C` are checked by the kernel even under
+`import std/hol/list@1 as L`, `import std/hol/finite@1 as F`,
+`import std/hol/graph@1 as G`, or `import std/hol/cardinality@1 as C` are checked by the kernel even under
 `--legacy-only`, including when the package import is reached through another
 source file. The finite package exposes its checked List dependency under the
-same alias. The cardinality package exposes checked
+same alias. The graph package supplies explicit directed paths and their
+endpoint equations; [the path guide](docs/REACHABILITY.md) includes a checked
+source-level concatenation proof. The cardinality package exposes checked
 `map`, `map_nil`, `map_cons`, `map_length`, membership transport,
 injective-Nodup, surjective coverage, and the final `cardinality_transport`
 theorem. Because `map` consumes a function argument, its uses are honestly
@@ -134,9 +145,20 @@ Then open:
 http://localhost:8000/web/
 ```
 
-The browser UI is also deployed automatically to GitHub Pages by
-`.github/workflows/pages.yml`, which builds the WebAssembly checker and
-publishes the contents of `web/` on every push to `main`.
+For a self-contained copy with a visible build ID, use:
+
+```sh
+python3 scripts/build_web.py --output target/web-distribution
+python3 -m http.server --bind 127.0.0.1 --directory target/web-distribution 8000
+```
+
+The output directory must be new. Its assets and Wasm are stored under a
+build-specific path and described by a hash manifest. See
+[`docs/WEB_DISTRIBUTION.md`](docs/WEB_DISTRIBUTION.md).
+
+`.github/workflows/pages.yml` is configured to run the reusable CI workflow
+before packaging and deploying this bundle on pushes to `main`. This describes
+the checked-in configuration, not verification of a current remote deployment.
 
 Browser checks are dual-certified: the teaching UI and the HOL replay must both
 accept the file. Exact logical imports work in checking, goal stepping, and
@@ -159,9 +181,25 @@ command or tactic line when the checker has path information. Parser
 diagnostics also carry line-local token spans where the parser can identify the
 offending token.
 
+Independent aliases of the same logical package share type and symbol identity.
+For example, a value of `F.List Nat` can be passed to `C.length` when both aliases
+refer to `std/hol/list@1`, including through finite, cardinality, or counting
+imports. Goals may display the first imported spelling. See the checked
+[`package-alias example`](docs/hol/examples/package_aliases.ctea).
+
 Import paths are resolved relative to the importing file first, then relative
-to the current working directory. A file imported more than once is checked and
-loaded once.
+to the current working directory. If an exact `std/...` source is absent,
+Cetacea uses the standard library bundled with the checker, so homework also
+checks outside the repository. `import builtin:std/nat.ctea as nat` explicitly
+selects that bundled copy. Its dependencies come from the same bundle. A file
+imported more than once under the same alias is checked and loaded once.
+
+The prelude's concrete `List` and counting's generic `List A` remain distinct:
+combine them with `import std/hol/counting.ctea as Counting`. See the
+[checked coexistence example](docs/hol/examples/prelude_counting.ctea).
+A failed import publishes no partial declarations or receipts. Its diagnostic
+points to the caller's import line, and later declarations wait until the import
+is fixed; declarations checked before the import remain reported.
 
 ## Implemented
 
@@ -232,7 +270,7 @@ loaded once.
 - tactics: `intro`, `revert`, `exact`, `trivial`, `assumption`, `apply`, `split`,
   `left`, `right`, `cases`, `exists`, `refl`, `rewrite`, `unfold`, `simp`,
   `induction`, `exfalso`, `contradiction`, `by_cases`, `by_contra`,
-  `show_goal`, `sorry` (alias `admit`), and `have` for forward reasoning
+  `finite`, `show_goal`, `sorry` (alias `admit`), and `have` for forward reasoning
   (`have h : P`, `have h : P := proof`, `have h := proof`)
 - projections and parenthesized sub-expressions inside proof-expression
   arguments, as in `exact f h.left` and `rewrite -> hinj x y (h.left)`;
@@ -259,22 +297,28 @@ loaded once.
   provable
 - goal hints are speculatively executed, so failing suggestions are dropped
 - TUI undo and redo with Ctrl-Z / Ctrl-Y
-- browser UI localStorage autosave, a load-example menu, inline error markers,
-  and live re-checking
+- browser source/project open and download, autosave, recovery checkpoints,
+  damaged-save recovery and concurrent-tab conflict protection
+- separate instructor assignment loading with pinned libraries, shared native
+  policy enforcement, saved task selection and explicit assignment feedback
+- browser cancellation/recovery, diagnostic navigation, keyboard section links,
+  theorem search and insertion, and live re-checking
 - command and tactic-line reporting for checker diagnostics
 - strict course checking with composable `--deny-sorry`, `--deny-axioms`, and
   `--deny-classical` policies, plus `--json` output for autograders and CI
 
 ## Next Milestones
 
-The `hol` branch evaluates whether these milestones should be built over a
-constructive simply typed higher-order core while retaining enforceable Prop and
-FOL teaching fragments. See
-[`docs/HOL_REARCHITECTURE_PLAN.md`](docs/HOL_REARCHITECTURE_PLAN.md).
+The HOL replay is now part of production checking, with enforceable teaching
+profiles and shared native/browser assignment policy. The remaining work is
+tracked in [`docs/STUDENT_READINESS.md`](docs/STUDENT_READINESS.md); the older
+[`docs/HOL_REARCHITECTURE_PLAN.md`](docs/HOL_REARCHITECTURE_PLAN.md) records the
+architecture's staged development. Browser and source-level regression tests do
+not establish classroom outcomes or a completed accessibility audit.
 
-1. Add a decidable equality or membership interface so overlapping finite
-   unions can construct canonical witnesses rather than merely bound a
-   supplied one.
+1. Add executable equality/membership decisions and a list-valued union API.
+   [Constructive union witnesses](docs/CONSTRUCTIVE_UNIONS.md) are now checked
+   from explicit logical membership decisions, including their size bound.
 2. Publish stable checked source libraries as versioned logical packages
    without manually duplicating their proofs as Rust terms.
 3. Build the next counting/graph verticals: handshake and finite-tree
@@ -283,5 +327,6 @@ FOL teaching fragments. See
    add mutual recursion or recursion on later `defrec` arguments when a course
    example requires them.
 5. Grow arithmetic with division/remainder, gcd, primes, integers, and useful
-   decision procedures; promote assignment-manifest enforcement to the
-   browser/grading surface.
+   decision procedures.
+6. Complete checking resource budgets, source-library publication, accessibility
+   verification and a real classroom pilot.

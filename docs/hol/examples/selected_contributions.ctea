@@ -1,0 +1,83 @@
+-- Values outside the selected list need not satisfy its counting premise.
+import builtin:std/hol/weighted_sums.ctea as W
+import std/hol/cardinality@1 as C
+import builtin:std/hol/sums.ctea as S
+import builtin:std/hol/finite_weighted_sums.ctea as FSum
+import builtin:std/hol/counting.ctea as F
+mode constructive
+
+data Item
+| selected
+| outside
+
+defrec contribution (x : Item) : Nat
+| selected => 2
+| outside => 99
+
+defrec alternative (x : Item) : Nat
+| selected => 2
+| outside => 0
+
+-- The functions really differ away from the selected items.
+theorem different_outside : not contribution(outside) = alternative(outside) := by
+  simp
+  intro impossible
+  contradiction
+
+-- No global assertion that contribution is constantly two is required.
+theorem selected_total (xs : C.List Item) :
+  (forall x : Item, C.Member(x, xs) -> x = selected) ->
+  S.sum(C.map(contribution, xs)) = mul(C.length(xs), 2) := by
+  intro selected_only
+  apply W.sum_map_constant_on {A := Item; f := contribution; xs := xs; k := 2}
+  intro x
+  intro member
+  have same : x = selected := selected_only x member
+  rewrite all -> same
+  simp
+  refl
+
+-- Agreement on the list suffices even though the functions differ outside it.
+theorem selected_totals_agree (xs : C.List Item) :
+  (forall x : Item, C.Member(x, xs) -> x = selected) ->
+  S.sum(C.map(contribution, xs)) = S.sum(C.map(alternative, xs)) := by
+  intro selected_only
+  apply W.sum_map_congr_on {A := Item; f := contribution; g := alternative; xs := xs}
+  intro x
+  intro member
+  have same : x = selected := selected_only x member
+  rewrite all -> same
+  simp
+  refl
+
+-- Duplicate occurrences still contribute separately.
+theorem two_selected_copies :
+  S.sum(C.map(contribution, C.cons(selected, C.cons(selected, C.nil)))) = 4 := by
+  rewrite -> C.map_cons
+  rewrite -> C.map_cons
+  rewrite -> C.map_nil
+  simp
+  refl
+
+-- Unlike the repeated list above, this is an exact set enumeration.
+def Selected : Set Item := { x : Item | x = selected }
+
+theorem selected_set_size : F.HasSize(Selected, C.cons(selected, C.nil), 1) := by
+  apply F.has_size_intro {A := Item; S := Selected; xs := C.cons(selected, C.nil); n := 1}
+  finite
+  rewrite -> C.length_cons
+  rewrite -> C.length_nil
+  refl
+  unfold Selected
+  finite
+
+theorem selected_set_total :
+  S.sum(C.map(contribution, C.cons(selected, C.nil))) = mul(1, 2) := by
+  apply FSum.sum_on_set_constant {A := Item; f := contribution; V := Selected; xs := C.cons(selected, C.nil); n := 1; k := 2}
+  exact selected_set_size
+  intro x
+  intro in_set
+  simp [Selected] at in_set
+  rewrite -> in_set
+  simp
+  refl

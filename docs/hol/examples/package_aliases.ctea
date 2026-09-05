@@ -1,0 +1,43 @@
+-- Independently named package imports share declaration identity.
+import std/hol/list@1 as L
+import std/hol/finite@1 as F
+import std/hol/cardinality@1 as H
+import ../../../std/hol/counting.ctea as C
+
+mode constructive
+
+theorem same_list (xs : F.List Nat) : H.length(xs) = L.length(xs) := by
+  refl
+
+theorem alias_lemma (xs : C.List Nat) : H.append(xs, F.nil) = xs := by
+  exact L.append_nil_right {A := Nat; xs := xs}
+
+theorem alias_induction (xs : F.List Nat) : F.append(xs, C.nil) = xs := by
+  induction xs with
+  | H.nil =>
+      exact C.append_nil_left {A := Nat; xs := (L.nil : L.List Nat)}
+  | H.cons h t ih =>
+      rewrite -> C.append_cons {A := Nat; h := h; t := t; ys := (L.nil : L.List Nat)}
+      rewrite -> ih
+      refl
+
+defrec alias_sum (xs : F.List Nat) : Nat
+| H.nil => 0
+| H.cons h t rec => add(h, rec)
+
+theorem sum_two : alias_sum(C.cons(1, L.cons(2, H.nil))) = 3 := by
+  simp
+  refl
+
+theorem counted (S : Set Nat) (xs : F.List Nat) (n : Nat) :
+  C.HasSize(S, xs, n) -> H.length(xs) = n := by
+  intro h
+  exact C.has_size_length {A := Nat; S := S; xs := xs; n := n} h
+
+theorem finite_length (xs : L.List Nat) (n : Nat) :
+  F.HasCard(xs, n) -> C.length(xs) = n := by
+  exact F.has_card_length {A := Nat; xs := xs; n := n}
+
+theorem mapped_length (f : Nat -> Nat) (xs : C.List Nat) :
+  F.length(H.map(f, xs)) = L.length(xs) := by
+  exact H.map_length {A := Nat; B := Nat; f := f; xs := xs}

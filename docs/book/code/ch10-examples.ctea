@@ -3,7 +3,7 @@
 --
 --   cargo run -p cetacea_cli -- docs/book/code/ch10-examples.ctea
 
-import ../../../std/prelude.ctea
+import ../../../std/qualified_prelude.ctea
 
 mode constructive
 
@@ -65,45 +65,45 @@ theorem addl_zero_right (n : Nat) : addl(n, 0) = n := by
 
 -- Section 10.5: lists (declared in std/list.ctea: nil, cons(Nat, List))
 -- and their recursive functions compute the same way.
-theorem length_demo : length(cons(7, cons(4, nil))) = 2 := by
+theorem length : list.length(list.cons(7, list.cons(4, list.nil))) = 2 := by
   refl
 
 -- Our own defrec over List: the sum of the elements.
-defrec sum (l : List) : Nat
-| nil => 0
-| cons h t rec => add(h, rec)
+defrec sum (l : list.List) : Nat
+| list.nil => 0
+| list.cons h t rec => add(h, rec)
 
-theorem sum_demo : sum(cons(1, cons(2, cons(3, nil)))) = 6 := by
+theorem sum_demo : sum(list.cons(1, list.cons(2, list.cons(3, list.nil)))) = 6 := by
   refl
 
 -- append (std/list.ctea) is a binary defrec, like addl. Its recursion
 -- equations are theorems, not axioms -- refl proves both.
-theorem append_demo : append(cons(1, nil), cons(2, nil)) = cons(1, cons(2, nil)) := by
+theorem append : list.append(list.cons(1, list.nil), list.cons(2, list.nil)) = list.cons(1, list.cons(2, list.nil)) := by
   refl
 
-theorem append_cons_demo (h : Nat) (t : List) (l : List)
-  : append(cons(h, t), l) = cons(h, append(t, l)) := by
+theorem append_cons (h : Nat) (t : list.List) (l : list.List)
+  : list.append(list.cons(h, t), l) = list.cons(h, list.append(t, l)) := by
   refl
 
 -- A binary defrec can even build a list from a number.
-defrec replicate (n : Nat) (x : Nat) : List
-| zero => nil
-| succ k rec => cons(x, rec)
+defrec replicate (n : Nat) (x : Nat) : list.List
+| zero => list.nil
+| succ k rec => list.cons(x, rec)
 
-theorem replicate_two : replicate(2, 9) = cons(9, cons(9, nil)) := by
+theorem replicate_two : replicate(2, 9) = list.cons(9, list.cons(9, list.nil)) := by
   refl
 
 -- Section 10.6: the same fact twice -- once from definitions alone,
 -- once through the library's one honest axiom. Compare the accepted
 -- lines the checker prints for these two.
-theorem divides_5_20_direct : Divides(5, 20) := by
-  unfold Divides
+theorem divides_5_20_direct : modular.Divides(5, 20) := by
+  unfold modular.Divides
   exists 4
   refl
 
-theorem divides_5_20_via_modeq : Divides(5, 20) := by
-  apply modeq_zero_to_divides
-  unfold ModEq
+theorem divides_5_20_via_modeq : modular.Divides(5, 20) := by
+  apply modular.modeq_zero_to_divides
+  unfold modular.ModEq
   exists 0
   exists 4
   refl

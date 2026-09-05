@@ -8,6 +8,7 @@ if ! cargo build -q -p cetacea_cli; then
   exit 1
 fi
 checker="$root/target/debug/cetacea_cli"
+checker_command=(python3 "$root/scripts/run_limited.py" -- "$checker")
 
 is_negative_file() {
   case "$1" in
@@ -53,7 +54,7 @@ contains_line() {
 }
 
 for file in "${files[@]}"; do
-  output="$("$checker" "$file" 2>&1)"
+  output="$("${checker_command[@]}" "$file" 2>&1)"
   code=$?
 
   if [[ "$file" == docs/book/code/* || "$file" == docs/book/hol-code/* ]]; then
@@ -83,7 +84,7 @@ for file in "${files[@]}"; do
       status=1
     fi
 
-    json_output="$("$checker" --json "$file" 2>/dev/null)"
+    json_output="$("${checker_command[@]}" --json "$file" 2>/dev/null)"
     json_code=$?
     if [[ $json_code -ne 1 ]]; then
       printf 'error: %s JSON check exited with %s, but is expected to exit 1\n' \
@@ -145,7 +146,7 @@ mapfile -t assignment_manifests < <(
 )
 for manifest in "${assignment_manifests[@]}"; do
   submission="${manifest%.ctea-assignment}.ctea"
-  output="$("$checker" --assignment "$manifest" "$submission" 2>&1)"
+  output="$("${checker_command[@]}" --assignment "$manifest" "$submission" 2>&1)"
   code=$?
   if [[ $code -ne 0 ]]; then
     printf 'error: %s failed its assignment policy\n' "$submission" >&2
@@ -159,7 +160,7 @@ mapfile -t restrictive_manifests < <(
 )
 for manifest in "${restrictive_manifests[@]}"; do
   submission="${manifest%-fol.ctea-assignment}.ctea"
-  output="$("$checker" --assignment "$manifest" "$submission" 2>&1)"
+  output="$("${checker_command[@]}" --assignment "$manifest" "$submission" 2>&1)"
   code=$?
   if [[ $code -ne 1 || "$output" != *'exceeds profile maximum `fol+induction`'* ]]; then
     printf 'error: %s did not produce its expected fragment-policy rejection\n' \

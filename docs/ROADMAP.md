@@ -1,12 +1,16 @@
 # Roadmap: Fixing the Friction
 
-A concrete plan for resolving the pain points in
+A historical plan for resolving the pain points in
 [`docs/book/FRICTION.md`](book/FRICTION.md), grounded in root-cause
 probes of each item (July 2026). Ordered into phases by
 (teaching impact × regression risk); every item names its acceptance
 test. Friction item numbers refer to FRICTION.md.
 
-## Status
+For the current implementation and remaining classroom requirements, use
+[STUDENT_READINESS.md](STUDENT_READINESS.md). The phases below preserve the
+July plan and its acceptance criteria; they are not an additional active queue.
+
+## Status of the original phases
 
 - Done: Phase 0, Phase 1, Phase 2, Phase 3, Phase 4, and Phase 5. The safety net is in CI; the
   instantiation collision, targeted hints, axiom labeling, predicate
@@ -19,8 +23,10 @@ test. Friction item numbers refer to FRICTION.md.
   diagnostics for qualified top-level leaves, scoped canonicalization for
   namespace declaration bodies, import aliases, and a qualified standard
   prelude are implemented.
-- Next: parked design work (namespaces, aggressive computation revisit,
-  polymorphic data types).
+- Subsequent work: namespace migration and explicit computation previews are
+  complete. Imported polymorphic List types support source recursion and
+  induction. User-declared polymorphic datatypes, source-library publication,
+  complete resource budgets and further curriculum remain on the active plan.
 
 ## Findings from triage
 
@@ -205,11 +211,11 @@ has several candidate occurrences, note which was rewritten
 right line.
 Status: done.
 
-## Parked (design before scheduling)
+## Disposition of originally parked work (2026-09-04)
 
-- **Namespaces (item 18):** qualified names (`nat.add_comm`) and import
+- **Namespaces (item 18), completed:** qualified names (`nat.add_comm`) and import
   aliasing touch the parser, `Env`, and every lookup; the `_demo`
-  convention holds until standard-library migration lands. Parser slices
+  convention was the temporary workaround before the completed classroom migration. Parser slices
   done: dot-qualified top-level names work, `namespace` / `end` blocks
   prefix declarations, and proof/tactic references inside a namespace
   can resolve sibling theorems and formula definitions by short name.
@@ -219,13 +225,14 @@ Status: done.
   `import path.ctea as alias` checks imported declarations under the alias
   namespace, and `std/qualified_prelude.ctea` exposes aliased standard-library
   names without changing the legacy prelude.
-  Remaining design/implementation note:
+  Design history and current implementation notes:
   [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md).
-- **Aggressive goal computation (item 15):** behavior is defensible and
-  chapters now narrate it; revisit only if Phase 3 doesn't already
-  soften the surprise (folded display should).
-- **Polymorphic data types:** unchanged from README milestones;
-  requires polymorphic signatures threaded through the kernel.
+- **Goal computation (item 15), completed:** checked applications retain their
+  written premises and expose a separate computation preview. Browser and
+  terminal displays show the distinction; see the active readiness evidence.
+- **Polymorphic data types, partial:** the kernel and public logical packages
+  support rank-one polymorphism, including `List A`. User-declared `data`
+  remains monomorphic; extending that source syntax is still open.
 
 ## Standing rules
 

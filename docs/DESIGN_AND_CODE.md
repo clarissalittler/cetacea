@@ -4,10 +4,12 @@ This guide explains the implementation structure, the design decisions behind
 the current language, and how the Rust code fits together. It is written for
 someone who wants to maintain Cetacea or extend it.
 
-The main implementation lives in `crates/cetacea_core/src/lib.rs`. The CLI in
-`crates/cetacea_cli/src/main.rs` is intentionally thin: it reads a path, asks
-the core checker to check that path, and prints the resulting diagnostics or
-accepted declarations.
+The parser and compatibility elaborator still largely live in
+`crates/cetacea_core/src/lib.rs`. The checked HOL implementation lives under
+`crates/cetacea_core/src/hol/`; shared assignment policy and virtual-project
+boundaries have separate core modules. The CLI also owns native file/policy
+resolution and terminal interaction. For current delivery status and remaining
+architecture work, see [STUDENT_READINESS.md](STUDENT_READINESS.md).
 
 ## High-Level Design
 
@@ -23,8 +25,10 @@ The important design choice is this separation:
 This keeps tactic execution out of the trusted core. Tactics can be incomplete
 or convenience-oriented, but the proof object still has to pass the kernel.
 
-The current implementation is intentionally compact. There is one core crate,
-one CLI crate, and a checked standard library written in Cetacea itself.
+There are core, CLI and Wasm crates, a browser UI, checked source libraries,
+and built-in logical packages. Narrowing the authoritative HOL API and retiring
+legacy verdict dependencies remain open; the existing split is not a claim
+that the architectural extraction is finished.
 
 ## Repository Layout
 
@@ -58,7 +62,20 @@ docs/
 
 ## Public API
 
-The main public entry points are:
+The compatibility entry points below still exist. `check_file*` returning
+`CheckResult` alone is not a complete production HOL acceptance decision.
+The CLI and browser use dual-check reports, require no source errors and a
+matching HOL replay, and apply any selected assignment policy separately.
+
+For integrated callers, inspect `check_file_with_hol_shadow`,
+`check_file_at_path_with_hol_shadow`, `VirtualProject` in `virtual_project.rs`,
+and `VirtualAssignment` in `virtual_assignment.rs`. Virtual projects enforce
+bounded paths and sources without host filesystem access; virtual assignments
+validate pinned libraries and combine proof and policy results. Shared manifest
+parsing and receipt constraints live in `assignment.rs` and
+`assignment_receipts.rs`. Avoid reconstructing policy checks in a UI.
+
+Compatibility API signatures:
 
 ```rust
 pub fn check_file(source: &str) -> CheckResult
@@ -901,8 +918,12 @@ Current induction is specialized:
 
 - It works over `Nat`.
 - It expects a target that depends on the induction variable.
-- It rejects local hypotheses that depend on the induction variable, because
-  the current implementation does not generalize them.
+- It rejects local hypotheses that depend on the induction variable until they
+  are generalized. `revert n` moves the term and its dependent hypotheses into
+  the goal; `revert h` moves a named hypothesis. Reintroduce them in the arms.
+
+Structural induction also works over user-declared datatypes and imported
+package datatypes. The Nat form below is one instance of that interface.
 
 The tactic form is:
 
@@ -998,10 +1019,13 @@ library and examples part of the regression suite.
 
 The CLI:
 
-1. Reads a single path argument.
-2. Calls `cetacea_core::check_file_at_path`.
-3. If there are no diagnostics, prints accepted root-file declarations.
-4. If there are diagnostics, prints each error and note.
+1. Reads the source path and any assignment or checking options.
+2. Runs `check_file_at_path_with_hol_shadow` by default.
+3. Prints certified root declarations, diagnostics and any policy violations,
+   or their structured JSON counterparts. A successful declaration can be
+   reported even when another declaration fails.
+4. Returns failure for source errors, replay mismatches or policy violations.
+   `--legacy-only` is a debugging opt-out and never reports HOL certification.
 
 The CLI filters out imported declarations using `CheckedTheorem::is_imported`.
 This avoids overwhelming output when a user checks a small file that imports
@@ -1019,15 +1043,15 @@ With `--line`, the CLI starts the older line-oriented terminal shell. It reuses
 the path-backed editor APIs for proof-state display, stepping, theorem search,
 tactic hints, and proof explanations.
 
-Native check mode first uses the legacy checker as a capability probe. If its
+Only the `--legacy-only` path first uses the legacy checker as a capability probe. If its
 `CheckResult` reports that an exact logical package import requires HOL, the
 CLI reruns the root and its transitive imports through the fail-closed sidecar
 and discards the probe result. TUI buffer refreshes and line reloads use the
-same signal to select package-aware full checks and goal analysis; replay
-mismatches become editor diagnostics. This keeps package-free callers on the
-existing path while avoiding diagnostic-text coupling: the core exposes an
-explicit `requires_hol_shadow` result flag. `--hol-shadow` still forces dual
-checking when no logical import is present.
+same signal in their legacy-debugging mode; normal editor checks use HOL.
+Replay mismatches become editor diagnostics. The core exposes an explicit
+`requires_hol_shadow` result flag, avoiding diagnostic-text coupling.
+`--hol-shadow` remains accepted for compatibility with older scripts; HOL
+checking is already the default.
 
 Logical package dependencies are surface-aware. Importing
 `std/hol/finite@1 as F` transactionally installs and exposes its List dependency
@@ -1075,11 +1099,13 @@ The wasm crate is intentionally thin, mirroring the CLI. It exports:
 - `cetacea_goals_at`
 - `cetacea_run_tactic`
 - `cetacea_explain_theorem`
+- `cetacea_project`, dispatching all five operations for bounded virtual projects
+  and optional assignment context
 
 The exports accept UTF-8 strings through explicit `cetacea_alloc` /
 `cetacea_free` memory helpers and return a length-prefixed JSON string. This
-keeps the wasm crate dependency-free while still making the browser boundary
-straightforward.
+keeps the boundary independent of a JavaScript binding generator. The Wasm
+crate depends on `cetacea_core` with the HOL feature enabled.
 
 The wasm wrapper embeds the current standard library as virtual imports, so
 browser sources can use paths such as `import std/prelude.ctea`,
@@ -1092,15 +1118,31 @@ complete mismatch-free HOL replay both succeed, and includes
 `hol_certified`, exact logical package IDs, receipt IDs, least fragments, and
 proof features. The virtual-import goal, step, and explanation exports use the
 same package-aware state and certify a proof when stepping reaches its end.
-Release builds use size-oriented LTO so this complete path remains below the
-raw-Wasm review threshold.
+Release builds use size-oriented LTO. The build configuration does not impose
+a Wasm size gate; do not treat an old size measurement as a release guarantee.
 
-The static UI in `web/` loads `cetacea_wasm.wasm`, renders diagnostics and
-accepted declarations, and uses the goal-stepping APIs to show the current proof
+The static UI in `web/` loads the Wasm module in a dedicated worker through
+`checker-client.mjs` and `checker-worker.js`. Requests can be cancelled, time
+out after ten seconds, and discard stale replies after edits. The UI renders
+diagnostics and per-declaration outcomes, and uses the goal-stepping APIs to show the current proof
 state. Goal snapshots include rule-based tactic hints, and check results include
 theorem statements for the searchable theorem-library panel. The proof
 explanation panel calls `cetacea_explain_theorem` for the selected theorem and
 renders the checked tactic trace as student-facing prose.
+
+`student-work.mjs` persists source, projects, assignment selection and recovery
+checkpoints. Browser locks protect concurrent saves; damaged data and quota
+failures retain downloadable drafts. Assignment acceptance is shown separately
+from proof certification. `project-request.mjs` and the Wasm
+`project_request.rs` implement bounded transport; the current assignment form
+is CTP2. See [BROWSER_PROJECTS.md](BROWSER_PROJECTS.md) and
+[BROWSER_ASSIGNMENTS.md](BROWSER_ASSIGNMENTS.md) for the workflow and limits.
+
+`scripts/build_web.py` builds the release Wasm and writes a self-contained
+distribution with a visible build ID and build-specific asset paths. CI gates
+the configured Pages workflow. Local builds are verified; remote deployment
+and retention of old assets remain unverified. See
+[WEB_DISTRIBUTION.md](WEB_DISTRIBUTION.md).
 
 ## Why the Language Is Small
 
@@ -1228,17 +1270,20 @@ Important limitations to account for when extending the system:
   blocks prefix declarations and resolve sibling top-level references through
   the current namespace, but Cetacea still does not have a full module system
   with private exports or `open` scopes.
-- Remaining namespace migration work is tracked in
-  [`docs/NAMESPACE_DESIGN.md`](NAMESPACE_DESIGN.md); qualified names affect
-  the parser, environment lookup, imports, theorem search, and proof
-  projections.
+- Classroom namespace migration is complete; the design history is in
+  [NAMESPACE_DESIGN.md](NAMESPACE_DESIGN.md) and evidence in
+  [CLASSROOM_NAMESPACE_MIGRATION.md](CLASSROOM_NAMESPACE_MIGRATION.md).
 - The parser is line-oriented and only parse errors carry token spans.
 - Formula and term definitions are transparent and simple.
-- Recursive definitions are limited to unary primitive recursion over `Nat`.
+- Recursive definitions recurse on their first argument over `Nat`, local
+  datatypes or imported package datatype applications, with additional fixed
+  parameters. Proposition-valued source recursion, later-argument recursion
+  and mutual recursion remain unavailable.
 - Predicate lambdas are intentionally first-order and are only accepted where a
   predicate argument is expected.
 - `simp` has explicit equality rewrite rules, but no global simp attribute set.
-- Nat induction is specialized and not fully generalized.
+- Induction requires dependent hypotheses to be generalized explicitly using
+  `revert`; it does not silently change the student's context.
 - The standard library contains an explicit trusted set-extensionality axiom.
 
 These are acceptable for the current project size, but they should be revisited

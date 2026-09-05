@@ -1,0 +1,59 @@
+-- Two endpoints contribute two, even when they occupy the same vertex.
+import builtin:std/hol/endpoint_sums.ctea as E
+import builtin:std/hol/sums.ctea as S
+import std/hol/cardinality@1 as C
+mode constructive
+
+data Vertex
+| home
+| away
+
+def vertices : C.List Vertex := C.cons(home, C.cons(away, C.nil))
+
+defrec home_end (v : Vertex) : Nat
+| home => 1
+| away => 0
+
+defrec away_end (v : Vertex) : Nat
+| home => 0
+| away => 1
+
+defrec bridge_incidence (v : Vertex) : Nat
+| home => 1
+| away => 1
+
+defrec loop_incidence (v : Vertex) : Nat
+| home => 2
+| away => 0
+
+theorem ordinary_edge_total : S.sum(C.map(bridge_incidence, vertices)) = 2 := by
+  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := away_end; incidence := bridge_incidence; a := home; b := away; vertices := vertices}
+  -- Duplicate-free enumeration and both endpoints present.
+  finite
+  finite
+  finite
+  -- Each indicator is one at its endpoint.
+  finite
+  finite
+  -- It is zero elsewhere; incidence adds the two indicators.
+  finite
+  finite
+  finite
+
+theorem loop_edge_total : S.sum(C.map(loop_incidence, vertices)) = 2 := by
+  apply E.sum_endpoint_pair {A := Vertex; left_end := home_end; right_end := home_end; incidence := loop_incidence; a := home; b := home; vertices := vertices}
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+  finite
+
+-- Excluding an endpoint loses its contribution; it cannot still count as one.
+theorem absent_endpoint_total :
+  S.sum(C.map(home_end, C.cons(away, C.nil))) = 0 := by
+  apply E.sum_absent_support {A := Vertex; f := home_end; a := home; xs := C.cons(away, C.nil)}
+  finite
+  finite
