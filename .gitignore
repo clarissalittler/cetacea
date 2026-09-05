@@ -5,3 +5,4 @@ target/
 .DS_Store
 *.swp
 *.swo
+scripts/__pycache__/
