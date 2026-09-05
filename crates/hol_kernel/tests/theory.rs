@@ -11,12 +11,12 @@ use common::{add, declare_add, nat, nat_theory, succ, zero};
 #[test]
 fn base_theory_has_set_principles() {
     let theory = Theory::new();
-    let mem_set_of = theory.theorem("mem_setOf").unwrap();
+    let mem_set_of = theory.theorem("Set.mem_setOf").unwrap();
     assert_eq!(
         mem_set_of.to_string(),
         "|- forall P : A -> Prop. forall x : A. x in setOf P <-> P x"
     );
-    let ext = theory.theorem("set_ext").unwrap();
+    let ext = theory.theorem("Set.ext").unwrap();
     assert_eq!(
         ext.to_string(),
         "|- forall S : Set A. forall T : Set A. (forall x : A. x in S <-> x in T) -> S = T"

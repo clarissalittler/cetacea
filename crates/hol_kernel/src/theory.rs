@@ -15,8 +15,8 @@ use crate::term::{Term, TermView};
 use crate::thm::{Tags, Thm};
 use crate::types::Type;
 
-pub const MEM_SET_OF: &str = "mem_setOf";
-pub const SET_EXT: &str = "set_ext";
+pub const MEM_SET_OF: &str = "Set.mem_setOf";
+pub const SET_EXT: &str = "Set.ext";
 
 #[derive(Clone, Debug)]
 pub struct DatatypeSpec {
