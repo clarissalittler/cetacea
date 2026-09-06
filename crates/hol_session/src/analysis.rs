@@ -45,6 +45,7 @@ pub struct Analysis {
     pub violations: Vec<String>,
     pub theorems: Vec<TheoremView>,
     pub library: Vec<LibraryEntry>,
+    pub assignment: Option<crate::AssignmentReport>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -65,8 +66,15 @@ fn source_lines(source: &str, span_line: u32, end_line: u32) -> String {
 }
 
 /// Runs a check and packages everything the UI needs.
-pub fn analyze(fs: &dyn FileSystem, opts: Options, path: Option<&str>, source: &str) -> Analysis {
+pub fn analyze(
+    fs: &dyn FileSystem,
+    opts: Options,
+    path: Option<&str>,
+    source: &str,
+    manifest: Option<&crate::Manifest>,
+) -> Analysis {
     let result = Session::new(fs, opts).check(path, source);
+    let assignment = manifest.map(|m| crate::check_manifest(&result, m));
     let mut theorems = Vec::new();
     for (name, (span, steps)) in &result.steps {
         let initial = steps
@@ -99,6 +107,8 @@ pub fn analyze(fs: &dyn FileSystem, opts: Options, path: Option<&str>, source: &
     let library = result
         .env
         .theorems()
+        // The prelude's internal computation lemmas are not for browsing.
+        .filter(|info| !info.name.as_str().starts_with("Nat."))
         .map(|info| LibraryEntry {
             name: info.name.to_string(),
             statement: print_term(&result.env, &info.statement),
@@ -124,6 +134,7 @@ pub fn analyze(fs: &dyn FileSystem, opts: Options, path: Option<&str>, source: &
         violations: result.violations,
         theorems,
         library,
+        assignment,
     }
 }
 

@@ -6,8 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub mod analysis;
 pub mod arith;
+pub mod assignment;
 pub mod prelude;
 pub use analysis::{analyze, hints, Analysis, Hint, LibraryEntry, StepView, TheoremView};
+pub use assignment::{check_manifest, manifest_from_result, AssignmentReport, Manifest};
 
 use hol_elab::{
     elab_command, elab_theorem_header, print_term, Diagnostic, Env, Status, TheoremInfo,
@@ -48,11 +50,17 @@ impl FileSystem for VirtualFs {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct Policy {
+    #[serde(default)]
     pub deny_sorry: bool,
+    #[serde(default)]
     pub deny_axioms: bool,
+    #[serde(default)]
     pub deny_classical: bool,
+    /// Tactics an assignment forbids, such as `simp` or `decide`.
+    #[serde(default)]
+    pub deny_tactics: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -146,6 +154,8 @@ pub struct Decl {
     pub is_imported: bool,
     pub line: u32,
     pub statement: String,
+    /// Tactic names used anywhere in the proof.
+    pub tactics: Vec<String>,
 }
 
 impl Decl {
@@ -197,6 +207,8 @@ pub struct GoalView {
 }
 
 pub struct CheckResult {
+    /// Import paths written in the root file, in order.
+    pub root_imports: Vec<String>,
     pub decls: Vec<Decl>,
     pub diagnostics: Vec<Diag>,
     pub violations: Vec<String>,
@@ -413,7 +425,17 @@ impl<'f> Session<'f> {
         }
         self.check_commands(path, &parsed.file.commands[start..], false);
         let violations = self.policy_violations();
+        let root_imports = parsed
+            .file
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                Command::Import { path, .. } => Some(path.clone()),
+                _ => None,
+            })
+            .collect();
         CheckResult {
+            root_imports,
             decls: self.decls,
             diagnostics: self.diagnostics,
             violations,
@@ -440,6 +462,14 @@ impl<'f> Session<'f> {
             }
             if self.opts.policy.deny_classical && decl.mode == "classical" {
                 out.push(format!("theorem `{}` uses classical reasoning", decl.name));
+            }
+            for tactic in &decl.tactics {
+                if self.opts.policy.deny_tactics.iter().any(|t| t == tactic) {
+                    out.push(format!(
+                        "theorem `{}` uses `{tactic}`, which this assignment does not allow",
+                        decl.name
+                    ));
+                }
             }
         }
         out
@@ -546,6 +576,7 @@ impl<'f> Session<'f> {
                     is_imported: importing,
                     line: span.line,
                     statement: print_term(&self.env, &info.statement),
+                    tactics: vec![],
                 });
             }
         }
@@ -663,6 +694,7 @@ impl<'f> Session<'f> {
                     is_imported: importing,
                     line: span.line,
                     statement: statement_text,
+                    tactics: tactic_names(proof),
                 });
             }
             Err(failure) => {
@@ -740,10 +772,75 @@ impl<'f> Session<'f> {
                     is_imported: importing,
                     line: span.line,
                     statement: statement_text,
+                    tactics: tactic_names(proof),
                 });
             }
         }
     }
+}
+
+/// Distinct tactic names used in a script, including nested blocks.
+pub fn tactic_names(tactics: &[hol_syntax::Tactic]) -> Vec<String> {
+    use hol_syntax::{HaveProof, TacticKind};
+    fn walk(tactics: &[hol_syntax::Tactic], out: &mut BTreeSet<String>) {
+        for tactic in tactics {
+            let name = match &tactic.kind {
+                TacticKind::Intro(_) => "intro",
+                TacticKind::Revert(_) => "revert",
+                TacticKind::Exact(_) => "exact",
+                TacticKind::Trivial => "trivial",
+                TacticKind::Assumption => "assumption",
+                TacticKind::Apply(_) => "apply",
+                TacticKind::Split => "split",
+                TacticKind::Left => "left",
+                TacticKind::Right => "right",
+                TacticKind::Cases { arms, .. } => {
+                    for arm in arms {
+                        walk(&arm.body, out);
+                    }
+                    "cases"
+                }
+                TacticKind::Exists(_) => "exists",
+                TacticKind::Refl => "refl",
+                TacticKind::Rewrite { .. } => "rewrite",
+                TacticKind::Unfold(..) => "unfold",
+                TacticKind::Simp { .. } => "simp",
+                TacticKind::Induction { arms, .. } => {
+                    for arm in arms {
+                        walk(&arm.body, out);
+                    }
+                    "induction"
+                }
+                TacticKind::Exfalso => "exfalso",
+                TacticKind::Contradiction => "contradiction",
+                TacticKind::ByCases { .. } => "by_cases",
+                TacticKind::ByContra(_) => "by_contra",
+                TacticKind::ShowGoal => "show_goal",
+                TacticKind::Sorry => "sorry",
+                TacticKind::Have { proof, .. } => {
+                    if let HaveProof::Block(body) = proof {
+                        walk(body, out);
+                    }
+                    "have"
+                }
+                TacticKind::Show(_) => "show",
+                TacticKind::Funext(_) => "funext",
+                TacticKind::Obtain { .. } => "obtain",
+                TacticKind::Calc { steps, .. } => {
+                    for step in steps {
+                        if let hol_syntax::CalcProof::Block(body) = &step.proof {
+                            walk(body, out);
+                        }
+                    }
+                    "calc"
+                }
+            };
+            out.insert(name.to_string());
+        }
+    }
+    let mut out = BTreeSet::new();
+    walk(tactics, &mut out);
+    out.into_iter().collect()
 }
 
 type ImportCacheEntry = (Env, BTreeSet<String>, Vec<Decl>);

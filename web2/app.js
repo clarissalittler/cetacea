@@ -25,6 +25,66 @@ const tierSelect = document.getElementById("tierSelect");
 const checkButton = document.getElementById("checkButton");
 const hintButton = document.getElementById("hintButton");
 const downloadButton = document.getElementById("downloadButton");
+const shareButton = document.getElementById("shareButton");
+const assignmentPanel = document.getElementById("assignmentPanel");
+const assignmentEl = document.getElementById("assignment");
+const assignmentMetaEl = document.getElementById("assignmentMeta");
+
+// ---------------------------------------------------------------------
+// URL state: `#src=<compressed source>` share links and
+// `#assignment=<compressed manifest>` assignment mode.
+// ---------------------------------------------------------------------
+
+function base64urlEncode(bytes) {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64urlDecode(text) {
+  const padded = text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+async function compressText(text) {
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("deflate-raw"));
+  const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  return base64urlEncode(bytes);
+}
+
+async function decompressText(encoded) {
+  const stream = new Blob([base64urlDecode(encoded)]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return await new Response(stream).text();
+}
+
+function fragmentParams() {
+  const hash = location.hash.startsWith("#") ? location.hash.slice(1) : "";
+  return new URLSearchParams(hash);
+}
+
+let assignment = null;
+
+async function loadFromFragment() {
+  const params = fragmentParams();
+  let source = null;
+  if (params.has("src")) {
+    try {
+      source = await decompressText(params.get("src"));
+    } catch (error) {
+      console.warn("cetacea: bad share link", error);
+    }
+  }
+  if (params.has("assignment")) {
+    try {
+      assignment = JSON.parse(await decompressText(params.get("assignment")));
+      if (assignment && assignment.tier) tierSelect.value = assignment.tier;
+    } catch (error) {
+      console.warn("cetacea: bad assignment link", error);
+    }
+  }
+  return source;
+}
 
 // ---------------------------------------------------------------------
 // Worker
@@ -158,7 +218,9 @@ function insertAfterLine(lineNumber, text) {
 }
 
 function options() {
-  return { tier: tierSelect.value, path: "web/main.ctea" };
+  const opts = { tier: tierSelect.value, path: "web/main.ctea" };
+  if (assignment) opts.assignment = assignment;
+  return opts;
 }
 
 // ---------------------------------------------------------------------
@@ -183,6 +245,7 @@ async function runAnalysis() {
     renderStatus();
     renderDiagnostics();
     renderLibrary();
+    renderAssignment();
     renderCursorPanels();
   } catch (error) {
     statusEl.textContent = `Checker error: ${error.message}`;
@@ -352,6 +415,43 @@ function updateMarks(currentStepLine = null) {
   editor.dispatch({ effects: setLineMarks.of(marks) });
 }
 
+function renderAssignment() {
+  if (!analysis || !analysis.assignment) {
+    assignmentPanel.hidden = true;
+    return;
+  }
+  const report = analysis.assignment;
+  assignmentPanel.hidden = false;
+  assignmentMetaEl.textContent = report.complete && report.violations.length === 0 ? "complete" : "not complete";
+  assignmentEl.replaceChildren();
+  if (report.title) {
+    const title = document.createElement("div");
+    title.textContent = report.title;
+    assignmentEl.appendChild(title);
+  }
+  for (const theorem of report.theorems) {
+    const div = document.createElement("div");
+    div.className = "lib-item";
+    const name = document.createElement("span");
+    name.className = "name mono";
+    name.textContent = theorem.name;
+    const badge = document.createElement("span");
+    badge.className = "badge " + (theorem.status === "accepted" ? "ok" : theorem.status);
+    badge.textContent = theorem.status;
+    const stmt = document.createElement("span");
+    stmt.className = "stmt mono";
+    stmt.textContent = theorem.expected;
+    div.append(name, badge, stmt);
+    assignmentEl.appendChild(div);
+  }
+  for (const violation of report.violations) {
+    const div = document.createElement("div");
+    div.className = "diag error";
+    div.textContent = violation;
+    assignmentEl.appendChild(div);
+  }
+}
+
 // ---------------------------------------------------------------------
 // Hints
 // ---------------------------------------------------------------------
@@ -486,7 +586,26 @@ downloadButton.addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
+shareButton.addEventListener("click", async () => {
+  try {
+    const params = new URLSearchParams();
+    params.set("src", await compressText(editor.state.doc.toString()));
+    if (assignment) params.set("assignment", await compressText(JSON.stringify(assignment)));
+    const url = `${location.origin}${location.pathname}#${params.toString()}`;
+    await navigator.clipboard.writeText(url);
+    shareButton.textContent = "Link copied";
+    setTimeout(() => (shareButton.textContent = "Share"), 1500);
+  } catch (error) {
+    statusEl.textContent = `Could not create a share link: ${error.message}`;
+  }
+});
+
 request("ping", {})
+  .then(async () => {
+    const shared = await loadFromFragment();
+    if (shared !== null) setSource(shared);
+    else if (assignment) renderAssignment();
+  })
   .then(() => runAnalysis())
   .catch((error) => {
     statusEl.textContent = `Checker error: ${error.message}`;

@@ -37,8 +37,12 @@ datatype values, and the `list` and `finite` libraries (`Finite`,
 by the new script only (`scripts/migrated_to_v2.txt`). Every corpus
 file now checks. Not yet done from the M4 list: the pigeonhole
 principle and cardinality of unions, which need a longer library
-development. Still open overall: re-quoting the book's diagnostics,
-multi-file projects, assignment mode, and per-declaration caching.
+development. M5 followed: `--deny-tactics`, assignment
+manifests generated from a skeleton (`--make-assignment`) and checked
+with `--assignment`, an Assignment panel and share links in the
+browser, and `docs/CETACEA2.md` as the instructor's guide. Still open
+overall: re-quoting the book's diagnostics, multi-file projects in the
+browser, release tags at cutover, and per-declaration caching.
 
 ## 1. Why rewrite, and why HOL
 
@@ -457,7 +461,7 @@ Sizes are relative to one another, not calendar estimates.
   predicates, quickcheck feedback, `std/list`, `std/fun` with real
   functions, `std/finite` and `std/card` with pigeonhole as the
   acceptance theorem. Tutorials 07 and 08 redone; book chapters 10 and 11.
-- M5 Course workflow (small). Manifests, locked statements,
+- M5 Course workflow (small). Done except multi-file projects and release tags. Manifests, locked statements,
   `--deny-tactics`, multi-file projects, share links, release tags.
 - M6 Polish (ongoing). Completion, abbreviations, prose "erase the
   tactics" exercises, graph library.

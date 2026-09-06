@@ -30,6 +30,7 @@
         </label>
         <button id="checkButton" type="button">Check</button>
         <button id="hintButton" type="button">Suggest a tactic</button>
+        <button id="shareButton" type="button" title="Copy a link that opens this file">Share</button>
         <button id="downloadButton" type="button" title="Save the file">Save</button>
       </div>
     </header>
@@ -39,6 +40,10 @@
       </section>
       <aside class="side-pane" aria-label="Proof state">
         <div id="status" class="status" role="status" aria-live="polite">Loading…</div>
+        <section id="assignmentPanel" class="panel" hidden>
+          <h2>Assignment <span id="assignmentMeta" class="meta"></span></h2>
+          <div id="assignment"></div>
+        </section>
         <section class="panel">
           <h2>Goals <span id="goalMeta" class="meta"></span></h2>
           <div id="goals"><p class="empty">Place the cursor inside a proof.</p></div>

@@ -24,6 +24,11 @@ struct RequestOptions {
     /// The path the source is checked as, for relative imports.
     #[serde(default)]
     path: Option<String>,
+    /// An assignment manifest to check against.
+    #[serde(default)]
+    assignment: Option<hol_session::Manifest>,
+    #[serde(default)]
+    deny_tactics: Vec<String>,
 }
 
 impl RequestOptions {
@@ -32,13 +37,27 @@ impl RequestOptions {
     }
 
     fn options(&self) -> Options {
+        let mut policy = Policy {
+            deny_sorry: self.deny_sorry,
+            deny_axioms: self.deny_axioms,
+            deny_classical: self.deny_classical,
+            deny_tactics: self.deny_tactics.clone(),
+        };
+        let mut tier = self.tier.as_deref().and_then(Tier::parse);
+        if let Some(manifest) = &self.assignment {
+            if let Some(t) = manifest.tier.as_deref().and_then(Tier::parse) {
+                tier = Some(t);
+            }
+            policy.deny_sorry |= manifest.policy.deny_sorry;
+            policy.deny_axioms |= manifest.policy.deny_axioms;
+            policy.deny_classical |= manifest.policy.deny_classical;
+            policy
+                .deny_tactics
+                .extend(manifest.policy.deny_tactics.iter().cloned());
+        }
         Options {
-            tier: self.tier.as_deref().and_then(Tier::parse),
-            policy: Policy {
-                deny_sorry: self.deny_sorry,
-                deny_axioms: self.deny_axioms,
-                deny_classical: self.deny_classical,
-            },
+            tier,
+            policy,
             std_dir: Some("lib".to_string()),
         }
     }
@@ -78,7 +97,13 @@ pub fn standard_library() -> VirtualFs {
 pub fn analyze_json(source: &str, options: &str) -> String {
     let opts = RequestOptions::parse(options);
     let fs = standard_library();
-    let analysis = analyze(&fs, opts.options(), Some(&opts.path()), source);
+    let analysis = analyze(
+        &fs,
+        opts.options(),
+        Some(&opts.path()),
+        source,
+        opts.assignment.as_ref(),
+    );
     serde_json::to_string(&analysis).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"))
 }
 

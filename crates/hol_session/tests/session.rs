@@ -114,6 +114,7 @@ theorem classical (P : Prop) : not not P -> P := by
             deny_sorry: true,
             deny_axioms: true,
             deny_classical: true,
+            ..Policy::default()
         },
         ..Options::default()
     };
