@@ -343,7 +343,75 @@ impl<'f> Session<'f> {
         if let Some(path) = path {
             self.loaded.insert(normalize_path(path));
         }
-        self.check_source(path, source, false);
+        let parsed = parse_file(source);
+        for error in &parsed.errors {
+            self.diagnostics.push(Diag::from_diagnostic(
+                Severity::Error,
+                path,
+                Diagnostic::new(error.span, error.message.clone()),
+            ));
+        }
+        // Leading imports are memoized per thread: the environment after
+        // loading the same library files is reused, which keeps re-checks
+        // (live editing, speculative hints) fast.
+        let leading = parsed
+            .file
+            .commands
+            .iter()
+            .take_while(|c| matches!(c, Command::Import { .. }))
+            .count();
+        let mut cache_key = String::new();
+        let mut cacheable = true;
+        for command in &parsed.file.commands[..leading] {
+            let Command::Import {
+                path: import,
+                alias,
+                ..
+            } = command
+            else {
+                unreachable!();
+            };
+            match self.resolve_import(path, import) {
+                Some((resolved, content)) => {
+                    cache_key.push_str(&format!(
+                        "{resolved}@{}:{}|",
+                        content.len(),
+                        alias.as_ref().map(|a| a.name.as_str()).unwrap_or("")
+                    ));
+                    cache_key.push_str(&hash_hex(&content));
+                    cache_key.push(';');
+                }
+                None => cacheable = false,
+            }
+        }
+        let tier_override = self.opts.tier;
+        let cached = if cacheable && leading > 0 {
+            IMPORT_CACHE.with(|cell| cell.borrow().get(&cache_key).cloned())
+        } else {
+            None
+        };
+        let start = if let Some((env, loaded, decls)) = cached {
+            self.env = env;
+            self.loaded.extend(loaded);
+            self.decls.extend(decls);
+            leading
+        } else {
+            let before = self.diagnostics.len();
+            self.check_commands(path, &parsed.file.commands[..leading], false);
+            if cacheable && leading > 0 && self.diagnostics.len() == before {
+                IMPORT_CACHE.with(|cell| {
+                    cell.borrow_mut().insert(
+                        cache_key,
+                        (self.env.clone(), self.loaded.clone(), self.decls.clone()),
+                    );
+                });
+            }
+            leading
+        };
+        if let Some(tier) = tier_override {
+            self.env.tier = tier;
+        }
+        self.check_commands(path, &parsed.file.commands[start..], false);
         let violations = self.policy_violations();
         CheckResult {
             decls: self.decls,
@@ -417,7 +485,11 @@ impl<'f> Session<'f> {
                 Diagnostic::new(error.span, error.message),
             ));
         }
-        for command in &parsed.file.commands {
+        self.check_commands(path, &parsed.file.commands, importing);
+    }
+
+    fn check_commands(&mut self, path: Option<&str>, commands: &[Command], importing: bool) {
+        for command in commands {
             match command {
                 Command::Import {
                     path: import,
@@ -672,6 +744,20 @@ impl<'f> Session<'f> {
             }
         }
     }
+}
+
+type ImportCacheEntry = (Env, BTreeSet<String>, Vec<Decl>);
+
+thread_local! {
+    static IMPORT_CACHE: std::cell::RefCell<BTreeMap<String, ImportCacheEntry>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+fn hash_hex(text: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 /// Convenience: check a root file from the real file system.
