@@ -45,6 +45,9 @@ pub struct Failure {
     pub diagnostic: Diagnostic,
     pub steps: Vec<StepRecord>,
     pub notes: Vec<Diagnostic>,
+    /// The goal the failing tactic was applied to, or the first
+    /// unsolved goal when the script ran out.
+    pub goal: Option<Goal>,
 }
 
 struct Runner<'a> {
@@ -52,6 +55,7 @@ struct Runner<'a> {
     base_scope: Scope,
     steps: Vec<StepRecord>,
     notes: Vec<Diagnostic>,
+    failing_goal: Option<Goal>,
 }
 
 fn kernel(span: Span) -> impl Fn(hol_kernel::KernelError) -> Diagnostic {
@@ -74,6 +78,7 @@ pub fn prove(
         base_scope: header.scope.clone(),
         steps: Vec::new(),
         notes: Vec::new(),
+        failing_goal: None,
     };
     let goal = Goal {
         id: 0,
@@ -82,6 +87,7 @@ pub fn prove(
         target: header.body.clone(),
     };
     let mut state = ProofState::new(goal);
+    let mut failing_goal: Option<Goal> = None;
     let result = runner.run_block(&mut state, tactics).and_then(|_| {
         if let Some(goal) = state.current() {
             let remaining = state.open_count();
@@ -148,11 +154,20 @@ pub fn prove(
             steps: runner.steps,
             notes: runner.notes,
         }),
-        Err(diagnostic) => Err(Box::new(Failure {
-            diagnostic,
-            steps: runner.steps,
-            notes: runner.notes,
-        })),
+        Err(diagnostic) => {
+            if failing_goal.is_none() {
+                failing_goal = runner
+                    .failing_goal
+                    .take()
+                    .or_else(|| state.current().cloned());
+            }
+            Err(Box::new(Failure {
+                diagnostic,
+                steps: runner.steps,
+                notes: runner.notes,
+                goal: failing_goal,
+            }))
+        }
     }
 }
 
@@ -195,6 +210,9 @@ impl<'a> Runner<'a> {
                     before: before.clone(),
                     after: before,
                 });
+                if self.failing_goal.is_none() {
+                    self.failing_goal = Some(goal.clone());
+                }
                 return Err(diag);
             }
             self.steps.push(StepRecord {

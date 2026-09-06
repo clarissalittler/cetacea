@@ -7,6 +7,7 @@ members = [
     "crates/hol_syntax",
     "crates/hol_elab",
     "crates/hol_tactics",
+    "crates/hol_feedback",
     "crates/hol_session",
     "crates/hol_cli",
 ]

@@ -148,6 +148,7 @@ impl Decl {
     pub fn render(&self) -> String {
         match self.status {
             DeclStatus::TrustedAxiom => format!("trusted axiom {}", self.name),
+            DeclStatus::Failed => format!("failed {} {}", self.kind, self.name),
             _ => {
                 let mut details = vec![self.mode.clone()];
                 if self.uses_sorry {
@@ -577,6 +578,27 @@ impl<'f> Session<'f> {
             Err(failure) => {
                 let mut diag = failure.diagnostic;
                 diag.message = format!("theorem `{}` failed: {}", name.name, diag.message);
+                let env = &self.env;
+                let display = |t: &hol_kernel::Term| print_term(env, t);
+                if let Some(model) =
+                    hol_feedback::propositional_countermodel(&header.statement, &display)
+                {
+                    diag = diag.note(format!(
+                        "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
+                        model.describe()
+                    ));
+                } else if let Some(goal) = &failure.goal {
+                    if let Some(model) = hol_feedback::goal_countermodel(
+                        &goal.hyp_formulas(),
+                        &goal.target,
+                        &display,
+                    ) {
+                        diag = diag.note(format!(
+                            "the open goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
+                            model.describe()
+                        ));
+                    }
+                }
                 self.diagnostics
                     .push(Diag::from_diagnostic(Severity::Error, path, diag));
                 for note in failure.notes {

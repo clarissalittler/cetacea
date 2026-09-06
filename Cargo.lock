@@ -39,6 +39,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hol_feedback"
+version = "0.1.0"
+dependencies = [
+ "hol_kernel",
+]
+
+[[package]]
 name = "hol_kernel"
 version = "0.1.0"
 
@@ -47,6 +54,7 @@ name = "hol_session"
 version = "0.1.0"
 dependencies = [
  "hol_elab",
+ "hol_feedback",
  "hol_kernel",
  "hol_syntax",
  "hol_tactics",
