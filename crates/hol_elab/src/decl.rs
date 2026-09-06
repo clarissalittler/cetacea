@@ -32,7 +32,9 @@ fn kernel_err(span: Span, err: hol_kernel::KernelError) -> Diagnostic {
 fn check_fresh_name(env: &Env, ident: &Ident) -> Result<Name> {
     let name = env.qualify(&ident.name);
     if let Some(kind) = env.name_taken(&name) {
-        fail!(ident.span, "`{}` is already declared as {kind}", ident.name);
+        if !(kind == "a theorem" && env.is_shadowable_theorem(&name)) {
+            fail!(ident.span, "`{}` is already declared as {kind}", ident.name);
+        }
     }
     if ident.name.contains('.') && env.current_namespace().is_some() {
         fail!(

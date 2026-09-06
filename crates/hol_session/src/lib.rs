@@ -4,6 +4,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod analysis;
+pub use analysis::{analyze, hints, Analysis, Hint, LibraryEntry, StepView, TheoremView};
+
 use hol_elab::{
     elab_command, elab_theorem_header, new_env, print_term, Diagnostic, Env, Status, TheoremInfo,
 };

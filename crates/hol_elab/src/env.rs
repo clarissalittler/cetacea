@@ -310,6 +310,17 @@ impl Env {
             .filter_map(move |name| self.theorems.get(name))
     }
 
+    /// True when `name` is an imported theorem that a local declaration
+    /// may shadow: a file's own names win over the library's.
+    pub fn is_shadowable_theorem(&self, name: &Name) -> bool {
+        !self.importing
+            && self
+                .theorems
+                .get(name)
+                .map(|t| t.is_imported)
+                .unwrap_or(false)
+    }
+
     /// True when a name is taken by any declaration kind.
     pub fn name_taken(&self, name: &Name) -> Option<&'static str> {
         if self.sorts.contains_key(name) {

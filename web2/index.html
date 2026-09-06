@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cetacea</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">C</span>
+        <span>Cetacea</span>
+        <span class="brand-sub">2</span>
+      </div>
+      <div class="actions">
+        <label class="picker">
+          <span class="visually-hidden">Load example</span>
+          <select id="exampleSelect">
+            <option value="">Load example…</option>
+          </select>
+        </label>
+        <label class="picker">
+          <span>Logic</span>
+          <select id="tierSelect" title="Default logic tier when the file has no `logic` line">
+            <option value="fol">fol</option>
+            <option value="fol_nat">fol_nat</option>
+            <option value="hol">hol</option>
+          </select>
+        </label>
+        <button id="checkButton" type="button">Check</button>
+        <button id="hintButton" type="button">Suggest a tactic</button>
+        <button id="downloadButton" type="button" title="Save the file">Save</button>
+      </div>
+    </header>
+    <main class="workspace">
+      <section class="editor-pane" aria-label="Source editor">
+        <div id="editor"></div>
+      </section>
+      <aside class="side-pane" aria-label="Proof state">
+        <div id="status" class="status" role="status" aria-live="polite">Loading…</div>
+        <section class="panel">
+          <h2>Goals <span id="goalMeta" class="meta"></span></h2>
+          <div id="goals"><p class="empty">Place the cursor inside a proof.</p></div>
+        </section>
+        <section class="panel">
+          <h2>Diagnostics</h2>
+          <div id="diagnostics"><p class="empty">Nothing to report.</p></div>
+        </section>
+        <section class="panel">
+          <h2>Suggested tactics</h2>
+          <div id="hints"><p class="empty">Press “Suggest a tactic” with the cursor on a proof line. Suggestions are run before they are shown; click one to insert it.</p></div>
+        </section>
+        <section class="panel">
+          <h2>Proof explanation</h2>
+          <div id="explanation"><p class="empty">Place the cursor inside a theorem.</p></div>
+        </section>
+        <section class="panel">
+          <h2>Theorem library</h2>
+          <div class="library-controls">
+            <input id="librarySearch" type="search" autocomplete="off" spellcheck="false" placeholder="Search name or statement" />
+            <select id="libraryScope" aria-label="Theorem library scope">
+              <option value="all">All</option>
+              <option value="imported">Imported</option>
+              <option value="local">This file</option>
+            </select>
+          </div>
+          <div id="library"></div>
+        </section>
+        <section class="panel">
+          <h2>Tactic reference</h2>
+          <div class="reference">
+            <details><summary><span>Implication and ∀</span><code>intro</code><code>exact</code><code>apply</code></summary>
+              <p><code>intro h</code> assumes the premise of an implication, or fixes an arbitrary element for a <code>forall</code>. <code>exact e</code> closes the goal with a hypothesis or theorem. <code>apply e</code> reduces the goal to the premises of <code>e</code>.</p></details>
+            <details><summary><span>Conjunction and ↔</span><code>split</code><code>.left</code><code>.right</code></summary>
+              <p><code>split</code> proves both halves. Use <code>h.left</code> and <code>h.right</code> to take a conjunction or biconditional apart; <code>obtain hp hq := h</code> names both halves.</p></details>
+            <details><summary><span>Disjunction</span><code>left</code><code>right</code><code>cases</code></summary>
+              <p><code>left</code> or <code>right</code> picks a side of the goal. <code>cases h with</code> followed by <code>| left hp =&gt;</code> and <code>| right hq =&gt;</code> arms analyzes a hypothesis.</p></details>
+            <details><summary><span>Existentials</span><code>exists</code><code>obtain</code></summary>
+              <p><code>exists t</code> supplies a witness. <code>obtain x hx := h</code> or <code>cases h with | intro x hx =&gt;</code> unpacks one.</p></details>
+            <details><summary><span>Equality and definitions</span><code>refl</code><code>rewrite</code><code>unfold</code><code>simp</code></summary>
+              <p><code>refl</code> closes <code>a = b</code> when both sides compute to the same term. <code>rewrite -&gt; h</code> replaces the left side of the equation <code>h</code> by its right side (<code>&lt;-</code> for the other direction, <code>at h2</code> to rewrite a hypothesis). <code>unfold Name</code> and <code>simp</code> expand definitions.</p></details>
+            <details><summary><span>Negation and absurdity</span><code>contradiction</code><code>exfalso</code></summary>
+              <p><code>not P</code> is <code>P -&gt; False</code>. <code>contradiction</code> closes a goal from <code>False</code> or from <code>P</code> and <code>not P</code>. <code>exfalso</code> turns any goal into <code>False</code>.</p></details>
+            <details><summary><span>Classical (needs <code>mode classical</code>)</span><code>by_cases</code><code>by_contra</code></summary>
+              <p><code>by_cases h : P</code> splits on whether <code>P</code> holds. <code>by_contra h</code> assumes the goal is false and asks for a contradiction.</p></details>
+            <details><summary><span>Structure</span><code>have</code><code>show</code><code>sorry</code></summary>
+              <p><code>have h : P</code> opens a subgoal for <code>P</code>; <code>have h : P := e</code> or <code>:= by</code> with an indented block proves it in place. <code>show P</code> restates the goal. <code>sorry</code> leaves a goal unproved and marks the theorem incomplete.</p></details>
+          </div>
+        </section>
+      </aside>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

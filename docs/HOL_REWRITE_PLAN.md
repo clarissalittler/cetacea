@@ -13,8 +13,17 @@ datatype and recursive-function packages, and an adversarial test
 suite. M1 is in progress: the syntax crate, elaborator, tactic engine,
 session API, `lib/` standard library, and `cetacea2` CLI landed on the
 same day, and every tier-1 corpus file checks through the kernel
-(`scripts/check_hol.sh`). Still open in M1: countermodels, tactic
-hints, proof explanations, and re-quoting the book's diagnostics.
+(`scripts/check_hol.sh`). Propositional countermodels, verified tactic hints, and
+step explanations followed. M2 landed the same day as `web2/`
+(published under `/v2/` by the Pages workflow): a CodeMirror editor, a
+Web Worker hosting the checker, goals at the cursor, diagnostics with
+inline markers, hints, explanations, the theorem library, examples,
+and autosave. Two deviations from section 7 and 8: the Wasm binding
+uses the plain length-prefixed JSON convention the old UI used (no
+`wasm-bindgen` toolchain in CI), and CodeMirror is loaded as pinned ES
+modules from a CDN rather than bundled by Vite. Still open in M1/M2:
+re-quoting the book's diagnostics, multi-file projects, assignment
+mode, and per-declaration caching.
 
 ## 1. Why rewrite, and why HOL
 

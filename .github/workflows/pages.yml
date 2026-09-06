@@ -29,14 +29,18 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
-      - name: Build WebAssembly checker
-        run: cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
+      - name: Build WebAssembly checkers
+        run: |
+          cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
+          cargo build -p hol_wasm --target wasm32-unknown-unknown --release
 
       - name: Assemble site
         run: |
-          mkdir -p site/pkg
+          mkdir -p site/pkg site/v2/pkg
           cp -r web/. site/
           cp target/wasm32-unknown-unknown/release/cetacea_wasm.wasm site/pkg/
+          cp -r web2/. site/v2/
+          cp target/wasm32-unknown-unknown/release/hol_wasm.wasm site/v2/pkg/
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
