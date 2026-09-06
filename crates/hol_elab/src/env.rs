@@ -3,7 +3,7 @@
 //! kind, definitions, theorems) and the current tier, mode, and
 //! namespace.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use hol_kernel::{Name, Term, Theory, Thm, Type};
 use hol_syntax::{Mode, Span, Tier};
@@ -46,6 +46,8 @@ pub struct ConstInfo {
     /// Number of surface arguments, for `f(a, b)` syntax and arity errors.
     pub arity: usize,
     pub span: Option<Span>,
+    /// The lowest tier in which the symbol may be used.
+    pub min_tier: Tier,
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +131,11 @@ pub struct Env {
     theorem_order: Vec<Name>,
     /// Defining equations of recursive functions, by function name.
     equations: BTreeMap<Name, Vec<Thm>>,
+    /// Definitions that `simp` and matching do not unfold; `unfold`
+    /// still can. Used for `le`, whose computation rules are lemmas.
+    opaque: BTreeSet<Name>,
+    /// Theorems registered as rewrite rules for `simp` and matching.
+    simp_lemmas: Vec<Name>,
     pub tier: Tier,
     pub mode: Mode,
     namespace: Vec<String>,
@@ -151,6 +158,8 @@ impl Env {
             theorems: BTreeMap::new(),
             theorem_order: Vec::new(),
             equations: BTreeMap::new(),
+            opaque: BTreeSet::new(),
+            simp_lemmas: Vec::new(),
             tier: Tier::Fol,
             mode: Mode::Constructive,
             namespace: Vec::new(),
@@ -219,7 +228,17 @@ impl Env {
                 return Some((candidate, value));
             }
         }
-        None
+        // A declaration loaded under an import alias is still reachable
+        // by its short name when that is unambiguous.
+        let suffix = format!(".{name}");
+        let mut matches = table
+            .iter()
+            .filter(|(key, _)| key.as_str().ends_with(&suffix));
+        let first = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some((first.0.clone(), first.1))
     }
 
     // ---- sorts ----
@@ -270,6 +289,29 @@ impl Env {
 
     pub fn defs(&self) -> impl Iterator<Item = &DefInfo> {
         self.defs.values()
+    }
+
+    // ---- simplification set ----
+
+    pub fn set_opaque(&mut self, name: Name) {
+        self.opaque.insert(name);
+    }
+
+    pub fn is_transparent(&self, name: &Name) -> bool {
+        !self.opaque.contains(name)
+    }
+
+    pub fn add_simp_lemma(&mut self, name: Name) {
+        if !self.simp_lemmas.contains(&name) {
+            self.simp_lemmas.push(name);
+        }
+    }
+
+    /// Registered simp lemmas that exist, in registration order.
+    pub fn simp_lemmas(&self) -> impl Iterator<Item = &TheoremInfo> {
+        self.simp_lemmas
+            .iter()
+            .filter_map(move |name| self.theorems.get(name))
     }
 
     // ---- recursive function equations ----

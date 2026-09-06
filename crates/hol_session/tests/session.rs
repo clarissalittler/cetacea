@@ -54,7 +54,9 @@ fn import_mode_does_not_leak_and_std_dir_maps_paths() {
 #[test]
 fn aliased_imports_qualify_names() {
     let fs = library();
-    let source = "import ../lib/prop.ctea as prop\n\ntheorem use_qualified (Q : Prop) : Q -> Q := by\n  exact prop.id\n\ntheorem unqualified_fails (Q : Prop) : Q -> Q := by\n  exact id\n";
+    // An aliased import is reachable by its qualified name, and by the
+    // short name while that is unambiguous.
+    let source = "import ../lib/prop.ctea as prop\n\ntheorem use_qualified (Q : Prop) : Q -> Q := by\n  exact prop.id\n\ntheorem use_short (Q : Prop) : Q -> Q := by\n  exact id\n\ntheorem unknown_fails (Q : Prop) : Q -> Q := by\n  exact nope\n";
     let result = check(&fs, Options::default(), "work/hw.ctea", source);
     let statuses: Vec<_> = result
         .decls
@@ -66,13 +68,14 @@ fn aliased_imports_qualify_names() {
         statuses,
         vec![
             ("use_qualified", DeclStatus::Accepted),
-            ("unqualified_fails", DeclStatus::Failed)
+            ("use_short", DeclStatus::Accepted),
+            ("unknown_fails", DeclStatus::Failed)
         ]
     );
     assert!(result
         .diagnostics
         .iter()
-        .any(|d| d.message.contains("unknown hypothesis or theorem `id`")));
+        .any(|d| d.message.contains("unknown hypothesis or theorem `nope`")));
 }
 
 #[test]

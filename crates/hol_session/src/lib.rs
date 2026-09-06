@@ -5,10 +5,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod analysis;
+pub mod arith;
+pub mod prelude;
 pub use analysis::{analyze, hints, Analysis, Hint, LibraryEntry, StepView, TheoremView};
 
 use hol_elab::{
-    elab_command, elab_theorem_header, new_env, print_term, Diagnostic, Env, Status, TheoremInfo,
+    elab_command, elab_theorem_header, print_term, Diagnostic, Env, Status, TheoremInfo,
 };
 use hol_kernel::{sorry, Name};
 use hol_syntax::{parse_file, Command, Mode, Span, Tier};
@@ -314,7 +316,13 @@ pub struct Session<'f> {
 
 impl<'f> Session<'f> {
     pub fn new(fs: &'f dyn FileSystem, opts: Options) -> Session<'f> {
-        let mut env = new_env();
+        let env = prelude::base_env();
+        Session::with_env(fs, opts, env)
+    }
+
+    /// A session over a given environment (used while building the
+    /// prelude itself).
+    pub fn with_env(fs: &'f dyn FileSystem, opts: Options, mut env: Env) -> Session<'f> {
         if let Some(tier) = opts.tier {
             env.tier = tier;
         }
@@ -394,7 +402,13 @@ impl<'f> Session<'f> {
         None
     }
 
-    fn check_source(&mut self, path: Option<&str>, source: &str, importing: bool) {
+    /// The environment and diagnostics after checking, for callers that
+    /// extend the environment rather than report on a file.
+    pub fn into_parts(self) -> (Env, Vec<Diag>) {
+        (self.env, self.diagnostics)
+    }
+
+    pub(crate) fn check_source(&mut self, path: Option<&str>, source: &str, importing: bool) {
         let parsed = parse_file(source);
         for error in parsed.errors {
             self.diagnostics.push(Diag::from_diagnostic(
@@ -482,6 +496,7 @@ impl<'f> Session<'f> {
         let saved_importing = self.env.importing;
         self.env.importing = true;
         self.env.mode = Mode::Constructive;
+        self.env.tier = Tier::Hol;
         if let Some(alias) = &alias {
             self.env.push_namespace(alias);
         }
@@ -590,16 +605,33 @@ impl<'f> Session<'f> {
                         "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
                         model.describe()
                     ));
+                } else if let Some(model) =
+                    arith::arithmetic_countermodel(&self.env, &header.statement)
+                {
+                    diag = diag.note(format!(
+                        "the statement is false when {model}. No proof can close it; check the statement itself."
+                    ));
                 } else if let Some(goal) = &failure.goal {
-                    if let Some(model) = hol_feedback::goal_countermodel(
-                        &goal.hyp_formulas(),
-                        &goal.target,
-                        &display,
-                    ) {
+                    let hyps = goal.hyp_formulas();
+                    if let Some(model) =
+                        hol_feedback::goal_countermodel(&hyps, &goal.target, &display)
+                    {
                         diag = diag.note(format!(
                             "the open goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
                             model.describe()
                         ));
+                    } else {
+                        let mut formula = goal.target.clone();
+                        for hyp in hyps.iter().rev() {
+                            if let Ok(next) = hol_kernel::Term::imp(hyp, &formula) {
+                                formula = next;
+                            }
+                        }
+                        if let Some(model) = arith::arithmetic_countermodel(&self.env, &formula) {
+                            diag = diag.note(format!(
+                                "the open goal does not follow from the current hypotheses: it is false when {model}. Reconsider the earlier proof steps."
+                            ));
+                        }
                     }
                 }
                 self.diagnostics

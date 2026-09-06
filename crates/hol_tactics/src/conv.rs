@@ -71,7 +71,29 @@ impl Rules {
     pub fn definitional(env: &Env, subst: &mut Subst) -> Rules {
         let mut rules = Vec::new();
         for def in env.defs() {
+            if !env.is_transparent(&def.name) {
+                continue;
+            }
             if let Some(rule) = Rule::from_thm(subst, &def.equation, def.name.as_str(), true) {
+                rules.push(rule);
+            }
+        }
+        // Registered lemmas: schematize their parameters first.
+        for info in env.simp_lemmas() {
+            let Ok((thm, _, _)) = crate::unify::schematize(
+                subst,
+                &info.thm,
+                &info.type_params(),
+                &info.term_params(),
+            ) else {
+                continue;
+            };
+            if let Some(rule) = Rule::from_thm(subst, &thm, info.name.as_str(), true) {
+                rules.push(rule);
+            }
+        }
+        for (name, thm) in crate::simp_rules::datatype_rules(env) {
+            if let Some(rule) = Rule::from_thm(subst, &thm, &name, true) {
                 rules.push(rule);
             }
         }
@@ -104,6 +126,25 @@ impl Rules {
             }
         }
         Rules { rules }
+    }
+
+    /// Adds `x = x <-> True` and the `True`/`False` propositional
+    /// simplifications, used for deciding closed statements. They are
+    /// kept out of the default `simp` set so that `simp` leaves the
+    /// logical structure of a goal alone.
+    pub fn with_decision_rules(&mut self, subst: &mut Subst) {
+        if let Ok(thm) = crate::simp_rules::reflexivity_rule() {
+            if let Some(rule) = Rule::from_thm(subst, &thm, "eq_self", true) {
+                self.rules.push(rule);
+            }
+        }
+        if let Ok(props) = crate::simp_rules::propositional_rules() {
+            for (name, thm) in props {
+                if let Some(rule) = Rule::from_thm(subst, &thm, &name, true) {
+                    self.rules.push(rule);
+                }
+            }
+        }
     }
 
     pub fn push(&mut self, rule: Rule) {

@@ -27,6 +27,9 @@ pub struct ProofCtx<'a> {
     pub scope: Scope,
     pub subst: Subst,
     pub rules: Rules,
+    /// Term parameters of the theorem at the head of the current
+    /// application, in declaration order, for positional arguments.
+    positional: Vec<Term>,
 }
 
 enum ArgKind<'e> {
@@ -52,6 +55,7 @@ impl<'a> ProofCtx<'a> {
             scope,
             subst,
             rules,
+            positional: Vec::new(),
         }
     }
 
@@ -93,9 +97,12 @@ impl<'a> ProofCtx<'a> {
             }
             ProofExpr::App(head, args, span) => {
                 let mut thm = self.elab_proof(head)?;
+                let positional = std::mem::take(&mut self.positional);
+                self.positional = positional;
                 for arg in args {
                     thm = self.apply_arg(thm, arg, *span)?;
                 }
+                self.positional.clear();
                 Ok(thm)
             }
             ProofExpr::Inst(head, args, span) => {
@@ -116,13 +123,18 @@ impl<'a> ProofCtx<'a> {
             return assume(hyp).map_err(kernel(ident.span));
         }
         if let Some(info) = self.env.theorem(name) {
-            let (thm, _, _) = schematize(
+            let (thm, _, term_metas) = schematize(
                 &mut self.subst,
                 &info.thm,
                 &info.type_params(),
                 &info.term_params(),
             )
             .map_err(kernel(ident.span))?;
+            self.positional = info
+                .term_params()
+                .iter()
+                .filter_map(|(n, _)| term_metas.get(n).cloned())
+                .collect();
             return Ok(thm);
         }
         if self.scope.lookup(name).is_some() || self.env.constant(name).is_some() {
@@ -207,6 +219,26 @@ impl<'a> ProofCtx<'a> {
         let mut thm = thm;
         for _ in 0..50 {
             let concl = self.subst.apply(thm.concl());
+            // A term given to a theorem whose statement is not universally
+            // quantified fills its next unbound parameter.
+            if let ArgKind::Term(expr) = &kind {
+                if concl.dest_forall().is_none() && !self.positional.is_empty() {
+                    let meta = self.positional.remove(0);
+                    let expected = self.subst.apply_type(meta.ty());
+                    let term = self.elab_term(expr, Some(&expected))?;
+                    if !self.subst.unify(&meta, &term) {
+                        return Err(Diagnostic::new(
+                            expr.span(),
+                            format!(
+                                "the parameter was already determined as `{}`, which differs from `{}`",
+                                self.show(&meta),
+                                self.show(&term)
+                            ),
+                        ));
+                    }
+                    return self.subst.apply_thm(&thm).map_err(kernel(span));
+                }
+            }
             if let Some(pred) = concl.dest_forall() {
                 let TermView::Lam(binder, ty, _) = pred.view() else {
                     unreachable!();
@@ -228,7 +260,10 @@ impl<'a> ProofCtx<'a> {
                 let premise = premise.clone();
                 return match kind {
                     ArgKind::Proof(proof) => {
-                        let arg_thm = self.elab_proof(proof)?;
+                        let saved = std::mem::take(&mut self.positional);
+                        let arg_thm = self.elab_proof(proof);
+                        self.positional = saved;
+                        let arg_thm = arg_thm?;
                         let arg_thm = self.coerce(arg_thm, &premise, proof.span())?;
                         let thm = self.subst.apply_thm(&thm).map_err(kernel(span))?;
                         imp_elim(&thm, &arg_thm).map_err(kernel(span))

@@ -46,6 +46,7 @@ pub fn install(env: &mut Env) -> Result<()> {
         kind: SymbolKind::Builtin,
         arity: 2,
         span: None,
+        min_tier: Tier::Fol,
     });
     env.add_constant(ConstInfo {
         name: Name::new(SET_OF),
@@ -53,6 +54,7 @@ pub fn install(env: &mut Env) -> Result<()> {
         kind: SymbolKind::Builtin,
         arity: 1,
         span: None,
+        min_tier: Tier::Fol,
     });
 
     // Ordered pairs.
@@ -78,6 +80,7 @@ pub fn install(env: &mut Env) -> Result<()> {
         kind: SymbolKind::Ctor,
         arity: 2,
         span: None,
+        min_tier: Tier::Fol,
     });
     for (name, result, pick_first) in [("fst", a.clone(), true), ("snd", b.clone(), false)] {
         let fn_ty = Type::fun(prod_ty.clone(), result.clone());
@@ -113,6 +116,7 @@ pub fn install(env: &mut Env) -> Result<()> {
             kind: SymbolKind::Def,
             arity: 1,
             span: None,
+            min_tier: Tier::Fol,
         });
         env.add_equations(Name::new(name), thms);
     }

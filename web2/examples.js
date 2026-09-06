@@ -128,6 +128,33 @@ theorem inter_comm_here (T : Type) (A B : Set T) : inter(A, B) = inter(B, A) := 
 `,
   },
   {
+    name: "Induction on natural numbers",
+    source: `logic fol_nat
+import ../std/prelude.ctea
+
+-- Numerals and + * - <= are built in; refl computes closed arithmetic.
+theorem two_plus_two : 2 + 2 = 4 := by
+  refl
+
+theorem add_zero (n : Nat) : n + 0 = n := by
+  induction n with
+  | zero =>
+      refl
+  | succ k ih =>
+      simp
+      exact ih
+
+-- A chain of equalities, each step justified.
+theorem chain (a b c : Nat) (h1 : a = b) (h2 : b = c) : a = c := by
+  calc a = b := h1
+    _ = c := h2
+
+-- This statement is false; the checker finds the counterexample.
+theorem wrong (n m : Nat) : n + m = n := by
+  refl
+`,
+  },
+  {
     name: "Classical reasoning",
     source: `-- Constructive mode rejects excluded middle; classical mode allows it.
 

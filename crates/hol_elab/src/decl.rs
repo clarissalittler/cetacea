@@ -321,6 +321,7 @@ pub fn elab_command(env: &mut Env, command: &Command) -> Result<Vec<Name>> {
                 kind: SymbolKind::Def,
                 arity: term_params.len(),
                 span: Some(*span),
+                min_tier: Tier::Fol,
             });
             env.add_def(DefInfo {
                 name: qualified.clone(),
@@ -368,9 +369,10 @@ pub fn elab_command(env: &mut Env, command: &Command) -> Result<Vec<Name>> {
             name,
             params,
             result,
+            rec_on,
             arms,
             span,
-        } => elab_defrec(env, name, params, result, arms, *span),
+        } => elab_defrec(env, name, params, result, rec_on.as_ref(), arms, *span),
         Command::Theorem { span, .. } => fail!(*span, "theorems are checked by the tactic engine"),
         Command::Import { span, .. } => fail!(*span, "imports are resolved by the session"),
     }
@@ -393,6 +395,7 @@ fn declare_constant(
         kind,
         arity,
         span: Some(span),
+        min_tier: Tier::Fol,
     });
     env.note_declaration(name);
     Ok(())
@@ -454,17 +457,20 @@ fn elab_data(
             kind: SymbolKind::Ctor,
             arity: ctor.args.len(),
             span: Some(span),
+            min_tier: Tier::Fol,
         });
         declared.push(ctor.name.clone());
     }
     Ok(declared)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn elab_defrec(
     env: &mut Env,
     name: &Ident,
     params: &[Param],
     result: &hol_syntax::TypeExpr,
+    rec_on: Option<&Ident>,
     arms: &[hol_syntax::RecArm],
     span: Span,
 ) -> Result<Vec<Name>> {
@@ -490,9 +496,26 @@ fn elab_defrec(
             "a `defrec` needs at least one parameter to recurse on"
         );
     }
-    // Recurse on the first parameter whose type is a datatype.
+    // Recurse on the named parameter, or the first one of a data type.
     let mut rec_arg = None;
+    if let Some(chosen) = rec_on {
+        match term_params
+            .iter()
+            .position(|(n, _)| n.as_str() == chosen.name)
+        {
+            Some(index) => rec_arg = Some(index),
+            None => fail!(
+                chosen.span,
+                "`{}` is not a parameter of `{}`",
+                chosen.name,
+                name.name
+            ),
+        }
+    }
     for (index, (_, ty)) in term_params.iter().enumerate() {
+        if rec_arg.is_some() {
+            break;
+        }
         if let Type::Con(con, _) = ty {
             if env.theory().datatype(con.as_str()).is_some() {
                 rec_arg = Some(index);
@@ -534,13 +557,18 @@ fn elab_defrec(
         kind: SymbolKind::Def,
         arity: term_params.len(),
         span: Some(span),
+        min_tier: Tier::Fol,
     });
 
     let f = Term::constant(env.theory().signature(), qualified.clone(), fn_ty.clone())
         .map_err(|e| kernel_err(span, e))?;
     let mut equations = Vec::new();
     for arm in arms {
-        let Some(ctor) = datatype.ctor(&Name::new(&arm.ctor.name)) else {
+        let ctor_name = env
+            .constant(&arm.ctor.name)
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| Name::new(&arm.ctor.name));
+        let Some(ctor) = datatype.ctor(&ctor_name) else {
             fail!(
                 arm.ctor.span,
                 "`{}` is not a constructor of `{}`",

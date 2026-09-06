@@ -59,6 +59,16 @@ pub fn standard_library() -> VirtualFs {
     fs.add("lib/fol.ctea", include_str!("../../../lib/fol.ctea"));
     fs.add("lib/eq.ctea", include_str!("../../../lib/eq.ctea"));
     fs.add("lib/set.ctea", include_str!("../../../lib/set.ctea"));
+    fs.add("lib/nat.ctea", include_str!("../../../lib/nat.ctea"));
+    fs.add(
+        "lib/modular.ctea",
+        include_str!("../../../lib/modular.ctea"),
+    );
+    fs.add("lib/fun.ctea", include_str!("../../../lib/fun.ctea"));
+    fs.add(
+        "lib/qualified_prelude.ctea",
+        include_str!("../../../lib/qualified_prelude.ctea"),
+    );
     fs
 }
 

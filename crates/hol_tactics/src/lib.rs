@@ -4,6 +4,7 @@
 pub mod conv;
 pub mod pexpr;
 pub mod proof;
+pub mod simp_rules;
 pub mod tactics;
 pub mod unify;
 

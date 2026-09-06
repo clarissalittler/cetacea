@@ -243,6 +243,9 @@ pub enum Command {
         name: Ident,
         params: Vec<Param>,
         result: TypeExpr,
+        /// `on x`: the parameter to recurse on (default: the first
+        /// parameter of a data type).
+        rec_on: Option<Ident>,
         arms: Vec<RecArm>,
         span: Span,
     },
@@ -370,7 +373,27 @@ pub enum HaveProof {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CalcProof {
+    Expr(ProofExpr),
+    Block(Vec<Tactic>),
+}
+
+/// One `_ = rhs := proof` step of a `calc` chain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CalcStep {
+    pub op: BinOp,
+    pub rhs: Expr,
+    pub proof: CalcProof,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TacticKind {
+    /// `calc a = b := p` followed by `_ = c := q` lines.
+    Calc {
+        start: Expr,
+        steps: Vec<CalcStep>,
+    },
     Intro(Vec<Ident>),
     Revert(Ident),
     Exact(ProofExpr),

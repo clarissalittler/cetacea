@@ -114,8 +114,18 @@ fn skeleton(term: &Term, atoms: &mut Atoms, display: &dyn Fn(&Term) -> String) -
     if !head_ok || args.iter().any(|a| a.is_lam() || !a.is_closed()) {
         return None;
     }
+    // Arithmetic atoms are not independent of each other; leave them to
+    // the arithmetic search.
+    if args.iter().any(|a| is_interpreted(a)) {
+        return None;
+    }
     let index = atoms.intern(term, display(term))?;
     Some(Prop::Atom(index))
+}
+
+/// Terms over `Nat` have interpreted structure.
+fn is_interpreted(t: &Term) -> bool {
+    matches!(t.ty(), hol_kernel::Type::Con(name, _) if name.as_str() == "Nat")
 }
 
 fn eval(prop: &Prop, row: u32) -> bool {

@@ -415,6 +415,11 @@ fn parse_defrec(lines: &[Line], span: Span) -> Result<Command> {
     let params = p.parse_params()?;
     p.expect(&Tok::Colon)?;
     let result = p.parse_type()?;
+    let rec_on = if p.eat_ident("on") {
+        Some(p.ident("the parameter to recurse on")?)
+    } else {
+        None
+    };
     p.finish()?;
     let mut arms = Vec::new();
     for tokens in arm_tokens {
@@ -445,6 +450,7 @@ fn parse_defrec(lines: &[Line], span: Span) -> Result<Command> {
         name,
         params,
         result,
+        rec_on,
         arms,
         span,
     })
@@ -487,7 +493,9 @@ pub fn parse_block(lines: &[Line], start: usize, base: u32) -> Result<(Vec<Tacti
         let mut tokens = line.tokens.clone();
         // Plain continuation lines: deeper indentation, not an arm, and the
         // previous line did not open a block.
-        let opens_block = ends_with_ident(&tokens, "with") || ends_with_define_by(&tokens);
+        let is_calc = matches!(&tokens[0].tok, Tok::Ident(name) if name == "calc");
+        let opens_block =
+            is_calc || ends_with_ident(&tokens, "with") || ends_with_define_by(&tokens);
         if !opens_block {
             while i < lines.len() && is_continuation(&lines[i], base) {
                 tokens.extend(lines[i].tokens.iter().cloned());
@@ -495,6 +503,15 @@ pub fn parse_block(lines: &[Line], start: usize, base: u32) -> Result<(Vec<Tacti
             }
         }
         let line_span = tokens[0].span.to(tokens[tokens.len() - 1].span);
+        if matches!(&tokens[0].tok, Tok::Ident(name) if name == "calc") {
+            let (kind, next, end) = parse_calc(lines, i, base, &tokens, line_span)?;
+            i = next;
+            tactics.push(Tactic {
+                kind,
+                span: line_span.to(end),
+            });
+            continue;
+        }
         if ends_with_ident(&tokens, "with") {
             let mut arms = Vec::new();
             while i < lines.len() && lines[i].indent == base && is_bar_line(&lines[i]) {
@@ -576,6 +593,109 @@ fn is_continuation(line: &Line, base: u32) -> bool {
             line.tokens[0].tok,
             Tok::RBrace | Tok::RParen | Tok::RBracket
         )
+}
+
+/// Parses a `calc` chain starting with the tokens of the `calc` line
+/// (already consumed up to `i`). Step lines start with `_` at a deeper
+/// indentation; a step ending in `:= by` owns the deeper block after it.
+fn parse_calc(
+    lines: &[Line],
+    start: usize,
+    base: u32,
+    first: &[Token],
+    first_span: Span,
+) -> Result<(TacticKind, usize, Span)> {
+    let mut i = start;
+    let mut end = first_span;
+    // First line: `calc a = b := proof`.
+    let (head_expr, head_proof, block_needed) = parse_calc_line(&first[1..], first_span)?;
+    let Expr::Binary(op, lhs, rhs, _) = head_expr else {
+        return err(
+            first_span,
+            "`calc` starts with a relation such as `calc a = b := proof`",
+        );
+    };
+    let mut steps = Vec::new();
+    let mut proof = head_proof;
+    if block_needed {
+        let (block, next) = calc_block(lines, i, base, first_span)?;
+        i = next;
+        end = block.last().map(|t| t.span).unwrap_or(end);
+        proof = Some(CalcProof::Block(block));
+    }
+    steps.push(CalcStep {
+        op,
+        rhs: *rhs,
+        proof: proof.expect("proof"),
+        span: first_span,
+    });
+    while i < lines.len()
+        && lines[i].indent > base
+        && matches!(&lines[i].tokens[0].tok, Tok::Ident(name) if name == "_")
+    {
+        let step_indent = lines[i].indent;
+        let mut tokens = lines[i].tokens.clone();
+        i += 1;
+        // Continuation lines deeper than the step that are not a block.
+        if !ends_with_define_by(&tokens) {
+            while i < lines.len()
+                && lines[i].indent > step_indent
+                && !matches!(&lines[i].tokens[0].tok, Tok::Ident(n) if n == "_")
+            {
+                tokens.extend(lines[i].tokens.iter().cloned());
+                i += 1;
+            }
+        }
+        let span = tokens[0].span.to(tokens[tokens.len() - 1].span);
+        end = span;
+        let (expr, step_proof, needs_block) = parse_calc_line(&tokens, span)?;
+        let Expr::Binary(op, lhs, rhs, _) = expr else {
+            return err(span, "a `calc` step has the form `_ = rhs := proof`");
+        };
+        if !matches!(&*lhs, Expr::Var(ident) if ident.name == "_") {
+            return err(
+                span,
+                "a `calc` step starts with `_`, standing for the previous right-hand side",
+            );
+        }
+        let mut step_proof = step_proof;
+        if needs_block {
+            let (block, next) = calc_block(lines, i, step_indent, span)?;
+            i = next;
+            end = block.last().map(|t| t.span).unwrap_or(end);
+            step_proof = Some(CalcProof::Block(block));
+        }
+        steps.push(CalcStep {
+            op,
+            rhs: *rhs,
+            proof: step_proof.expect("proof"),
+            span,
+        });
+    }
+    Ok((TacticKind::Calc { start: *lhs, steps }, i, end))
+}
+
+/// `a = b := proof` or `a = b := by`. Returns the relation expression,
+/// the proof when inline, and whether a block follows.
+fn parse_calc_line(tokens: &[Token], span: Span) -> Result<(Expr, Option<CalcProof>, bool)> {
+    let mut p = Parser::new(tokens, span);
+    let expr = p.parse_expr()?;
+    p.expect(&Tok::Define)?;
+    if p.eat_ident("by") {
+        p.finish()?;
+        return Ok((expr, None, true));
+    }
+    let proof = p.parse_proof_expr()?;
+    p.finish()?;
+    Ok((expr, Some(CalcProof::Expr(proof)), false))
+}
+
+fn calc_block(lines: &[Line], i: usize, indent: u32, span: Span) -> Result<(Vec<Tactic>, usize)> {
+    if i >= lines.len() || lines[i].indent <= indent {
+        return err(span, "expected an indented tactic block after `:= by`");
+    }
+    let body_base = lines[i].indent;
+    parse_block(lines, i, body_base)
 }
 
 fn tactics_end_span(kind: &TacticKind) -> Option<Span> {
@@ -1363,12 +1483,12 @@ impl<'a> Parser<'a> {
                     name.as_str(),
                     "True" | "False" | "fun" | "forall" | "exists" | "not"
                 );
+                // `f(x)` is an application; `f (x)` passes `(x)` as an
+                // argument to the proof `f`.
                 let followed_by_paren = matches!(
                     self.peek_at(1),
-                    Some(Token {
-                        tok: Tok::LParen,
-                        ..
-                    })
+                    Some(Token { tok: Tok::LParen, span: next })
+                        if next.line == token.span.line && next.col == token.span.end_col
                 );
                 if is_term_keyword || followed_by_paren {
                     ProofExpr::Term(self.parse_app()?)
@@ -1493,7 +1613,7 @@ impl<'a> Parser<'a> {
 fn is_type_keyword_stop(name: &str) -> bool {
     matches!(
         name,
-        "in" | "subset" | "with" | "at" | "by" | "as" | "generalizing"
+        "in" | "subset" | "with" | "at" | "by" | "as" | "generalizing" | "on"
     )
 }
 

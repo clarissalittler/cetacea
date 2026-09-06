@@ -283,6 +283,20 @@ impl<'e> Elab<'e> {
         }
     }
 
+    fn check_min_tier(&self, info: &ConstInfo, span: Span) -> Result<()> {
+        if info.min_tier > self.tier() && !self.env.importing {
+            return Err(Diagnostic::new(
+                span,
+                format!("`{}` needs `logic {}`", info.name, info.min_tier.name()),
+            )
+            .note(format!(
+                "add `logic {}` at the top of the file",
+                info.min_tier.name()
+            )));
+        }
+        Ok(())
+    }
+
     fn variable(
         &mut self,
         scope: &Scope,
@@ -294,6 +308,7 @@ impl<'e> Elab<'e> {
             return Ok(var.clone());
         }
         if let Some(info) = self.env.constant(name).cloned() {
+            self.check_min_tier(&info, span)?;
             if info.arity > 0 && self.tier() < Tier::Hol && !self.is_predicate_expected(expected) {
                 let placeholders = (0..info.arity)
                     .map(|i| format!("x{}", i + 1))
@@ -376,6 +391,7 @@ impl<'e> Elab<'e> {
                     let arity = var.ty().strip_fun().0.len();
                     (var.clone(), Some(arity), format!("`{}`", ident.name))
                 } else if let Some(info) = self.env.constant(&ident.name).cloned() {
+                    self.check_min_tier(&info, ident.span)?;
                     let described = format!("{} `{}`", info.kind.describe(), ident.name);
                     (self.constant_term(&info), Some(info.arity), described)
                 } else {

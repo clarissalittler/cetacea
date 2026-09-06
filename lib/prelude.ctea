@@ -2,3 +2,6 @@ import prop.ctea
 import fol.ctea
 import eq.ctea
 import set.ctea
+import nat.ctea
+import modular.ctea
+import fun.ctea

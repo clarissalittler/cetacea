@@ -28,7 +28,13 @@ allows_incomplete() {
 }
 
 needs_later_milestone() {
-  grep -qE '^(data|defrec) |^ *induction |\bNat\b|\bsucc\(|\badd\(|\bmul\(|\ble\(|\bsub\(' "$1"
+  grep -qE '^data |\bList\b|\bTree\b' "$1"
+}
+
+tier_flags() {
+  if grep -qE '\bNat\b|\bsucc\(|\badd\(|\bmul\(|\ble\(|\bsub\(|^defrec |[0-9]' "$1"; then
+    printf -- '--tier fol_nat'
+  fi
 }
 
 mapfile -t files < <(find lib examples docs/cs250/code docs/book/code -type f -name '*.ctea' | sort)
@@ -45,7 +51,9 @@ for file in "${files[@]}"; do
     continue
   fi
   checked=$((checked + 1))
-  output="$("$checker" "$file" 2>&1)"
+  flags="$(tier_flags "$file")"
+  # shellcheck disable=SC2086
+  output="$("$checker" $flags "$file" 2>&1)"
   code=$?
   if is_negative_file "$file"; then
     if [[ $code -eq 0 ]]; then
@@ -53,7 +61,8 @@ for file in "${files[@]}"; do
       status=1
       continue
     fi
-    json_output="$("$checker" --json "$file" 2>/dev/null)"
+    # shellcheck disable=SC2086
+    json_output="$("$checker" --json $flags "$file" 2>/dev/null)"
     mapfile -t negative_theorems < <(
       sed -nE 's/^[[:space:]]*theorem[[:space:]]+([A-Za-z_][A-Za-z0-9_.]*).*/\1/p' "$file"
     )

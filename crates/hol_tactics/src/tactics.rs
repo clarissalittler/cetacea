@@ -327,14 +327,20 @@ impl<'a> Runner<'a> {
             } => self.rewrite(state, goal, *dir, *all, proof, at.as_ref(), span),
             TacticKind::Unfold(name, at) => self.unfold(state, goal, name, at.as_ref(), span),
             TacticKind::Simp { rules, target } => self.simp(state, goal, rules, target, span),
-            TacticKind::Induction { .. } => {
-                let message = if self.env.tier < Tier::FolNat {
-                    "induction needs natural numbers or data types; add `logic fol_nat` or `logic hol`"
-                } else {
-                    "induction is not available yet in this build"
-                };
-                Err(Diagnostic::new(span, message.to_string()))
+            TacticKind::Induction {
+                var,
+                generalizing,
+                arms,
+            } => {
+                if self.env.tier < Tier::FolNat {
+                    return Err(Diagnostic::new(
+                        span,
+                        "induction needs natural numbers or data types; add `logic fol_nat` or `logic hol`".to_string(),
+                    ));
+                }
+                self.induction(state, goal, var, generalizing, arms, span)
             }
+            TacticKind::Calc { start, steps } => self.calc(state, goal, start, steps, span),
             TacticKind::Exfalso => {
                 let target = goal.target.clone();
                 let subgoal = Goal {
@@ -1570,6 +1576,353 @@ impl<'a> Runner<'a> {
             eq_mp(&bridge, &thms[0])
         });
         state.close(goal.id, vec![subgoal], just);
+        Ok(())
+    }
+}
+
+impl<'a> Runner<'a> {
+    /// Structural induction on a variable of a data type.
+    fn induction(
+        &mut self,
+        state: &mut ProofState,
+        goal: &Goal,
+        var_name: &Ident,
+        generalizing: &[Ident],
+        arms: &[CaseArm],
+        span: Span,
+    ) -> Result<()> {
+        let var = goal
+            .vars
+            .iter()
+            .find(|v| {
+                v.as_free()
+                    .map(|(n, _)| n.as_str() == var_name.name)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .or_else(|| self.base_scope.lookup(&var_name.name).cloned());
+        let Some(var) = var else {
+            return Err(Diagnostic::new(
+                var_name.span,
+                format!("`{}` is not a variable in scope", var_name.name),
+            ));
+        };
+        let hol_kernel::Type::Con(dt_name, dt_args) = var.ty().clone() else {
+            return Err(Diagnostic::new(
+                var_name.span,
+                format!(
+                    "`{}` has type `{}`, which is not a data type",
+                    var_name.name,
+                    var.ty()
+                ),
+            ));
+        };
+        let Some(info) = self.env.theory().datatype(dt_name.as_str()).cloned() else {
+            return Err(Diagnostic::new(
+                var_name.span,
+                format!(
+                    "`{}` has type `{}`, which is not a data type",
+                    var_name.name,
+                    var.ty()
+                ),
+            ));
+        };
+        // Generalize: revert the named variables and the hypotheses that
+        // mention them into the target.
+        let mut generalized: Vec<Term> = Vec::new();
+        for name in generalizing {
+            if name.name == var_name.name {
+                return Err(Diagnostic::new(
+                    name.span,
+                    "cannot generalize the induction variable itself".to_string(),
+                ));
+            }
+            let Some(g) = goal.vars.iter().find(|v| {
+                v.as_free()
+                    .map(|(n, _)| n.as_str() == name.name)
+                    .unwrap_or(false)
+            }) else {
+                return Err(Diagnostic::new(
+                    name.span,
+                    format!("`{}` is not a variable introduced in this proof", name.name),
+                ));
+            };
+            generalized.push(g.clone());
+        }
+        let mut kept_hyps: Vec<(Name, Term)> = Vec::new();
+        let mut reverted_hyps: Vec<(Name, Term)> = Vec::new();
+        for (name, hyp) in &goal.hyps {
+            if generalized.iter().any(|g| hyp.contains_var(g)) {
+                reverted_hyps.push((name.clone(), hyp.clone()));
+            } else {
+                kept_hyps.push((name.clone(), hyp.clone()));
+            }
+        }
+        if let Some((name, _)) = kept_hyps.iter().find(|(_, h)| h.contains_var(&var)) {
+            return Err(Diagnostic::new(
+                span,
+                format!(
+                    "cannot induct on `{}` while the hypothesis `{name}` depends on it",
+                    var_name.name
+                ),
+            )
+            .note(format!("move it back into the goal first with `revert {name}`, and `intro {name}` again inside each case")));
+        }
+        let mut target = goal.target.clone();
+        for (_, hyp) in reverted_hyps.iter().rev() {
+            target = Term::imp(hyp, &target).map_err(kernel(span))?;
+        }
+        for g in generalized.iter().rev() {
+            target = Term::forall(g, &target).map_err(kernel(span))?;
+        }
+        let motive = Term::lam(&var, &target).map_err(kernel(span))?;
+
+        // Arms must follow the constructors in order.
+        if arms.len() != info.ctors.len() {
+            return Err(Diagnostic::new(
+                span,
+                format!(
+                    "`{}` has {} constructor{}, so `induction` needs {} case arm{}: {}",
+                    dt_name,
+                    info.ctors.len(),
+                    if info.ctors.len() == 1 { "" } else { "s" },
+                    info.ctors.len(),
+                    if info.ctors.len() == 1 { "" } else { "s" },
+                    info.ctors
+                        .iter()
+                        .map(|c| format!("`| {} ... =>`", c.name))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
+        }
+        let param_subst: hol_kernel::TypeSubst = info
+            .params
+            .iter()
+            .cloned()
+            .zip(dt_args.iter().cloned())
+            .collect();
+        let mut subgoals = Vec::new();
+        let mut arm_shapes: Vec<(Vec<Term>, Vec<Term>)> = Vec::new();
+        let taken = goal.taken_names();
+        for (arm, ctor) in arms.iter().zip(&info.ctors) {
+            let short = ctor
+                .name
+                .as_str()
+                .rsplit('.')
+                .next()
+                .unwrap_or(ctor.name.as_str());
+            if arm.ctor.name != ctor.name.as_str() && arm.ctor.name != short {
+                return Err(Diagnostic::new(
+                    arm.ctor.span,
+                    format!("expected the case `| {} ... =>` here", ctor.name),
+                ));
+            }
+            let rec_count = ctor.recursive.iter().filter(|r| **r).count();
+            if arm.binders.len() != ctor.args.len() + rec_count {
+                return Err(Diagnostic::new(
+                    arm.span,
+                    format!(
+                        "case `{}` binds {} name{}: one per constructor argument ({}) and one induction hypothesis per recursive argument ({})",
+                        ctor.name,
+                        ctor.args.len() + rec_count,
+                        if ctor.args.len() + rec_count == 1 { "" } else { "s" },
+                        ctor.args.len(),
+                        rec_count
+                    ),
+                ));
+            }
+            let mut arm_vars = Vec::new();
+            for (binder, ty) in arm.binders.iter().zip(&ctor.args) {
+                self.check_fresh(goal, binder)?;
+                if taken.contains(&Name::new(&binder.name)) {
+                    return Err(Diagnostic::new(
+                        binder.span,
+                        format!(
+                            "induction binder `{}` would shadow an existing variable",
+                            binder.name
+                        ),
+                    ));
+                }
+                arm_vars.push(Term::free(binder.name.as_str(), ty.subst(&param_subst)));
+            }
+            let ctor_term = self
+                .env
+                .theory()
+                .constant(
+                    ctor.name.clone(),
+                    hol_kernel::Type::funs(
+                        &ctor
+                            .args
+                            .iter()
+                            .map(|t| t.subst(&param_subst))
+                            .collect::<Vec<_>>(),
+                        var.ty().clone(),
+                    ),
+                )
+                .map_err(kernel(span))?;
+            let applied = Term::apps(&ctor_term, &arm_vars).map_err(kernel(span))?;
+            let mut hyps = kept_hyps.clone();
+            let mut ih_formulas = Vec::new();
+            let mut ih_index = 0;
+            for (i, is_rec) in ctor.recursive.iter().enumerate() {
+                if !*is_rec {
+                    continue;
+                }
+                let binder = &arm.binders[ctor.args.len() + ih_index];
+                self.check_fresh(goal, binder)?;
+                let formula = motive.beta_apply(&arm_vars[i]).map_err(kernel(span))?;
+                hyps.push((Name::new(&binder.name), formula.clone()));
+                ih_formulas.push(formula);
+                ih_index += 1;
+            }
+            let arm_target = motive.beta_apply(&applied).map_err(kernel(span))?;
+            let mut vars: Vec<Term> = goal
+                .vars
+                .iter()
+                .filter(|v| *v != &var && !generalized.contains(v))
+                .cloned()
+                .collect();
+            vars.extend(arm_vars.iter().cloned());
+            subgoals.push(Goal {
+                id: 0,
+                vars,
+                hyps,
+                target: arm_target,
+            });
+            arm_shapes.push((arm_vars, ih_formulas));
+        }
+
+        let principle = hol_kernel::inst_type(&info.induction, &param_subst);
+        let principle = forall_elim(&principle, &motive).map_err(kernel(span))?;
+        let principle = hol_kernel::beta_norm(&principle).map_err(kernel(span))?;
+        let reverted_for_just = reverted_hyps.clone();
+        let generalized_for_just = generalized.clone();
+        let var_for_just = var.clone();
+        let just: Justification = Box::new(move |thms| {
+            let mut current = principle.clone();
+            for (thm, (arm_vars, ih_formulas)) in thms.iter().zip(&arm_shapes) {
+                let mut step = thm.clone();
+                for ih in ih_formulas.iter().rev() {
+                    step = imp_intro(ih, &step)?;
+                }
+                for v in arm_vars.iter().rev() {
+                    step = forall_intro(v, &step)?;
+                }
+                current = imp_elim(&current, &step)?;
+            }
+            current = forall_elim(&current, &var_for_just)?;
+            current = hol_kernel::beta_norm(&current)?;
+            for g in &generalized_for_just {
+                current = forall_elim(&current, g)?;
+            }
+            for (_, hyp) in &reverted_for_just {
+                current = imp_elim(&current, &assume(hyp)?)?;
+            }
+            Ok(current)
+        });
+        state.close(goal.id, subgoals, just);
+
+        // Reintroduce generalized variables and hypotheses in each arm,
+        // then run the arm bodies.
+        let arm_ids: Vec<u64> = state.goals.iter().take(arms.len()).map(|g| g.id).collect();
+        for (arm, id) in arms.iter().zip(arm_ids) {
+            let _ = id;
+            for g in &generalized {
+                let name = g.as_free().unwrap().0.to_string();
+                let current = state.current().cloned().expect("goal");
+                self.intro(state, &current, &Ident::new(&name, arm.span))?;
+            }
+            for (name, _) in &reverted_hyps {
+                let current = state.current().cloned().expect("goal");
+                self.intro(state, &current, &Ident::new(name.as_str(), arm.span))?;
+            }
+            let what = format!("case `{}`", arm.ctor.name);
+            self.run_block_closing(state, &arm.body, &what, arm.span)?;
+        }
+        Ok(())
+    }
+
+    /// `calc a = b := p` followed by `_ = c := q` steps.
+    fn calc(
+        &mut self,
+        state: &mut ProofState,
+        goal: &Goal,
+        start: &Expr,
+        steps: &[hol_syntax::CalcStep],
+        span: Span,
+    ) -> Result<()> {
+        let mut ctx = self.ctx(goal);
+        let mut current = ctx.elab_term(start, None)?;
+        current = ctx.subst.apply(&current);
+        let mut chain: Option<Thm> = None;
+        for step in steps {
+            if !matches!(step.op, hol_syntax::BinOp::Eq | hol_syntax::BinOp::Iff) {
+                return Err(Diagnostic::new(
+                    step.span,
+                    "`calc` steps use `=` (or `<->`) for now".to_string(),
+                ));
+            }
+            let ty = current.ty().clone();
+            let rhs = ctx.elab_term(&step.rhs, Some(&ty))?;
+            let rhs = ctx.subst.apply(&rhs);
+            let claim = Term::eq(&current, &rhs).map_err(kernel(step.span))?;
+            let proof = match &step.proof {
+                hol_syntax::CalcProof::Expr(expr) => {
+                    let thm = ctx.elab_proof(expr)?;
+                    let thm = ctx.coerce(thm, &claim, expr.span())?;
+                    ctx.finalize(&thm, expr.span(), "the step")?
+                }
+                hol_syntax::CalcProof::Block(body) => {
+                    let sub = Goal {
+                        id: 0,
+                        vars: goal.vars.clone(),
+                        hyps: goal.hyps.clone(),
+                        target: claim.clone(),
+                    };
+                    let mut sub_state = ProofState::new(sub);
+                    self.run_block_closing(&mut sub_state, body, "the calc step", step.span)?;
+                    sub_state.finish().map_err(|_| {
+                        Diagnostic::new(
+                            step.span,
+                            format!(
+                                "the kernel rejected the calc step: {}",
+                                sub_state.last_kernel_error.clone().unwrap_or_default()
+                            ),
+                        )
+                    })?
+                }
+            };
+            chain = Some(match chain {
+                None => proof,
+                Some(previous) => trans(&previous, &proof).map_err(kernel(step.span))?,
+            });
+            current = rhs;
+        }
+        let Some(chain) = chain else {
+            return Err(Diagnostic::new(
+                span,
+                "`calc` needs at least one step".to_string(),
+            ));
+        };
+        let thm = ctx.coerce(chain, &goal.target, span).map_err(|d| {
+            Diagnostic::new(
+                span,
+                format!(
+                    "the calc chain proves `{}`, but the goal is `{}`",
+                    d.message
+                        .split("proof has type ")
+                        .nth(1)
+                        .unwrap_or("")
+                        .split(", but")
+                        .next()
+                        .unwrap_or(""),
+                    self.show(&goal.target)
+                ),
+            )
+        })?;
+        let thm = ctx.finalize(&thm, span, "the calc chain")?;
+        state.close(goal.id, vec![], Box::new(move |_| Ok(thm.clone())));
         Ok(())
     }
 }

@@ -180,6 +180,13 @@ fn elab_type_inner(env: &Env, scope: &TypeScope, ty: &TypeExpr) -> Result<Type> 
                 }
                 return Ok(Type::var(text));
             }
+            if text == "Nat" && env.tier < Tier::FolNat && !env.importing {
+                return Err(
+                    Diagnostic::new(name.span, "`Nat` needs `logic fol_nat`".to_string()).note(
+                        "add `logic fol_nat` at the top of the file to enable natural numbers",
+                    ),
+                );
+            }
             let Some((qualified, arity)) = env.sort(text) else {
                 let mut diag = Diagnostic::new(name.span, format!("unknown type `{text}`"));
                 if text == "Nat" && env.tier < Tier::FolNat {

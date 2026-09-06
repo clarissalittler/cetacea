@@ -21,7 +21,12 @@ inline markers, hints, explanations, the theorem library, examples,
 and autosave. Two deviations from section 7 and 8: the Wasm binding
 uses the plain length-prefixed JSON convention the old UI used (no
 `wasm-bindgen` toolchain in CI), and CodeMirror is loaded as pinned ES
-modules from a CDN rather than bundled by Vite. Still open in M1/M2:
+modules from a CDN rather than bundled by Vite. M3 landed on 6 September 2026: `Nat` as a
+prelude datatype with numerals and infix arithmetic, `defrec ... on x`,
+`induction ... generalizing`, `calc`, datatype no-confusion and
+arithmetic computation as `simp` rules, arithmetic countermodels, and
+the ported `nat`, `modular`, and `fun` libraries; every corpus file
+except the nine that need `List` or `Tree` checks. Still open:
 re-quoting the book's diagnostics, multi-file projects, assignment
 mode, and per-declaration caching.
 
@@ -433,7 +438,7 @@ Sizes are relative to one another, not calendar estimates.
 - M2 Browser (medium). Vite app, CodeMirror, worker, Pages deploy.
   Goals, hints, library, explanation, examples, autosave. Acceptance:
   a student can do every module-2 to module-4 exercise without the CLI.
-- M3 Tier 2 (medium). `Nat` via the datatype package, numerals,
+- M3 Tier 2 (medium). Done. `Nat` via the datatype package, numerals,
   infix, `defrec`, `induction`, `calc`, arithmetic countermodels,
   `std/nat`, `std/modular`. Acceptance: tutorials 04, 07 (Nat part),
   09; book chapters 9 and 12.
