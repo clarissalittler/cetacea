@@ -8,9 +8,9 @@ import ../../../std/prelude.ctea
 
 mode constructive
 
--- Mistake 1: arms out of declaration order. List declares nil first,
+-- Mistake 1: arms out of declaration order. List Nat declares nil first,
 -- so the nil arm must come first.
-theorem arms_out_of_order (l : List) : append(l, nil) = l := by
+theorem arms_out_of_order (l : List Nat) : append(l, nil) = l := by
   induction l with
   | cons h t ih =>
       simp
@@ -21,7 +21,7 @@ theorem arms_out_of_order (l : List) : append(l, nil) = l := by
 
 -- Mistake 2: forgetting the induction hypothesis binder. The cons arm
 -- binds the head, the tail, AND the hypothesis about the tail.
-theorem missing_binders (l : List) : append(l, nil) = l := by
+theorem missing_binders (l : List Nat) : append(l, nil) = l := by
   induction l with
   | nil =>
       refl

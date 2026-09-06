@@ -5,3 +5,5 @@ import set.ctea
 import nat.ctea
 import modular.ctea
 import fun.ctea
+import list.ctea
+import finite.ctea

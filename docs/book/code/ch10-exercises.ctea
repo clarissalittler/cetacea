@@ -20,7 +20,7 @@ defrec sumto (n : Nat) : Nat
 | zero => 0
 | succ k rec => add(succ(k), rec)
 
-defrec replicate (n : Nat) (x : Nat) : List
+defrec replicate (n : Nat) (x : Nat) : List Nat
 | zero => nil
 | succ k rec => cons(x, rec)
 

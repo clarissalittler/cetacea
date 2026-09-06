@@ -888,6 +888,7 @@ fn parse_tactic_line(tokens: &[Token], span: Span) -> Result<TacticKind> {
             }
         }
         "show" => TacticKind::Show(p.parse_expr()?),
+        "funext" => TacticKind::Funext(p.ident("a variable name")?),
         "obtain" => {
             let mut names = Vec::new();
             while !p.at(&Tok::Define) {

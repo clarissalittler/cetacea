@@ -440,6 +440,8 @@ pub enum TacticKind {
         proof: HaveProof,
     },
     Show(Expr),
+    /// `funext x`.
+    Funext(Ident),
     Obtain {
         names: Vec<Ident>,
         proof: ProofExpr,

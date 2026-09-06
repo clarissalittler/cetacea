@@ -26,9 +26,19 @@ prelude datatype with numerals and infix arithmetic, `defrec ... on x`,
 `induction ... generalizing`, `calc`, datatype no-confusion and
 arithmetic computation as `simp` rules, arithmetic countermodels, and
 the ported `nat`, `modular`, and `fun` libraries; every corpus file
-except the nine that need `List` or `Tree` checks. Still open:
-re-quoting the book's diagnostics, multi-file projects, assignment
-mode, and per-declaration caching.
+except the nine that need `List` or `Tree` checks. M4 landed the same day: user `data` types with
+polymorphic parameters, `defrec` over them (including recursive
+predicates and functions taking function arguments), `induction` and
+`cases` on datatype variables, `funext`, theorem statements that are
+implicitly polymorphic in undetermined types, countermodels over small
+datatype values, and the `list` and `finite` libraries (`Finite`,
+`HasCard`, `Nodup`, closure of finiteness under union). Book chapters
+10 and 11 and tutorial 07 were migrated to `List Nat` and are checked
+by the new script only (`scripts/migrated_to_v2.txt`). Every corpus
+file now checks. Not yet done from the M4 list: the pigeonhole
+principle and cardinality of unions, which need a longer library
+development. Still open overall: re-quoting the book's diagnostics,
+multi-file projects, assignment mode, and per-declaration caching.
 
 ## 1. Why rewrite, and why HOL
 
@@ -442,7 +452,7 @@ Sizes are relative to one another, not calendar estimates.
   infix, `defrec`, `induction`, `calc`, arithmetic countermodels,
   `std/nat`, `std/modular`. Acceptance: tutorials 04, 07 (Nat part),
   09; book chapters 9 and 12.
-- M4 Tier 3 (large). Polymorphic `data`, general `defrec`, lambdas and
+- M4 Tier 3 (large). Done except pigeonhole. Polymorphic `data`, general `defrec`, lambdas and
   higher types everywhere, `funext`, sets via `setOf`, recursive
   predicates, quickcheck feedback, `std/list`, `std/fun` with real
   functions, `std/finite` and `std/card` with pigeonhole as the

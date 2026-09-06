@@ -10,7 +10,7 @@ mode constructive
 -- Section 11.2: the Chapter 10 cliffhanger, resolved. append(l, nil)
 -- is stuck as a computation, but structural induction on l unsticks it
 -- one constructor at a time.
-theorem append_nil_demo (l : List) : append(l, nil) = l := by
+theorem append_nil_demo (l : List Nat) : append(l, nil) = l := by
   induction l with
   | nil =>
       refl
@@ -22,7 +22,7 @@ theorem append_nil_demo (l : List) : append(l, nil) = l := by
 -- Section 11.3: length of an append. The proof skeleton is identical
 -- -- structural induction proofs follow the data, not the theorem.
 -- This is `length_append` in std/list.ctea.
-theorem length_append_demo (l1 : List) (l2 : List)
+theorem length_append_demo (l1 : List Nat) (l2 : List Nat)
   : length(append(l1, l2)) = add(length(l1), length(l2)) := by
   induction l1 with
   | nil =>

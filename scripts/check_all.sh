@@ -31,7 +31,12 @@ allows_incomplete() {
   esac
 }
 
-mapfile -t files < <(find std examples docs/cs250/code docs/book/code -type f -name '*.ctea' | sort)
+# Files migrated to Cetacea 2 syntax are checked by scripts/check_hol.sh.
+is_migrated() {
+  grep -qxF "$1" "$root/scripts/migrated_to_v2.txt"
+}
+
+mapfile -t files < <(find std examples docs/cs250/code docs/book/code -type f -name '*.ctea' | sort | while read -r f; do is_migrated "$f" || printf '%s\n' "$f"; done)
 
 status=0
 book_error_lines=""
@@ -136,14 +141,14 @@ while IFS= read -r expected; do
     printf 'error: quoted book diagnostic is stale: %s\n' "$expected" >&2
     status=1
   fi
-done < <(sed -n '/^error: /p' docs/book/*.md)
+done < <(for md in docs/book/*.md; do is_migrated "$md" || sed -n '/^error: /p' "$md"; done)
 
 while IFS= read -r expected; do
   if ! contains_line "$book_receipt_lines" "$expected"; then
     printf 'error: quoted book acceptance receipt is stale: %s\n' "$expected" >&2
     status=1
   fi
-done < <(sed -n '/^\(accepted theorem\|incomplete theorem\|trusted axiom\) /p' docs/book/*.md)
+done < <(for md in docs/book/*.md; do is_migrated "$md" || sed -n '/^\(accepted theorem\|incomplete theorem\|trusted axiom\) /p' "$md"; done)
 
 if [[ $status -eq 0 ]]; then
   printf 'checked %s .ctea files\n' "${#files[@]}"

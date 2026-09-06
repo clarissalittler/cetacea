@@ -134,10 +134,14 @@ pub fn elab_theorem_header(
     span: Span,
 ) -> Result<TheoremHeader> {
     let qualified = check_fresh_name(env, name)?;
-    let (mut scope, infos) = elab_params(env, params, true)?;
+    let (mut scope, mut infos) = elab_params(env, params, true)?;
     let mut elab = Elab::new(env);
     let body = elab.formula(&mut scope, statement)?;
-    let body = elab.finish(&body, statement.span())?;
+    let (body, generalized) = elab.finish_generalizing(&body, &scope.types.vars);
+    for var in generalized {
+        scope.types.vars.insert(var.clone());
+        infos.push(ParamInfo::TypeVar(var));
+    }
     let hyps: Vec<(Name, Term)> = infos
         .iter()
         .filter_map(|p| match p {

@@ -271,3 +271,80 @@ pub fn propositional_rules() -> hol_kernel::Result<Vec<(String, Thm)>> {
 
     Ok(out)
 }
+
+/// Splits a right-nested conjunction into its components.
+fn conjuncts(t: &Term) -> Vec<Term> {
+    match t.dest_and() {
+        Some((a, b)) => {
+            let mut out = vec![a.clone()];
+            out.extend(conjuncts(b));
+            out
+        }
+        None => vec![t.clone()],
+    }
+}
+
+fn conjoin(parts: &[Term]) -> hol_kernel::Result<Term> {
+    let mut iter = parts.iter().rev();
+    let mut acc = iter.next().expect("non-empty").clone();
+    for part in iter {
+        acc = Term::and(part, &acc)?;
+    }
+    Ok(acc)
+}
+
+/// For the conjunction produced by an injectivity rewrite, `|- conj <->
+/// kept` where `kept` drops the components `x = x` (proved by `refl`),
+/// keeping the first component when all are trivial so the result stays
+/// an equation rather than collapsing to `True`.
+pub fn tidy_injectivity(conj: &Term) -> Option<Thm> {
+    let parts = conjuncts(conj);
+    let trivial: Vec<bool> = parts
+        .iter()
+        .map(|p| p.dest_eq().map(|(a, b)| a == b).unwrap_or(false))
+        .collect();
+    if !trivial.iter().any(|t| *t) || parts.len() < 2 {
+        return None;
+    }
+    let mut kept: Vec<usize> = (0..parts.len()).filter(|i| !trivial[*i]).collect();
+    if kept.is_empty() {
+        kept.push(0);
+    }
+    let kept_terms: Vec<Term> = kept.iter().map(|i| parts[*i].clone()).collect();
+    let kept_conj = conjoin(&kept_terms).ok()?;
+    // Forward: project the kept components out of the full conjunction.
+    let full = assume(conj).ok()?;
+    let components = split_conjunction(&full, parts.len()).ok()?;
+    let forward_body = join_thms(
+        &kept
+            .iter()
+            .map(|i| components[*i].clone())
+            .collect::<Vec<_>>(),
+    )?;
+    let forward = imp_intro(conj, &forward_body).ok()?;
+    // Backward: rebuild every component, using `refl` for the dropped ones.
+    let kept_thm = assume(&kept_conj).ok()?;
+    let kept_components = split_conjunction(&kept_thm, kept.len()).ok()?;
+    let mut all = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        match kept.iter().position(|k| *k == i) {
+            Some(pos) => all.push(kept_components[pos].clone()),
+            None => {
+                let (a, _) = part.dest_eq()?;
+                all.push(refl(a).ok()?);
+            }
+        }
+    }
+    let backward_body = join_thms(&all)?;
+    let backward = imp_intro(&kept_conj, &backward_body).ok()?;
+    iff_of(forward, backward).ok()
+}
+
+fn join_thms(thms: &[Thm]) -> Option<Thm> {
+    let mut iter = thms.iter().rev();
+    let mut acc = iter.next()?.clone();
+    for thm in iter {
+        acc = and_intro(thm, &acc).ok()?;
+    }
+    Some(acc)
+}

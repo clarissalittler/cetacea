@@ -8,7 +8,7 @@ import ../../../std/prelude.ctea
 
 mode constructive
 
-defrec sum (l : List) : Nat
+defrec sum (l : List Nat) : Nat
 | nil => 0
 | cons h t rec => add(h, rec)
 
@@ -35,14 +35,14 @@ theorem ex11_1 : size(node(node(leaf, 1, leaf), 2, leaf)) = 2 := by
 -- Exercise 11.2. Associativity of append. Induct on l1 -- the
 -- argument append recurses on. The skeleton is the same as
 -- length_append_demo.
-theorem ex11_2 (l1 : List) (l2 : List) (l3 : List)
+theorem ex11_2 (l1 : List Nat) (l2 : List Nat) (l3 : List Nat)
   : append(append(l1, l2), l3) = append(l1, append(l2, l3)) := by
   sorry
 
 -- Exercise 11.3. Sum distributes over append. The cons arm needs one
 -- extra step beyond the induction hypothesis:
 -- rewrite add_assoc {n := h; m := sum(t); k := sum(l2)}.
-theorem ex11_3 (l1 : List) (l2 : List)
+theorem ex11_3 (l1 : List Nat) (l2 : List Nat)
   : sum(append(l1, l2)) = add(sum(l1), sum(l2)) := by
   sorry
 

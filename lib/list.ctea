@@ -1,0 +1,161 @@
+mode constructive
+
+import nat.ctea
+
+-- Polymorphic lists. `List Nat` is the list type used in the course.
+data List (A : Type)
+| nil
+| cons(A, List A)
+
+defrec length (A : Type) (l : List A) : Nat
+| nil => 0
+| cons h t => succ(length(t))
+
+theorem length_nil : length(nil) = 0 := by
+  refl
+
+theorem length_cons (A : Type) (h : A) (t : List A)
+  : length(cons(h, t)) = succ(length(t)) := by
+  refl
+
+-- Concatenation, by recursion on the first list.
+defrec append (A : Type) (l : List A) (r : List A) : List A
+| nil => r
+| cons h t => cons(h, append(t, r))
+
+theorem append_nil (A : Type) (l : List A) : append(nil, l) = l := by
+  refl
+
+theorem append_cons (A : Type) (h : A) (t : List A) (l : List A)
+  : append(cons(h, t), l) = cons(h, append(t, l)) := by
+  refl
+
+theorem length_append (A : Type) (l1 : List A) (l2 : List A)
+  : length(append(l1, l2)) = add(length(l1), length(l2)) := by
+  induction l1 with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      exact ih
+
+theorem append_nil_length (A : Type) (l : List A)
+  : length(append(nil, l)) = length(l) := by
+  refl
+
+theorem append_assoc (A : Type) (l1 : List A) (l2 : List A) (l3 : List A)
+  : append(append(l1, l2), l3) = append(l1, append(l2, l3)) := by
+  induction l1 with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      exact ih
+
+theorem append_nil_right (A : Type) (l : List A) : append(l, nil) = l := by
+  induction l with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      exact ih
+
+-- Membership in a list, a recursive predicate.
+defrec elem (A : Type) (x : A) (l : List A) : Prop on l
+| nil => False
+| cons h t => x = h \/ elem(x, t)
+
+theorem elem_head (A : Type) (x : A) (t : List A) : elem(x, cons(x, t)) := by
+  simp
+  left
+  refl
+
+theorem elem_tail (A : Type) (x h : A) (t : List A) : elem(x, t) -> elem(x, cons(h, t)) := by
+  intro hx
+  simp
+  right
+  exact hx
+
+theorem elem_append_left (A : Type) (x : A) (l r : List A)
+  : elem(x, l) -> elem(x, append(l, r)) := by
+  induction l with
+  | nil =>
+      intro h
+      simp at h
+      contradiction
+  | cons h t ih =>
+      intro hx
+      simp at hx
+      simp
+      cases hx with
+      | left hl =>
+          left
+          exact hl
+      | right hr =>
+          right
+          apply ih
+          exact hr
+
+theorem elem_append (A : Type) (x : A) (l r : List A)
+  : elem(x, append(l, r)) <-> elem(x, l) \/ elem(x, r) := by
+  induction l with
+  | nil =>
+      simp
+      split
+      intro h
+      right
+      exact h
+      intro h
+      cases h with
+      | left hl =>
+          contradiction
+      | right hr =>
+          exact hr
+  | cons h t ih =>
+      simp
+      rewrite -> ih
+      split
+      intro hx
+      cases hx with
+      | left h1 =>
+          left
+          left
+          exact h1
+      | right h2 =>
+          cases h2 with
+          | left h3 =>
+              left
+              right
+              exact h3
+          | right h4 =>
+              right
+              exact h4
+      intro hx
+      cases hx with
+      | left h1 =>
+          cases h1 with
+          | left h3 =>
+              left
+              exact h3
+          | right h4 =>
+              right
+              left
+              exact h4
+      | right h2 =>
+          right
+          right
+          exact h2
+
+-- Functions as values: map.
+defrec map (A : Type) (B : Type) (f : A -> B) (l : List A) : List B on l
+| nil => nil
+| cons h t => cons(f(h), map(f, t))
+
+theorem length_map (A : Type) (B : Type) (f : A -> B) (l : List A)
+  : length(map(f, l)) = length(l) := by
+  induction l with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      exact ih

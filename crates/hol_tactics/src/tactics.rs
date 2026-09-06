@@ -19,7 +19,9 @@ use hol_syntax::{
     TacticKind, Tier,
 };
 
-use crate::conv::{head_unfold, normalize, rhs, Rule, Rules};
+use crate::conv::{
+    head_unfold, normalize, normalize_until as hol_tactics_normalize_until, rhs, Rule, Rules,
+};
 use crate::pexpr::ProofCtx;
 use crate::proof::{Goal, Justification, ProofState};
 use crate::unify::{Subst, TermNorm};
@@ -338,9 +340,10 @@ impl<'a> Runner<'a> {
                         "induction needs natural numbers or data types; add `logic fol_nat` or `logic hol`".to_string(),
                     ));
                 }
-                self.induction(state, goal, var, generalizing, arms, span)
+                self.induction(state, goal, var, generalizing, arms, true, span)
             }
             TacticKind::Calc { start, steps } => self.calc(state, goal, start, steps, span),
+            TacticKind::Funext(name) => self.funext(state, goal, name, span),
             TacticKind::Exfalso => {
                 let target = goal.target.clone();
                 let subgoal = Goal {
@@ -938,6 +941,13 @@ impl<'a> Runner<'a> {
         arms: &[CaseArm],
         span: Span,
     ) -> Result<()> {
+        if let ProofExpr::Name(ident) = scrutinee {
+            let is_var = goal.hyp(&ident.name).is_none()
+                && (goal.has_var(&ident.name) || self.base_scope.lookup(&ident.name).is_some());
+            if is_var {
+                return self.induction(state, goal, ident, &[], arms, false, span);
+            }
+        }
         let mut ctx = self.ctx(goal);
         let thm = ctx.elab_proof(scrutinee)?;
         let thm = ctx.finalize(&thm, span, "the hypothesis")?;
@@ -1027,12 +1037,23 @@ impl<'a> Runner<'a> {
         let ctx = self.ctx(goal);
         let conv = ctx.norm(&goal.target).map_err(kernel(span))?;
         let normalized = rhs(&conv);
+        if normalized.is_true() {
+            let just: Justification = Box::new(move |_| eq_mp(&sym(&conv)?, &true_intro()));
+            state.close(goal.id, vec![], just);
+            return Ok(());
+        }
+        if let Some(closed) = close_trivial(&normalized) {
+            let just: Justification = Box::new(move |_| eq_mp(&sym(&conv)?, &closed));
+            state.close(goal.id, vec![], just);
+            return Ok(());
+        }
         let Some((a, b)) = normalized.dest_eq() else {
             return Err(Diagnostic::new(
                 span,
                 format!(
-                    "`refl` needs an equality as the goal, but the goal is `{}`",
-                    self.show(&goal.target)
+                    "`refl` needs an equality as the goal, but the goal is `{}`, which computes to `{}`",
+                    self.show(&goal.target),
+                    self.show(&normalized)
                 ),
             ));
         };
@@ -1124,7 +1145,26 @@ impl<'a> Runner<'a> {
                 (goal.hyps[position].1.clone(), Some(position))
             }
         };
-        let (conv, count) = rewrite_occurrences(&mut ctx.subst, &rule, &subject, all, span)?;
+        let (mut conv, count) = rewrite_occurrences(&mut ctx.subst, &rule, &subject, all, span)?;
+        // The old checker searched the computed form of the goal; do the
+        // same when the pattern does not occur literally.
+        if conv.is_none() {
+            let probe_subst = ctx.subst.clone();
+            let probe_rule = rule.clone();
+            let probe_rules = ctx.rules.equations_first();
+            let found = hol_tactics_normalize_until(&ctx.subst, &probe_rules, &subject, |form| {
+                form != &subject && find_first_match(&probe_subst, &probe_rule, form).is_some()
+            })
+            .map_err(kernel(span))?;
+            if let Some(normalized) = found {
+                let computed = rhs(&normalized);
+                if let (Some(inner), _) =
+                    rewrite_occurrences(&mut ctx.subst, &rule, &computed, all, span)?
+                {
+                    conv = Some(trans(&normalized, &inner).map_err(kernel(span))?);
+                }
+            }
+        }
         let Some(conv) = conv else {
             let (l, r) = ctx
                 .subst
@@ -1581,7 +1621,10 @@ impl<'a> Runner<'a> {
 }
 
 impl<'a> Runner<'a> {
-    /// Structural induction on a variable of a data type.
+    /// Structural induction on a variable of a data type. With
+    /// `with_ih` false this is case analysis: the same arms without
+    /// induction hypotheses.
+    #[allow(clippy::too_many_arguments)]
     fn induction(
         &mut self,
         state: &mut ProofState,
@@ -1589,6 +1632,7 @@ impl<'a> Runner<'a> {
         var_name: &Ident,
         generalizing: &[Ident],
         arms: &[CaseArm],
+        with_ih: bool,
         span: Span,
     ) -> Result<()> {
         let var = goal
@@ -1718,7 +1762,11 @@ impl<'a> Runner<'a> {
                     format!("expected the case `| {} ... =>` here", ctor.name),
                 ));
             }
-            let rec_count = ctor.recursive.iter().filter(|r| **r).count();
+            let rec_count = if with_ih {
+                ctor.recursive.iter().filter(|r| **r).count()
+            } else {
+                0
+            };
             if arm.binders.len() != ctor.args.len() + rec_count {
                 return Err(Diagnostic::new(
                     arm.span,
@@ -1769,12 +1817,14 @@ impl<'a> Runner<'a> {
                 if !*is_rec {
                     continue;
                 }
-                let binder = &arm.binders[ctor.args.len() + ih_index];
-                self.check_fresh(goal, binder)?;
                 let formula = motive.beta_apply(&arm_vars[i]).map_err(kernel(span))?;
-                hyps.push((Name::new(&binder.name), formula.clone()));
+                if with_ih {
+                    let binder = &arm.binders[ctor.args.len() + ih_index];
+                    self.check_fresh(goal, binder)?;
+                    hyps.push((Name::new(&binder.name), formula.clone()));
+                    ih_index += 1;
+                }
                 ih_formulas.push(formula);
-                ih_index += 1;
             }
             let arm_target = motive.beta_apply(&applied).map_err(kernel(span))?;
             let mut vars: Vec<Term> = goal
@@ -1840,6 +1890,72 @@ impl<'a> Runner<'a> {
             let what = format!("case `{}`", arm.ctor.name);
             self.run_block_closing(state, &arm.body, &what, arm.span)?;
         }
+        Ok(())
+    }
+
+    /// `funext x`: to prove `f = g` between functions, prove `f(x) = g(x)`
+    /// for an arbitrary `x`.
+    fn funext(
+        &mut self,
+        state: &mut ProofState,
+        goal: &Goal,
+        name: &Ident,
+        span: Span,
+    ) -> Result<()> {
+        if self.env.tier < Tier::Hol {
+            return Err(Diagnostic::new(
+                span,
+                "`funext` reasons about functions as values and needs `logic hol`".to_string(),
+            ));
+        }
+        let (conv, unfolded) = self.whnf(goal)?;
+        let Some((f, g)) = unfolded.dest_eq() else {
+            return Err(Diagnostic::new(
+                span,
+                format!(
+                    "`funext` needs an equality between functions, but the goal is `{}`",
+                    self.show(&goal.target)
+                ),
+            ));
+        };
+        let Some((dom, _)) = f.ty().as_fun() else {
+            return Err(Diagnostic::new(
+                span,
+                format!(
+                    "`funext` needs an equality between functions, but `{}` has type `{}`",
+                    self.show(f),
+                    f.ty()
+                ),
+            ));
+        };
+        self.check_fresh(goal, name)?;
+        if goal.taken_names().contains(&Name::new(&name.name)) {
+            return Err(Diagnostic::new(
+                name.span,
+                format!(
+                    "the name `{}` already occurs in the goal; choose another",
+                    name.name
+                ),
+            ));
+        }
+        let x = Term::free(name.name.as_str(), dom.clone());
+        let target = Term::eq(
+            &Term::app(f, &x).map_err(kernel(span))?,
+            &Term::app(g, &x).map_err(kernel(span))?,
+        )
+        .map_err(kernel(span))?;
+        let mut vars = goal.vars.clone();
+        vars.push(x.clone());
+        let subgoal = Goal {
+            vars,
+            target,
+            ..goal.clone()
+        };
+        let just: Justification = Box::new(move |thms| {
+            let ext = hol_kernel::funext(&x, &thms[0])?;
+            eq_mp(&sym(&conv)?, &ext)
+        });
+        state.close(goal.id, vec![subgoal], just);
         Ok(())
     }
 
@@ -1951,6 +2067,24 @@ fn hypothesis_consequences(goal: &Goal) -> Vec<Term> {
     out
 }
 
+/// A proof of a term made of `True`, reflexive equalities, and
+/// conjunctions of those; `None` otherwise.
+fn close_trivial(t: &Term) -> Option<Thm> {
+    if t.is_true() {
+        return Some(true_intro());
+    }
+    if let Some((a, b)) = t.dest_eq() {
+        if a == b {
+            return refl(a).ok();
+        }
+        return None;
+    }
+    if let Some((a, b)) = t.dest_and() {
+        return and_intro(&close_trivial(a)?, &close_trivial(b)?).ok();
+    }
+    None
+}
+
 /// Converts `thm` into a proof of `target` when the two agree up to
 /// normalization.
 fn bridge(subst: &Subst, rules: &Rules, thm: Thm, target: &Term) -> hol_kernel::Result<Thm> {
@@ -2008,21 +2142,44 @@ fn rewrite_occurrences(
     Ok((conv, count))
 }
 
+/// Subterms in breadth-first order (shallowest first), which is the
+/// occurrence order students expect: `k` on the right of `f(k) = k`
+/// comes before the `k` buried in `f(k)`.
+fn subterms_breadth_first(t: &Term) -> Vec<Term> {
+    let mut out = Vec::new();
+    let mut frontier = vec![t.clone()];
+    while !frontier.is_empty() {
+        let mut next = Vec::new();
+        for term in &frontier {
+            match term.view() {
+                TermView::App(f, x) => {
+                    next.push(f.clone());
+                    next.push(x.clone());
+                }
+                TermView::Lam(..) => {
+                    let (_, body) = term.open_fresh(&BTreeSet::new()).expect("lambda");
+                    next.push(body);
+                }
+                _ => {}
+            }
+            out.push(term.clone());
+        }
+        frontier = next;
+    }
+    out
+}
+
 fn find_first_match(subst: &Subst, rule: &Rule, t: &Term) -> Option<Subst> {
-    let mut trial = subst.clone();
-    if t.is_closed() && trial.unify(&rule.lhs, t) {
-        return Some(trial);
-    }
-    match t.view() {
-        TermView::App(f, x) => {
-            find_first_match(subst, rule, f).or_else(|| find_first_match(subst, rule, x))
+    for candidate in subterms_breadth_first(t) {
+        if !candidate.is_closed() {
+            continue;
         }
-        TermView::Lam(..) => {
-            let (_, body) = t.open_fresh(&BTreeSet::new()).expect("lambda");
-            find_first_match(subst, rule, &body)
+        let mut trial = subst.clone();
+        if trial.unify(&rule.lhs, &candidate) {
+            return Some(trial);
         }
-        _ => None,
     }
+    None
 }
 
 fn count_occurrences(pattern: &Term, t: &Term) -> usize {
@@ -2039,13 +2196,26 @@ fn count_occurrences(pattern: &Term, t: &Term) -> usize {
     }
 }
 
-/// `|- t = t'` replacing the first occurrence of the equation's left side.
+/// `|- t = t'` replacing the shallowest occurrence of the equation's left
+/// side, in the order of `subterms_breadth_first`.
 fn rewrite_first(equation: &Thm, lhs: &Term, t: &Term) -> hol_kernel::Result<Option<Thm>> {
     if t == lhs {
         return Ok(Some(equation.clone()));
     }
+    let depth_of =
+        |sub: &Term| -> Option<usize> { subterms_breadth_first(sub).iter().position(|s| s == lhs) };
     match t.view() {
         TermView::App(f, x) => {
+            let prefer_x = match (depth_of(f), depth_of(x)) {
+                (Some(df), Some(dx)) => dx < df,
+                (None, Some(_)) => true,
+                _ => false,
+            };
+            if prefer_x {
+                if let Some(cx) = rewrite_first(equation, lhs, x)? {
+                    return Ok(Some(hol_kernel::mk_comb(&refl(f)?, &cx)?));
+                }
+            }
             if let Some(cf) = rewrite_first(equation, lhs, f)? {
                 return Ok(Some(hol_kernel::mk_comb(&cf, &refl(x)?)?));
             }

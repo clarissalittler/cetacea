@@ -165,16 +165,7 @@ fn arithmetic_countermodels() {
 
 #[test]
 fn strong_induction_from_the_library() {
-    let mut fs = VirtualFs::default();
-    for name in [
-        "prelude", "prop", "fol", "eq", "set", "nat", "modular", "fun",
-    ] {
-        let path = format!("lib/{name}.ctea");
-        fs.add(
-            &path,
-            &std::fs::read_to_string(format!("../../{path}")).unwrap(),
-        );
-    }
+    let fs = library_fs();
     let source = "\
 import ../lib/prelude.ctea
 
@@ -192,5 +183,120 @@ theorem zero_le_all (n : Nat) : le(0, n) := by
         ..Options::default()
     };
     let result = Session::new(&fs, opts).check(Some("work/hw.ctea"), source);
+    assert!(result.ok(), "{:?}", result.diagnostics);
+}
+
+fn library_fs() -> VirtualFs {
+    let mut fs = VirtualFs::default();
+    for name in [
+        "prelude", "prop", "fol", "eq", "set", "nat", "modular", "fun", "list", "finite",
+    ] {
+        let path = format!("lib/{name}.ctea");
+        fs.add(
+            &path,
+            &std::fs::read_to_string(format!("../../{path}")).unwrap(),
+        );
+    }
+    fs
+}
+
+#[test]
+fn hol_tier_lists_functions_and_cases() {
+    let fs = library_fs();
+    let source = "\
+import ../lib/prelude.ctea
+
+-- Polymorphic lists: the statement is implicitly polymorphic.
+theorem len_two (A : Type) (a b : A) : length(cons(a, cons(b, nil))) = 2 := by
+  refl
+
+theorem map_id (l : List Nat) : map(fun x : Nat => x, l) = l := by
+  induction l with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      exact ih
+
+-- Functions as values and extensionality.
+theorem add_zero_fun : (fun n : Nat => n + 0) = (fun n : Nat => n) := by
+  funext n
+  refl
+
+-- Case analysis on a data type variable, without induction hypotheses.
+theorem zero_or_succ (n : Nat) : n = 0 \\/ exists k : Nat, n = succ(k) := by
+  cases n with
+  | zero =>
+      left
+      refl
+  | succ k =>
+      right
+      exists k
+      refl
+
+-- A recursive predicate.
+theorem two_in (x : Nat) : elem(x, cons(x, cons(1, nil))) := by
+  exact elem_head
+
+-- Membership in a finite set literal is decided by computation.
+theorem wrong_list (l : List Nat) : length(l) = 0 := by
+  induction l with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      exact ih
+";
+    let opts = Options {
+        tier: Some(Tier::Hol),
+        ..Options::default()
+    };
+    let result = Session::new(&fs, opts).check(Some("work/hw.ctea"), source);
+    let statuses = statuses(&result);
+    assert_eq!(
+        statuses,
+        vec![
+            ("len_two".to_string(), DeclStatus::Accepted),
+            ("map_id".to_string(), DeclStatus::Accepted),
+            ("add_zero_fun".to_string(), DeclStatus::Accepted),
+            ("zero_or_succ".to_string(), DeclStatus::Accepted),
+            ("two_in".to_string(), DeclStatus::Accepted),
+            ("wrong_list".to_string(), DeclStatus::Failed),
+        ],
+        "{:?}",
+        result.diagnostics
+    );
+    let error = result
+        .diagnostics
+        .iter()
+        .find(|d| d.severity == Severity::Error)
+        .unwrap();
+    assert!(
+        error
+            .notes
+            .iter()
+            .any(|n| n.contains("false when l = cons(")),
+        "{:?}",
+        error.notes
+    );
+}
+
+#[test]
+fn tier_one_and_two_reject_hol_features() {
+    let source = "theorem fun_val (f : Nat -> Nat) : f = f := by\n  refl\n";
+    let result = check(source, Some(Tier::FolNat));
+    assert!(
+        result.diagnostics[0].message.contains("needs `logic hol`"),
+        "{:?}",
+        result.diagnostics
+    );
+    let source = "data Bit\n| off\n| on\ntheorem t : off = off := by\n  refl\n";
+    let result = check(source, Some(Tier::FolNat));
+    assert!(
+        result.diagnostics[0].message.contains("needs `logic hol`"),
+        "{:?}",
+        result.diagnostics
+    );
+    let result = check(source, Some(Tier::Hol));
     assert!(result.ok(), "{:?}", result.diagnostics);
 }

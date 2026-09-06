@@ -28,11 +28,13 @@ allows_incomplete() {
 }
 
 needs_later_milestone() {
-  grep -qE '^data |\bList\b|\bTree\b' "$1"
+  false
 }
 
 tier_flags() {
-  if grep -qE '\bNat\b|\bsucc\(|\badd\(|\bmul\(|\ble\(|\bsub\(|^defrec |[0-9]' "$1"; then
+  if grep -qE '^data |\bList\b|\bTree\b|\bfunext\b' "$1"; then
+    printf -- '--tier hol'
+  elif grep -qE '\bNat\b|\bsucc\(|\badd\(|\bmul\(|\ble\(|\bsub\(|^defrec |[0-9]' "$1"; then
     printf -- '--tier fol_nat'
   fi
 }

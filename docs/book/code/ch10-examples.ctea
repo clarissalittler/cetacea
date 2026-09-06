@@ -63,13 +63,13 @@ theorem addl_zero_right (n : Nat) : addl(n, 0) = n := by
       rewrite -> ih
       refl
 
--- Section 10.5: lists (declared in std/list.ctea: nil, cons(Nat, List))
+-- Section 10.5: lists (declared in std/list.ctea: nil, cons(Nat, List Nat))
 -- and their recursive functions compute the same way.
 theorem length_demo : length(cons(7, cons(4, nil))) = 2 := by
   refl
 
--- Our own defrec over List: the sum of the elements.
-defrec sum (l : List) : Nat
+-- Our own defrec over List Nat: the sum of the elements.
+defrec sum (l : List Nat) : Nat
 | nil => 0
 | cons h t rec => add(h, rec)
 
@@ -81,12 +81,12 @@ theorem sum_demo : sum(cons(1, cons(2, cons(3, nil)))) = 6 := by
 theorem append_demo : append(cons(1, nil), cons(2, nil)) = cons(1, cons(2, nil)) := by
   refl
 
-theorem append_cons_demo (h : Nat) (t : List) (l : List)
+theorem append_cons_demo (h : Nat) (t : List Nat) (l : List Nat)
   : append(cons(h, t), l) = cons(h, append(t, l)) := by
   refl
 
 -- A binary defrec can even build a list from a number.
-defrec replicate (n : Nat) (x : Nat) : List
+defrec replicate (n : Nat) (x : Nat) : List Nat
 | zero => nil
 | succ k rec => cons(x, rec)
 

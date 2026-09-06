@@ -103,6 +103,36 @@ impl<'e> Elab<'e> {
         print_term(self.env, &self.zonk(t))
     }
 
+    /// Zonks a finished term and turns unsolved type metavariables into
+    /// fresh rigid type variables, returning their names. Used for
+    /// theorem statements, which are implicitly polymorphic in the
+    /// types that nothing determines (as in Isabelle).
+    pub fn finish_generalizing(
+        &mut self,
+        term: &Term,
+        avoid: &BTreeSet<Name>,
+    ) -> (Term, Vec<Name>) {
+        let term = self.zonk(term);
+        let mut vars = BTreeSet::new();
+        term.type_vars(&mut vars);
+        let mut fresh = Vec::new();
+        let mut counter = 0;
+        for meta in vars.into_iter().filter(crate::types::is_meta) {
+            let name = loop {
+                counter += 1;
+                let candidate = Name::new(&format!("T{counter}"));
+                if !avoid.contains(&candidate) && !fresh.contains(&candidate) {
+                    break candidate;
+                }
+            };
+            let _ = self
+                .unifier
+                .unify(&Type::Var(meta), &Type::Var(name.clone()));
+            fresh.push(name);
+        }
+        (self.zonk(&term), fresh)
+    }
+
     /// Zonks a finished term and rejects unsolved metavariables.
     pub fn finish(&self, term: &Term, span: Span) -> Result<Term> {
         let term = self.zonk(term);

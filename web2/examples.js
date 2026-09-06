@@ -155,6 +155,44 @@ theorem wrong (n m : Nat) : n + m = n := by
 `,
   },
   {
+    name: "Data types and structural induction",
+    source: `logic hol
+import ../std/prelude.ctea
+
+-- A data type, a recursive function over it, and structural induction.
+data Tree
+| leaf
+| node(Tree, Nat, Tree)
+
+defrec size (t : Tree) : Nat
+| leaf => 0
+| node l v r => succ(size(l) + size(r))
+
+defrec mirror (t : Tree) : Tree
+| leaf => leaf
+| node l v r => node(mirror(r), v, mirror(l))
+
+theorem mirror_size (t : Tree) : size(mirror(t)) = size(t) := by
+  induction t with
+  | leaf =>
+      refl
+  | node l v r ihl ihr =>
+      simp
+      rewrite -> ihl
+      rewrite -> ihr
+      exact Nat.add_comm_lemma
+
+-- Polymorphic lists come from the library: List A, length, append, map, elem.
+theorem length_two (A : Type) (a b : A) : length(cons(a, cons(b, nil))) = 2 := by
+  refl
+
+-- Functions are values: extensionality.
+theorem add_zero_fun : (fun n : Nat => n + 0) = (fun n : Nat => n) := by
+  funext n
+  refl
+`,
+  },
+  {
     name: "Classical reasoning",
     source: `-- Constructive mode rejects excluded middle; classical mode allows it.
 

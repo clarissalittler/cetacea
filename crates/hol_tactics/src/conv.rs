@@ -63,6 +63,11 @@ impl Rule {
 #[derive(Clone, Debug, Default)]
 pub struct Rules {
     pub rules: Vec<Rule>,
+    /// Applied only to the result of a constructor-injectivity rewrite:
+    /// `x = x` becomes `True` and `True /\ P` becomes `P`, so that
+    /// `succ(a) = succ(b)` simplifies to `a = b` while ordinary goals keep
+    /// their trivial equalities.
+    pub tidy: Vec<Rule>,
 }
 
 impl Rules {
@@ -107,7 +112,22 @@ impl Rules {
                 rules.push(rule);
             }
         }
-        Rules { rules }
+        let mut tidy = Vec::new();
+        if let Ok(thm) = crate::simp_rules::reflexivity_rule() {
+            if let Some(rule) = Rule::from_thm(subst, &thm, "eq_self", true) {
+                tidy.push(rule);
+            }
+        }
+        if let Ok(props) = crate::simp_rules::propositional_rules() {
+            for (name, thm) in props {
+                if name == "and_true_left" || name == "and_true_right" {
+                    if let Some(rule) = Rule::from_thm(subst, &thm, &name, true) {
+                        tidy.push(rule);
+                    }
+                }
+            }
+        }
+        Rules { rules, tidy }
     }
 
     /// Only the equation of one definition.
@@ -125,7 +145,10 @@ impl Rules {
                 }
             }
         }
-        Rules { rules }
+        Rules {
+            rules,
+            tidy: Vec::new(),
+        }
     }
 
     /// Adds `x = x <-> True` and the `True`/`False` propositional
@@ -144,6 +167,21 @@ impl Rules {
                     self.rules.push(rule);
                 }
             }
+        }
+    }
+
+    /// The same rules with the structural recursion equations first, so
+    /// that a step-by-step search sees the unfolded shapes the old checker
+    /// produced.
+    pub fn equations_first(&self) -> Rules {
+        let (eqs, rest): (Vec<Rule>, Vec<Rule>) = self
+            .rules
+            .iter()
+            .cloned()
+            .partition(|r| r.name == "equation");
+        Rules {
+            rules: eqs.into_iter().chain(rest).collect(),
+            tidy: self.tidy.clone(),
         }
     }
 
@@ -191,6 +229,13 @@ fn rewrite_root(subst: &Subst, rules: &Rules, t: &Term) -> Option<Thm> {
         };
         if lhs != t || rhs == t {
             continue;
+        }
+        if rule.name.ends_with(".inj") {
+            if let Some(conv) = crate::simp_rules::tidy_injectivity(rhs) {
+                if let Ok(chained) = trans(&thm, &conv) {
+                    return Some(chained);
+                }
+            }
         }
         return Some(thm);
     }
@@ -261,6 +306,30 @@ pub fn normalize(subst: &Subst, rules: &Rules, t: &Term) -> hol_kernel::Result<(
         changed = true;
     }
     Ok((acc, changed))
+}
+
+/// Rewrites pass by pass and stops as soon as `stop` holds of the current
+/// form, returning `|- t = t'` for that form. `None` when it never holds.
+pub fn normalize_until(
+    subst: &Subst,
+    rules: &Rules,
+    t: &Term,
+    stop: impl Fn(&Term) -> bool,
+) -> hol_kernel::Result<Option<Thm>> {
+    let mut acc = beta_norm_conv(t)?;
+    for _ in 0..200 {
+        let current = rhs(&acc);
+        if stop(&current) {
+            return Ok(Some(acc));
+        }
+        let Some(step) = rewrite_pass(subst, rules, &current)? else {
+            return Ok(None);
+        };
+        let stepped = trans(&acc, &step)?;
+        let beta = beta_norm_conv(&rhs(&stepped))?;
+        acc = trans(&stepped, &beta)?;
+    }
+    Ok(None)
 }
 
 /// The normal form of a term, without the theorem.
