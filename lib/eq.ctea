@@ -1,0 +1,63 @@
+mode constructive
+
+theorem eq_symm (A : Type) (x y : A) : x = y -> y = x := by
+  intro h
+  rewrite -> h
+  refl
+
+theorem eq_trans (A : Type) (x y z : A) : x = y -> y = z -> x = z := by
+  intro hxy
+  intro hyz
+  rewrite <- hyz
+  exact hxy
+
+theorem congr_pred
+  (A : Type)
+  (P : A -> Prop)
+  (x y : A)
+  : x = y -> P(x) -> P(y) := by
+  intro h
+  intro hp
+  rewrite <- h
+  exact hp
+
+theorem congr_pred2_left
+  (A B : Type)
+  (R : A -> B -> Prop)
+  (x y : A)
+  (z : B)
+  : x = y -> R(x, z) -> R(y, z) := by
+  intro h
+  intro hr
+  rewrite <- h
+  exact hr
+
+theorem congr_pred2_right
+  (A B : Type)
+  (R : A -> B -> Prop)
+  (x : A)
+  (y z : B)
+  : y = z -> R(x, y) -> R(x, z) := by
+  intro h
+  intro hr
+  rewrite <- h
+  exact hr
+
+theorem eq_subst_left
+  (A : Type)
+  (P : A -> Prop)
+  (x y : A)
+  : x = y -> P(y) -> P(x) := by
+  intro h
+  intro hp
+  apply congr_pred {A := A; P := P; x := y; y := x}
+  apply eq_symm
+  exact h
+  exact hp
+
+theorem eq_subst_right
+  (A : Type)
+  (P : A -> Prop)
+  (x y : A)
+  : x = y -> P(x) -> P(y) := by
+  exact congr_pred

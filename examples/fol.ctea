@@ -30,7 +30,7 @@ theorem rewrite_happy
   : alice = mother(alice) -> Happy(alice) -> Happy(mother(alice)) := by
   intro h
   intro ha
-  rewrite h
+  rewrite <- h
   exact ha
 
 theorem happy_mother_def_elim : HappyMother(alice) -> Happy(mother(alice)) := by

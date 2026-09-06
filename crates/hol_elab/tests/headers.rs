@@ -47,11 +47,10 @@ fn statement_text(source: &str, name: &str) -> String {
     let header = &rest[..end];
     let colon = header.rfind("\n  : ").map(|i| i + 4).unwrap_or_else(|| {
         // single-line header: statement follows the last `) :` or `name :`
-        let params_end = header
+        header
             .rfind(") :")
             .map(|i| i + 3)
-            .unwrap_or_else(|| header.find(':').unwrap() + 1);
-        params_end
+            .unwrap_or_else(|| header.find(':').unwrap() + 1)
     });
     header[colon..]
         .split_whitespace()
@@ -66,10 +65,10 @@ fn standard_library_headers_round_trip() {
     let mut mismatches = Vec::new();
     let mut count = 0;
     for file in [
-        "std/prop.ctea",
-        "std/fol.ctea",
-        "std/eq.ctea",
-        "std/set.ctea",
+        "lib/prop.ctea",
+        "lib/fol.ctea",
+        "lib/eq.ctea",
+        "lib/set.ctea",
     ] {
         let source = std::fs::read_to_string(root.join(file)).unwrap();
         let (statements, errors) = run(&mut env, &source);

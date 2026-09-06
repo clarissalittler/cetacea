@@ -22,7 +22,7 @@ const PREC_BINDER: u8 = 5;
 pub fn print_term(env: &Env, term: &Term) -> String {
     let free = term.free_var_names();
     let mut printer = Printer {
-        _env: env,
+        env,
         free: &free,
         bound: Vec::new(),
         out: String::new(),
@@ -36,7 +36,7 @@ pub fn print_type(ty: &Type) -> String {
 }
 
 struct Printer<'a> {
-    _env: &'a Env,
+    env: &'a Env,
     free: &'a BTreeSet<Name>,
     bound: Vec<Name>,
     out: String,
@@ -70,6 +70,26 @@ fn infix_symbol(name: &str, ty: &Type) -> Option<(&'static str, u8, bool)> {
 }
 
 impl Printer<'_> {
+    /// Variables and declared predicates, functions, definitions, and
+    /// constructors read well on their own; logical constants do not.
+    fn is_user_symbol(&self, t: &Term) -> bool {
+        if t.as_free().is_some() {
+            return true;
+        }
+        match t.as_const() {
+            Some((name, _)) => matches!(
+                self.env.constant_by_exact_name(name).map(|c| c.kind),
+                Some(
+                    crate::env::SymbolKind::Pred
+                        | crate::env::SymbolKind::Func
+                        | crate::env::SymbolKind::Def
+                        | crate::env::SymbolKind::Ctor
+                )
+            ),
+            None => false,
+        }
+    }
+
     fn taken(&self, name: &Name) -> bool {
         self.free.contains(name) || self.bound.contains(name)
     }
@@ -189,7 +209,10 @@ impl Printer<'_> {
                     p.out.push(')');
                 });
             }
-            TermView::Lam(..) => self.lambda(t, prec),
+            TermView::Lam(..) => match eta_contract(t).filter(|c| self.is_user_symbol(c)) {
+                Some(contracted) => self.term(&contracted, prec),
+                None => self.lambda(t, prec),
+            },
         }
     }
 
@@ -292,6 +315,22 @@ impl Printer<'_> {
         self.term(&body, 0);
         self.bound.pop();
         self.out.push_str(" }");
+    }
+}
+
+/// `fun x y => f x y` with `x`, `y` not free in `f` is shown as `f`.
+fn eta_contract(t: &Term) -> Option<Term> {
+    let (var, body) = t.open_fresh(&BTreeSet::new())?;
+    let body = if body.is_lam() {
+        eta_contract(&body)?
+    } else {
+        body
+    };
+    let (f, x) = body.as_app()?;
+    if x == &var && !f.contains_var(&var) {
+        Some(f.clone())
+    } else {
+        None
     }
 }
 

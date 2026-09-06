@@ -26,3 +26,6 @@ jobs:
 
       - name: Check Cetacea corpus
         run: scripts/check_all.sh
+
+      - name: Check Cetacea 2 corpus
+        run: scripts/check_hol.sh

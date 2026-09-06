@@ -117,6 +117,23 @@ pub fn install(env: &mut Env) -> Result<()> {
         env.add_equations(Name::new(name), thms);
     }
 
+    // Set extensionality is a kernel principle; expose it as the theorem
+    // `set_ext` so proofs can `apply set_ext`.
+    let ext = env
+        .theory()
+        .theorem(hol_kernel::SET_EXT)
+        .expect("kernel principle")
+        .clone();
+    env.add_theorem(crate::env::TheoremInfo {
+        name: Name::new("set_ext"),
+        params: vec![crate::env::ParamInfo::TypeVar(Name::new("A"))],
+        statement: ext.concl().clone(),
+        thm: ext,
+        status: crate::env::Status::Accepted,
+        is_imported: true,
+        span: None,
+    });
+
     // Set operations, elaborated like any other definitions.
     let saved_tier = env.tier;
     let saved_importing = env.importing;

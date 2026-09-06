@@ -10,3 +10,5 @@ path = "src/main.rs"
 [dependencies]
 hol_kernel = { path = "../hol_kernel" }
 hol_session = { path = "../hol_session" }
+serde_json = "1"
+hol_syntax = { path = "../hol_syntax" }

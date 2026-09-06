@@ -18,7 +18,7 @@ pred Flies(Person)
 theorem wrong_direction : clark = superman -> Flies(superman) -> Flies(clark) := by
   intro h
   intro hs
-  rewrite h
+  rewrite <- h
   exact hs
 
 -- Mistake 2: refl on an equation that is simply false.

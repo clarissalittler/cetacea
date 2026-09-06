@@ -10,7 +10,11 @@ instructor on the same day. It is a plan, not a changelog.
 Progress: M0 (the kernel, `crates/hol_kernel`) landed on 5 September
 2026 with the primitive rules, tags, definitional principles, the
 datatype and recursive-function packages, and an adversarial test
-suite. Later milestones are not started.
+suite. M1 is in progress: the syntax crate, elaborator, tactic engine,
+session API, `lib/` standard library, and `cetacea2` CLI landed on the
+same day, and every tier-1 corpus file checks through the kernel
+(`scripts/check_hol.sh`). Still open in M1: countermodels, tactic
+hints, proof explanations, and re-quoting the book's diagnostics.
 
 ## 1. Why rewrite, and why HOL
 

@@ -15,7 +15,7 @@ theorem add_comm (n m : Nat) : add(n, m) = add(m, n) := by
       refl
   | succ n0 ih =>
       simp
-      rewrite ih
+      rewrite <- ih
       refl
 
 defrec double (n : Nat) : Nat
@@ -35,7 +35,7 @@ axiom myadd_succ_right (n m : Nat) : myadd(n, succ(m)) = succ(myadd(n, m))
 
 theorem myadd_succ_right_rev (n m : Nat)
   : succ(myadd(n, m)) = myadd(n, succ(m)) := by
-  rewrite myadd_succ_right {n := n; m := m}
+  rewrite <- myadd_succ_right {n := n; m := m}
   refl
 
 theorem myadd_zero_n (n : Nat) : myadd(0, n) = n := by
@@ -43,7 +43,7 @@ theorem myadd_zero_n (n : Nat) : myadd(0, n) = n := by
   | zero =>
       exact myadd_zero_right
   | succ k ih =>
-      rewrite myadd_succ_right_rev {n := 0; m := k}
+      rewrite <- myadd_succ_right_rev {n := 0; m := k}
       rewrite -> ih
       refl
 

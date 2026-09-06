@@ -80,6 +80,17 @@ impl<'e> Elab<'e> {
         }
     }
 
+    /// An elaborator sharing an existing type unifier, so type
+    /// metavariables solved elsewhere (for instance by proof-expression
+    /// unification) are visible here and vice versa.
+    pub fn with_unifier(env: &'e Env, unifier: Unifier) -> Elab<'e> {
+        Elab { env, unifier }
+    }
+
+    pub fn into_unifier(self) -> Unifier {
+        self.unifier
+    }
+
     fn tier(&self) -> Tier {
         self.env.tier
     }
