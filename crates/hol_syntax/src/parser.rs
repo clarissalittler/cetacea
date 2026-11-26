@@ -898,11 +898,60 @@ fn parse_tactic_line(tokens: &[Token], span: Span) -> Result<TacticKind> {
             let proof = p.parse_proof_expr()?;
             TacticKind::Obtain { names, proof }
         }
-        other => return err(head.span, format!("unknown tactic `{other}`")),
+        other => {
+            return err(
+                head.span,
+                match crate::suggest::closest(other, TACTIC_NAMES.iter().copied()) {
+                    Some(suggestion) => {
+                        format!("unknown tactic `{other}`; did you mean `{suggestion}`?")
+                    }
+                    None => format!("unknown tactic `{other}`"),
+                },
+            )
+        }
     };
     p.finish()?;
     Ok(kind)
 }
+
+/// Every tactic name the parser accepts, with its aliases, for
+/// suggestions when a name is misspelled.
+pub const TACTIC_NAMES: &[&str] = &[
+    "intro",
+    "intros",
+    "revert",
+    "exact",
+    "apply",
+    "trivial",
+    "assumption",
+    "split",
+    "constructor",
+    "left",
+    "right",
+    "exists",
+    "use",
+    "refl",
+    "rfl",
+    "rewrite",
+    "rw",
+    "unfold",
+    "simp",
+    "cases",
+    "induction",
+    "exfalso",
+    "contradiction",
+    "by_cases",
+    "by_contra",
+    "show_goal",
+    "print_state",
+    "sorry",
+    "admit",
+    "have",
+    "show",
+    "funext",
+    "obtain",
+    "calc",
+];
 
 // ---------------------------------------------------------------------
 // Token-level parser

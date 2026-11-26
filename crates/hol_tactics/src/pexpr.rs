@@ -150,10 +150,51 @@ impl<'a> ProofCtx<'a> {
             format!("unknown hypothesis or theorem `{name}`"),
         );
         let hyps: Vec<String> = self.goal.hyps.iter().map(|(n, _)| n.to_string()).collect();
+        if let Some(suggestion) = self.suggest_name(name, &hyps) {
+            diag = diag.note(suggestion);
+        }
         if !hyps.is_empty() {
             diag = diag.note(format!("hypotheses in scope: {}", hyps.join(", ")));
         }
         Err(diag)
+    }
+
+    /// A note for an unknown proof name: the import alias that owns it,
+    /// or the closest hypothesis or theorem name.
+    fn suggest_name(&self, name: &str, hyps: &[String]) -> Option<String> {
+        let theorems: Vec<String> = self.env.theorems().map(|t| t.name.to_string()).collect();
+        // `add_comm` after `import ... as nat` is `nat.add_comm`.
+        if !name.contains('.') {
+            let owners: Vec<&String> = theorems
+                .iter()
+                .filter(|full| full.rsplit_once('.').map(|(_, leaf)| leaf) == Some(name))
+                .collect();
+            if let [owner] = owners.as_slice() {
+                return Some(format!(
+                    "it is available as `{owner}` through its import alias"
+                ));
+            }
+        }
+        let leaves = theorems
+            .iter()
+            .filter_map(|full| full.rsplit_once('.').map(|(_, leaf)| leaf));
+        let candidates = hyps
+            .iter()
+            .map(String::as_str)
+            .chain(theorems.iter().map(String::as_str))
+            .chain(leaves);
+        let found = hol_syntax::suggest::closest(name, candidates)?;
+        // Spell a leaf match with its alias so the suggestion works as written.
+        let spelled = if hyps.iter().any(|h| h == found) || theorems.iter().any(|t| t == found) {
+            found.to_string()
+        } else {
+            theorems
+                .iter()
+                .find(|full| full.rsplit_once('.').map(|(_, leaf)| leaf) == Some(found))
+                .cloned()
+                .unwrap_or_else(|| found.to_string())
+        };
+        Some(format!("did you mean `{spelled}`?"))
     }
 
     fn project(&mut self, thm: Thm, projection: Projection, span: Span) -> Result<Thm> {
@@ -304,10 +345,11 @@ impl<'a> ProofCtx<'a> {
             .note(format!("apply it to terms directly, as in `{name} x`")));
         }
         let Some(info) = self.env.theorem(name).cloned() else {
-            return Err(Diagnostic::new(
-                ident.span,
-                format!("unknown theorem `{name}`"),
-            ));
+            let mut diag = Diagnostic::new(ident.span, format!("unknown theorem `{name}`"));
+            if let Some(suggestion) = self.suggest_name(name, &[]) {
+                diag = diag.note(suggestion);
+            }
+            return Err(diag);
         };
         crate::uses::record(&info.name, ident.span, info.is_imported);
         let (thm, type_metas, term_metas) = schematize(

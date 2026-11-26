@@ -855,8 +855,8 @@ impl<'f> Session<'f> {
                 diag.message = format!("theorem `{}` failed: {}", name.name, diag.message);
                 if let Some(model) = fol::propositional_countermodel(&self.env, &header.statement) {
                     diag = diag.note(format!(
-                        "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
-                        model.describe()
+                        "the statement is not a tautology: {}. No proof can close it; check the statement itself.",
+                        model.clause()
                     ));
                 } else if let Some(model) =
                     fol::first_order_countermodel(&self.env, &header.statement)
@@ -881,8 +881,8 @@ impl<'f> Session<'f> {
                     }
                     if let Some(model) = fol::propositional_countermodel(&self.env, &formula) {
                         diag = diag.note(format!(
-                            "the open goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
-                            model.describe()
+                            "the open goal does not follow from the current hypotheses: {}. Reconsider the earlier proof steps.",
+                            model.clause()
                         ));
                     } else if let Some(model) = fol::first_order_countermodel(&self.env, &formula) {
                         diag = diag.note(format!(

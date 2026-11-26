@@ -19,6 +19,16 @@ pub struct Countermodel {
 }
 
 impl Countermodel {
+    /// A clause saying when the formula fails: `it is false when P =
+    /// false, Q = true`, or `it is false however its propositions are
+    /// read` when the formula has no atoms to assign (`False` itself).
+    pub fn clause(&self) -> String {
+        if self.assignment.is_empty() {
+            return "it is false however its propositions are read".to_string();
+        }
+        format!("it is false when {}", self.describe())
+    }
+
     /// `P = false, Q = true`.
     pub fn describe(&self) -> String {
         if self.assignment.is_empty() {
