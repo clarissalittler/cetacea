@@ -16,6 +16,12 @@ use crate::env::{ConstInfo, Env, SymbolKind};
 use crate::print::print_term;
 use crate::types::{elab_type, TypePosition, TypeScope, Unifier};
 
+/// The largest numeral literal accepted. Numbers are successor towers,
+/// and every traversal of a term is recursive, so a numeral's size is a
+/// stack depth; this keeps literals within what the browser build's
+/// stack can carry.
+pub const MAX_NUMERAL: u64 = 500;
+
 /// Term variables in scope, innermost last, plus the type variables.
 #[derive(Clone, Debug, Default)]
 pub struct Scope {
@@ -400,6 +406,15 @@ impl<'e> Elab<'e> {
                 "natural numbers are not available: `Nat` is not declared"
             );
         };
+        if n > MAX_NUMERAL {
+            return Err(Diagnostic::new(
+                span,
+                format!("the numeral `{n}` is too large to check"),
+            )
+            .note(format!(
+                "a number is built from `zero` by applying `succ`, one application per unit, so the checker supports numerals up to {MAX_NUMERAL}"
+            )));
+        }
         let mut term = self.constant_term(&zero);
         let succ = self.constant_term(&succ);
         for _ in 0..n {

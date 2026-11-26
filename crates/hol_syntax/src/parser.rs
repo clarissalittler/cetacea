@@ -912,7 +912,16 @@ pub struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
     span: Span,
+    /// How many recursive parsing calls are active; see [`MAX_NESTING`].
+    depth: u32,
 }
+
+/// The parser is recursive descent, so nesting costs stack, and the
+/// browser build has a small one. Past this many nested calls the input
+/// is refused with an ordinary error instead of exhausting the stack.
+/// It allows roughly fifty levels of parentheses or a chain of two
+/// hundred `->`, far beyond anything written by hand.
+pub const MAX_NESTING: u32 = 250;
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [Token], span: Span) -> Parser<'a> {
@@ -920,7 +929,24 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             span,
+            depth: 0,
         }
+    }
+
+    /// Runs one level of recursive parsing, refusing input nested past
+    /// [`MAX_NESTING`].
+    fn nested<T>(&mut self, parse: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
+        if self.depth >= MAX_NESTING {
+            let span = self.peek().map(|t| t.span).unwrap_or(self.span);
+            return err(
+                span,
+                "this is nested too deeply to check; name the inner parts with `def` or split the statement up",
+            );
+        }
+        self.depth += 1;
+        let result = parse(self);
+        self.depth -= 1;
+        result
     }
 
     fn peek(&self) -> Option<&'a Token> {
@@ -1011,6 +1037,10 @@ impl<'a> Parser<'a> {
     // ---- types ----
 
     pub fn parse_type(&mut self) -> Result<TypeExpr> {
+        self.nested(Self::parse_type_level)
+    }
+
+    fn parse_type_level(&mut self) -> Result<TypeExpr> {
         let dom = self.parse_type_app()?;
         if self.eat(&Tok::Arrow) {
             let cod = self.parse_type()?;
@@ -1144,6 +1174,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_imp(&mut self) -> Result<Expr> {
+        self.nested(Self::parse_imp_level)
+    }
+
+    fn parse_imp_level(&mut self) -> Result<Expr> {
         let lhs = self.parse_iff()?;
         if self.eat(&Tok::Arrow) {
             let rhs = self.parse_imp()?;
@@ -1154,6 +1188,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_iff(&mut self) -> Result<Expr> {
+        self.nested(Self::parse_iff_level)
+    }
+
+    fn parse_iff_level(&mut self) -> Result<Expr> {
         let lhs = self.parse_or()?;
         if self.eat(&Tok::Iff) {
             let rhs = self.parse_iff()?;
@@ -1164,6 +1202,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_or(&mut self) -> Result<Expr> {
+        self.nested(Self::parse_or_level)
+    }
+
+    fn parse_or_level(&mut self) -> Result<Expr> {
         let lhs = self.parse_and()?;
         if self.eat(&Tok::Or) {
             let rhs = self.parse_or()?;
@@ -1174,6 +1216,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_and(&mut self) -> Result<Expr> {
+        self.nested(Self::parse_and_level)
+    }
+
+    fn parse_and_level(&mut self) -> Result<Expr> {
         let lhs = self.parse_not()?;
         if self.eat(&Tok::And) {
             let rhs = self.parse_and()?;
@@ -1184,6 +1230,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_not(&mut self) -> Result<Expr> {
+        self.nested(Self::parse_not_level)
+    }
+
+    fn parse_not_level(&mut self) -> Result<Expr> {
         if let Some(Token {
             tok: Tok::Ident(name),
             span,
@@ -1439,6 +1489,10 @@ impl<'a> Parser<'a> {
     // ---- proof expressions ----
 
     pub fn parse_proof_expr(&mut self) -> Result<ProofExpr> {
+        self.nested(Self::parse_proof_expr_level)
+    }
+
+    fn parse_proof_expr_level(&mut self) -> Result<ProofExpr> {
         let mut head = self.parse_proof_atom()?;
         if self.at(&Tok::LBrace) {
             let open = self.expect(&Tok::LBrace)?;

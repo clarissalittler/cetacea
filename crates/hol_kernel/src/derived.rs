@@ -16,6 +16,10 @@ pub fn beta_norm_conv(t: &Term) -> Result<Thm> {
 }
 
 fn conv(t: &Term) -> Result<Thm> {
+    // Nothing to reduce: `|- t = t` without walking the term.
+    if t.is_beta_normal() {
+        return rules::refl(t);
+    }
     match t.view() {
         TermView::App(f, x) => {
             let step = rules::mk_comb(&conv(f)?, &conv(x)?)?;

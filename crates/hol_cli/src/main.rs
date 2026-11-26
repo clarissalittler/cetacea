@@ -128,7 +128,30 @@ fn derivation_rows(
         .collect()
 }
 
+/// Stack for the checking thread. Parsing, elaboration and the kernel
+/// all recurse over terms, and a number is a tower of `succ`, so a
+/// legitimate file can need far more stack than a main thread gets,
+/// especially in a debug build. The reservation is virtual memory:
+/// pages are committed only if they are used.
+const CHECKER_STACK_BYTES: usize = 256 * 1024 * 1024;
+
 fn main() -> ExitCode {
+    let checker = std::thread::Builder::new()
+        .name("checker".to_string())
+        .stack_size(CHECKER_STACK_BYTES)
+        .spawn(run);
+    match checker.map(|handle| handle.join()) {
+        Ok(Ok(code)) => code,
+        // The checker panicked; its message is already on stderr.
+        Ok(Err(_)) => ExitCode::from(101),
+        Err(error) => {
+            eprintln!("error: cannot start the checker thread: {error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mut opts = Options {
         std_dir: Some("lib".to_string()),

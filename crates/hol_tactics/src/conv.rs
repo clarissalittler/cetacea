@@ -215,20 +215,39 @@ impl Rules {
     }
 }
 
+/// The constant at the head of an application spine and the number of
+/// arguments, when the head is a constant. Two terms whose heads are
+/// different constants, or the same constant with different argument
+/// counts, cannot unify, which lets `rewrite_root` skip most rules
+/// without copying the substitution.
+fn rigid_head(t: &Term) -> Option<(&Name, usize)> {
+    let (head, args) = t.strip_app();
+    head.as_const().map(|(name, _)| (name, args.len()))
+}
+
 /// Tries every rule at the root of `t`. Returns `|- t = t'`.
 fn rewrite_root(subst: &Subst, rules: &Rules, t: &Term) -> Option<Thm> {
-    let own_metas: BTreeSet<Name> = t
-        .free_vars()
-        .into_iter()
-        .map(|(n, _)| n)
-        .filter(is_meta_name)
-        .collect();
+    let head = rigid_head(t);
+    // Computed only if some rule matches: most nodes match none.
+    let mut own_metas: Option<BTreeSet<Name>> = None;
     for rule in &rules.rules {
+        if let (Some(mine), Some(theirs)) = (head, rigid_head(&rule.lhs)) {
+            if mine != theirs {
+                continue;
+            }
+        }
         let mut local = subst.clone();
         if !local.unify(&rule.lhs, t) {
             continue;
         }
         // One-way: the term's own metavariables must stay unsolved.
+        let own_metas = own_metas.get_or_insert_with(|| {
+            t.free_vars()
+                .into_iter()
+                .map(|(n, _)| n)
+                .filter(is_meta_name)
+                .collect()
+        });
         if own_metas
             .iter()
             .any(|m| local.is_solved(m) && !subst.is_solved(m))
@@ -306,11 +325,34 @@ pub fn rhs(thm: &Thm) -> Term {
 /// Rewrites to a normal form: repeated bottom-up passes with beta
 /// normalization between them. Returns `|- t = t'` and whether anything
 /// changed.
+/// Computation can build terms far deeper than anything a student
+/// wrote (`30 * 30` unfolds to a tower of 900 successors), and every
+/// traversal of a term is recursive. Past this depth, simplification
+/// stops with an ordinary error instead of exhausting the stack.
+pub const MAX_COMPUTED_DEPTH: u32 = 600;
+
+/// How many bottom-up rewriting passes a normalization may take. Unary
+/// arithmetic needs about one pass per unit of the result, so this is
+/// what lets `refl` finish `15 * 15 = 225`; the depth limit above stops
+/// runaway growth long before the passes run out.
+const MAX_PASSES: usize = 1000;
+
+fn check_depth(t: &Term) -> hol_kernel::Result<()> {
+    if t.depth() > MAX_COMPUTED_DEPTH {
+        return Err(hol_kernel::KernelError::new(
+            "simp",
+            "this computation grows too large to check; numbers are built from `succ`, so results in the hundreds are the practical limit",
+        ));
+    }
+    Ok(())
+}
+
 pub fn normalize(subst: &Subst, rules: &Rules, t: &Term) -> hol_kernel::Result<(Thm, bool)> {
     let mut acc = beta_norm_conv(t)?;
     let mut changed = rhs(&acc) != *t;
-    for _ in 0..200 {
+    for _ in 0..MAX_PASSES {
         let current = rhs(&acc);
+        check_depth(&current)?;
         let Some(step) = rewrite_pass(subst, rules, &current)? else {
             break;
         };
@@ -319,6 +361,7 @@ pub fn normalize(subst: &Subst, rules: &Rules, t: &Term) -> hol_kernel::Result<(
         acc = trans(&stepped, &beta)?;
         changed = true;
     }
+    check_depth(&rhs(&acc))?;
     Ok((acc, changed))
 }
 
@@ -331,11 +374,12 @@ pub fn normalize_until(
     stop: impl Fn(&Term) -> bool,
 ) -> hol_kernel::Result<Option<Thm>> {
     let mut acc = beta_norm_conv(t)?;
-    for _ in 0..200 {
+    for _ in 0..MAX_PASSES {
         let current = rhs(&acc);
         if stop(&current) {
             return Ok(Some(acc));
         }
+        check_depth(&current)?;
         let Some(step) = rewrite_pass(subst, rules, &current)? else {
             return Ok(None);
         };

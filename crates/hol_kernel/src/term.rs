@@ -31,6 +31,13 @@ struct Node {
     /// Number of enclosing binders this term needs before it is closed.
     /// Zero means locally closed.
     loose: u32,
+    /// Height of the syntax tree. Informational: layers above the kernel
+    /// use it to refuse terms too deep for their recursive traversals.
+    depth: u32,
+    /// True when no subterm is a beta redex `(λx. b) a`. A cache of a
+    /// purely syntactic fact, so beta normalization can return at once
+    /// on the (very common) terms that are already normal.
+    beta_normal: bool,
 }
 
 enum Kind {
@@ -54,7 +61,35 @@ pub enum TermView<'a> {
 
 impl Term {
     fn mk(kind: Kind, ty: Type, loose: u32) -> Term {
-        Term(Rc::new(Node { kind, ty, loose }))
+        let depth = match &kind {
+            Kind::Free(_) | Kind::Bound(_) | Kind::Const(_) => 1,
+            Kind::App(f, x) => 1 + f.0.depth.max(x.0.depth),
+            Kind::Lam(_, _, body) => 1 + body.0.depth,
+        };
+        let beta_normal = match &kind {
+            Kind::Free(_) | Kind::Bound(_) | Kind::Const(_) => true,
+            Kind::App(f, x) => {
+                f.0.beta_normal && x.0.beta_normal && !matches!(f.0.kind, Kind::Lam(..))
+            }
+            Kind::Lam(_, _, body) => body.0.beta_normal,
+        };
+        Term(Rc::new(Node {
+            kind,
+            ty,
+            loose,
+            depth,
+            beta_normal,
+        }))
+    }
+
+    /// True when the term contains no beta redex.
+    pub fn is_beta_normal(&self) -> bool {
+        self.0.beta_normal
+    }
+
+    /// The height of the term's syntax tree; a constant or variable is 1.
+    pub fn depth(&self) -> u32 {
+        self.0.depth
     }
 
     /// A free variable. Free variables of a type are assumed to exist,
@@ -375,6 +410,11 @@ impl Term {
     /// If the term is `(λx. b) a`, returns `b[a/x]`.
     pub fn beta_head(&self) -> Option<Term> {
         let (f, x) = self.as_app()?;
+        // Checked here so the common non-redex case does not build (and
+        // throw away) `beta_apply`'s error message, which prints the term.
+        if !matches!(f.0.kind, Kind::Lam(..)) {
+            return None;
+        }
         f.beta_apply(x).ok()
     }
 
