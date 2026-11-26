@@ -123,6 +123,7 @@ impl<'a> ProofCtx<'a> {
             return assume(hyp).map_err(kernel(ident.span));
         }
         if let Some(info) = self.env.theorem(name) {
+            crate::uses::record(&info.name, ident.span, info.is_imported);
             let (thm, _, term_metas) = schematize(
                 &mut self.subst,
                 &info.thm,
@@ -308,6 +309,7 @@ impl<'a> ProofCtx<'a> {
                 format!("unknown theorem `{name}`"),
             ));
         };
+        crate::uses::record(&info.name, ident.span, info.is_imported);
         let (thm, type_metas, term_metas) = schematize(
             &mut self.subst,
             &info.thm,

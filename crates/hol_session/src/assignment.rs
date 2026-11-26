@@ -51,13 +51,25 @@ pub struct AssignmentReport {
 /// Builds a manifest from a checked skeleton: every root theorem's
 /// statement is pinned and the root's imports become the allowed set.
 pub fn manifest_from_result(result: &CheckResult, title: &str, tier: Option<&str>) -> Manifest {
+    manifest_with_policy(result, title, tier, Policy::default())
+}
+
+/// Like [`manifest_from_result`], with the rules of a course section (or
+/// any other policy) written into the manifest, so the assignment is
+/// graded under them wherever it is checked.
+pub fn manifest_with_policy(
+    result: &CheckResult,
+    title: &str,
+    tier: Option<&str>,
+    policy: Policy,
+) -> Manifest {
     Manifest {
         title: title.to_string(),
         tier: tier.map(str::to_string),
         policy: Policy {
             deny_sorry: true,
             deny_axioms: true,
-            ..Policy::default()
+            ..policy
         },
         allowed_imports: result
             .root_imports

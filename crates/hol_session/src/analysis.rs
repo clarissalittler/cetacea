@@ -33,6 +33,22 @@ pub struct LibraryEntry {
     pub statement: String,
     pub status: String,
     pub is_imported: bool,
+    /// False when the active policy forbids citing this theorem.
+    pub allowed: bool,
+}
+
+/// The course rules in force, for the UI to show next to the editor.
+#[derive(Clone, Debug, Serialize)]
+pub struct RulesView {
+    /// The section the rules came from, when they came from one.
+    pub section: Option<String>,
+    /// The only tactics available, when the policy lists them.
+    pub tactics_available: Option<Vec<String>>,
+    pub tactics_denied: Vec<String>,
+    pub restricts_theorems: bool,
+    pub deny_sorry: bool,
+    pub deny_classical: bool,
+    pub advisory: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -46,6 +62,8 @@ pub struct Analysis {
     pub theorems: Vec<TheoremView>,
     pub library: Vec<LibraryEntry>,
     pub assignment: Option<crate::AssignmentReport>,
+    /// Present when the active policy restricts anything.
+    pub rules: Option<RulesView>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -73,8 +91,18 @@ pub fn analyze(
     source: &str,
     manifest: Option<&crate::Manifest>,
 ) -> Analysis {
+    let policy = opts.policy.clone();
     let result = Session::new(fs, opts).check(path, source);
     let assignment = manifest.map(|m| crate::check_manifest(&result, m));
+    let rules = policy.has_rules().then(|| RulesView {
+        section: policy.section.clone(),
+        tactics_available: policy.available_tactics(),
+        tactics_denied: policy.deny_tactics.clone(),
+        restricts_theorems: policy.restricts_theorems(),
+        deny_sorry: policy.deny_sorry,
+        deny_classical: policy.deny_classical,
+        advisory: policy.advisory,
+    });
     let mut theorems = Vec::new();
     for (name, (span, steps)) in &result.steps {
         let initial = steps
@@ -119,6 +147,7 @@ pub fn analyze(
             }
             .to_string(),
             is_imported: info.is_imported,
+            allowed: !info.is_imported || policy.theorem_problem(info.name.as_str()).is_none(),
         })
         .collect();
     Analysis {
@@ -135,6 +164,7 @@ pub fn analyze(
         theorems,
         library,
         assignment,
+        rules,
     }
 }
 

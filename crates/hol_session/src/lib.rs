@@ -8,9 +8,15 @@ pub mod analysis;
 pub mod arith;
 pub mod assignment;
 pub mod fol;
+pub mod policy;
 pub mod prelude;
-pub use analysis::{analyze, hints, Analysis, Hint, LibraryEntry, StepView, TheoremView};
-pub use assignment::{check_manifest, manifest_from_result, AssignmentReport, Manifest};
+pub use analysis::{
+    analyze, hints, Analysis, Hint, LibraryEntry, RulesView, StepView, TheoremView,
+};
+pub use assignment::{
+    check_manifest, manifest_from_result, manifest_with_policy, AssignmentReport, Manifest,
+};
+pub use policy::{Course, Policy, ResolvedSection, Section};
 
 use hol_elab::{
     elab_command, elab_theorem_header, print_term, Diagnostic, Env, Status, TheoremInfo,
@@ -49,19 +55,6 @@ impl FileSystem for VirtualFs {
     fn read_file(&self, path: &str) -> Option<String> {
         self.files.get(&normalize_path(path)).cloned()
     }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
-pub struct Policy {
-    #[serde(default)]
-    pub deny_sorry: bool,
-    #[serde(default)]
-    pub deny_axioms: bool,
-    #[serde(default)]
-    pub deny_classical: bool,
-    /// Tactics an assignment forbids, such as `simp` or `decide`.
-    #[serde(default)]
-    pub deny_tactics: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -157,6 +150,9 @@ pub struct Decl {
     pub statement: String,
     /// Tactic names used anywhere in the proof.
     pub tactics: Vec<String>,
+    /// Imported theorems the proof cited, by full name.
+    #[serde(default)]
+    pub theorems: Vec<String>,
 }
 
 impl Decl {
@@ -213,6 +209,9 @@ pub struct CheckResult {
     pub decls: Vec<Decl>,
     pub diagnostics: Vec<Diag>,
     pub violations: Vec<String>,
+    /// The violations that were also reported as diagnostics at the
+    /// line that caused them, so text output need not repeat them.
+    pub located_violations: Vec<String>,
     pub env: Env,
     /// Tactic steps per root theorem, in source order.
     pub steps: BTreeMap<String, (Span, Vec<StepRecord>)>,
@@ -325,6 +324,8 @@ pub struct Session<'f> {
     decls: Vec<Decl>,
     diagnostics: Vec<Diag>,
     steps: BTreeMap<String, (Span, Vec<StepRecord>)>,
+    /// Tactic and theorem rules broken by root theorems, in order.
+    use_violations: Vec<String>,
 }
 
 impl<'f> Session<'f> {
@@ -347,6 +348,7 @@ impl<'f> Session<'f> {
             decls: Vec::new(),
             diagnostics: Vec::new(),
             steps: BTreeMap::new(),
+            use_violations: Vec::new(),
         }
     }
 
@@ -440,6 +442,7 @@ impl<'f> Session<'f> {
             decls: self.decls,
             diagnostics: self.diagnostics,
             violations,
+            located_violations: self.use_violations,
             env: self.env,
             steps: self.steps,
             root_path: path.map(str::to_string),
@@ -464,16 +467,68 @@ impl<'f> Session<'f> {
             if self.opts.policy.deny_classical && decl.mode == "classical" {
                 out.push(format!("theorem `{}` uses classical reasoning", decl.name));
             }
-            for tactic in &decl.tactics {
-                if self.opts.policy.deny_tactics.iter().any(|t| t == tactic) {
-                    out.push(format!(
-                        "theorem `{}` uses `{tactic}`, which this assignment does not allow",
-                        decl.name
-                    ));
-                }
+        }
+        out.extend(self.use_violations.iter().cloned());
+        out
+    }
+
+    /// Reports every tactic and imported theorem the script used that
+    /// the policy does not permit, at the line where it was written.
+    /// The proof itself is unaffected: these are course rules, not logic.
+    fn enforce_uses(
+        &mut self,
+        path: Option<&str>,
+        theorem: &str,
+        proof: &[hol_syntax::Tactic],
+        uses: &[hol_tactics::TheoremUse],
+    ) {
+        let policy = self.opts.policy.clone();
+        let severity = if policy.advisory {
+            Severity::Warning
+        } else {
+            Severity::Error
+        };
+        let label = policy.source_label();
+        let mut reported = BTreeSet::new();
+        for (tactic, span) in policy::tactic_uses(proof) {
+            let Some(problem) = policy.tactic_problem(tactic) else {
+                continue;
+            };
+            let mut diag = Diagnostic::new(span, problem);
+            if let Some(available) = policy.available_tactics() {
+                diag = diag.note(format!(
+                    "tactics available here: {}",
+                    if available.is_empty() {
+                        "none".to_string()
+                    } else {
+                        available.join(", ")
+                    }
+                ));
+            }
+            self.diagnostics
+                .push(Diag::from_diagnostic(severity, path, diag));
+            if !policy.advisory && reported.insert(tactic.to_string()) {
+                self.use_violations.push(format!(
+                    "theorem `{theorem}` uses `{tactic}`, which {label} does not allow"
+                ));
             }
         }
-        out
+        for used in uses.iter().filter(|u| u.is_imported) {
+            let name = used.name.to_string();
+            let Some(problem) = policy.theorem_problem(&name) else {
+                continue;
+            };
+            let diag = Diagnostic::new(used.span, problem).note(
+                "a theorem you prove in this file may always be used, so you can state and prove this fact yourself first",
+            );
+            self.diagnostics
+                .push(Diag::from_diagnostic(severity, path, diag));
+            if !policy.advisory && reported.insert(format!("theorem {name}")) {
+                self.use_violations.push(format!(
+                    "theorem `{theorem}` cites `{name}`, which {label} does not allow"
+                ));
+            }
+        }
     }
 
     fn resolve_import(&self, from: Option<&str>, import: &str) -> Option<(String, String)> {
@@ -578,6 +633,7 @@ impl<'f> Session<'f> {
                     line: span.line,
                     statement: print_term(&self.env, &info.statement),
                     tactics: vec![],
+                    theorems: vec![],
                 });
             }
         }
@@ -649,7 +705,20 @@ impl<'f> Session<'f> {
             }
         };
         let statement_text = print_term(&self.env, &header.statement);
-        match prove(&self.env, &header, proof) {
+        let enclosing = hol_tactics::uses::start();
+        let proved = prove(&self.env, &header, proof);
+        let uses = hol_tactics::uses::finish(enclosing);
+        let cited: Vec<String> = uses
+            .iter()
+            .filter(|u| u.is_imported)
+            .map(|u| u.name.to_string())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        if !importing {
+            self.enforce_uses(path, &name.name, proof, &uses);
+        }
+        match proved {
             Ok(outcome) => {
                 for note in outcome.notes {
                     self.diagnostics
@@ -696,6 +765,7 @@ impl<'f> Session<'f> {
                     line: span.line,
                     statement: statement_text,
                     tactics: tactic_names(proof),
+                    theorems: cited.clone(),
                 });
             }
             Err(failure) => {
@@ -780,6 +850,7 @@ impl<'f> Session<'f> {
                     line: span.line,
                     statement: statement_text,
                     tactics: tactic_names(proof),
+                    theorems: cited.clone(),
                 });
             }
         }
@@ -788,66 +859,12 @@ impl<'f> Session<'f> {
 
 /// Distinct tactic names used in a script, including nested blocks.
 pub fn tactic_names(tactics: &[hol_syntax::Tactic]) -> Vec<String> {
-    use hol_syntax::{HaveProof, TacticKind};
-    fn walk(tactics: &[hol_syntax::Tactic], out: &mut BTreeSet<String>) {
-        for tactic in tactics {
-            let name = match &tactic.kind {
-                TacticKind::Intro(_) => "intro",
-                TacticKind::Revert(_) => "revert",
-                TacticKind::Exact(_) => "exact",
-                TacticKind::Trivial => "trivial",
-                TacticKind::Assumption => "assumption",
-                TacticKind::Apply(_) => "apply",
-                TacticKind::Split => "split",
-                TacticKind::Left => "left",
-                TacticKind::Right => "right",
-                TacticKind::Cases { arms, .. } => {
-                    for arm in arms {
-                        walk(&arm.body, out);
-                    }
-                    "cases"
-                }
-                TacticKind::Exists(_) => "exists",
-                TacticKind::Refl => "refl",
-                TacticKind::Rewrite { .. } => "rewrite",
-                TacticKind::Unfold(..) => "unfold",
-                TacticKind::Simp { .. } => "simp",
-                TacticKind::Induction { arms, .. } => {
-                    for arm in arms {
-                        walk(&arm.body, out);
-                    }
-                    "induction"
-                }
-                TacticKind::Exfalso => "exfalso",
-                TacticKind::Contradiction => "contradiction",
-                TacticKind::ByCases { .. } => "by_cases",
-                TacticKind::ByContra(_) => "by_contra",
-                TacticKind::ShowGoal => "show_goal",
-                TacticKind::Sorry => "sorry",
-                TacticKind::Have { proof, .. } => {
-                    if let HaveProof::Block(body) = proof {
-                        walk(body, out);
-                    }
-                    "have"
-                }
-                TacticKind::Show(_) => "show",
-                TacticKind::Funext(_) => "funext",
-                TacticKind::Obtain { .. } => "obtain",
-                TacticKind::Calc { steps, .. } => {
-                    for step in steps {
-                        if let hol_syntax::CalcProof::Block(body) = &step.proof {
-                            walk(body, out);
-                        }
-                    }
-                    "calc"
-                }
-            };
-            out.insert(name.to_string());
-        }
-    }
-    let mut out = BTreeSet::new();
-    walk(tactics, &mut out);
-    out.into_iter().collect()
+    policy::tactic_uses(tactics)
+        .into_iter()
+        .map(|(name, _)| name.to_string())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 type ImportCacheEntry = (Env, BTreeSet<String>, Vec<Decl>);

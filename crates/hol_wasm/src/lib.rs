@@ -29,6 +29,14 @@ struct RequestOptions {
     assignment: Option<hol_session::Manifest>,
     #[serde(default)]
     deny_tactics: Vec<String>,
+    /// A complete policy, combined restrictively with the flags above.
+    #[serde(default)]
+    policy: Option<Policy>,
+    /// A course definition and the section of it to check under.
+    #[serde(default)]
+    course: Option<hol_session::Course>,
+    #[serde(default)]
+    section: Option<String>,
 }
 
 impl RequestOptions {
@@ -36,29 +44,52 @@ impl RequestOptions {
         serde_json::from_str(text).unwrap_or_default()
     }
 
+    /// The tier and policy for this request. A course section sets the
+    /// baseline, explicit flags and a full `policy` restrict it further,
+    /// and an assignment manifest restricts it again. A section named
+    /// here that the course does not define is reported by `problem`.
     fn options(&self) -> Options {
-        let mut policy = Policy {
+        let mut policy = Policy::default();
+        let mut tier = self.tier.as_deref().and_then(Tier::parse);
+        if let (Some(course), Some(section)) = (&self.course, &self.section) {
+            if let Ok(resolved) = course.resolve(section) {
+                if let Some(t) = resolved.tier.as_deref().and_then(Tier::parse) {
+                    tier = Some(t);
+                }
+                policy = resolved.policy;
+            }
+        }
+        policy.restrict_with(&Policy {
             deny_sorry: self.deny_sorry,
             deny_axioms: self.deny_axioms,
             deny_classical: self.deny_classical,
             deny_tactics: self.deny_tactics.clone(),
-        };
-        let mut tier = self.tier.as_deref().and_then(Tier::parse);
+            ..Policy::default()
+        });
+        if let Some(extra) = &self.policy {
+            policy.restrict_with(extra);
+        }
         if let Some(manifest) = &self.assignment {
             if let Some(t) = manifest.tier.as_deref().and_then(Tier::parse) {
                 tier = Some(t);
             }
-            policy.deny_sorry |= manifest.policy.deny_sorry;
-            policy.deny_axioms |= manifest.policy.deny_axioms;
-            policy.deny_classical |= manifest.policy.deny_classical;
-            policy
-                .deny_tactics
-                .extend(manifest.policy.deny_tactics.iter().cloned());
+            policy.restrict_with(&manifest.policy);
         }
         Options {
             tier,
             policy,
             std_dir: Some("lib".to_string()),
+        }
+    }
+
+    /// A message when the request names a section the course lacks.
+    fn problem(&self) -> Option<String> {
+        match (&self.course, &self.section) {
+            (Some(course), Some(section)) => course.resolve(section).err(),
+            (None, Some(section)) => Some(format!(
+                "the section `{section}` was requested without a course"
+            )),
+            _ => None,
         }
     }
 
@@ -96,6 +127,9 @@ pub fn standard_library() -> VirtualFs {
 /// Runs the analysis on a source with JSON options; returns JSON.
 pub fn analyze_json(source: &str, options: &str) -> String {
     let opts = RequestOptions::parse(options);
+    if let Some(problem) = opts.problem() {
+        return serde_json::json!({ "error": problem }).to_string();
+    }
     let fs = standard_library();
     let analysis = analyze(
         &fs,

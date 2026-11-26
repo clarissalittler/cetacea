@@ -78,3 +78,28 @@ fn quantified_countermodel_reaches_browser_diagnostics() {
         })
     }));
 }
+
+#[test]
+fn a_course_section_in_the_request_sets_tier_and_rules() {
+    let source = "theorem t (P Q : Prop) : P /\\ Q -> Q /\\ P := by\n  intro h\n  cases h with\n  | intro hp hq =>\n      split\n      exact hq\n      exact hp\n";
+    let options = r#"{"tier":"hol","section":"week1","course":{"title":"Demo","sections":[
+        {"id":"week1","title":"Week 1","tier":"fol","allow_tactics":["intro","exact","split"]}]}}"#;
+    let json: serde_json::Value = serde_json::from_str(&analyze_json(source, options)).unwrap();
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["tier"], "fol");
+    assert_eq!(json["rules"]["section"], "Week 1");
+    assert_eq!(json["declarations"][0]["status"], "accepted");
+    let diag = &json["diagnostics"][0];
+    assert_eq!(diag["line"], 3);
+    assert_eq!(
+        diag["message"],
+        "`cases` is not available in the section `Week 1`"
+    );
+
+    let unknown = r#"{"section":"week9","course":{"sections":[{"id":"week1"}]}}"#;
+    let json: serde_json::Value = serde_json::from_str(&analyze_json(source, unknown)).unwrap();
+    assert!(json["error"]
+        .as_str()
+        .unwrap()
+        .contains("there is no section `week9`"));
+}
