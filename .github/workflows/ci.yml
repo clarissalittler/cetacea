@@ -17,6 +17,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
@@ -35,3 +37,9 @@ jobs:
 
       - name: Verify the browser's course module is current
         run: python3 scripts/build_web_course.py --check
+
+      - name: Build the browser checker
+        run: cargo build -p hol_wasm --target wasm32-unknown-unknown --release
+
+      - name: Smoke-test the browser checker
+        run: node scripts/wasm_smoke.mjs
