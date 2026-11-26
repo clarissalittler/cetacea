@@ -80,6 +80,45 @@ shown. Share creates a link that reproduces the file. Save downloads
 it. The Logic menu sets the default tier for files without a `logic`
 line.
 
+## Countermodel feedback
+
+When a proof fails, the new checker can search small first-order worlds.
+Try **Quantifier order: a counterexample** in the browser's example menu:
+
+```text
+sort Person
+theorem quantifier_swap (R : Person -> Person -> Prop)
+  : (forall y : Person, exists x : Person, R(x, y))
+    -> exists x : Person, forall y : Person, R(x, y) := by
+  show_goal
+```
+
+A two-element world refutes this implication: for example, with
+`R = {(a, b), (b, a)}`, every `y` has a witness `x`, but no single `x`
+works for every `y`. The diagnostic lists domains, constant assignments,
+true predicate tuples (all others are false), and total function tables.
+An open-goal counterexample instead satisfies every current hypothesis
+and falsifies the goal; it is labeled as a wrong proof step, not a false
+original statement. Feedback appears in CLI text, JSON, and the browser.
+
+The search supports abstract sorts, type parameters, equality, ordinary
+connectives, quantifiers over objects, and uninterpreted constants,
+predicates, and functions. Different sorts can have different nonempty
+domains. It tries domains of one to three elements for up to three sorts,
+with limits of 12 symbols, three arguments per symbol, 16 table cells,
+32,768 candidate interpretations, and 250,000 evaluation steps per search.
+Compilation is also bounded (512 nodes, depth 64).
+
+This is diagnostic search, not a proof rule or a decision procedure.
+No countermodel found means **unknown**, not valid. Definitions, sets,
+datatypes, arithmetic, and higher-order binders are deliberately declined
+by this search; the separate arithmetic feedback remains available.
+Supported declared axioms constrain candidate worlds. Any unsupported
+axiom, including a polymorphic axiom, disables first-order search rather
+than being ignored. In particular, the full prelude currently imports an
+arithmetic axiom: use a standalone file or only the axiom-free `prop`,
+`fol`, and `eq` libraries for these quantifier exercises.
+
 ## Libraries
 
 `lib/` is the standard library: `prop`, `fol`, `eq`, `set`, `nat`,

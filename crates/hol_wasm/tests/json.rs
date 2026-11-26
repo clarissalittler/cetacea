@@ -62,3 +62,19 @@ fn hints_are_verified_by_running_them() {
         .unwrap();
     assert_eq!(closing["closes_goal"], true);
 }
+
+#[test]
+fn quantified_countermodel_reaches_browser_diagnostics() {
+    let source = "sort U\ntheorem swap (R : U -> U -> Prop) : (forall y : U, exists x : U, R(x, y)) -> exists x : U, forall y : U, R(x, y) := by\n  show_goal\n";
+    let json: serde_json::Value = serde_json::from_str(&analyze_json(source, "{}")).unwrap();
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["declarations"][0]["status"], "failed");
+    assert!(json["diagnostics"].as_array().unwrap().iter().any(|diag| {
+        diag["notes"].as_array().unwrap().iter().any(|note| {
+            let text = note.as_str().unwrap();
+            text.contains("first-order statement is false")
+                && text.contains("U = {a, b} (2 elements)")
+                && text.contains("R : U -> U -> Prop")
+        })
+    }));
+}

@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub mod analysis;
 pub mod arith;
 pub mod assignment;
+pub mod fol;
 pub mod prelude;
 pub use analysis::{analyze, hints, Analysis, Hint, LibraryEntry, StepView, TheoremView};
 pub use assignment::{check_manifest, manifest_from_result, AssignmentReport, Manifest};
@@ -700,13 +701,16 @@ impl<'f> Session<'f> {
             Err(failure) => {
                 let mut diag = failure.diagnostic;
                 diag.message = format!("theorem `{}` failed: {}", name.name, diag.message);
-                let env = &self.env;
-                let display = |t: &hol_kernel::Term| print_term(env, t);
-                if let Some(model) =
-                    hol_feedback::propositional_countermodel(&header.statement, &display)
-                {
+                if let Some(model) = fol::propositional_countermodel(&self.env, &header.statement) {
                     diag = diag.note(format!(
                         "the statement is not a tautology: it is false when {}. No proof can close it; check the statement itself.",
+                        model.describe()
+                    ));
+                } else if let Some(model) =
+                    fol::first_order_countermodel(&self.env, &header.statement)
+                {
+                    diag = diag.note(format!(
+                        "the first-order statement is false in this finite world: {}. No proof can close it; check the statement itself.",
                         model.describe()
                     ));
                 } else if let Some(model) =
@@ -717,20 +721,23 @@ impl<'f> Session<'f> {
                     ));
                 } else if let Some(goal) = &failure.goal {
                     let hyps = goal.hyp_formulas();
-                    if let Some(model) =
-                        hol_feedback::goal_countermodel(&hyps, &goal.target, &display)
-                    {
+                    let mut formula = goal.target.clone();
+                    for hyp in hyps.iter().rev() {
+                        if let Ok(next) = hol_kernel::Term::imp(hyp, &formula) {
+                            formula = next;
+                        }
+                    }
+                    if let Some(model) = fol::propositional_countermodel(&self.env, &formula) {
                         diag = diag.note(format!(
                             "the open goal does not follow from the current hypotheses: it is false when {}. Reconsider the earlier proof steps.",
                             model.describe()
                         ));
+                    } else if let Some(model) = fol::first_order_countermodel(&self.env, &formula) {
+                        diag = diag.note(format!(
+                            "the open goal does not follow from the current hypotheses in this finite world: {}. Reconsider the earlier proof steps.",
+                            model.describe()
+                        ));
                     } else {
-                        let mut formula = goal.target.clone();
-                        for hyp in hyps.iter().rev() {
-                            if let Ok(next) = hol_kernel::Term::imp(hyp, &formula) {
-                                formula = next;
-                            }
-                        }
                         if let Some(model) = arith::arithmetic_countermodel(&self.env, &formula) {
                             diag = diag.note(format!(
                                 "the open goal does not follow from the current hypotheses: it is false when {model}. Reconsider the earlier proof steps."

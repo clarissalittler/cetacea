@@ -62,6 +62,22 @@ theorem affirming_the_consequent (P Q : Prop) : (P -> Q) -> Q -> P := by
 `,
   },
   {
+    name: "Quantifier order: a counterexample",
+    source: `-- Each person can have an admirer without one person admiring everyone.
+sort Person
+
+theorem quantifier_swap (Admires : Person -> Person -> Prop)
+  : (forall y : Person, exists x : Person, Admires(x, y))
+    -> exists x : Person, forall y : Person, Admires(x, y) := by
+  intro h
+  show_goal
+
+-- Read the finite world in the diagnostic:
+-- every column has a true entry, but no row is true everywhere.
+-- Reversing the implication gives a valid theorem. Try proving it!
+`,
+  },
+  {
     name: "Quantifiers",
     source: `import ../std/prelude.ctea
 
