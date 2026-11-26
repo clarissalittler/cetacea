@@ -400,3 +400,41 @@ pre {
   margin: 0.4rem 0 0;
   color: var(--muted);
 }
+
+/* Section rules */
+
+.rules-title {
+  font-weight: 600;
+}
+
+.rules-note {
+  color: var(--muted);
+  margin: 0.3rem 0;
+}
+
+.rules-row {
+  margin: 0.3rem 0;
+  line-height: 1.7;
+}
+
+.rules-label {
+  color: var(--muted);
+}
+
+.rules-row code.denied {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.lib-item.unavailable {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.lib-item.unavailable:hover {
+  border-color: var(--line);
+}
+
+.badge.locked {
+  border: 1px solid var(--line);
+}

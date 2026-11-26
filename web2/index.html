@@ -28,6 +28,12 @@
             <option value="hol">hol</option>
           </select>
         </label>
+        <label class="picker">
+          <span>Section</span>
+          <select id="sectionSelect" title="Course section: sets which tactics and library theorems may be used">
+            <option value="">No section rules</option>
+          </select>
+        </label>
         <button id="checkButton" type="button">Check</button>
         <button id="hintButton" type="button">Suggest a tactic</button>
         <button id="shareButton" type="button" title="Copy a link that opens this file">Share</button>
@@ -43,6 +49,10 @@
         <section id="assignmentPanel" class="panel" hidden>
           <h2>Assignment <span id="assignmentMeta" class="meta"></span></h2>
           <div id="assignment"></div>
+        </section>
+        <section id="rulesPanel" class="panel" hidden>
+          <h2>Section rules <span id="rulesMeta" class="meta"></span></h2>
+          <div id="rules"></div>
         </section>
         <section class="panel">
           <h2>Goals <span id="goalMeta" class="meta"></span></h2>

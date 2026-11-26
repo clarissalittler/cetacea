@@ -29,3 +29,9 @@ jobs:
 
       - name: Check Cetacea 2 corpus
         run: scripts/check_hol.sh
+
+      - name: Check the sample course against the book
+        run: scripts/check_course.sh
+
+      - name: Verify the browser's course module is current
+        run: python3 scripts/build_web_course.py --check

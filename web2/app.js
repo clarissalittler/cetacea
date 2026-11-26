@@ -7,9 +7,11 @@ import { EditorState, StateField, StateEffect, RangeSetBuilder } from "https://e
 import { EditorView, Decoration, keymap } from "https://esm.sh/@codemirror/view@6";
 import { indentWithTab } from "https://esm.sh/@codemirror/commands@6";
 import { EXAMPLES } from "./examples.js";
+import { COURSE } from "./course.js";
 
 const STORAGE_SOURCE = "cetacea2.source";
 const STORAGE_TIER = "cetacea2.tier";
+const STORAGE_SECTION = "cetacea2.section";
 
 const statusEl = document.getElementById("status");
 const goalsEl = document.getElementById("goals");
@@ -22,6 +24,10 @@ const librarySearchEl = document.getElementById("librarySearch");
 const libraryScopeEl = document.getElementById("libraryScope");
 const exampleSelect = document.getElementById("exampleSelect");
 const tierSelect = document.getElementById("tierSelect");
+const sectionSelect = document.getElementById("sectionSelect");
+const rulesPanel = document.getElementById("rulesPanel");
+const rulesEl = document.getElementById("rules");
+const rulesMetaEl = document.getElementById("rulesMeta");
 const checkButton = document.getElementById("checkButton");
 const hintButton = document.getElementById("hintButton");
 const downloadButton = document.getElementById("downloadButton");
@@ -74,6 +80,11 @@ async function loadFromFragment() {
     } catch (error) {
       console.warn("cetacea: bad share link", error);
     }
+  }
+  if (params.has("section")) {
+    // A shared link pins the section it was written under.
+    const id = params.get("section");
+    if (COURSE.sections.some((section) => section.id === id)) sectionSelect.value = id;
   }
   if (params.has("assignment")) {
     try {
@@ -219,6 +230,11 @@ function insertAfterLine(lineNumber, text) {
 
 function options() {
   const opts = { tier: tierSelect.value, path: "web/main.ctea" };
+  if (sectionSelect.value) {
+    // The section supplies the tier and the tactic and theorem rules.
+    opts.course = COURSE;
+    opts.section = sectionSelect.value;
+  }
   if (assignment) opts.assignment = assignment;
   return opts;
 }
@@ -240,11 +256,13 @@ async function runAnalysis() {
   try {
     const result = await request("analyze", { source, options: options() });
     if (source !== editor.state.doc.toString()) return; // stale
+    if (result.error) throw new Error(result.error);
     analysis = result;
     analysisSource = source;
     renderStatus();
     renderDiagnostics();
     renderLibrary();
+    renderRules();
     renderAssignment();
     renderCursorPanels();
   } catch (error) {
@@ -415,6 +433,64 @@ function updateMarks(currentStepLine = null) {
   editor.dispatch({ effects: setLineMarks.of(marks) });
 }
 
+// The rules in force: which section, which tactics, and whether the
+// library is restricted. Hidden when nothing is restricted.
+function renderRules() {
+  const rules = analysis && analysis.rules;
+  if (!rules) {
+    rulesPanel.hidden = true;
+    return;
+  }
+  rulesPanel.hidden = false;
+  rulesMetaEl.textContent = rules.advisory ? "advice only" : "";
+  rulesEl.replaceChildren();
+  const section = COURSE.sections.find((s) => s.id === sectionSelect.value);
+  if (rules.section) {
+    const title = document.createElement("div");
+    title.className = "rules-title";
+    title.textContent = rules.section;
+    rulesEl.appendChild(title);
+  }
+  if (section && section.description) {
+    const note = document.createElement("p");
+    note.className = "rules-note";
+    note.textContent = section.description;
+    rulesEl.appendChild(note);
+  }
+  const addList = (label, items, kind) => {
+    const row = document.createElement("div");
+    row.className = "rules-row";
+    const head = document.createElement("span");
+    head.className = "rules-label";
+    head.textContent = label;
+    row.appendChild(head);
+    if (items.length === 0) {
+      row.append(" none");
+    }
+    for (const item of items) {
+      const code = document.createElement("code");
+      code.className = kind;
+      code.textContent = item;
+      row.append(" ", code);
+    }
+    rulesEl.appendChild(row);
+  };
+  if (rules.tactics_available) addList("Tactics you can use:", rules.tactics_available, "allowed");
+  if (rules.tactics_denied.length) addList("Tactics not allowed:", rules.tactics_denied, "denied");
+  const extras = [];
+  if (rules.restricts_theorems) {
+    extras.push("Only some library theorems may be cited; the Theorem library below marks the rest. Anything you prove in this file is always usable.");
+  }
+  if (rules.deny_sorry) extras.push("Every proof must be finished: no sorry.");
+  if (rules.deny_classical) extras.push("Constructive proofs only.");
+  for (const text of extras) {
+    const note = document.createElement("p");
+    note.className = "rules-note";
+    note.textContent = text;
+    rulesEl.appendChild(note);
+  }
+}
+
 function renderAssignment() {
   if (!analysis || !analysis.assignment) {
     assignmentPanel.hidden = true;
@@ -519,6 +595,17 @@ function renderLibrary() {
     stmt.className = "stmt mono";
     stmt.textContent = entry.statement;
     div.append(name, badge, stmt);
+    if (entry.allowed === false) {
+      // Out of bounds for the current section: shown, but not insertable.
+      div.classList.add("unavailable");
+      const locked = document.createElement("span");
+      locked.className = "badge locked";
+      locked.textContent = "not in this section";
+      div.insertBefore(locked, stmt);
+      div.title = "This theorem may not be cited in the current section";
+      libraryEl.appendChild(div);
+      continue;
+    }
     div.title = "Click to insert the name at the cursor";
     div.addEventListener("click", () => {
       const pos = editor.state.selection.main.head;
@@ -571,6 +658,34 @@ tierSelect.addEventListener("change", () => {
   runAnalysis();
 });
 
+for (const section of COURSE.sections) {
+  const option = document.createElement("option");
+  option.value = section.id;
+  option.textContent = section.title || section.id;
+  sectionSelect.appendChild(option);
+}
+try {
+  const savedSection = localStorage.getItem(STORAGE_SECTION);
+  if (savedSection && COURSE.sections.some((section) => section.id === savedSection)) {
+    sectionSelect.value = savedSection;
+  }
+} catch (_) {
+  /* storage unavailable */
+}
+// A section fixes the tier, so the Logic menu only applies without one.
+function syncTierPicker() {
+  tierSelect.disabled = sectionSelect.value !== "";
+}
+sectionSelect.addEventListener("change", () => {
+  try {
+    localStorage.setItem(STORAGE_SECTION, sectionSelect.value);
+  } catch (_) {
+    /* storage unavailable */
+  }
+  syncTierPicker();
+  runAnalysis();
+});
+
 checkButton.addEventListener("click", runAnalysis);
 hintButton.addEventListener("click", runHints);
 librarySearchEl.addEventListener("input", renderLibrary);
@@ -590,6 +705,7 @@ shareButton.addEventListener("click", async () => {
   try {
     const params = new URLSearchParams();
     params.set("src", await compressText(editor.state.doc.toString()));
+    if (sectionSelect.value) params.set("section", sectionSelect.value);
     if (assignment) params.set("assignment", await compressText(JSON.stringify(assignment)));
     const url = `${location.origin}${location.pathname}#${params.toString()}`;
     await navigator.clipboard.writeText(url);
@@ -603,6 +719,7 @@ shareButton.addEventListener("click", async () => {
 request("ping", {})
   .then(async () => {
     const shared = await loadFromFragment();
+    syncTierPicker();
     if (shared !== null) setSource(shared);
     else if (assignment) renderAssignment();
   })

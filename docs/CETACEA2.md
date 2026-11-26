@@ -27,9 +27,10 @@ cargo run -p hol_cli -- --strict --json FILE.ctea
 ```
 
 Flags: `--strict` (no `sorry`, no root axioms), `--deny-sorry`,
-`--deny-axioms`, `--deny-classical`, `--deny-tactics simp,decide`,
+`--deny-axioms`, `--deny-classical`, `--deny-tactics simp,calc`,
 `--json`, `--tier`, `--std DIR` (where `std/` imports resolve; defaults
-to `lib/`).
+to `lib/`), and the course flags described below. `--help` lists them
+all.
 
 Status lines are the familiar ones:
 
@@ -44,6 +45,97 @@ failed theorem converse_error
 Every status is computed from kernel tags, so a proof cannot hide a
 `sorry`, an axiom, or a classical step.
 
+## Course sections: allowed tactics and theorems
+
+A course file names the sections of a class and says, for each one,
+which tactics and which library theorems students may use. The checker
+then reports anything outside the section's rules at the line where it
+was written:
+
+```text
+error: hw2.ctea:5: the theorem `and_comm` is not available in the section `Chapter 2: Natural deduction`
+  note: a theorem you prove in this file may always be used, so you can state and prove this fact yourself first
+error: hw2.ctea:17: `simp` is not available in the section `Chapter 2: Natural deduction`
+  note: tactics available here: intro, exact, apply, split, trivial, assumption, show, left, right, cases, contradiction, exfalso, have
+```
+
+These are course rules, not logic. The proof is still checked by the
+kernel and still shows as `accepted theorem`; the file as a whole does
+not pass, and the exit status is 1.
+
+```sh
+cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch02 hw2.ctea
+cargo run -p hol_cli -- --course courses/proofs-checked.json --list-sections
+```
+
+`courses/proofs-checked.json` has one section per book chapter and is
+the place to start; copy it and edit. A section looks like this:
+
+```json
+{
+  "id": "ch04",
+  "title": "Chapter 4: Quantifiers",
+  "description": "Shown to students next to the editor.",
+  "extends": "ch03",
+  "tier": "fol",
+  "allow_tactics": ["exists", "obtain"],
+  "allow_theorems": ["forall_*", "exists_*", "not_exists_to_forall_not"]
+}
+```
+
+- `extends` builds on another section: its allow lists are added to, so
+  a later section normally only lists what it unlocks. The tier is
+  inherited unless the section sets one.
+- `allow_tactics`, when present anywhere in the chain, makes the list
+  exhaustive: any other tactic is refused. `show_goal` and `sorry` are
+  always available (`sorry` is governed by `deny_sorry`).
+- `deny_tactics` refuses specific tactics and wins over an allow list.
+  Use it alone for "everything except `simp`".
+- `allow_theorems` restricts which **imported** theorems may be cited.
+  Entries are names or `*` patterns, matched against the full name and
+  against the part after an import alias, so `add_*` covers
+  `nat.add_comm`. An empty list means no library at all.
+  `deny_theorems` refuses specific ones.
+- Theorems proved in the submitted file are always usable. Closing the
+  library therefore asks students to prove what they need, which is
+  usually the point.
+- `deny_sorry`, `deny_axioms`, `deny_classical` work as on the command
+  line. `"advisory": true` turns the tactic and theorem rules into
+  warnings for practice files.
+
+A course file is validated when it is loaded: an unknown tactic name, a
+missing parent, a cycle, or an unknown tier is an error, not a rule that
+silently never fires.
+
+What counts as using a theorem is what the proof actually resolved: a
+hypothesis that happens to share a library theorem's name is not a
+citation, and a proof that fails halfway still reports what it used up
+to that point. The JSON report lists each theorem's `tactics` and cited
+`theorems`.
+
+To calibrate a section against material you already have, ask what a
+set of files uses:
+
+```sh
+python3 scripts/section_usage.py docs/book/code/ch04-solutions.ctea
+```
+
+`scripts/check_course.sh` (run in CI) checks that every chapter's
+examples and solutions pass under that chapter's section, so the sample
+course cannot drift from the book.
+
+The same rules are available without a course file: `--allow-tactics`,
+`--deny-tactics`, `--allow-theorems` (`none` for an empty list),
+`--deny-theorems`, and `--advisory`. Flags only ever restrict a section
+further.
+
+In the browser, the **Section** menu applies a section of the bundled
+course (`web2/course.js`, generated from the course file by
+`scripts/build_web_course.py`). A Section rules panel shows what is
+available, suggested tactics never include anything the section
+forbids, and the theorem library marks entries that are out of bounds.
+Share links carry the section.
+
 ## Assignments
 
 Write the skeleton you hand out, with `sorry` bodies, then generate a
@@ -54,8 +146,11 @@ cargo run -p hol_cli -- --make-assignment "Homework 3" hw3_skeleton.ctea > hw3.j
 ```
 
 The manifest pins each theorem's statement, the allowed imports, and a
-policy (by default no `sorry` and no axioms). Edit it to add
-`"deny_tactics": ["simp"]` or `"deny_classical": true`. Grade with:
+policy (by default no `sorry` and no axioms). Add `--course FILE
+--section ID` to write that section's tactic and theorem rules into the
+manifest, so the assignment is graded under them wherever it is checked;
+or edit the policy by hand (`"deny_tactics": ["simp"]`,
+`"allow_theorems": ["add_*"]`, `"deny_classical": true`). Grade with:
 
 ```sh
 cargo run -p hol_cli -- --assignment hw3.json --json submission.ctea

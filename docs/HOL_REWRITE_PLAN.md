@@ -40,7 +40,14 @@ principle and cardinality of unions, which need a longer library
 development. M5 followed: `--deny-tactics`, assignment
 manifests generated from a skeleton (`--make-assignment`) and checked
 with `--assignment`, an Assignment panel and share links in the
-browser, and `docs/CETACEA2.md` as the instructor's guide. Still open
+browser, and `docs/CETACEA2.md` as the instructor's guide. Course
+sections followed on 26 November 2026: a course file names sections
+with allowed and disallowed tactics and library theorems (inherited
+with `extends`), selected with `--course`/`--section`, written into
+manifests, and offered in the browser's Section menu; violations are
+reported at the line of use from what the proof actually resolved.
+`courses/proofs-checked.json` has a section per book chapter and
+`scripts/check_course.sh` holds it to the book. Still open
 overall: re-quoting the book's diagnostics, multi-file projects in the
 browser, release tags at cutover, and per-declaration caching.
 
