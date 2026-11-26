@@ -180,6 +180,7 @@ const editor = new EditorView({
         if (update.docChanged) {
           saveSource();
           scheduleAnalysis();
+          clearHints();
         }
         if (update.selectionSet || update.docChanged) {
           renderCursorPanels();
@@ -543,13 +544,25 @@ function renderAssignment() {
 // Hints
 // ---------------------------------------------------------------------
 
+const HINTS_PROMPT = hintsEl.textContent.trim();
+// Suggestions were tested against one version of the file under one set
+// of rules; `hintsEpoch` moves on whenever either changes.
+let hintsEpoch = 0;
+
+function clearHints() {
+  hintsEpoch++;
+  hintsEl.replaceChildren(empty(HINTS_PROMPT));
+}
+
 async function runHints() {
   const source = editor.state.doc.toString();
   const line = currentLine();
+  const epoch = ++hintsEpoch;
   hintsEl.replaceChildren(empty("Trying tactics…"));
   hintButton.disabled = true;
   try {
     const hints = await request("hints", { source, options: options(), line });
+    if (epoch !== hintsEpoch) return; // the file or the rules changed meanwhile
     hintsEl.replaceChildren();
     if (!Array.isArray(hints) || hints.length === 0) {
       hintsEl.appendChild(empty("No suggestion applies to the goal on this line. Try describing the next step yourself, or look at the tactic reference below."));
@@ -568,7 +581,7 @@ async function runHints() {
       hintsEl.appendChild(div);
     }
   } catch (error) {
-    hintsEl.replaceChildren(empty(`Could not compute hints: ${error.message}`));
+    if (epoch === hintsEpoch) hintsEl.replaceChildren(empty(`Could not compute hints: ${error.message}`));
   } finally {
     hintButton.disabled = false;
   }
@@ -666,6 +679,7 @@ tierSelect.addEventListener("change", () => {
   } catch (_) {
     /* storage unavailable */
   }
+  clearHints();
   runAnalysis();
 });
 
@@ -694,6 +708,7 @@ sectionSelect.addEventListener("change", () => {
     /* storage unavailable */
   }
   syncTierPicker();
+  clearHints();
   runAnalysis();
 });
 

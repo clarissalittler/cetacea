@@ -554,13 +554,16 @@ impl<'f> Session<'f> {
     /// Reports every tactic and imported theorem the script used that
     /// the policy does not permit, at the line where it was written.
     /// The proof itself is unaffected: these are course rules, not logic.
+    /// Returns the lines where a tactic was refused, so advice about how
+    /// that tactic behaved is not reported on top of the refusal.
     fn enforce_uses(
         &mut self,
         path: Option<&str>,
         theorem: &str,
         proof: &[hol_syntax::Tactic],
         uses: &[hol_tactics::TheoremUse],
-    ) {
+    ) -> BTreeSet<u32> {
+        let mut refused_lines = BTreeSet::new();
         let policy = self.opts.policy.clone();
         let severity = if policy.advisory {
             Severity::Warning
@@ -584,6 +587,7 @@ impl<'f> Session<'f> {
                     }
                 ));
             }
+            refused_lines.insert(span.line);
             self.diagnostics
                 .push(Diag::from_diagnostic(severity, path, diag));
             if !policy.advisory && reported.insert(tactic.to_string()) {
@@ -608,6 +612,7 @@ impl<'f> Session<'f> {
                 ));
             }
         }
+        refused_lines
     }
 
     fn resolve_import(&self, from: Option<&str>, import: &str) -> Option<(String, String)> {
@@ -794,12 +799,17 @@ impl<'f> Session<'f> {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        if !importing {
-            self.enforce_uses(path, &name.name, proof, &uses);
-        }
+        let refused_lines = if importing {
+            BTreeSet::new()
+        } else {
+            self.enforce_uses(path, &name.name, proof, &uses)
+        };
         match proved {
             Ok(outcome) => {
                 for note in outcome.notes {
+                    if refused_lines.contains(&note.span.line) {
+                        continue;
+                    }
                     self.diagnostics
                         .push(Diag::from_diagnostic(Severity::Warning, path, note));
                 }
@@ -900,6 +910,9 @@ impl<'f> Session<'f> {
                 self.diagnostics
                     .push(Diag::from_diagnostic(Severity::Error, path, diag));
                 for note in failure.notes {
+                    if refused_lines.contains(&note.span.line) {
+                        continue;
+                    }
                     self.diagnostics
                         .push(Diag::from_diagnostic(Severity::Warning, path, note));
                 }

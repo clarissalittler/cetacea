@@ -507,10 +507,12 @@ fn candidates(goal: &GoalView, result: &CheckResult) -> Vec<(String, String)> {
         let statement = print_term(&result.env, &info.statement);
         let conclusion = statement.rsplit(" -> ").next().unwrap_or(&statement);
         if connective_head(conclusion) == goal_head && goal_head != "atom" {
-            out.push((
-                format!("apply {}", info.name),
-                format!("use the library theorem `{}`", info.name),
-            ));
+            let description = if info.is_imported {
+                format!("use the library theorem `{}`", info.name)
+            } else {
+                format!("use `{}`, proved earlier in this file", info.name)
+            };
+            out.push((format!("apply {}", info.name), description));
         }
         if out.len() > 40 {
             break;
@@ -541,6 +543,17 @@ fn connective_head(text: &str) -> &'static str {
     } else {
         "atom"
     }
+}
+
+/// True when two printed formulas are made of the same symbols, so one
+/// is at most a rearrangement of the other.
+fn same_symbols(a: &str, b: &str) -> bool {
+    let sorted = |text: &str| {
+        let mut chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
+        chars.sort_unstable();
+        chars
+    };
+    sorted(a) == sorted(b)
 }
 
 /// Tactic hints for the goal at `line`, verified by running each
@@ -595,10 +608,26 @@ pub fn hints(
         if !ran {
             continue;
         }
-        let closes_goal = trial
+        let step = trial
             .steps
             .get(&theorem)
-            .and_then(|(_, steps)| steps.iter().find(|s| s.span.line == first_inserted))
+            .and_then(|(_, steps)| steps.iter().find(|s| s.span.line == first_inserted));
+        // A step that only reorders the goal (commutativity, symmetry) is
+        // worth suggesting when the reordered goal is a hypothesis, and
+        // is a detour otherwise.
+        let detour = step
+            .filter(|s| s.after.len() == s.before.len())
+            .and_then(|s| s.after.first())
+            .map(|g| trial.render_goal(g))
+            .is_some_and(|after| {
+                after.target != goal.target
+                    && same_symbols(&after.target, &goal.target)
+                    && !after.hyps.iter().any(|(_, hyp)| *hyp == after.target)
+            });
+        if detour {
+            continue;
+        }
+        let closes_goal = step
             .map(|s| s.after.len() < s.before.len())
             .unwrap_or(false);
         hints.push(Hint {

@@ -251,6 +251,71 @@ fn hints_never_suggest_what_the_section_forbids() {
 }
 
 #[test]
+fn hints_skip_a_reordering_that_leads_nowhere() {
+    let fs = fs();
+    // With `h : A /\\ B`, swapping the goal `B /\\ A` reaches `h`.
+    let useful = "import lib.ctea\n\ntheorem t (A B : Prop) : A /\\ B -> B /\\ A := by\n  intro h\n  sorry\n";
+    let found = hints(&fs, Options::default(), Some("hw.ctea"), useful, 4);
+    assert!(
+        found.iter().any(|h| h.tactic == "apply and_swap"),
+        "{found:?}"
+    );
+    // With `A` and `B` separately, swapping `A /\\ B` gets no closer.
+    let detour = "import lib.ctea\n\ntheorem t (A B : Prop) : A -> B -> A /\\ B := by\n  intro ha hb\n  sorry\n";
+    let found = hints(&fs, Options::default(), Some("hw.ctea"), detour, 4);
+    assert!(found.iter().any(|h| h.tactic == "split"), "{found:?}");
+    assert!(
+        !found.iter().any(|h| h.tactic.contains("and_swap")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn hints_say_when_a_theorem_comes_from_this_file() {
+    let fs = fs();
+    let source = "theorem mine (P Q : Prop) : P /\\ Q -> Q /\\ P := by\n  intro h\n  split\n  exact h.right\n  exact h.left\n\ntheorem t (A B : Prop) : A /\\ B -> B /\\ A := by\n  intro h\n  sorry\n";
+    let found = hints(&fs, Options::default(), Some("hw.ctea"), source, 8);
+    let hint = found
+        .iter()
+        .find(|h| h.tactic == "apply mine")
+        .expect("apply mine");
+    assert_eq!(hint.description, "use `mine`, proved earlier in this file");
+}
+
+#[test]
+fn a_refused_tactic_is_not_also_given_advice() {
+    let source = "theorem t (A B : Prop) : A /\\ B -> B /\\ A := by\n  intro h\n  simp\n  sorry\n";
+    let policy = Policy {
+        allow_tactics: Some(names(&["intro", "exact"])),
+        ..Policy::default()
+    };
+    let refused = check(source, policy);
+    let on_line_3: Vec<&str> = refused
+        .diagnostics
+        .iter()
+        .filter(|d| d.line == 3)
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(on_line_3.len(), 1, "{on_line_3:?}");
+    assert!(
+        on_line_3[0].contains("`simp` is not available"),
+        "{on_line_3:?}"
+    );
+    // Without the rule, the advice is still given.
+    let open = check(source, Policy::default());
+    assert!(
+        open.diagnostics
+            .iter()
+            .any(|d| d.message.contains("did nothing")),
+        "{:?}",
+        open.diagnostics
+            .iter()
+            .map(|d| &d.message)
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn the_analysis_describes_the_rules_and_marks_the_library() {
     let fs = fs();
     let policy = Policy {
