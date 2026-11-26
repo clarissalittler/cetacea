@@ -13,6 +13,8 @@
 //!   functions).
 //! - [`derived`]: convenience rules built from the primitives, which are
 //!   therefore not trusted.
+//! - [`record`]: an optional, write-only log of rule applications for
+//!   explanations and diagnostics. No rule reads it.
 //!
 //! The kernel has no parser, no tactics, and no dependencies.
 
@@ -21,6 +23,7 @@ mod error;
 mod logic;
 mod name;
 mod print;
+pub mod record;
 mod rules;
 mod signature;
 mod term;

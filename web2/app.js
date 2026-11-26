@@ -416,6 +416,17 @@ function renderCursorPanels() {
     why.className = "why";
     why.textContent = step.explanation;
     div.append(code, why);
+    // Once the proof is finished, the kernel's recording says which
+    // primitive rules this tactic ran and whether trust entered here.
+    const kernelBits = [];
+    if (step.rules && step.rules.length) kernelBits.push(`kernel rules: ${step.rules.join(", ")}`);
+    if (step.introduces && step.introduces.length) kernelBits.push(`introduces ${step.introduces.join(", ")}`);
+    if (kernelBits.length) {
+      const kernel = document.createElement("span");
+      kernel.className = "kernel" + (step.introduces && step.introduces.length ? " trust" : "");
+      kernel.textContent = kernelBits.join(" · ");
+      div.appendChild(kernel);
+    }
     div.addEventListener("click", () => jumpToLine(step.line));
     explanationEl.appendChild(div);
   });

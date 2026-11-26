@@ -74,6 +74,12 @@ impl Rules {
     /// Every definition, recursive-function equation, and the set
     /// comprehension principle: the rules that define computation.
     pub fn definitional(env: &Env, subst: &mut Subst) -> Rules {
+        // Building the rule table derives a few hundred helper theorems;
+        // they are setup, not part of the step a recording describes.
+        hol_kernel::record::paused(|| Rules::build_definitional(env, subst))
+    }
+
+    fn build_definitional(env: &Env, subst: &mut Subst) -> Rules {
         let mut rules = Vec::new();
         for def in env.defs() {
             if !env.is_transparent(&def.name) {
@@ -132,6 +138,10 @@ impl Rules {
 
     /// Only the equation of one definition.
     pub fn for_def(env: &Env, subst: &mut Subst, name: &Name) -> Rules {
+        hol_kernel::record::paused(|| Rules::build_for_def(env, subst, name))
+    }
+
+    fn build_for_def(env: &Env, subst: &mut Subst, name: &Name) -> Rules {
         let mut rules = Vec::new();
         if let Some(def) = env.def_by_exact_name(name) {
             if let Some(rule) = Rule::from_thm(subst, &def.equation, def.name.as_str(), true) {
@@ -156,6 +166,10 @@ impl Rules {
     /// kept out of the default `simp` set so that `simp` leaves the
     /// logical structure of a goal alone.
     pub fn with_decision_rules(&mut self, subst: &mut Subst) {
+        hol_kernel::record::paused(|| self.add_decision_rules(subst))
+    }
+
+    fn add_decision_rules(&mut self, subst: &mut Subst) {
         if let Ok(thm) = crate::simp_rules::reflexivity_rule() {
             if let Some(rule) = Rule::from_thm(subst, &thm, "eq_self", true) {
                 self.rules.push(rule);

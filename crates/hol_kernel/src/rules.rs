@@ -17,13 +17,19 @@ use crate::types::TypeSubst;
 /// `P |- P`.
 pub fn assume(p: &Term) -> Result<Thm> {
     require_prop("assume", p)?;
-    Ok(Thm::new(vec![p.clone()], p.clone(), Tags::none()))
+    Ok(Thm::derived(
+        "assume",
+        vec![p.clone()],
+        p.clone(),
+        Tags::none(),
+    ))
 }
 
 /// Adds a hypothesis: from `Γ |- Q` to `Γ, P |- Q`.
 pub fn add_hyp(th: &Thm, p: &Term) -> Result<Thm> {
     require_prop("add_hyp", p)?;
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "add_hyp",
         Thm::merged_hyps(&[th.hyps(), std::slice::from_ref(p)]),
         th.concl().clone(),
         th.tags().clone(),
@@ -33,13 +39,14 @@ pub fn add_hyp(th: &Thm, p: &Term) -> Result<Thm> {
 /// `|- t = t`.
 pub fn refl(t: &Term) -> Result<Thm> {
     t.require_closed("refl")?;
-    Ok(Thm::new(vec![], Term::eq(t, t)?, Tags::none()))
+    Ok(Thm::derived("refl", vec![], Term::eq(t, t)?, Tags::none()))
 }
 
 /// From `|- a = b`, `|- b = a`.
 pub fn sym(th: &Thm) -> Result<Thm> {
     let (a, b) = dest_eq("sym", th)?;
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "sym",
         th.hyps().to_vec(),
         Term::eq(b, a)?,
         th.tags().clone(),
@@ -56,7 +63,8 @@ pub fn trans(ab: &Thm, bc: &Thm) -> Result<Thm> {
             "middle terms differ: `{b1}` in the first equation, `{b2}` in the second"
         );
     }
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "trans",
         Thm::merged_hyps(&[ab.hyps(), bc.hyps()]),
         Term::eq(a, c)?,
         ab.tags().union(bc.tags()),
@@ -69,7 +77,8 @@ pub fn mk_comb(fg: &Thm, xy: &Thm) -> Result<Thm> {
     let (x, y) = dest_eq("mk_comb", xy)?;
     let fx = Term::app(f, x)?;
     let gy = Term::app(g, y)?;
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "mk_comb",
         Thm::merged_hyps(&[fg.hyps(), xy.hyps()]),
         Term::eq(&fx, &gy)?,
         fg.tags().union(xy.tags()),
@@ -89,7 +98,8 @@ pub fn abs(x: &Term, th: &Thm) -> Result<Thm> {
             "cannot abstract over `{x}`: it occurs free in a hypothesis"
         );
     }
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "abs",
         th.hyps().to_vec(),
         Term::eq(&Term::lam(x, a)?, &Term::lam(x, b)?)?,
         th.tags().clone(),
@@ -102,7 +112,12 @@ pub fn beta(t: &Term) -> Result<Thm> {
     let Some(reduced) = t.beta_head() else {
         bail!("beta", "`{t}` is not a beta redex");
     };
-    Ok(Thm::new(vec![], Term::eq(t, &reduced)?, Tags::none()))
+    Ok(Thm::derived(
+        "beta",
+        vec![],
+        Term::eq(t, &reduced)?,
+        Tags::none(),
+    ))
 }
 
 /// For `t = λx. f x` with `x` not free in `f`, `|- (λx. f x) = f`.
@@ -121,7 +136,7 @@ pub fn eta(t: &Term) -> Result<Thm> {
             "`{t}` is not of the form `fun x => f x` with `x` not free in `f`"
         );
     }
-    Ok(Thm::new(vec![], Term::eq(t, f)?, Tags::none()))
+    Ok(Thm::derived("eta", vec![], Term::eq(t, f)?, Tags::none()))
 }
 
 /// From `|- P = Q` and `|- P`, `|- Q`.
@@ -134,7 +149,8 @@ pub fn eq_mp(pq: &Thm, p: &Thm) -> Result<Thm> {
             p.concl()
         );
     }
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "eq_mp",
         Thm::merged_hyps(&[pq.hyps(), p.hyps()]),
         rhs.clone(),
         pq.tags().union(p.tags()),
@@ -143,7 +159,7 @@ pub fn eq_mp(pq: &Thm, p: &Thm) -> Result<Thm> {
 
 /// `|- True`.
 pub fn true_intro() -> Thm {
-    Thm::new(vec![], Term::true_(), Tags::none())
+    Thm::derived("true_intro", vec![], Term::true_(), Tags::none())
 }
 
 /// From `|- False`, `|- P`.
@@ -156,12 +172,18 @@ pub fn false_elim(th: &Thm, p: &Term) -> Result<Thm> {
             th.concl()
         );
     }
-    Ok(Thm::new(th.hyps().to_vec(), p.clone(), th.tags().clone()))
+    Ok(Thm::derived(
+        "false_elim",
+        th.hyps().to_vec(),
+        p.clone(),
+        th.tags().clone(),
+    ))
 }
 
 /// From `|- P` and `|- Q`, `|- P /\ Q`.
 pub fn and_intro(p: &Thm, q: &Thm) -> Result<Thm> {
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "and_intro",
         Thm::merged_hyps(&[p.hyps(), q.hyps()]),
         Term::and(p.concl(), q.concl())?,
         p.tags().union(q.tags()),
@@ -173,7 +195,12 @@ pub fn and_left(th: &Thm) -> Result<Thm> {
     let Some((p, _)) = th.concl().dest_and() else {
         bail!("and_left", "expected a conjunction, found `{}`", th.concl());
     };
-    Ok(Thm::new(th.hyps().to_vec(), p.clone(), th.tags().clone()))
+    Ok(Thm::derived(
+        "and_left",
+        th.hyps().to_vec(),
+        p.clone(),
+        th.tags().clone(),
+    ))
 }
 
 /// From `|- P /\ Q`, `|- Q`.
@@ -185,12 +212,18 @@ pub fn and_right(th: &Thm) -> Result<Thm> {
             th.concl()
         );
     };
-    Ok(Thm::new(th.hyps().to_vec(), q.clone(), th.tags().clone()))
+    Ok(Thm::derived(
+        "and_right",
+        th.hyps().to_vec(),
+        q.clone(),
+        th.tags().clone(),
+    ))
 }
 
 /// From `|- P`, `|- P \/ Q`.
 pub fn or_left(th: &Thm, q: &Term) -> Result<Thm> {
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "or_left",
         th.hyps().to_vec(),
         Term::or(th.concl(), q)?,
         th.tags().clone(),
@@ -199,7 +232,8 @@ pub fn or_left(th: &Thm, q: &Term) -> Result<Thm> {
 
 /// From `|- Q`, `|- P \/ Q`.
 pub fn or_right(p: &Term, th: &Thm) -> Result<Thm> {
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "or_right",
         th.hyps().to_vec(),
         Term::or(p, th.concl())?,
         th.tags().clone(),
@@ -226,7 +260,8 @@ pub fn or_elim(disj: &Thm, left: &Thm, right: &Thm) -> Result<Thm> {
     }
     let left_hyps = left.hyps_without(p);
     let right_hyps = right.hyps_without(q);
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "or_elim",
         Thm::merged_hyps(&[disj.hyps(), &left_hyps, &right_hyps]),
         left.concl().clone(),
         disj.tags().union(left.tags()).union(right.tags()),
@@ -236,7 +271,8 @@ pub fn or_elim(disj: &Thm, left: &Thm, right: &Thm) -> Result<Thm> {
 /// From `Γ |- Q`, `Γ - {P} |- P -> Q`.
 pub fn imp_intro(p: &Term, th: &Thm) -> Result<Thm> {
     require_prop("imp_intro", p)?;
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "imp_intro",
         th.hyps_without(p),
         Term::imp(p, th.concl())?,
         th.tags().clone(),
@@ -259,7 +295,8 @@ pub fn imp_elim(imp: &Thm, p: &Thm) -> Result<Thm> {
             p.concl()
         );
     }
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "imp_elim",
         Thm::merged_hyps(&[imp.hyps(), p.hyps()]),
         conseq.clone(),
         imp.tags().union(p.tags()),
@@ -291,7 +328,8 @@ pub fn iff_intro(pq: &Thm, qp: &Thm) -> Result<Thm> {
             qp.concl()
         );
     }
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "iff_intro",
         Thm::merged_hyps(&[pq.hyps(), qp.hyps()]),
         Term::iff(p1, q1)?,
         pq.tags().union(qp.tags()),
@@ -310,7 +348,8 @@ pub fn forall_intro(x: &Term, th: &Thm) -> Result<Thm> {
             "cannot generalize `{x}`: it occurs free in a hypothesis"
         );
     }
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "forall_intro",
         th.hyps().to_vec(),
         Term::forall(x, th.concl())?,
         th.tags().clone(),
@@ -329,7 +368,12 @@ pub fn forall_elim(th: &Thm, t: &Term) -> Result<Thm> {
     let instance = pred
         .beta_apply(t)
         .map_err(|err| crate::error::KernelError::new("forall_elim", err.message))?;
-    Ok(Thm::new(th.hyps().to_vec(), instance, th.tags().clone()))
+    Ok(Thm::derived(
+        "forall_elim",
+        th.hyps().to_vec(),
+        instance,
+        th.tags().clone(),
+    ))
 }
 
 /// From `|- P[t/x]`, `|- exists x. P`. The existential statement is
@@ -352,7 +396,12 @@ pub fn exists_intro(ex: &Term, witness: &Term, th: &Thm) -> Result<Thm> {
             th.concl()
         );
     }
-    Ok(Thm::new(th.hyps().to_vec(), ex.clone(), th.tags().clone()))
+    Ok(Thm::derived(
+        "exists_intro",
+        th.hyps().to_vec(),
+        ex.clone(),
+        th.tags().clone(),
+    ))
 }
 
 /// From `|- exists x. P` and `P[x] |- Q`, `|- Q`, provided the
@@ -392,7 +441,8 @@ pub fn exists_elim(ex: &Thm, x: &Term, th: &Thm) -> Result<Thm> {
             "the eigenvariable `{x}` occurs in the existential theorem"
         );
     }
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "exists_elim",
         Thm::merged_hyps(&[ex.hyps(), &remaining]),
         th.concl().clone(),
         ex.tags().union(th.tags()),
@@ -401,7 +451,8 @@ pub fn exists_elim(ex: &Thm, x: &Term, th: &Thm) -> Result<Thm> {
 
 /// Instantiates type variables in the hypotheses and conclusion.
 pub fn inst_type(th: &Thm, subst: &TypeSubst) -> Thm {
-    Thm::new(
+    Thm::derived(
+        "inst_type",
         th.hyps().iter().map(|hyp| hyp.subst_type(subst)).collect(),
         th.concl().subst_type(subst),
         th.tags().clone(),
@@ -417,13 +468,14 @@ pub fn inst(th: &Thm, subst: &[(Term, Term)]) -> Result<Thm> {
         .iter()
         .map(|hyp| hyp.subst_free(subst))
         .collect::<Result<Vec<_>>>()?;
-    Ok(Thm::new(hyps, concl, th.tags().clone()))
+    Ok(Thm::derived("inst", hyps, concl, th.tags().clone()))
 }
 
 /// `|- P \/ not P`, tagged classical.
 pub fn excluded_middle(p: &Term) -> Result<Thm> {
     require_prop("excluded_middle", p)?;
-    Ok(Thm::new(
+    Ok(Thm::derived(
+        "excluded_middle",
         vec![],
         Term::or(p, &Term::not(p)?)?,
         Tags::classical(),
@@ -434,7 +486,7 @@ pub fn excluded_middle(p: &Term) -> Result<Thm> {
 /// depends on it.
 pub fn sorry(p: &Term) -> Result<Thm> {
     require_prop("sorry", p)?;
-    Ok(Thm::new(vec![], p.clone(), Tags::sorry()))
+    Ok(Thm::derived("sorry", vec![], p.clone(), Tags::sorry()))
 }
 
 fn require_prop(rule: &'static str, t: &Term) -> Result<()> {

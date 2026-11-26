@@ -283,3 +283,102 @@ fn the_analysis_describes_the_rules_and_marks_the_library() {
     let unrestricted = analyze(&fs, Options::default(), Some("hw.ctea"), source, None);
     assert!(unrestricted.rules.is_none());
 }
+
+// ---------------------------------------------------------------------
+// The kernel's recording: which rules each tactic ran, and where
+// classical reasoning or `sorry` entered.
+// ---------------------------------------------------------------------
+
+const CLASSICAL: &str = "mode classical\n\ntheorem lem (P : Prop) : P \\/ not P := by\n  by_cases h : P\n  left\n  exact h\n  right\n  exact h\n\ntheorem uses_lem (P : Prop) : not P \\/ P := by\n  cases lem {P := P} with\n  | left hp =>\n      right\n      exact hp\n  | right hn =>\n      left\n      exact hn\n\ntheorem unfinished (P Q : Prop) : P -> Q -> P /\\ Q := by\n  intro hp hq\n  split\n  exact hp\n  sorry\n\ntheorem leans (P Q : Prop) : P -> Q -> P /\\ Q := by\n  intro hp hq\n  exact unfinished hp hq\n";
+
+#[test]
+fn each_tactic_reports_the_kernel_rules_it_ran() {
+    let analysis = analyze(&fs(), Options::default(), Some("hw.ctea"), CLASSICAL, None);
+    let lem = analysis.theorems.iter().find(|t| t.name == "lem").unwrap();
+    let step = |text: &str| lem.steps.iter().find(|s| s.text == text).unwrap();
+    assert_eq!(
+        step("by_cases h : P").rules,
+        vec!["excluded_middle", "or_elim"]
+    );
+    assert_eq!(step("by_cases h : P").introduces, vec!["classical"]);
+    assert_eq!(step("left").rules, vec!["or_left"]);
+    assert!(step("left").introduces.is_empty());
+    let unfinished = analysis
+        .theorems
+        .iter()
+        .find(|t| t.name == "unfinished")
+        .unwrap();
+    let step = |text: &str| unfinished.steps.iter().find(|s| s.text == text).unwrap();
+    assert_eq!(step("intro hp hq").rules, vec!["imp_intro ×2"]);
+    assert_eq!(step("split").rules, vec!["and_intro"]);
+    assert_eq!(step("sorry").introduces, vec!["sorry"]);
+}
+
+#[test]
+fn refused_classical_reasoning_and_sorry_are_located() {
+    let policy = Policy {
+        deny_classical: true,
+        deny_sorry: true,
+        ..Policy::default()
+    };
+    let result = check(CLASSICAL, policy);
+    let located: Vec<(u32, &str, &str)> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .map(|d| (d.line, d.message.as_str(), d.notes[0].as_str()))
+        .collect();
+    assert_eq!(
+        located,
+        vec![
+            (
+                4,
+                "classical reasoning enters the proof here, and this assignment asks for a constructive proof",
+                "this step applies the law of excluded middle"
+            ),
+            (
+                11,
+                "classical reasoning enters the proof here, and this assignment asks for a constructive proof",
+                "this step cites a theorem that was proved classically"
+            ),
+            (
+                23,
+                "the proof is unfinished here, and this assignment asks for complete proofs",
+                "this step leaves a goal unproved"
+            ),
+            (
+                27,
+                "the proof is unfinished here, and this assignment asks for complete proofs",
+                "this step cites a theorem whose own proof is unfinished"
+            ),
+        ]
+    );
+    // The summaries are still listed, and marked as already located.
+    for summary in [
+        "theorem `lem` uses classical reasoning",
+        "theorem `unfinished` uses sorry",
+        "theorem `leans` uses sorry",
+    ] {
+        assert!(result.violations.iter().any(|v| v == summary), "{summary}");
+        assert!(result.located_violations.iter().any(|v| v == summary));
+    }
+}
+
+#[test]
+fn constructive_mode_points_at_the_classical_step() {
+    let source = "mode classical\n\ntheorem lem (P : Prop) : P \\/ not P := by\n  by_cases h : P\n  left\n  exact h\n  right\n  exact h\n\nmode constructive\n\ntheorem t (P : Prop) : not P \\/ P := by\n  cases lem {P := P} with\n  | left hp =>\n      right\n      exact hp\n  | right hn =>\n      left\n      exact hn\n";
+    let result = check(source, Policy::default());
+    let error = result
+        .diagnostics
+        .iter()
+        .find(|d| d.severity == Severity::Error)
+        .unwrap();
+    assert_eq!(error.line, 13);
+    assert!(error
+        .message
+        .contains("uses classical reasoning, but the file is in constructive mode"));
+    assert_eq!(
+        error.notes[0],
+        "this step cites a theorem that was proved classically"
+    );
+}

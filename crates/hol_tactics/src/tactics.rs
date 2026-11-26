@@ -23,7 +23,7 @@ use crate::conv::{
     head_unfold, normalize, normalize_until as hol_tactics_normalize_until, rhs, Rule, Rules,
 };
 use crate::pexpr::ProofCtx;
-use crate::proof::{Goal, Justification, ProofState};
+use crate::proof::{DerivationStep, Goal, Justification, ProofState};
 use crate::unify::{Subst, TermNorm};
 
 pub type Result<T> = std::result::Result<T, Diagnostic>;
@@ -41,6 +41,8 @@ pub struct Outcome {
     pub thm: Thm,
     pub steps: Vec<StepRecord>,
     pub notes: Vec<Diagnostic>,
+    /// What the kernel did for each node of the finished proof.
+    pub derivation: Vec<DerivationStep>,
 }
 
 pub struct Failure {
@@ -58,6 +60,8 @@ struct Runner<'a> {
     steps: Vec<StepRecord>,
     notes: Vec<Diagnostic>,
     failing_goal: Option<Goal>,
+    /// Kernel rules each tactic ran while it executed, by tactic.
+    eager: Vec<DerivationStep>,
 }
 
 fn kernel(span: Span) -> impl Fn(hol_kernel::KernelError) -> Diagnostic {
@@ -81,6 +85,7 @@ pub fn prove(
         steps: Vec::new(),
         notes: Vec::new(),
         failing_goal: None,
+        eager: Vec::new(),
     };
     let goal = Goal {
         id: 0,
@@ -89,6 +94,7 @@ pub fn prove(
         target: header.body.clone(),
     };
     let mut state = ProofState::new(goal);
+    state.recording = !env.importing;
     let mut failing_goal: Option<Goal> = None;
     let result = runner.run_block(&mut state, tactics).and_then(|_| {
         if let Some(goal) = state.current() {
@@ -142,11 +148,24 @@ pub fn prove(
             ));
         }
         if thm.tags().classical && env.mode == Mode::Constructive {
-            return Err(Diagnostic::new(
-                header.span,
+            // Point at the step where classical reasoning entered, which
+            // the recording knows, instead of at the theorem as a whole.
+            let entry = state
+                .derivation
+                .iter()
+                .find(|step| step.introduced.classical);
+            let mut diag = Diagnostic::new(
+                entry.map(|step| step.span).unwrap_or(header.span),
                 "this proof uses classical reasoning, but the file is in constructive mode".to_string(),
-            )
-            .note("add `mode classical` above the theorem to allow `by_cases`, `by_contra`, and classical theorems such as `em`"));
+            );
+            if let Some(step) = entry {
+                diag = diag.note(if step.rules.count("excluded_middle") > 0 {
+                    "this step applies the law of excluded middle".to_string()
+                } else {
+                    "this step cites a theorem that was proved classically".to_string()
+                });
+            }
+            return Err(diag.note("add `mode classical` above the theorem to allow `by_cases`, `by_contra`, and classical theorems such as `em`"));
         }
         Ok(thm)
     });
@@ -155,6 +174,11 @@ pub fn prove(
             thm,
             steps: runner.steps,
             notes: runner.notes,
+            derivation: {
+                let mut all = runner.eager;
+                all.append(&mut state.derivation);
+                all
+            },
         }),
         Err(diagnostic) => {
             if failing_goal.is_none() {
@@ -195,7 +219,24 @@ impl<'a> Runner<'a> {
                     "there are no goals left to prove; remove this tactic".to_string(),
                 ));
             };
-            if let Err(diag) = self.step(state, &goal, tactic) {
+            // Goals closed while this tactic runs belong to it; a nested
+            // block hands the position back when it returns.
+            let outer = std::mem::replace(&mut state.at, tactic.span);
+            let enclosing = state.recording.then(hol_kernel::record::start);
+            let stepped = self.step(state, &goal, tactic);
+            let rules = enclosing
+                .map(hol_kernel::record::finish)
+                .unwrap_or_default();
+            state.at = outer;
+            if !rules.is_empty() {
+                self.eager.push(DerivationStep {
+                    span: tactic.span,
+                    rules,
+                    concl: None,
+                    introduced: hol_kernel::Tags::none(),
+                });
+            }
+            if let Err(diag) = stepped {
                 let diag = if diag.span == Span::default() {
                     diag.with_span(tactic.span)
                 } else {

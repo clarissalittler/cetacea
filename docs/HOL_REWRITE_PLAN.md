@@ -47,7 +47,12 @@ with `extends`), selected with `--course`/`--section`, written into
 manifests, and offered in the browser's Section menu; violations are
 reported at the line of use from what the proof actually resolved.
 `courses/proofs-checked.json` has a section per book chapter and
-`scripts/check_course.sh` holds it to the book. Still open
+`scripts/check_course.sh` holds it to the book. The same day added
+proof recording: an optional, write-only log of primitive rule
+applications in the kernel (`hol_kernel::record`), gathered per tactic,
+which powers `--derivation`, the kernel rules shown under each proof
+step, and line-accurate diagnostics for where classical reasoning or
+`sorry` entered. Still open
 overall: re-quoting the book's diagnostics, multi-file projects in the
 browser, release tags at cutover, and per-declaration caching.
 

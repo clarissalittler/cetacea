@@ -11,7 +11,7 @@ pub mod uses;
 
 pub use conv::{head_unfold, normal_form, normalize, Rule, Rules};
 pub use pexpr::{strip_meta_suffixes, ProofCtx};
-pub use proof::{Goal, Justification, ProofState};
+pub use proof::{DerivationStep, Goal, Justification, ProofState};
 pub use tactics::{prove, Failure, Outcome, StepRecord};
 pub use unify::{schematize, Subst, TermNorm};
 pub use uses::TheoremUse;

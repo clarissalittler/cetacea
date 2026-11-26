@@ -136,6 +136,42 @@ available, suggested tactics never include anything the section
 forbids, and the theorem library marks entries that are out of bounds.
 Share links carry the section.
 
+## What the kernel did: recorded derivations
+
+The kernel is LCF style: only its primitive rules can build a theorem,
+and no proof object is kept. It can still record what it did. While a
+proof is checked, each tactic's primitive rule applications are logged,
+together with the step at which `classical`, `sorry`, or an axiom first
+entered the proof. The log is write-only for the kernel (no rule reads
+it), so it adds nothing to what must be trusted.
+
+```sh
+cargo run -p hol_cli -- --derivation FILE.ctea
+```
+
+```text
+derivation of lem:
+  line  13  by_cases h : P      excluded_middle, or_elim   [introduces classical]
+  line  14  left                or_left (+3 equality steps)
+  line  15  exact h             3 equality steps
+```
+
+The introduction and elimination rules are listed by name, because they
+are the rule table the course teaches; equational bookkeeping (`sym`,
+`eq_mp`, instantiation) is counted. Rules a tactic tried on the way are
+included, so this shows what the tactic did, not a minimal proof. With
+`--json` the same data appears under `derivations`, and the browser's
+Proof explanation panel shows it under each step of a finished proof.
+
+The recording also makes three diagnostics point at a line instead of
+at a whole theorem:
+
+- under `--deny-classical`, the step that applied excluded middle or
+  cited a classically proved theorem;
+- under `--deny-sorry`, the step that left a goal open or cited a
+  theorem whose own proof is unfinished;
+- in a constructive file, the step where classical reasoning entered.
+
 ## Assignments
 
 Write the skeleton you hand out, with `sorry` bodies, then generate a

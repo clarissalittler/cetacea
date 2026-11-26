@@ -108,6 +108,14 @@ impl Thm {
         Thm { hyps, concl, tags }
     }
 
+    /// Constructor for the primitive rules: builds the theorem and, when
+    /// a recording is active, notes which rule produced it.
+    pub(crate) fn derived(rule: &'static str, hyps: Vec<Term>, concl: Term, tags: Tags) -> Thm {
+        let thm = Thm::new(hyps, concl, tags);
+        crate::record::note(rule, &thm);
+        thm
+    }
+
     pub fn hyps(&self) -> &[Term] {
         &self.hyps
     }

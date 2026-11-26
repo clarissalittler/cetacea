@@ -14,6 +14,8 @@ checking:
   --tier fol|fol_nat|hol     logic tier when the file has no `logic` line
   --std DIR                  where `std/` imports resolve (default: lib)
   --json                     machine-readable report
+  --derivation               for each finished proof, list the kernel
+                             rules every tactic ran
 
 policy:
   --strict                   no `sorry`, no root axioms
@@ -97,6 +99,35 @@ fn describe_policy(policy: &Policy) -> Vec<String> {
     lines
 }
 
+/// The recorded derivation of every finished root theorem: one row per
+/// tactic, in source order.
+fn derivation_rows(
+    result: &hol_session::CheckResult,
+) -> Vec<(String, Vec<(u32, hol_session::analysis::KernelView)>)> {
+    let mut theorems = Vec::new();
+    for (name, recorded) in &result.derivations {
+        let Some((span, steps)) = result.steps.get(name) else {
+            continue;
+        };
+        let mut rows: Vec<(u32, hol_session::analysis::KernelView)> = steps
+            .iter()
+            .map(|step| {
+                (
+                    step.span.line,
+                    hol_session::analysis::kernel_view(recorded, step.span),
+                )
+            })
+            .collect();
+        rows.sort_by_key(|(line, _)| *line);
+        theorems.push((span.line, name.clone(), rows));
+    }
+    theorems.sort_by_key(|(line, _, _)| *line);
+    theorems
+        .into_iter()
+        .map(|(_, name, rows)| (name, rows))
+        .collect()
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let mut opts = Options {
@@ -110,6 +141,7 @@ fn main() -> ExitCode {
     let mut course_path: Option<String> = None;
     let mut section: Option<String> = None;
     let mut list_sections = false;
+    let mut derivation = false;
     let mut file: Option<String> = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -165,6 +197,7 @@ fn main() -> ExitCode {
                 None => return usage(),
             },
             "--json" => json = true,
+            "--derivation" => derivation = true,
             "--std" => match args.next() {
                 Some(dir) => opts.std_dir = Some(dir),
                 None => return usage(),
@@ -312,6 +345,24 @@ fn main() -> ExitCode {
         if let Some(report) = &report {
             value["assignment"] = serde_json::to_value(report).unwrap();
         }
+        if derivation {
+            let mut all = serde_json::Map::new();
+            for (name, steps) in derivation_rows(&result) {
+                let rows: Vec<serde_json::Value> = steps
+                    .into_iter()
+                    .map(|(line, view)| {
+                        serde_json::json!({
+                            "line": line,
+                            "rules": view.rules,
+                            "equational_rules": view.equational,
+                            "introduces": view.introduces,
+                        })
+                    })
+                    .collect();
+                all.insert(name, serde_json::Value::Array(rows));
+            }
+            value["derivations"] = serde_json::Value::Object(all);
+        }
         println!("{value}");
     } else {
         let mut printed = false;
@@ -327,6 +378,39 @@ fn main() -> ExitCode {
                 eprintln!("{}", diag.render());
             } else {
                 println!("{}", diag.render());
+            }
+        }
+        if derivation {
+            let source = std::fs::read_to_string(&file).unwrap_or_default();
+            let lines: Vec<&str> = source.lines().collect();
+            for (name, steps) in derivation_rows(&result) {
+                println!("derivation of {name}:");
+                for (line, view) in steps {
+                    let text = lines
+                        .get(line.saturating_sub(1) as usize)
+                        .map(|l| l.trim())
+                        .unwrap_or("");
+                    let mut detail = view.rules.join(", ");
+                    if view.equational > 0 {
+                        let note = format!(
+                            "{} equality step{}",
+                            view.equational,
+                            if view.equational == 1 { "" } else { "s" }
+                        );
+                        if detail.is_empty() {
+                            detail = note;
+                        } else {
+                            detail.push_str(&format!(" (+{note})"));
+                        }
+                    }
+                    if detail.is_empty() {
+                        detail = "(uses a hypothesis as it stands)".to_string();
+                    }
+                    if !view.introduces.is_empty() {
+                        detail.push_str(&format!("   [introduces {}]", view.introduces.join(", ")));
+                    }
+                    println!("  line {line:>3}  {text:<36} {detail}");
+                }
             }
         }
         // Tactic and theorem rules were already reported at their lines.

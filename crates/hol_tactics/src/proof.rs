@@ -9,7 +9,8 @@
 
 use std::collections::BTreeSet;
 
-use hol_kernel::{Name, Term, Thm};
+use hol_kernel::{Name, Tags, Term, Thm};
+use hol_syntax::Span;
 
 #[derive(Clone, Debug)]
 pub struct Goal {
@@ -70,7 +71,46 @@ enum Node {
     Closed {
         just: Justification,
         children: Vec<Node>,
+        /// The tactic that closed this goal.
+        span: Span,
     },
+}
+
+/// What the kernel did on behalf of one tactic: the primitive rules it
+/// ran and any trust tags that first appear at it.
+///
+/// A tactic works in two phases, and both are recorded. While it runs,
+/// it may build theorems directly (instantiating a cited theorem,
+/// rewriting, simplifying); those entries have no `concl`. When the
+/// proof is finished, each node of the proof tree runs its
+/// justification; those entries carry the node's conclusion.
+///
+/// This is a recording for explanations and diagnostics. It plays no
+/// part in checking. Rules a tactic tried on the way to an answer are
+/// listed too, so it shows what the tactic did, not a minimal proof.
+#[derive(Clone, Debug)]
+pub struct DerivationStep {
+    pub span: Span,
+    /// How many times each primitive rule ran, in order of first use.
+    pub rules: hol_kernel::record::RuleCounts,
+    /// The theorem a proof-tree node established, when this entry is one.
+    pub concl: Option<Term>,
+    /// Tags on this node's theorem that none of its subproofs carried:
+    /// where `classical`, `sorry`, or an axiom entered the proof.
+    pub introduced: Tags,
+}
+
+fn tags_minus(all: &Tags, known: &Tags) -> Tags {
+    Tags {
+        classical: all.classical && !known.classical,
+        sorry: all.sorry && !known.sorry,
+        axioms: all.axioms.difference(&known.axioms).cloned().collect(),
+        datatypes: all
+            .datatypes
+            .difference(&known.datatypes)
+            .cloned()
+            .collect(),
+    }
 }
 
 enum FinishError {
@@ -78,15 +118,35 @@ enum FinishError {
     Kernel(String),
 }
 
-fn finish_node(node: &Node) -> Result<Thm, FinishError> {
+fn finish_node(node: &Node, trace: &mut Option<Vec<DerivationStep>>) -> Result<Thm, FinishError> {
     match node {
         Node::Open(id) => Err(FinishError::Open(*id)),
-        Node::Closed { just, children } => {
+        Node::Closed {
+            just,
+            children,
+            span,
+        } => {
             let thms = children
                 .iter()
-                .map(finish_node)
+                .map(|child| finish_node(child, trace))
                 .collect::<Result<Vec<_>, FinishError>>()?;
-            just(&thms).map_err(|e| FinishError::Kernel(e.to_string()))
+            let Some(steps) = trace else {
+                return just(&thms).map_err(|e| FinishError::Kernel(e.to_string()));
+            };
+            let enclosing = hol_kernel::record::start();
+            let result = just(&thms);
+            let rules = hol_kernel::record::finish(enclosing);
+            let thm = result.map_err(|e| FinishError::Kernel(e.to_string()))?;
+            let known = thms
+                .iter()
+                .fold(Tags::none(), |acc, child| acc.union(child.tags()));
+            steps.push(DerivationStep {
+                span: *span,
+                rules,
+                concl: Some(thm.concl().clone()),
+                introduced: tags_minus(thm.tags(), &known),
+            });
+            Ok(thm)
         }
     }
 }
@@ -120,6 +180,14 @@ pub struct ProofState {
     next_id: u64,
     /// The last kernel error from a justification, for diagnostics.
     pub last_kernel_error: Option<String>,
+    /// The tactic currently running; nodes closed now belong to it.
+    pub at: Span,
+    /// Whether to record what the kernel does. Off for imported files,
+    /// whose derivations nobody will look at.
+    pub recording: bool,
+    /// The recording made by the last successful [`ProofState::finish`],
+    /// in the order the kernel built the theorems (subproofs first).
+    pub derivation: Vec<DerivationStep>,
 }
 
 impl ProofState {
@@ -130,6 +198,9 @@ impl ProofState {
             goals: vec![goal],
             next_id: 2,
             last_kernel_error: None,
+            at: Span::default(),
+            recording: true,
+            derivation: Vec::new(),
         }
     }
 
@@ -153,7 +224,11 @@ impl ProofState {
             self.next_id += 1;
         }
         let children = subgoals.iter().map(|g| Node::Open(g.id)).collect();
-        let replacement = Node::Closed { just, children };
+        let replacement = Node::Closed {
+            just,
+            children,
+            span: self.at,
+        };
         let leftover = replace_in(&mut self.root, id, replacement);
         debug_assert!(leftover.is_none(), "closed a goal that was not open");
         let position = self.goals.iter().position(|g| g.id == id).unwrap_or(0);
@@ -166,8 +241,12 @@ impl ProofState {
     /// Runs every justification. Errors with the id of an open goal, or
     /// with `None` after recording a kernel error.
     pub fn finish(&mut self) -> Result<Thm, Option<u64>> {
-        match finish_node(&self.root) {
-            Ok(thm) => Ok(thm),
+        let mut trace = self.recording.then(Vec::new);
+        match finish_node(&self.root, &mut trace) {
+            Ok(thm) => {
+                self.derivation = trace.unwrap_or_default();
+                Ok(thm)
+            }
             Err(FinishError::Open(id)) => Err(Some(id)),
             Err(FinishError::Kernel(message)) => {
                 self.last_kernel_error = Some(message);

@@ -16,6 +16,14 @@ pub struct StepView {
     pub text: String,
     pub explanation: String,
     pub after: Vec<GoalView>,
+    /// The kernel rules this tactic ran, once the proof is finished:
+    /// `imp_intro`, or `and_left ×2` when a rule ran more than once.
+    pub rules: Vec<String>,
+    /// How many equational and bookkeeping kernel rules ran as well.
+    pub equational_rules: u64,
+    /// Trust that entered the proof at this step: `classical`, `sorry`,
+    /// or `axiom name`.
+    pub introduces: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -115,12 +123,20 @@ pub fn analyze(
             let after: Vec<GoalView> = step.after.iter().map(|g| result.render_goal(g)).collect();
             let before: Vec<GoalView> = step.before.iter().map(|g| result.render_goal(g)).collect();
             let explanation = explain_step(&text, &before, &after);
+            let kernel = result
+                .derivations
+                .get(name)
+                .map(|derivation| kernel_view(derivation, step.span))
+                .unwrap_or_default();
             views.push(StepView {
                 line: step.span.line,
                 end_line: step.span.end_line,
                 text,
                 explanation,
                 after,
+                rules: kernel.rules,
+                equational_rules: kernel.equational,
+                introduces: kernel.introduces,
             });
         }
         theorems.push(TheoremView {
@@ -166,6 +182,79 @@ pub fn analyze(
         assignment,
         rules,
     }
+}
+
+/// Kernel rules that only move equations and hypotheses around. They
+/// are real rules, but not the ones a logic course teaches by name, so
+/// views list them separately from the introduction and elimination
+/// rules.
+const EQUATIONAL_RULES: &[&str] = &[
+    "assume",
+    "add_hyp",
+    "refl",
+    "sym",
+    "trans",
+    "mk_comb",
+    "abs",
+    "beta",
+    "eta",
+    "eq_mp",
+    "inst",
+    "inst_type",
+];
+
+/// What the kernel did for one tactic, for display.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KernelView {
+    /// Logical rules, with repeats counted: `imp_intro`, `and_left ×2`.
+    pub rules: Vec<String>,
+    /// How many equational and bookkeeping rules ran as well.
+    pub equational: u64,
+    /// Trust that entered the proof here: `classical`, `sorry`,
+    /// `axiom name`.
+    pub introduces: Vec<String>,
+}
+
+/// The kernel's recording for the tactic at `span`.
+pub fn kernel_view(
+    derivation: &[hol_tactics::DerivationStep],
+    span: hol_syntax::Span,
+) -> KernelView {
+    let mut counts: Vec<(&'static str, u64)> = Vec::new();
+    let mut view = KernelView::default();
+    for step in derivation.iter().filter(|step| step.span == span) {
+        for (rule, times) in step.rules.iter() {
+            if EQUATIONAL_RULES.contains(&rule) {
+                view.equational += times;
+                continue;
+            }
+            match counts.iter_mut().find(|(name, _)| *name == rule) {
+                Some((_, count)) => *count += times,
+                None => counts.push((rule, times)),
+            }
+        }
+        if step.introduced.classical {
+            view.introduces.push("classical".to_string());
+        }
+        if step.introduced.sorry {
+            view.introduces.push("sorry".to_string());
+        }
+        for axiom in &step.introduced.axioms {
+            view.introduces.push(format!("axiom {axiom}"));
+        }
+    }
+    view.introduces.dedup();
+    view.rules = counts
+        .into_iter()
+        .map(|(rule, count)| {
+            if count == 1 {
+                rule.to_string()
+            } else {
+                format!("{rule} ×{count}")
+            }
+        })
+        .collect();
+    view
 }
 
 /// One sentence about what a tactic did, from the goals before and after.

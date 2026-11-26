@@ -23,7 +23,7 @@ use hol_elab::{
 };
 use hol_kernel::{sorry, Name};
 use hol_syntax::{parse_file, Command, Mode, Span, Tier};
-use hol_tactics::{prove, Goal, StepRecord};
+use hol_tactics::{prove, DerivationStep, Goal, StepRecord};
 use serde::Serialize;
 
 /// Where files come from: the real file system for the CLI, a virtual
@@ -215,6 +215,9 @@ pub struct CheckResult {
     pub env: Env,
     /// Tactic steps per root theorem, in source order.
     pub steps: BTreeMap<String, (Span, Vec<StepRecord>)>,
+    /// For each finished root theorem, what the kernel did per tactic:
+    /// the primitive rules applied and where trust tags entered.
+    pub derivations: BTreeMap<String, Vec<DerivationStep>>,
     pub root_path: Option<String>,
 }
 
@@ -326,6 +329,9 @@ pub struct Session<'f> {
     steps: BTreeMap<String, (Span, Vec<StepRecord>)>,
     /// Tactic and theorem rules broken by root theorems, in order.
     use_violations: Vec<String>,
+    /// Other violations that were also reported at a line.
+    located: Vec<String>,
+    derivations: BTreeMap<String, Vec<DerivationStep>>,
 }
 
 impl<'f> Session<'f> {
@@ -349,6 +355,8 @@ impl<'f> Session<'f> {
             diagnostics: Vec::new(),
             steps: BTreeMap::new(),
             use_violations: Vec::new(),
+            located: Vec::new(),
+            derivations: BTreeMap::new(),
         }
     }
 
@@ -442,9 +450,14 @@ impl<'f> Session<'f> {
             decls: self.decls,
             diagnostics: self.diagnostics,
             violations,
-            located_violations: self.use_violations,
+            located_violations: {
+                let mut located = self.use_violations;
+                located.extend(self.located);
+                located
+            },
             env: self.env,
             steps: self.steps,
+            derivations: self.derivations,
             root_path: path.map(str::to_string),
         }
     }
@@ -470,6 +483,72 @@ impl<'f> Session<'f> {
         }
         out.extend(self.use_violations.iter().cloned());
         out
+    }
+
+    /// When the policy refuses `sorry` or classical reasoning, says where
+    /// in the proof it entered, using the kernel's recording: the step
+    /// that applied excluded middle, or the one that cited a classical or
+    /// unfinished theorem.
+    fn locate_tags(&mut self, path: Option<&str>, theorem: &str, derivation: &[DerivationStep]) {
+        let policy = &self.opts.policy;
+        let mut found_classical = false;
+        let mut found_sorry = false;
+        let mut diags = Vec::new();
+        // A tactic's rules are spread over the entries that share its span.
+        let ran = |span: Span, rule: &str| {
+            derivation
+                .iter()
+                .any(|other| other.span == span && other.rules.count(rule) > 0)
+        };
+        for step in derivation {
+            if policy.deny_classical && step.introduced.classical {
+                found_classical = true;
+                let how = if ran(step.span, "excluded_middle") {
+                    "this step applies the law of excluded middle"
+                } else {
+                    "this step cites a theorem that was proved classically"
+                };
+                diags.push(
+                    Diagnostic::new(
+                        step.span,
+                        format!(
+                            "classical reasoning enters the proof here, and {} asks for a constructive proof",
+                            policy.source_label()
+                        ),
+                    )
+                    .note(how),
+                );
+            }
+            if policy.deny_sorry && step.introduced.sorry {
+                found_sorry = true;
+                let how = if ran(step.span, "sorry") {
+                    "this step leaves a goal unproved"
+                } else {
+                    "this step cites a theorem whose own proof is unfinished"
+                };
+                diags.push(
+                    Diagnostic::new(
+                        step.span,
+                        format!(
+                            "the proof is unfinished here, and {} asks for complete proofs",
+                            policy.source_label()
+                        ),
+                    )
+                    .note(how),
+                );
+            }
+        }
+        for diag in diags {
+            self.diagnostics
+                .push(Diag::from_diagnostic(Severity::Error, path, diag));
+        }
+        if found_classical {
+            self.located
+                .push(format!("theorem `{theorem}` uses classical reasoning"));
+        }
+        if found_sorry {
+            self.located.push(format!("theorem `{theorem}` uses sorry"));
+        }
     }
 
     /// Reports every tactic and imported theorem the script used that
@@ -741,8 +820,11 @@ impl<'f> Session<'f> {
                 });
                 self.env.note_declaration(header.name.clone());
                 if !importing {
+                    self.locate_tags(path, &name.name, &outcome.derivation);
                     self.steps
                         .insert(header.name.to_string(), (span, outcome.steps));
+                    self.derivations
+                        .insert(header.name.to_string(), outcome.derivation);
                 }
                 self.decls.push(Decl {
                     name: header.name.to_string(),

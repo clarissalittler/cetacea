@@ -438,3 +438,17 @@ pre {
 .badge.locked {
   border: 1px solid var(--line);
 }
+
+/* Kernel rules under a proof step */
+
+.step .kernel {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.85em;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.step .kernel.trust {
+  color: var(--warn, var(--muted));
+}
