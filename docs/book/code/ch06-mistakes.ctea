@@ -2,7 +2,7 @@
 -- INTENDED TO FAIL. Every theorem in this file contains a deliberate
 -- mistake discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch06-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch06 docs/book/code/ch06-mistakes.ctea
 
 mode constructive
 
@@ -20,11 +20,11 @@ theorem sets_equal_by_staring (T : Type) (A B : Set T)
   : union(A, B) = union(B, A) := by
   refl
 
--- Mistake 2: intro on a subset goal before simp has exposed the forall.
-theorem subset_too_fast (T : Type) (A : Set T) : A subset A := by
-  intro x
-  intro hx
-  exact hx
+-- Mistake 2: a subset hypothesis is a forall, and wants the element first.
+theorem subset_skips_a_step (T : Type) (A B : Set T) (a : T) : A subset B -> a in A -> a in B := by
+  intro h
+  intro ha
+  exact h ha
 
 -- Mistake 3: subset is not symmetric — and watch how the failure looks.
 theorem subset_flip (T : Type) (A B : Set T) : A subset B -> B subset A := by

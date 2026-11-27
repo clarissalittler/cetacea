@@ -312,22 +312,22 @@ longer only *making* moves, you're starting to *collect* them.
 
 ## 4.9 Common mistakes
 
-Run [`code/ch04-mistakes.ctea`](code/ch04-mistakes.ctea) — intended to
+Load [`code/ch04-mistakes.ctea`](code/ch04-mistakes.ctea) — intended to
 fail, as usual.
 
 **Mistake 1: a witness from the wrong world.** The goal wants a
-`Person`; the proof, in a fit of absent-mindedness, offers the number
-`0`:
+`Person`; the proof, in a fit of absent-mindedness, offers the dog:
 
 ```text
-error: docs/book/code/ch04-mistakes.ctea:19: theorem `wrong_witness` failed: exists witness `0` has type `Nat`, but the goal needs a `Person`
+error: docs/book/code/ch04-mistakes.ctea:21: theorem `wrong_witness` failed: witness `rex` has type `Pet`, but `Person` was expected here
+  note: h : Happy(alice)
   note: target: exists x : Person, Happy(x)
 ```
 
-Every term in Cetacea has a **type** — `alice` is a `Person`, `0` is a
-`Nat` (a natural number, star of Chapter 9) — and `exists` checks your
-witness's type against the quantifier's before even looking at the
-logic. Silly as this example is, its grown-up siblings (offering an
+Every term in Cetacea has a **type** — `alice` is a `Person`, `rex` is
+a `Pet`, because the file declared them that way — and `exists` checks
+your witness's type against the quantifier's before even looking at
+the logic. Silly as this example is, its grown-up siblings (offering an
 index where a value is needed, an element where a set is needed) are
 everyday bugs, and this error message catches them at the source.
 
@@ -337,9 +337,10 @@ everyone." The proof tries to `cases` the universal hypothesis, hoping
 to shake a single witness out of it:
 
 ```text
-error: docs/book/code/ch04-mistakes.ctea:31: theorem `everyone_has_an_admirer_so_someone_admires_everyone` failed: cases with `| intro a b` expects an existential or conjunction proof
+error: docs/book/code/ch04-mistakes.ctea:33: theorem `everyone_has_an_admirer_so_someone_admires_everyone` failed: `cases` needs a disjunction, existential, or conjunction, but this proves `forall y : A, exists x : A, R(x, y)`
+  note: h : forall y : A, exists x : A, R(x, y)
   note: target: exists x : A, forall y : A, R(x, y)
-  note: the first-order statement is false in a 2-element domain where R = {(a,b), (b,a)}. No proof can close it; check the statement itself.
+  note: the first-order statement is false in this finite world: A = {a, b} (2 elements); R : A -> A -> Prop = {(a, b), (b, a)}. Unlisted predicate tuples are false. No proof can close it; check the statement itself.
 ```
 
 `cases ... with | intro ...` opens things that *contain* something — an
@@ -352,10 +353,12 @@ to prove it, and see whether the rules cooperate.
 
 Chapter 2's caveat still applies: a *failed proof* isn't by itself a
 refutation, because maybe you just proved it badly. Here the checker
-has more evidence. The first-order note is a concrete two-person world:
-each person admires the other, so everyone has an admirer, but no one
-admires everyone. For small abstract sorts and predicates, Cetacea can
-now close this kind of case without making you build the world by hand.
+has more evidence. The last note is a concrete two-person world, `a`
+and `b`: each person admires the other and nobody admires themselves
+(that's the "unlisted tuples are false" part), so everyone has an
+admirer, but no one admires everyone. For small abstract sorts and
+predicates, Cetacea can now close this kind of case without making you
+build the world by hand.
 
 ## 4.10 Exercises
 

@@ -3,7 +3,7 @@
 -- this file never says `mode classical`, so the checker refuses the
 -- classical tactics. The chapter discusses both error messages.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch03-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch03 docs/book/code/ch03-mistakes.ctea
 
 mode constructive
 

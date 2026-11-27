@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 9: exercises.
 -- Replace each `sorry` with a real proof.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch09-exercises.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch09 docs/book/code/ch09-exercises.ctea
 
 import ../../../std/prelude.ctea
 
@@ -9,31 +9,31 @@ mode constructive
 
 -- Exercise 9.1 (warm-up). Multiplying by one. Decide first: is this
 -- computation or induction?
-theorem ex9_1 (n : Nat) : mul(1, n) = n := by
+theorem ex9_1 (n : Nat) : 1 * n = n := by
   sorry
 
 -- Exercise 9.2. Every number is at most its successor. The succ arm,
 -- after `simp`, is exactly the induction hypothesis.
-theorem ex9_2 (n : Nat) : le(n, succ(n)) := by
+theorem ex9_2 (n : Nat) : n <= succ(n) := by
   sorry
 
 -- Exercise 9.3. Adding m and then subtracting n undoes itself.
--- Induct on n; remember sub(succ(a), succ(b)) computes to sub(a, b).
-theorem ex9_3 (n m : Nat) : sub(add(n, m), n) = m := by
+-- Induct on n; remember succ(a) - succ(b) computes to a - b.
+theorem ex9_3 (n m : Nat) : (n + m) - n = m := by
   sorry
 
 -- Exercise 9.4. A number is at most itself plus anything.
-theorem ex9_4 (n m : Nat) : le(n, add(n, m)) := by
+theorem ex9_4 (n m : Nat) : n <= n + m := by
   sorry
 
 -- Exercise 9.5. No induction here: rewrite with the library's
 -- add_comm, instantiated at the right arguments --
 -- `rewrite -> add_comm {n := m; m := n}` is most of the proof.
-theorem ex9_5 (k n m : Nat) : add(k, add(n, m)) = add(k, add(m, n)) := by
+theorem ex9_5 (k n m : Nat) : k + (n + m) = k + (m + n) := by
   sorry
 
 -- Exercise 9.6 (challenge). Associativity of addition. The library
 -- has this as add_assoc -- prove it yourself by induction on n before
 -- you peek at std/nat.ctea.
-theorem ex9_6 (n m p : Nat) : add(add(n, m), p) = add(n, add(m, p)) := by
+theorem ex9_6 (n m p : Nat) : (n + m) + p = n + (m + p) := by
   sorry

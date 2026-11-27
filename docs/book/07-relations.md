@@ -128,35 +128,35 @@ they do; `eq_symm` and `eq_trans` *are* those properties, we've merely
 re-packaged them in the new vocabulary. Three passes, full marks: an
 **equivalence relation**, says Section 7.6.
 
-## 7.4 A relation that flunks: `le`
+## 7.4 A relation that flunks: `<=`
 
-Meet `le(n, m)` — "n is less than or equal to m" — a built-in relation
-on `Nat`. Like `add` in Chapter 5, `le` *computes* on concrete
-numbers: `simp` and `refl` reduce `le(0, 1)` to `True` and `le(1, 0)`
-to `False` without any help. (Its general theory lives in
-`std/nat.ctea`; today we need only `le_refl` and one fact with a
-wonderful name, `succ_not_le_zero`.)
+Meet `n <= m` — "n is less than or equal to m" — a built-in relation
+on `Nat`. Like `+` in Chapter 5, `<=` *computes* on concrete
+numbers: `simp` and `refl` reduce `0 <= 1` to `True` and `1 <= 0`
+to `False` without any help. (Its name is `le`, and its general
+theory lives in `std/nat.ctea` under that name; today we need only
+`le_refl` and one fact with a wonderful name, `succ_not_le_zero`.)
 
 Reflexivity: everything is less-than-or-equal-to itself, and the
 library already knows:
 
 ```text
-theorem le_reflexive : Reflexive(fun x y : Nat => le(x, y)) := by
+theorem le_reflexive : Reflexive(fun x y : Nat => x <= y) := by
   unfold Reflexive
   intro x
   exact le_refl
 ```
 
-Symmetry is where it gets interesting — because `le` *isn't*
+Symmetry is where it gets interesting — because `<=` *isn't*
 symmetric, and unlike the sad shrug of a failed attempt, we can prove
 the failure outright. Here is the first theorem in the book of the
 form *this relation does NOT have that property*:
 
 ```text
-theorem le_not_symmetric : not Symmetric(fun x y : Nat => le(x, y)) := by
+theorem le_not_symmetric : not Symmetric(fun x y : Nat => x <= y) := by
   intro h
   simp at h
-  have h01 : le(1, 0)
+  have h01 : 1 <= 0
   apply h 0 1
   trivial
   apply succ_not_le_zero {n := 0}
@@ -171,23 +171,23 @@ the definition inside the hypothesis, leaving `h` as the naked
 universal claim *whenever x ≤ y, also y ≤ x*.
 
 Now the trap springs, and Chapter 5's `have` gets its finest hour.
-`have h01 : le(1, 0)` names the absurd thing we're about to extract,
+`have h01 : 1 <= 0` names the absurd thing we're about to extract,
 and makes it the current goal:
 
 ```text
-h : forall x y : Nat, le(x, y) -> le(y, x)  |-  le(1, 0)
+h : forall x y : Nat, x <= y -> y <= x  |-  1 <= 0
 ```
 To prove it, `apply h 0 1` — symmetry, specialized to the pair
-`(0, 1)`, promises `le(0, 1) -> le(1, 0)` — and the premise `le(0, 1)`
+`(0, 1)`, promises `0 <= 1 -> 1 <= 0` — and the premise `0 <= 1`
 *computes to* `True`, so the goal after the `apply` is literally
 `True`, and `trivial` collects. Back in the main goal we hold
-`h01 : le(1, 0)`, i.e. `1 ≤ 0`, and `succ_not_le_zero` — *no successor
-is ≤ 0* — turns it into the `False` we owed.
+`h01 : 1 <= 0`, and `succ_not_le_zero` — *no successor is ≤ 0* —
+turns it into the `False` we owed.
 
 Two things to notice. First, the counterexample is *inside* the proof:
 the pair `(0, 1)` appears nowhere in the statement, only in our
 `apply h 0 1`. Choosing it was the creative act; everything else was
-bookkeeping. Second — transitivity: `le` *does* have it, and the
+bookkeeping. Second — transitivity: `<=` *does* have it, and the
 standard library provides it as `le_trans` in `std/nat.ctea`. But if
 you open that file you'll find its proof is a nested induction —
 Chapter 9's whole subject. For now we may *use* `le_trans` freely
@@ -239,7 +239,7 @@ subtract freely — by a lovely trick: *x and y are congruent mod m when
 each can be padded by a multiple of m to reach the same number*:
 
 ```text
-def ModEq (m : Nat) (x : Nat) (y : Nat) : Prop := exists a b : Nat, add(x, mul(m, a)) = add(y, mul(m, b))
+def ModEq (m : Nat) (x : Nat) (y : Nat) : Prop := exists a b : Nat, x + m * a = y + m * b
 ```
 
 And — this is the payoff — the library doesn't just define it, it
@@ -312,7 +312,7 @@ theorem clock_27_is_3 : ModEq(12, 27, 3) := by
 
 27 o'clock is 3 o'clock: pad 27 by zero twelves and 3 by two twelves,
 and both roads reach 27. The `refl` at the end checks
-`add(27, mul(12, 0)) = add(3, mul(12, 2))` by pure computation — the
+`27 + 12 * 0 = 3 + 12 * 2` by pure computation — the
 witnesses were the only creative input.
 
 (For the road not taken: `Divides`, also in `std/modular.ctea`, is
@@ -323,7 +323,7 @@ you certify the two properties the library already proves.)
 
 ## 7.7 Common mistakes
 
-Run [`code/ch07-mistakes.ctea`](code/ch07-mistakes.ctea) — intended to
+Load [`code/ch07-mistakes.ctea`](code/ch07-mistakes.ctea) — intended to
 fail.
 
 One formerly common mistake is gone: `intro`, `split`, `left`, `right`,
@@ -336,31 +336,31 @@ when you want to show that step.
 make an unrelated name occur in the goal:
 
 ```text
-error: docs/book/code/ch07-mistakes.ctea:17: theorem `wrong_property` failed: no occurrence of definition `Symmetric` in goal `Reflexive(fun x y : Nat => ModEq(m, x, y))`
+error: docs/book/code/ch07-mistakes.ctea:17: theorem `wrong_property` failed: no occurrence of `Symmetric` in the goal
   note: target: Reflexive(fun x y : Nat => ModEq(m, x, y))
 ```
 
-Harmless, but common once a file juggles three look-alike definitions
-— and worth showing because the message names both what you asked for
-and what's actually there. Read errors like a detective: the checker
-always tells you which world *it* is living in.
+Harmless, but common once a file juggles three look-alike definitions —
+and worth showing because the message names what you asked for and the
+note underneath shows what's actually there. Read errors like a
+detective: the checker always tells you which world *it* is living in.
 
-**Mistake 2: wishful symmetry.** The file claims `le` is symmetric and
+**Mistake 2: wishful symmetry.** The file claims `<=` is symmetric and
 plays the proof as far as it goes. After `unfold`, intros, and
-assuming `h : le(x, y)`, the goal is `le(y, x)` — and the only thing
+assuming `h : x <= y`, the goal is `y <= x` — and the only thing
 in reach is `h` itself:
 
 ```text
-error: docs/book/code/ch07-mistakes.ctea:28: theorem `le_symmetric_wish` failed: exact proof does not solve the goal: proof has type `le(x, y)`, but expected `le(y, x)`
-  note: target: le(y, x)
-  note: the open arithmetic goal does not follow from the current hypotheses: it is false when x = 0, y = 1. Reconsider the earlier proof steps.
+error: docs/book/code/ch07-mistakes.ctea:28: theorem `le_symmetric_wish` failed: proof has type `x <= y`, but expected `y <= x`
+  note: h : x <= y
+  note: target: y <= x
+  note: the open goal does not follow from the current hypotheses: it is false when x = 0, y = 1. Reconsider the earlier proof steps.
 ```
 
-(The `help:` paragraph is Chapter 2's usual `exact` advice — check
-your terminal.) Look at the failure point: the proof dies *exactly
-where the two arguments trade places* — `le(x, y)` offered, `le(y, x)`
-owed. The extra note also gives the concrete failed branch: `x = 0`
-and `y = 1` make `le(x, y)` true and `le(y, x)` false. That is
+Look at the failure point: the proof dies *exactly where the two
+arguments trade places* — `x <= y` offered, `y <= x` owed. The last
+note also gives the concrete failed branch: `x = 0` and `y = 1` make
+`x <= y` true and `y <= x` false. That is
 precisely what `le_not_symmetric` in Section 7.4 proves. Failed wish,
 then proved refutation: that pair of theorems is the complete
 etiquette for suspicion.

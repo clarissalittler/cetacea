@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 5: exercises.
 -- Replace each `sorry` with a real proof.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch05-exercises.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch05 docs/book/code/ch05-exercises.ctea
 
 import ../../../std/prelude.ctea
 
@@ -19,11 +19,11 @@ pred Reporter(Person)
 func mother : Person -> Person
 
 -- Exercise 5.1 (warm-up). Let the checker do the arithmetic.
-theorem ex5_1 : mul(3, 4) = 12 := by
+theorem ex5_1 : 3 * 4 = 12 := by
   sorry
 
 -- Exercise 5.2. Computation with a variable in the way.
-theorem ex5_2 (n : Nat) : add(n, 2) = succ(succ(n)) := by
+theorem ex5_2 (n : Nat) : n + 2 = succ(succ(n)) := by
   sorry
 
 -- Exercise 5.3. Equality is symmetric — one lemma, or one rewrite.

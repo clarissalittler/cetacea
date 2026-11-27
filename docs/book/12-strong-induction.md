@@ -61,12 +61,12 @@ theorem one_rung_short (n : Nat) : bulb(n) = 0 := by
 ```
 
 ```text
-error: docs/book/code/ch12-mistakes.ctea:25: theorem `one_rung_short` failed: exact proof does not solve the goal: proof has type `bulb(k) = 0`, but expected `bulb(pred(k)) = 0`
+error: docs/book/code/ch12-mistakes.ctea:25: theorem `one_rung_short` failed: proof has type `bulb(k) = 0`, but expected `bulb(pred(k)) = 0`
+  note: ih : bulb(k) = 0
   note: target: bulb(pred(k)) = 0
 ```
 
-(The generic `help:` paragraph is trimmed, as usual by now.) There it
-is, stated more crisply than any prose could: the hypothesis
+There it is, stated more crisply than any prose could: the hypothesis
 is about `k`, the goal is about `pred(k)`, and they are different
 rungs. Ordinary induction gave us the rung below; the wiring reaches
 two below. This isn't a tactic problem — no rearrangement of `simp`s
@@ -80,13 +80,13 @@ In `std/nat.ctea`:
 ```text
 theorem strong_induction (P : Nat -> Prop) (n : Nat)
   : P(0)
-    -> (forall k : Nat, (forall m : Nat, le(m, k) -> P(m)) -> P(succ(k)))
+    -> (forall k : Nat, (forall m : Nat, m <= k -> P(m)) -> P(succ(k)))
     -> P(n)
 ```
 
 Read the step premise slowly, because it's the whole upgrade: to prove
 `P(succ(k))`, you may assume — not just `P(k)` — but
-`forall m : Nat, le(m, k) -> P(m)`: the claim at **every** rung up to
+`forall m : Nat, m <= k -> P(m)`: the claim at **every** rung up to
 and including `k`. The entire history of the climb. Ordinary
 induction's gift was one fact; strong induction's is a *universally
 quantified* fact you can spend at any smaller number you like, as
@@ -111,8 +111,8 @@ guess a lambda for you (Section 12.5 shows the refusal). You spell it
 out, in the explicit-instantiation braces of Chapter 4:
 
 ```text
-theorem sub_self_strong (n : Nat) : sub(n, n) = 0 := by
-  apply strong_induction {P := fun m : Nat => sub(m, m) = 0; n := n}
+theorem sub_self_strong (n : Nat) : n - n = 0 := by
+  apply strong_induction {P := fun m : Nat => m - m = 0; n := n}
   refl
   intro k
   intro hk
@@ -123,25 +123,25 @@ theorem sub_self_strong (n : Nat) : sub(n, n) = 0 := by
 
 This is Chapter 9's `sub_self_demo` re-proved, as a first contact
 where the logic is familiar and only the scaffolding is new. Walk it.
-`P := fun m : Nat => sub(m, m) = 0` says which property of `m` we're
+`P := fun m : Nat => m - m = 0` says which property of `m` we're
 climbing with — the lambda is the statement with the induction
 variable held blank, exactly like Chapter 4's predicates. The `apply`
 then leaves the theorem's two premises as goals, in order:
 
-1. `|- sub(0, 0) = 0` — the base. `refl`.
-2. `|- forall k : Nat, (forall m : Nat, le(m, k) -> sub(m, m) = 0) -> sub(succ(k), succ(k)) = 0`
+1. `|- 0 - 0 = 0` — the base. `refl`.
+2. `|- forall k : Nat, (forall m : Nat, m <= k -> m - m = 0) -> succ(k) - succ(k) = 0`
    — the step, as one big quantified formula.
 
 The step goal is just Chapter 4 material: `intro k`, then `intro hk`
 to assume the history, leaving
 
 ```text
-k : Nat, hk : forall m : Nat, le(m, k) -> sub(m, m) = 0  |-  sub(succ(k), succ(k)) = 0
+k : Nat, hk : forall m : Nat, m <= k -> m - m = 0  |-  succ(k) - succ(k) = 0
 ```
 
-`simp` computes the goal down to `sub(k, k) = 0`. Now spend the
+`simp` computes the goal down to `k - k = 0`. Now spend the
 history: `apply hk` matches its conclusion against the goal
-(instantiating `m := k`) and leaves the toll, `|- le(k, k)`, which
+(instantiating `m := k`) and leaves the toll, `|- k <= k`, which
 the library's `le_refl` pays. That last exchange is worth a beat:
 strong induction made us *prove our target is low enough on the
 ladder* before handing over the fact. At `m = k` — the old induction
@@ -154,7 +154,7 @@ Two tolls need paying in the bulb proof, so first, two little order
 lemmas — ordinary Chapter 9 inductions; neither is in the library:
 
 ```text
-theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
+theorem le_n_succ_n (n : Nat) : n <= succ(n) := by
   induction n with
   | zero =>
       simp
@@ -163,7 +163,7 @@ theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
       simp
       exact ih
 
-theorem pred_le (n : Nat) : le(pred(n), n) := by
+theorem pred_le (n : Nat) : pred(n) <= n := by
   induction n with
   | zero =>
       simp
@@ -174,7 +174,7 @@ theorem pred_le (n : Nat) : le(pred(n), n) := by
 ```
 
 (The second's `succ` arm is sneaky-simple: `simp` computes
-`pred(succ(k))` to `k`, leaving `le(k, succ(k))` — the previous lemma
+`pred(succ(k))` to `k`, leaving `k <= succ(k)` — the previous lemma
 at `k`, no `ih` needed.)
 
 Now the theorem the chapter came for:
@@ -195,20 +195,20 @@ at the end. After `intro k`, `intro hk`, and the rewrite along the
 wiring equation, the state is
 
 ```text
-k : Nat, hk : forall m : Nat, le(m, k) -> bulb(m) = 0  |-  bulb(pred(k)) = 0
+k : Nat, hk : forall m : Nat, m <= k -> bulb(m) = 0  |-  bulb(pred(k)) = 0
 ```
 
 — precisely the goal that stumped ordinary induction in Section 12.2.
 But `hk` is not one rung; it's the whole history. `apply hk`
 instantiates it at `m := pred(k)` and asks only that we prove the
-toll, `|- le(pred(k), k)` — and that's `pred_le`. Done. Compare the
+toll, `|- pred(k) <= k` — and that's `pred_le`. Done. Compare the
 two proofs line by line: where `one_rung_short` had `exact ih` and
 died, `all_bulbs_off` has `apply hk; exact pred_le` and lives. Strong
 induction is exactly that trade — every use of the hypothesis now
-costs a small `le` proof, and in exchange you may reach *any* rung
+costs a small `<=` proof, and in exchange you may reach *any* rung
 below.
 
-Run the examples file and read the verdicts, Chapter 10 eyes on:
+Load the examples file and read the verdicts, Chapter 10 eyes on:
 
 ```text
 accepted theorem sub_self_strong (constructive)
@@ -230,23 +230,26 @@ The mistakes file's first entry was dissected in Section 12.2. The
 second is the scaffolding error everyone makes once:
 
 **Forgetting to say what `P` is.** A bare `apply strong_induction`
-feels like it should work — the goal is right there:
+feels like it should work — the goal is right there. And the checker
+doesn't object to the `apply`. The trouble arrives one line later, at
+what should be the easy base case:
 
 ```text
-error: docs/book/code/ch12-mistakes.ctea:31: theorem `which_predicate` failed: cannot use theorem `strong_induction` here: its conclusion `P(n)` does not match goal `bulb(n) = 0`
+error: docs/book/code/ch12-mistakes.ctea:32: theorem `which_predicate` failed: proof has type `bulb(0) = 0`, but expected `bulb(n) = 0`
   note: target: bulb(n) = 0
-  help: Provide the predicate parameter
-    Theorem `strong_induction` has predicate parameter `P`, and predicate parameters are not inferred from the goal. Spell `P` out with a lambda.
-    try:
-      apply strong_induction {P := fun m : Nat => ...}
 ```
 
-The checker must match the conclusion `P(n)` against `bulb(n) = 0`,
-which means *inventing* the lambda `fun m : Nat => bulb(m) = 0` — and
-inferring predicates is a genuinely harder problem than inferring
-terms, one Cetacea deliberately doesn't attempt. (Which `P` did you
-mean? `fun m => bulb(m) = 0`? `fun m => bulb(n) = 0`, constant in
-`m`? Both match.) When a theorem parameter is a predicate, write the
+The base case was supposed to be `bulb(0) = 0`, and we brought exactly
+that. Why is the checker asking for `bulb(n) = 0` — the very thing we
+set out to prove? Because to use the theorem it had to match the
+conclusion `P(n)` against `bulb(n) = 0`, which means *inventing* a
+predicate, and there are two candidates. `fun m => bulb(m) = 0`, the
+one we meant. And `fun m => bulb(n) = 0`, which ignores `m` entirely.
+Both match. It took the second — and with a `P` that ignores its
+argument, "prove `P(0)`" is just "prove the theorem," and the
+induction has quietly evaporated. Inferring predicates is a genuinely
+harder problem than inferring terms, and a guess is the best any
+checker can do. When a theorem parameter is a predicate, write the
 braces. The lambda you write is the induction; choosing it *is* the
 proof decision.
 
@@ -257,13 +260,13 @@ order lemmas are provided at the top; the recurrences are declared
 with `func` and `axiom` like the chapter's bulbs — watch your
 `axioms:` receipts.
 
-- **Exercise 12.1** `le(0, mul(n, n))` — scaffolding practice: both
+- **Exercise 12.1** `0 <= n * n` — scaffolding practice: both
   goals after the `apply` close with `simp` then `trivial`. Get the
   lambda and the goal order right and it's four short lines.
 - **Exercise 12.2** an `echo` that copies **one** step back
   (`echo(succ(k)) = echo(k)`; `echo(0) = 0`): prove `echo(n) = 0`.
   Strong induction covers ordinary induction as the special case
-  "spend the history at `m := k`" — what proof of `le(k, k)` does the
+  "spend the history at `m := k`" — what proof of `k <= k` does the
   library hand you?
 - **Exercise 12.3 (challenge)** a `siren` wired like the bulbs but
   with `siren(0) = 1`: prove `siren(n) = 1`. Model it on
@@ -282,18 +285,16 @@ strong. Three parting maps.
 
 **What Cetacea deliberately left out.** Cetacea is a teaching
 instrument, kept small enough to learn completely — you have now, in
-fact, seen essentially all of it. The honest inventory of edges is in
-[`docs/cs250/LIMITATIONS.md`](../cs250/LIMITATIONS.md); the three you
-will bump into first: data types are *monomorphic* (there is a
-`List` of `Nat`s, but no generic `List A` — a list of anything else
-is a separate declaration); there is no *cardinality* (you proved
-facts about sets in Chapter 6, but "how many elements" and the
-counting arguments built on it aren't expressible); and arithmetic
+fact, seen most of it. The edges you will bump into first: arithmetic
 stops short of *division* (no `div`, no `mod` — Chapter 10's `ModEq`
 worked around exactly this, and its one axiom marks the spot where
-the workaround ran out of library). None of these are conceptual
-walls. They are engineering left undone on purpose, so the kernel
-stays readable.
+the workaround ran out of library); the only numbers are the naturals
+(no negatives, no fractions); and *counting* is the newest and
+thinnest part of the library — it can say that a finite set has
+exactly `n` elements, and it proves the pigeonhole principle from
+that, but most of a combinatorics course is still ahead of it. None
+of these are conceptual walls. They are engineering not yet done, or
+left undone on purpose so the kernel stays readable.
 
 **The same ideas, at full scale.** Everything you learned transfers
 to the industrial-strength proof assistants — **Lean**, **Rocq**
@@ -302,8 +303,8 @@ miniature of them. `theorem ... := by` with `intro`, `exact`,
 `apply`, `cases`, `induction` is recognizably Lean; Rocq's tactic
 names differ in spelling, not spirit; Agda drops tactics and has you
 write the proof term directly. `data` and `defrec` are the training
-wheels for their inductive types and recursive definitions —
-polymorphic, this time. The `axioms:` receipt is Lean's
+wheels for their inductive types and recursive definitions. The
+`axioms:` receipt is Lean's
 `#print axioms`. Where `std/` has a few dozen lemmas, Lean's mathlib
 has hundreds of thousands, with a community formalizing research
 mathematics in it. If this book was fun, that's the door. It will

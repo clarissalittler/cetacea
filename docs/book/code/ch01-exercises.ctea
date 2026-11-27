@@ -3,7 +3,7 @@
 -- (each unfinished theorem is reported as "incomplete: uses sorry"),
 -- and your job is to make the "incomplete" flags disappear.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch01-exercises.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch01 docs/book/code/ch01-exercises.ctea
 
 import ../../../std/prelude.ctea
 

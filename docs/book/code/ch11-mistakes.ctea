@@ -2,7 +2,7 @@
 -- INTENDED TO FAIL. Each theorem contains a deliberate mistake
 -- discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch11-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch11 docs/book/code/ch11-mistakes.ctea
 
 import ../../../std/prelude.ctea
 
@@ -35,12 +35,12 @@ data Tree
 
 defrec size (t : Tree) : Nat
 | leaf => 0
-| node l v r recl recr => succ(add(recl, recr))
+| node l v r recl recr => succ(recl + recr)
 
 -- Mistake 3: one induction hypothesis for a two-recursive-argument
 -- constructor. node recurses on both subtrees, so its arm needs five
 -- binders: l, v, r, then ihl and ihr.
-theorem one_ih_for_node (t : Tree) : le(0, size(t)) := by
+theorem one_ih_for_node (t : Tree) : 0 <= size(t) := by
   induction t with
   | leaf =>
       simp

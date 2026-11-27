@@ -3,7 +3,7 @@
 -- Cetacea rejects all three; the chapter walks through the error
 -- messages, including the countermodel notes.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch02-fallacies.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch02 docs/book/code/ch02-fallacies.ctea
 
 mode classical
 

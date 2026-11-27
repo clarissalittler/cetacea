@@ -2,7 +2,7 @@
 -- INTENDED TO FAIL. Every theorem in this file contains a deliberate
 -- mistake discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch07-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch07 docs/book/code/ch07-mistakes.ctea
 
 import ../../../std/prelude.ctea
 
@@ -20,7 +20,7 @@ theorem wrong_property (m : Nat) : Reflexive(fun x y : Nat => ModEq(m, x, y)) :=
 
 -- Mistake 2: wishful thinking — le is not symmetric, and the proof
 -- runs aground exactly where the two sides trade places.
-theorem le_symmetric_wish : Symmetric(fun x y : Nat => le(x, y)) := by
+theorem le_symmetric_wish : Symmetric(fun x y : Nat => x <= y) := by
   unfold Symmetric
   intro x
   intro y

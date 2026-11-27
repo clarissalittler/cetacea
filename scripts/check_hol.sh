@@ -41,6 +41,10 @@ tier_flags() {
 
 mapfile -t files < <(find lib examples docs/cs250/code docs/book/code -type f -name '*.ctea' | sort)
 
+# Everything the checker prints for the book's companion files, so the
+# output quoted in the chapters can be held to it.
+book_output=""
+
 status=0
 checked=0
 skipped=0
@@ -57,6 +61,9 @@ for file in "${files[@]}"; do
   # shellcheck disable=SC2086
   output="$("$checker" $flags "$file" 2>&1)"
   code=$?
+  if [[ "$file" == docs/book/code/* ]]; then
+    book_output+="$output"$'\n'
+  fi
   if is_negative_file "$file"; then
     if [[ $code -eq 0 ]]; then
       printf 'error: %s passed, but is expected to fail\n' "$file" >&2
@@ -69,7 +76,10 @@ for file in "${files[@]}"; do
       sed -nE 's/^[[:space:]]*theorem[[:space:]]+([A-Za-z_][A-Za-z0-9_.]*).*/\1/p' "$file"
     )
     for theorem in "${negative_theorems[@]}"; do
-      if printf '%s' "$json_output" | grep -q "\"name\":\"$theorem\",\"kind\":\"theorem\",\"status\":\"accepted\""; then
+      # One record per line; fields come in no promised order.
+      if printf '%s' "$json_output" | sed 's/},{/}\n{/g' \
+        | grep -F "\"name\":\"$theorem\"" | grep -F '"is_imported":false' \
+        | grep -qE '"status":"(accepted|incomplete)"'; then
         printf 'error: theorem %s in %s passed, but every theorem in a negative file must fail\n' "$theorem" "$file" >&2
         status=1
       fi
@@ -88,5 +98,18 @@ for file in "${files[@]}"; do
   fi
 done
 
-printf 'checked %s files, skipped %s for later milestones\n' "$checked" "$skipped"
+# The book quotes the checker: error headlines, the notes under them,
+# and status lines. Each quoted line must be something the checker
+# prints for a companion file today, or the chapter has gone stale.
+quoted=0
+while IFS= read -r expected; do
+  [[ -n "$expected" ]] || continue
+  quoted=$((quoted + 1))
+  if ! grep -qxF -- "$expected" <<<"$book_output"; then
+    printf 'error: the book quotes output the checker no longer prints: %s\n' "$expected" >&2
+    status=1
+  fi
+done < <(sed -nE '/^(error: |  note: |accepted theorem |incomplete theorem |failed theorem |trusted axiom )/p' docs/book/[0-9]*.md | sort -u)
+
+printf 'checked %s files and %s quoted lines of book output, skipped %s for later milestones\n' "$checked" "$quoted" "$skipped"
 exit "$status"

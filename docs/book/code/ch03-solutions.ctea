@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 3: exercise solutions.
 -- Spoilers! Try docs/book/code/ch03-exercises.ctea yourself first.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch03-solutions.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch03 docs/book/code/ch03-solutions.ctea
 
 import ../../../std/prelude.ctea
 

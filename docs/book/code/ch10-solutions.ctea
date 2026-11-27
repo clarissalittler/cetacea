@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 10: exercise solutions.
 -- Spoilers! Try docs/book/code/ch10-exercises.ctea yourself first.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch10-solutions.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch10 docs/book/code/ch10-solutions.ctea
 
 import ../../../std/prelude.ctea
 
@@ -17,7 +17,7 @@ defrec triple (n : Nat) : Nat
 
 defrec sumto (n : Nat) : Nat
 | zero => 0
-| succ k rec => add(succ(k), rec)
+| succ k rec => succ(k) + rec
 
 defrec replicate (n : Nat) (x : Nat) : List Nat
 | zero => nil
@@ -32,7 +32,7 @@ theorem ex10_2 (n : Nat) : triple(succ(n)) = succ(succ(succ(triple(n)))) := by
   refl
 
 -- Exercise 10.3
-theorem ex10_3 (n : Nat) : triple(n) = add(n, double(n)) := by
+theorem ex10_3 (n : Nat) : triple(n) = n + double(n) := by
   induction n with
   | zero =>
       refl

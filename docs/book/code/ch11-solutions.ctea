@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 11: exercise solutions.
 -- Spoilers! Try docs/book/code/ch11-exercises.ctea yourself first.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch11-solutions.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch11 docs/book/code/ch11-solutions.ctea
 
 import ../../../std/prelude.ctea
 
@@ -9,7 +9,7 @@ mode constructive
 
 defrec sum (l : List Nat) : Nat
 | nil => 0
-| cons h t rec => add(h, rec)
+| cons h t rec => h + rec
 
 data Tree
 | leaf
@@ -17,7 +17,7 @@ data Tree
 
 defrec size (t : Tree) : Nat
 | leaf => 0
-| node l v r recl recr => succ(add(recl, recr))
+| node l v r recl recr => succ(recl + recr)
 
 defrec mirror (t : Tree) : Tree
 | leaf => leaf
@@ -25,7 +25,7 @@ defrec mirror (t : Tree) : Tree
 
 defrec leaves (t : Tree) : Nat
 | leaf => 1
-| node l v r recl recr => add(recl, recr)
+| node l v r recl recr => recl + recr
 
 -- Exercise 11.1
 theorem ex11_1 : size(node(node(leaf, 1, leaf), 2, leaf)) = 2 := by
@@ -44,7 +44,7 @@ theorem ex11_2 (l1 : List Nat) (l2 : List Nat) (l3 : List Nat)
 
 -- Exercise 11.3
 theorem ex11_3 (l1 : List Nat) (l2 : List Nat)
-  : sum(append(l1, l2)) = add(sum(l1), sum(l2)) := by
+  : sum(append(l1, l2)) = sum(l1) + sum(l2) := by
   induction l1 with
   | nil =>
       refl

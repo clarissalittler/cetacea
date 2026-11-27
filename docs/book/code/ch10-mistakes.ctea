@@ -2,7 +2,7 @@
 -- INTENDED TO FAIL. Each declaration or theorem contains a deliberate
 -- mistake discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch10-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch10 docs/book/code/ch10-mistakes.ctea
 
 import ../../../std/prelude.ctea
 
@@ -15,11 +15,11 @@ defrec length (n : Nat) : Nat
 | succ k rec => succ(rec)
 
 -- Mistake 2: wrong binder count in a defrec arm. cons has two
--- constructor arguments (head, tail) and one recursive argument (the
--- tail), so its arm needs three names -- here `t` is missing.
+-- arguments (head, tail) and one recursive argument (the tail), so
+-- three names -- here `t` is missing, and `rec` lands on the tail.
 defrec total (l : List Nat) : Nat
 | nil => 0
-| cons h rec => add(h, rec)
+| cons h rec => h + rec
 
 -- Mistake 3: expecting refl to prove something that needs induction.
 -- append recurses on its FIRST argument, so append(l, nil) is stuck:

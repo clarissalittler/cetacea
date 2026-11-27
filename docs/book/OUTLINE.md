@@ -87,7 +87,7 @@ version of the "= ... = ..." calculations students already do.
 **Cetacea features:** `=`, `refl`, `rewrite <-` / `rewrite ->` /
 `rewrite all <-`, `simp [lemma]`, `simp at h`, `std/eq.ctea`
 (`eq_symm`, `eq_trans`, `congr_pred`, substitution lemmas), Nat
-computation (`add`, `mul` simplification).
+computation (`+`, `*` simplification).
 
 ## Chapter 6 — Sets: Collections You Can Reason About
 
@@ -103,8 +103,8 @@ become tactic scripts with the same skeleton every time.
 
 **Cetacea features:** `Set T`, set term syntax (`union`, `inter`,
 `diff`, `compl`, `{x, y, z}`, `{ x : T | P(x) }`), `simp` membership
-expansion, the `set_ext` axiom, `std/set.ctea` lemmas, `def` for naming
-sets.
+expansion, the built-in `set_ext` principle, `std/set.ctea` lemmas,
+`def` for naming sets.
 
 ## Chapter 7 — Relations: Structure Between Things
 
@@ -113,7 +113,7 @@ sets.
 Binary predicates as relations, and the three properties that organize
 them: reflexivity, symmetry, transitivity. The chapter uses `def` with
 predicate parameters to state the properties once and instantiate them
-many times, classifies familiar relations (equality, `le`, "knows"),
+many times, classifies familiar relations (equality, `<=`, "knows"),
 and builds toward equivalence relations and partial orders as bundles
 of properties.
 
@@ -149,9 +149,8 @@ first proofs in the book where the statement is obvious and the proof
 is genuinely work.
 
 **Cetacea features:** `Nat`, `induction ... with | zero | succ k ih`,
-`simp` for the `add`/`mul` equations, `rewrite <- ih`, `std/nat.ctea`,
-the "induction binder would shadow" and hypothesis-dependence
-restrictions.
+`simp` for the `+`/`*` equations, `rewrite <- ih`, `std/nat.ctea`,
+the fresh-name and hypothesis-dependence restrictions.
 
 ## Chapter 10 — Recursion and Data: Building Your Own Worlds
 
@@ -162,12 +161,14 @@ introduces `defrec` over `Nat` (doubling, summing), then `data` for
 user-defined types like lists and trees, and shows that `refl` can
 prove concrete computations — evaluating a program and checking a
 proof become the same activity. Binary operations such as list append
-are defined directly with `defrec`'s fixed extra parameters; the
+are defined directly with `defrec`'s fixed extra parameters, with
+`on` to recurse on an argument other than the first; the
 honest discussion of what taking equations on trust means uses the one
 real axiom in `std/modular.ctea` and the checker's `axioms:` reporting.
 
 **Cetacea features:** `defrec` over `Nat` and over `data` types,
-binary `defrec` with fixed parameters, `data` declarations,
+binary `defrec` with fixed parameters and `on`, both spellings of a
+`defrec` arm, `data` declarations, the polymorphic `List A`,
 `refl`/`simp` computation, `std/list.ctea`, axiom tracking in
 `accepted` lines.
 
@@ -195,8 +196,7 @@ Sometimes the previous case isn't enough and you need *all* smaller
 cases — strong induction, provided by the library theorem
 `strong_induction` and applied with an explicit predicate lambda. After
 working an example, the chapter closes the course: what Cetacea
-deliberately leaves out (and where `docs/cs250/LIMITATIONS.md` says
-so), how the ideas here map onto full-scale assistants like Lean, Rocq,
+leaves out, how the ideas here map onto full-scale assistants like Lean, Rocq,
 and Agda, and why "the proof is the program" is the idea to carry
 forward.
 
