@@ -90,7 +90,8 @@ async function loadFromFragment() {
   if (params.has("section")) {
     // A shared link pins the section it was written under.
     const id = params.get("section");
-    if (COURSE.sections.some((section) => section.id === id)) sectionSelect.value = id;
+    // An empty one asks for no section rules at all.
+    if (id === "" || COURSE.sections.some((section) => section.id === id)) sectionSelect.value = id;
   }
   if (params.has("assignment")) {
     try {

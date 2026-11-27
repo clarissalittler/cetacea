@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cetacea: a tutorial</title>
+    <link rel="stylesheet" href="./tutorial.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">C</span>
+        <span>Cetacea</span>
+        <span class="brand-sub">tutorial</span>
+      </div>
+      <a class="button" href="./index.html">Open the editor</a>
+    </header>
+
+    <div class="page">
+      <nav class="toc" aria-label="On this page">
+        <h2>On this page</h2>
+        <ol>
+          <li><a href="#what">What this is</a></li>
+          <li><a href="#screen">The screen</a></li>
+          <li><a href="#first-proof">Your first proof</a></li>
+          <li><a href="#goals">Living in the Goals panel</a></li>
+          <li><a href="#errors">When the checker says no</a></li>
+          <li><a href="#sorry">Unfinished business: <code>sorry</code></a></li>
+          <li><a href="#stuck">Getting unstuck</a></li>
+          <li><a href="#moves">The moves, on one page</a></li>
+          <li><a href="#library">Using what's already proved</a></li>
+          <li><a href="#beyond">Numbers, induction, and <code>decide</code></a></li>
+          <li><a href="#menus">The menus</a></li>
+          <li><a href="#small-print">Small things that trip people up</a></li>
+          <li><a href="#next">Where to go next</a></li>
+        </ol>
+      </nav>
+
+      <article>
+        <div class="hero">
+          <h1>Cetacea</h1>
+          <p class="lede">A proof checker for people who are learning to prove things.</p>
+          <div class="hero-actions">
+            <a class="button big" href="./index.html">Open the editor</a>
+          </div>
+        </div>
+
+        <h2 id="what">What this is</h2>
+        <p>
+          Cetacea is a proof checker. You write a proof one step per line, and it reads along behind you and
+          tells you, at every step, what you have, what you still owe, and whether the step you just took was
+          legal. When it says <em>accepted</em>, the proof is right. Not "probably right," not "the grader didn't
+          notice" — right.
+        </p>
+        <p>
+          It runs entirely in your browser. There is nothing to install and no account to make, and your proofs
+          never leave your computer.
+        </p>
+        <p>
+          This page is a tour of the <em>tool</em>: where things are on the screen, how to write a proof, how to
+          read the checker when it says no, and what all the menus are for. It is not a logic course. That's the
+          job of the book, <a href="https://github.com/clarissalittler/cetacea/tree/main/docs/book#readme"><em>Proofs,
+          Checked</em></a>, which takes the slow, friendly path through the mathematics and uses this tool the
+          whole way. Read this first, though, and the book will go more smoothly.
+        </p>
+        <p>
+          The whole page takes about twenty minutes, and it goes best with the editor open in another tab. Every
+          complete example below has an <strong>Open in the editor</strong> link that does exactly that.
+        </p>
+
+        <h2 id="screen">The screen</h2>
+        <p>Here is the editor, drawn as a map:</p>
+
+        <div class="screen" role="img" aria-label="Layout of the editor: a toolbar on top, the editor on the left, and panels on the right">
+          <div class="screen-top">
+            <span>Load example…</span><span>Open a book file…</span><span>Logic</span><span>Section</span>
+            <span class="go">Check</span><span>Suggest a tactic</span><span>Share</span><span>Save</span>
+          </div>
+          <div class="screen-editor">theorem and_swap (P Q : Prop) : …
+  intro h
+  split
+  exact h.right
+  exact h.left</div>
+          <div class="screen-side">
+            <span class="status">1 accepted · logic fol, mode constructive</span>
+            <span>Goals</span><span>Diagnostics</span><span>Suggested tactics</span>
+            <span>Proof explanation</span><span>Theorem library</span><span>Tactic reference</span>
+          </div>
+        </div>
+
+        <p>
+          You type on the left. Everything on the right is the checker talking back, and it talks back
+          constantly: a moment after you stop typing, it has re-checked the whole file. (The
+          <strong>Check</strong> button is there for when you want to be sure, but you will rarely need it.)
+        </p>
+        <ul>
+          <li>The <strong>status line</strong> at the top right is the verdict on the whole file: how many theorems
+            are accepted, how many are incomplete, how many failed.</li>
+          <li><strong>Goals</strong> shows where you are in the proof your cursor is in. This is the panel you will
+            look at most.</li>
+          <li><strong>Diagnostics</strong> is where errors appear. Click one and the cursor jumps to the line.</li>
+          <li><strong>Suggested tactics</strong>, <strong>Proof explanation</strong>, <strong>Theorem
+            library</strong> and <strong>Tactic reference</strong> are help of various kinds. We'll meet each
+            one below.</li>
+        </ul>
+
+        <h2 id="first-proof">Your first proof</h2>
+        <p>
+          Let's prove something small: if you know <em>P and Q</em>, then you know <em>Q and P</em>. Here is the
+          whole thing.
+        </p>
+
+        <div class="sample">
+          <pre data-name="first" data-expect="accepted">theorem and_swap (P Q : Prop) : P /\ Q -&gt; Q /\ P := by
+  intro h
+  split
+  exact h.right
+  exact h.left
+</pre>
+        </div>
+
+        <p>The first line is the claim, and it has four parts:</p>
+        <ul>
+          <li><code>theorem and_swap</code> gives the theorem a name. The name is yours to choose.</li>
+          <li><code>(P Q : Prop)</code> says what the theorem is about: two propositions, <code>P</code> and
+            <code>Q</code>. They could be anything — "it is raining," "the bus is late" — and the proof will work
+            for all of them.</li>
+          <li><code>P /\ Q -&gt; Q /\ P</code> is the statement being proved.</li>
+          <li><code>:= by</code> says "and here is the proof."</li>
+        </ul>
+        <p>
+          Everything after that, indented, is the proof: a list of <strong>tactics</strong>, one per line. A
+          tactic is a single move — "assume the premise," "prove the two halves separately" — and the checker
+          carries out each one and keeps track of what's left.
+        </p>
+        <p>The symbols are spelled so that you can type them:</p>
+
+        <table>
+          <thead>
+            <tr><th>You mean</th><th>You type</th><th>Also accepted</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>P and Q</td><td><code>P /\ Q</code></td><td><code>P ∧ Q</code></td></tr>
+            <tr><td>P or Q</td><td><code>P \/ Q</code></td><td><code>P ∨ Q</code></td></tr>
+            <tr><td>not P</td><td><code>not P</code></td><td><code>¬P</code></td></tr>
+            <tr><td>if P then Q</td><td><code>P -&gt; Q</code></td><td><code>P → Q</code></td></tr>
+            <tr><td>P if and only if Q</td><td><code>P &lt;-&gt; Q</code></td><td><code>P ↔ Q</code></td></tr>
+            <tr><td>for every x</td><td><code>forall x : T, …</code></td><td></td></tr>
+            <tr><td>for some x</td><td><code>exists x : T, …</code></td><td></td></tr>
+          </tbody>
+        </table>
+
+        <p>
+          Now watch the proof happen. At every moment the checker holds a <strong>goal</strong>: the things you
+          have (your <em>hypotheses</em>, each with a name) above a dashed line, and the thing you still have to
+          prove (the <em>target</em>) below it, after a <code>⊢</code>. Each tactic changes the goal. Here is
+          the goal after each line:
+        </p>
+
+        <div class="steps">
+          <div class="step">
+            <code>theorem and_swap …</code>
+            <div><div class="goal"><div class="target">⊢ P /\ Q -&gt; Q /\ P</div></div></div>
+          </div>
+          <div class="step">
+            <code>  intro h</code>
+            <div><div class="goal"><div class="hyp"><b>h</b> : P /\ Q</div><div class="target">⊢ Q /\ P</div></div></div>
+          </div>
+          <div class="step">
+            <code>  split</code>
+            <div>
+              <div class="goal"><div class="hyp"><b>h</b> : P /\ Q</div><div class="target">[1] ⊢ Q</div></div>
+              <div class="goal"><div class="hyp"><b>h</b> : P /\ Q</div><div class="target">[2] ⊢ P</div></div>
+            </div>
+          </div>
+          <div class="step">
+            <code>  exact h.right</code>
+            <div><div class="goal"><div class="hyp"><b>h</b> : P /\ Q</div><div class="target">⊢ P</div></div></div>
+          </div>
+          <div class="step">
+            <code>  exact h.left</code>
+            <div><div class="goal done">No goals remain.</div></div>
+          </div>
+        </div>
+
+        <p>In words:</p>
+        <ol>
+          <li>You start with nothing in hand, owing the whole statement.</li>
+          <li><code>intro h</code> handles the <code>-&gt;</code>. To prove "if A then B," you assume A and prove
+            B, so the premise moves above the line and gets the name you gave it, <code>h</code>.</li>
+          <li><code>split</code> handles the <code>/\</code> in the target. To prove "Q and P" you prove each
+            half, so one goal becomes two.</li>
+          <li><code>exact h.right</code> closes the first goal. <code>h</code> is a proof of
+            <code>P /\ Q</code>, so <code>h.right</code> is a proof of <code>Q</code>, which is
+            <em>exactly</em> what was asked for.</li>
+          <li><code>exact h.left</code> closes the second the same way, and there is nothing left to prove.</li>
+        </ol>
+        <p>
+          The status line now reads <span class="statusline">1 accepted · logic fol, mode constructive</span>.
+          That's it; that's a checked proof.
+        </p>
+
+        <h2 id="goals">Living in the Goals panel</h2>
+        <p>
+          You do not have to keep that table of goals in your head, because the Goals panel <em>is</em> that
+          table. <strong>Put your cursor on any line of a proof, and the panel shows the goal after that
+          line.</strong> Put it on the <code>theorem</code> line and you see where you started.
+        </p>
+        <p>
+          Try it now: open the proof above, click on the <code>split</code> line, and then move down one line at
+          a time with the arrow keys. You'll see two goals become one and then none.
+        </p>
+        <p>
+          This is how proofs actually get written. Nobody types five tactics and then looks up. You type one,
+          glance right, see what you owe now, and decide on the next. If you ever feel lost, the question to ask
+          is always the same: <em>what does the Goals panel say?</em>
+        </p>
+        <div class="aside">
+          <p>
+            When there are several goals, tactics work on the first one. You finish it, and the next goal moves
+            up to take its place.
+          </p>
+        </div>
+
+        <h2 id="errors">When the checker says no</h2>
+        <p>
+          It will say no a lot. That's normal, and it's the point: a wrong step is caught the moment you make
+          it, on the line where you made it. Here is the same proof with the last two lines swapped.
+        </p>
+
+        <div class="sample">
+          <pre data-name="swapped" data-expect="failed">theorem and_swap (P Q : Prop) : P /\ Q -&gt; Q /\ P := by
+  intro h
+  split
+  exact h.left
+  exact h.right
+</pre>
+        </div>
+
+        <p>Line 4 turns red, and the Diagnostics panel says:</p>
+
+        <div class="diag" data-of="swapped" data-line="4">
+          <div class="where">error · line 4</div>
+          <div data-from="swapped">theorem `and_swap` failed: proof has type `P`, but expected `Q`</div>
+          <ul>
+            <li data-from="swapped">h : P /\ Q</li>
+            <li data-from="swapped">target: Q</li>
+          </ul>
+        </div>
+
+        <p>
+          Read it slowly, because every error has this shape. The first line is what went wrong: you handed
+          over a proof of <code>P</code> (that's what <code>h.left</code> is), and what was wanted was a proof
+          of <code>Q</code>. Underneath is the goal at the moment it went wrong: what you had, and what the
+          target was. Nearly always, the fix is sitting in those lines.
+        </p>
+
+        <h3>The proof that stops early</h3>
+        <p>If you delete the last line instead, every step you took is fine. There just aren't enough of them:</p>
+
+        <div class="sample">
+          <pre data-name="short" data-expect="failed">theorem and_swap (P Q : Prop) : P /\ Q -&gt; Q /\ P := by
+  intro h
+  split
+  exact h.right
+</pre>
+        </div>
+
+        <div class="diag" data-of="short" data-line="4">
+          <div class="where">error · line 4</div>
+          <div data-from="short">theorem `and_swap` failed: the proof is incomplete: 1 goal remains</div>
+          <ul>
+            <li data-from="short">h : P /\ Q</li>
+            <li data-from="short">target: P</li>
+          </ul>
+        </div>
+
+        <p>The checker tells you which goal is still open, which is to say, what to do next.</p>
+
+        <h3>The goal that can't be proved</h3>
+        <p>
+          Sometimes the trouble isn't the line with the error. It's an earlier choice that painted you into a
+          corner. Here someone has "or" in hand and tries to commit to one side too soon:
+        </p>
+
+        <div class="sample">
+          <pre data-name="corner" data-expect="failed">theorem or_swap (P Q : Prop) : P \/ Q -&gt; Q \/ P := by
+  intro h
+  left
+  exact h
+</pre>
+        </div>
+
+        <div class="diag" data-of="corner" data-line="4">
+          <div class="where">error · line 4</div>
+          <div data-from="corner">theorem `or_swap` failed: proof has type `P \/ Q`, but expected `Q`</div>
+          <ul>
+            <li data-from="corner">h : P \/ Q</li>
+            <li data-from="corner">target: Q</li>
+            <li data-from="corner">the open goal does not follow from the current hypotheses: it is false when P = true, Q = false. Reconsider the earlier proof steps.</li>
+          </ul>
+        </div>
+
+        <p>
+          That last note is worth knowing about. The checker has noticed that the goal you're stuck on
+          <em>can't</em> be proved from what you have, and it gives you a concrete situation where it fails.
+          No amount of cleverness on line 4 will help; the mistake was <code>left</code> on line 3. (The right
+          proof looks at <code>h</code> first. It's in the <a href="#moves">table of moves</a> below.)
+        </p>
+
+        <h3>Typos</h3>
+        <p>
+          And sometimes you just mistyped. Write <code>splt</code> and the checker says
+          <span data-from="typo">unknown tactic `splt`; did you mean `split`?</span> It does the same for
+          misspelled theorem names.
+        </p>
+
+        <div class="sample" hidden>
+          <pre data-name="typo" data-expect="failed">theorem and_swap (P Q : Prop) : P /\ Q -&gt; Q /\ P := by
+  intro h
+  splt
+  exact h.right
+  exact h.left
+</pre>
+        </div>
+
+        <h2 id="sorry">Unfinished business: <code>sorry</code></h2>
+        <p>
+          There is one tactic that closes any goal at all: <code>sorry</code>. It means "I'll come back to
+          this."
+        </p>
+
+        <div class="sample">
+          <pre data-name="sorry" data-expect="incomplete">theorem and_swap (P Q : Prop) : P /\ Q -&gt; Q /\ P := by
+  intro h
+  split
+  sorry
+  exact h.left
+</pre>
+        </div>
+
+        <p>
+          The checker goes along with it, but it doesn't forget. The theorem is not <em>accepted</em>; it is
+          <em>incomplete</em>, and the status line says so:
+          <span class="statusline">1 incomplete · logic fol, mode constructive</span>.
+        </p>
+        <p>
+          <code>sorry</code> is how you work on one part of a proof without the rest shouting at you. Sketch
+          the outline, put <code>sorry</code> where the hard parts go, check that the outline holds together,
+          and then come back and replace them one at a time. Exercise files arrive full of <code>sorry</code>
+          for exactly this reason: the incomplete theorems are your to-do list.
+        </p>
+
+        <h2 id="stuck">Getting unstuck</h2>
+        <p>Three of the panels on the right exist for the moment when you don't know what to type.</p>
+        <p>
+          <strong>Suggest a tactic.</strong> Put the cursor on a line of a proof and press the button. The
+          checker looks at the goal at that point and proposes moves that fit it. Each suggestion has actually
+          been run before you see it, so nothing on the list is a guess that might not even apply. Click one to
+          insert it. Use this the way you'd use a hint in the back of the book: after you've had a real try.
+        </p>
+        <p>
+          <strong>Proof explanation.</strong> With the cursor inside a theorem, this panel lists the proof step
+          by step in plain words — "assume the premise," and so on — with the step you're on marked. It's
+          handy for reading a proof somebody else wrote, including the book's.
+        </p>
+        <p>
+          <strong>Tactic reference.</strong> At the bottom of the right-hand side, every tactic is listed by
+          what it's for. Click a row to open it.
+        </p>
+
+        <h2 id="moves">The moves, on one page</h2>
+        <p>
+          Which tactic to use is almost always decided by the <em>shape</em> of what's in front of you. If the
+          shape is in the target, you're trying to prove it; if it's in a hypothesis, you're trying to use it.
+        </p>
+
+        <table>
+          <thead>
+            <tr><th>Shape</th><th>To prove it (target)</th><th>To use it (hypothesis <code>h</code>)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>A -&gt; B</code></td><td><code>intro h</code></td><td><code>apply h</code></td></tr>
+            <tr><td><code>A /\ B</code></td><td><code>split</code></td><td><code>h.left</code>, <code>h.right</code></td></tr>
+            <tr><td><code>A \/ B</code></td><td><code>left</code> or <code>right</code></td><td><code>cases h with</code> …</td></tr>
+            <tr><td><code>not A</code></td><td><code>intro h</code></td><td><code>contradiction</code></td></tr>
+            <tr><td><code>A &lt;-&gt; B</code></td><td><code>split</code></td><td><code>h.left</code>, <code>h.right</code></td></tr>
+            <tr><td><code>forall x, …</code></td><td><code>intro x</code></td><td><code>apply h</code></td></tr>
+            <tr><td><code>exists x, …</code></td><td><code>exists t</code></td><td><code>obtain x hx := h</code></td></tr>
+            <tr><td><code>a = b</code></td><td><code>refl</code></td><td><code>rewrite -&gt; h</code></td></tr>
+          </tbody>
+        </table>
+
+        <p>
+          And when the target is something you already have, <code>exact h</code> hands it over. Here is a
+          proof that uses a few of these at once, including <code>cases</code>, which has a layout of its own:
+          one indented arm for each way the "or" could be true.
+        </p>
+
+        <div class="sample">
+          <pre data-name="cases" data-expect="accepted">theorem or_swap (P Q : Prop) : P \/ Q -&gt; Q \/ P := by
+  intro h
+  cases h with
+  | left hp =&gt;
+      right
+      exact hp
+  | right hq =&gt;
+      left
+      exact hq
+</pre>
+        </div>
+
+        <p>
+          One more tool deserves a mention, because longer proofs lean on it: <code>have</code> lets you prove
+          a stepping stone, give it a name, and then use it.
+        </p>
+
+        <div class="sample">
+          <pre data-name="have" data-expect="accepted">theorem chain (P Q R : Prop) : (P -&gt; Q) -&gt; (Q -&gt; R) -&gt; P -&gt; R := by
+  intro hpq
+  intro hqr
+  intro hp
+  have hq : Q := by
+    apply hpq
+    exact hp
+  apply hqr
+  exact hq
+</pre>
+        </div>
+
+        <h2 id="library">Using what's already proved</h2>
+        <p>
+          You don't have to prove everything from nothing. Cetacea comes with a library of theorems about
+          logic, numbers, sets, functions and lists, and one line at the top of your file brings it in:
+        </p>
+
+        <div class="sample">
+          <pre data-name="library" data-expect="accepted">logic fol_nat
+
+import std/prelude.ctea
+
+theorem swap_sum (a b : Nat) : a + b = b + a := by
+  exact add_comm
+
+theorem swap_inside (a b c : Nat) : (a + b) + c = (b + a) + c := by
+  rewrite -&gt; add_comm {n := a; m := b}
+  refl
+</pre>
+        </div>
+
+        <p>
+          A library theorem is used just like a hypothesis. In the first proof the target is precisely what
+          <code>add_comm</code> says, so <code>exact add_comm</code> finishes it. In the second,
+          <code>add_comm</code> is used to <em>rewrite</em> part of the target, and the braces say which
+          <code>n</code> and <code>m</code> you mean, since there's more than one sum it could apply to.
+        </p>
+        <p>
+          How do you know <code>add_comm</code> exists? The <strong>Theorem library</strong> panel. Type
+          <code>comm</code> or <code>add</code> into its search box and it lists every theorem whose name or
+          statement matches, along with exactly what each one says. Searching there before proving a small fact
+          yourself is a very good habit.
+        </p>
+        <p>
+          (The <code>logic fol_nat</code> line switches on the natural numbers. More on that
+          <a href="#menus">below</a>.)
+        </p>
+
+        <h2 id="beyond">Numbers, induction, and <code>decide</code></h2>
+        <p>
+          Everything so far has been about <code>P</code>s and <code>Q</code>s, but the same editor handles
+          numbers, sets, functions, lists and data types you define yourself. Two things are worth seeing
+          early.
+        </p>
+        <p>
+          Proofs about <em>every</em> natural number go by <strong>induction</strong>, which is laid out like
+          <code>cases</code>: one arm for zero, one for the step from <code>k</code> to its successor, where
+          you get an induction hypothesis to use.
+        </p>
+
+        <div class="sample">
+          <pre data-name="induction" data-expect="accepted">logic fol_nat
+
+import std/prelude.ctea
+
+theorem sub_self (n : Nat) : n - n = 0 := by
+  induction n with
+  | zero =&gt;
+      refl
+  | succ k ih =&gt;
+      simp
+      exact ih
+
+theorem small_sum : 2 + 3 = 5 := by
+  decide
+</pre>
+        </div>
+
+        <p>
+          And when a claim has no unknowns in it — it's about particular numbers, or particular values of a
+          small data type — <code>decide</code> simply works it out. If the claim turns out to be false, it
+          tells you which part.
+        </p>
+        <p>The book spends whole chapters on each of these. This is just so you recognise them.</p>
+
+        <h2 id="menus">The menus</h2>
+
+        <h3>Logic</h3>
+        <p>
+          Cetacea can check three sizes of mathematics, and a file says which one it wants with a
+          <code>logic</code> line at the top:
+        </p>
+        <table>
+          <thead>
+            <tr><th>Line</th><th>What you get</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>logic fol</code></td><td>Propositions and quantifiers. Enough for pure logic.</td></tr>
+            <tr><td><code>logic fol_nat</code></td><td>All that, plus the natural numbers, arithmetic and induction.</td></tr>
+            <tr><td><code>logic hol</code></td><td>All that, plus sets, functions, lists and your own data types.</td></tr>
+          </tbody>
+        </table>
+        <p>
+          The <strong>Logic</strong> menu is the setting for files that don't have such a line. If you write
+          <code>Nat</code> in a file that hasn't asked for numbers, the checker tells you which line to add.
+        </p>
+        <p>
+          There is one more switch of this kind. Some ways of reasoning, like proof by contradiction, are
+          <em>classical</em>, and files start out without them. Writing <code>mode classical</code> on a line
+          of its own turns them on for the theorems after it. The book's Chapter 3 is about why anyone would
+          care about the difference.
+        </p>
+
+        <h3>Section</h3>
+        <p>
+          If you're following the book or taking a course, the <strong>Section</strong> menu is the one that
+          matters. Pick the chapter you're on, and the checker limits itself to the moves that chapter has
+          taught. It sets the logic for you, too.
+        </p>
+        <p>
+          This is not there to be annoying. An exercise that's meant to make you practise case analysis
+          teaches nothing if a bigger tactic from six chapters later does it in one line. So under Chapter 2's
+          rules, this proof is turned away:
+        </p>
+
+        <div class="sample">
+          <pre data-name="section" data-expect="failed" data-section="ch02">theorem dne (P : Prop) : not not P -&gt; P := by
+  intro h
+  by_contra hn
+  contradiction
+</pre>
+        </div>
+
+        <div class="diag" data-of="section" data-line="3">
+          <div class="where">error · line 3</div>
+          <div data-from="section">`by_contra` is not available in the section `Chapter 2: Natural deduction`</div>
+          <ul>
+            <li data-from="section">tactics available here: intro, exact, apply, split, trivial, assumption, show, left, right, cases, contradiction, exfalso, have</li>
+          </ul>
+        </div>
+
+        <p>
+          (Open it and you'll see a second error underneath, about classical mode. That's the other switch
+          from a moment ago: <code>by_contra</code> is a classical move, and this file never asked for them.)
+        </p>
+        <p>
+          When a section is selected, a <strong>Section rules</strong> panel appears on the right listing
+          exactly what's allowed, so you never have to guess. Choose "No section rules" to have everything
+          available.
+        </p>
+
+        <h3>Open a book file</h3>
+        <p>
+          Every file that goes with the book is in this menu, chapter by chapter: the worked examples, the
+          deliberately wrong proofs each chapter picks apart, the exercises, and the solutions. Opening one
+          also sets the Section menu to its chapter.
+        </p>
+        <p>
+          Your work on each book file is remembered separately. You can leave the Chapter 4 exercises half
+          done, go look at something in Chapter 2, and come back to find them as you left them. If you want a
+          clean copy, the same menu grows a "Start … over" entry for the file you have open.
+        </p>
+
+        <h3>Load example</h3>
+        <p>
+          A handful of short, complete files that show off one thing each — a good place to poke around once
+          you've finished this page.
+        </p>
+
+        <h3>Save and Share</h3>
+        <p>
+          <strong>Save</strong> downloads what's in the editor as a file. <strong>Share</strong> copies a link
+          to your clipboard that opens the editor with your file in it, section and all. That link is the
+          easiest way to show somebody a proof, or to ask for help with one: paste it into an email or a
+          discussion post and they see exactly what you see.
+        </p>
+        <p>
+          Your instructor may send you a link of the same kind for an assignment. Those open with an
+          <strong>Assignment</strong> panel on the right, which lists the theorems you're asked to prove and
+          keeps track of which ones are done.
+        </p>
+
+        <h2 id="small-print">Small things that trip people up</h2>
+        <ul>
+          <li><strong>Your work is kept in this browser.</strong> Close the tab and come back, and the editor
+            has what you left in it. But it lives in this browser on this computer, and clearing your browsing
+            data clears it. Use <strong>Save</strong> or <strong>Share</strong> for anything you'd be sad to
+            lose.</li>
+          <li><strong>Opening a link replaces what's in the editor.</strong> That includes the "Open in the
+            editor" links on this page. (Work on a book file is safe; it's stored with the file.)</li>
+          <li><strong>Indentation matters.</strong> The lines of a proof are indented under the theorem, and
+            the lines inside a <code>cases</code> or <code>induction</code> arm are indented further. Copy the
+            layout of the examples and you'll be fine.</li>
+          <li><strong>Comments start with two dashes.</strong> Anything after <code>--</code> on a line is
+            ignored by the checker. Write notes to yourself.</li>
+          <li><strong>Hypothesis names are up to you.</strong> <code>intro h</code> and
+            <code>intro raining</code> do the same thing. Pick names that help you read the Goals panel.</li>
+          <li><strong>The very first check takes a moment.</strong> The library is loaded the first time a file
+            asks for it. After that, checking is fast.</li>
+          <li><strong>A red line isn't always the guilty line.</strong> The checker reports where it got stuck,
+            which can be a step or two after the choice that caused it. Walk the cursor back up and watch the
+            Goals panel.</li>
+        </ul>
+
+        <h2 id="next">Where to go next</h2>
+        <ul>
+          <li><a href="./index.html"><strong>Open the editor</strong></a>, load the first example, and finish
+            the proof it leaves for you.</li>
+          <li>Read <a href="https://github.com/clarissalittler/cetacea/tree/main/docs/book#readme"><em>Proofs,
+            Checked</em></a>. Start at Chapter 1, pick "Chapter 1" in the Section menu, and open the chapter's
+            files from the Book menu as you go.</li>
+          <li>If you'd rather work in a terminal, or you're an instructor with a stack of files to check, the
+            same checker is a command-line program. It's in the
+            <a href="https://github.com/clarissalittler/cetacea">repository</a>, along with everything else.</li>
+        </ul>
+        <p>
+          One last thing. Rejection is the normal state of a proof in progress. Nobody's proofs go through the
+          first time, so don't take a red line personally — just read what it says, and take the next step.
+        </p>
+
+        <footer>
+          You can always get back to this page from the <strong>Tutorial</strong> button at the top of the
+          editor.
+        </footer>
+      </article>
+    </div>
+
+    <script type="module" src="./tutorial.js"></script>
+  </body>
+</html>

@@ -204,8 +204,8 @@ Assignment panel with each required theorem's status.
 
 ## Browser
 
-`web2/` runs entirely in the browser. It checks as you type, shows the
-goal at the cursor, marks errors inline, explains each step, searches
+The editor (`web2/index.html`) runs entirely in the browser. It checks
+as you type, shows the goal at the cursor, marks errors inline, explains each step, searches
 the library, and offers tactic suggestions that were run before being
 shown. Share creates a link that reproduces the file. Save downloads
 it. The Logic menu sets the default tier for files without a `logic`
@@ -217,6 +217,13 @@ The **Book** menu opens any of the book's companion files
 one selects that chapter's section, and a student's work on each file
 is kept separately in the browser's storage; "Start ... over" in the
 same menu returns the open file to the book's version.
+
+The editor's **Tutorial** button opens `web2/tutorial.html`, which
+walks a newcomer through the editor: the screen, a first proof, reading
+errors, `sorry`, the help panels, the library and the menus. Each of
+its examples has a link that opens it in the editor, and
+`scripts/check_tutorial.py` (run in CI) checks every example and every
+quoted error against the checker.
 
 ## Countermodel feedback
 

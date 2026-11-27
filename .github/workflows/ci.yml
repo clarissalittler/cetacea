@@ -41,6 +41,9 @@ jobs:
       - name: Verify the browser's book module is current
         run: python3 scripts/build_web_book.py --check
 
+      - name: Check the tutorial page's examples and quoted errors
+        run: python3 scripts/check_tutorial.py
+
       - name: Build the browser checker
         run: cargo build -p hol_wasm --target wasm32-unknown-unknown --release
 

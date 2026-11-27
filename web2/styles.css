@@ -452,3 +452,19 @@ pre {
 .step .kernel.trust {
   color: var(--warn, var(--muted));
 }
+
+.brand-link {
+  margin-left: 0.6rem;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.brand-link:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
