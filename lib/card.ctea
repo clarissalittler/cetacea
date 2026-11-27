@@ -1,0 +1,473 @@
+mode constructive
+
+import finite.ctea
+
+-- Counting with lists: the lemmas behind cardinality and pigeonhole.
+
+-- An element of a list splits the list around itself.
+theorem elem_split (A : Type) (x : A) (l : List A)
+  : elem(x, l) -> exists a b : List A, l = append(a, cons(x, b)) := by
+  induction l with
+  | nil =>
+      intro h
+      simp at h
+      contradiction
+  | cons h t ih =>
+      intro hx
+      simp at hx
+      cases hx with
+      | left hl =>
+          exists nil
+          exists t
+          rewrite -> hl
+          refl
+      | right hr =>
+          obtain a ha := ih hr
+          obtain b hb := ha
+          exists cons(h, a)
+          exists b
+          simp
+          exact hb
+
+theorem length_append_cons (A : Type) (x : A) (a b : List A)
+  : length(append(a, cons(x, b))) = succ(length(append(a, b))) := by
+  induction a with
+  | nil =>
+      refl
+  | cons h t ih =>
+      simp
+      exact ih
+
+theorem elem_append_cons (A : Type) (x y : A) (a b : List A)
+  : elem(y, append(a, cons(x, b))) -> y = x \/ elem(y, append(a, b)) := by
+  induction a with
+  | nil =>
+      simp
+      intro h
+      exact h
+  | cons h t ih =>
+      intro hy
+      simp at hy
+      simp
+      cases hy with
+      | left hl =>
+          right
+          left
+          exact hl
+      | right hr =>
+          cases ih hr with
+          | left h1 =>
+              left
+              exact h1
+          | right h2 =>
+              right
+              right
+              exact h2
+
+-- The counting lemma: a list without repeats, all of whose elements
+-- appear in a second list, is no longer than the second list.
+theorem nodup_sub_length (A : Type) (l1 : List A)
+  : forall l2 : List A,
+      Nodup(l1) -> (forall x : A, elem(x, l1) -> elem(x, l2))
+      -> le(length(l1), length(l2)) := by
+  induction l1 with
+  | nil =>
+      intro l2
+      intro hn
+      intro hs
+      exact zero_le
+  | cons h t ih =>
+      intro l2
+      intro hn
+      intro hs
+      simp at hn
+      have hh : elem(h, l2) := by
+        apply hs h
+        simp
+        left
+        refl
+      obtain a ha := elem_split hh
+      obtain b hb := ha
+      rewrite -> hb
+      rewrite -> length_append_cons
+      simp
+      apply ih append(a, b)
+      exact hn.right
+      intro y
+      intro hy
+      have hy2 : elem(y, l2) := by
+        apply hs y
+        simp
+        right
+        exact hy
+      have step : y = h \/ elem(y, append(a, b)) := by
+        apply elem_append_cons
+        rewrite <- hb
+        exact hy2
+      cases step with
+      | left hl =>
+          exfalso
+          apply hn.left
+          rewrite <- hl
+          exact hy
+      | right hr =>
+          exact hr
+
+-- A finite set has exactly one size.
+theorem card_subset_le (A : Type) (S T : Set A) (n m : Nat)
+  : S subset T -> HasCard(S, n) -> HasCard(T, m) -> le(n, m) := by
+  intro hst
+  intro hs
+  intro ht
+  unfold HasCard at hs
+  unfold HasCard at ht
+  obtain ls h1 := hs
+  obtain lt h2 := ht
+  rewrite <- h1.right.right
+  rewrite <- h2.right.right
+  apply nodup_sub_length
+  exact h1.left
+  intro x
+  intro hx
+  have e1 : forall y : A, y in S <-> elem(y, ls) := h1.right.left
+  have e2 : forall y : A, y in T <-> elem(y, lt) := h2.right.left
+  apply (e2 x).left
+  apply hst
+  apply (e1 x).right
+  exact hx
+
+theorem card_unique (A : Type) (S : Set A) (n m : Nat)
+  : HasCard(S, n) -> HasCard(S, m) -> n = m := by
+  intro hn
+  intro hm
+  apply le_antisymm
+  apply card_subset_le {S := S; T := S}
+  exact subset_refl
+  exact hn
+  exact hm
+  apply card_subset_le {S := S; T := S}
+  exact subset_refl
+  exact hm
+  exact hn
+
+-- Joining two lists without repeats that share no element.
+theorem nodup_append (A : Type) (a b : List A)
+  : Nodup(a) -> Nodup(b) -> (forall x : A, elem(x, a) -> elem(x, b) -> False)
+    -> Nodup(append(a, b)) := by
+  induction a with
+  | nil =>
+      intro ha
+      intro hb
+      intro hd
+      exact hb
+  | cons h t ih =>
+      intro ha
+      intro hb
+      intro hd
+      simp at ha
+      simp
+      split
+      intro hin
+      have hor : elem(h, t) \/ elem(h, b) := by
+        rewrite <- elem_append
+        exact hin
+      cases hor with
+      | left h1 =>
+          exact ha.left h1
+      | right h2 =>
+          apply hd h
+          simp
+          left
+          refl
+          exact h2
+      apply ih
+      exact ha.right
+      exact hb
+      intro x
+      intro hx1
+      intro hx2
+      apply hd x
+      simp
+      right
+      exact hx1
+      exact hx2
+
+-- The sum rule: sets with no common element have sizes that add.
+theorem card_union_disjoint (A : Type) (S T : Set A) (n m : Nat)
+  : HasCard(S, n) -> HasCard(T, m) -> (forall x : A, x in S -> x in T -> False)
+    -> HasCard(union(S, T), add(n, m)) := by
+  intro hs
+  intro ht
+  intro hd
+  unfold HasCard at hs
+  unfold HasCard at ht
+  obtain ls h1 := hs
+  obtain lt h2 := ht
+  have e1 : forall y : A, y in S <-> elem(y, ls) := h1.right.left
+  have e2 : forall y : A, y in T <-> elem(y, lt) := h2.right.left
+  unfold HasCard
+  exists append(ls, lt)
+  split
+  apply nodup_append
+  exact h1.left
+  exact h2.left
+  intro x
+  intro hx1
+  intro hx2
+  apply hd x
+  apply (e1 x).right
+  exact hx1
+  apply (e2 x).right
+  exact hx2
+  split
+  unfold Enumerates
+  intro x
+  simp
+  rewrite -> elem_append
+  rewrite -> e1 x
+  rewrite -> e2 x
+  refl
+  rewrite -> length_append
+  rewrite -> h1.right.right
+  rewrite -> h2.right.right
+  refl
+
+-- Lists under a function.
+theorem elem_map_intro (A : Type) (B : Type) (f : A -> B) (x : A) (l : List A)
+  : elem(x, l) -> elem(f(x), map(f, l)) := by
+  induction l with
+  | nil =>
+      intro h
+      simp at h
+      contradiction
+  | cons h t ih =>
+      intro hx
+      simp at hx
+      simp
+      cases hx with
+      | left hl =>
+          left
+          rewrite -> hl
+          refl
+      | right hr =>
+          right
+          exact ih hr
+
+theorem elem_map_elim (A : Type) (B : Type) (f : A -> B) (y : B) (l : List A)
+  : elem(y, map(f, l)) -> exists x : A, elem(x, l) /\ f(x) = y := by
+  induction l with
+  | nil =>
+      intro h
+      simp at h
+      contradiction
+  | cons h t ih =>
+      intro hy
+      simp at hy
+      cases hy with
+      | left hl =>
+          exists h
+          split
+          simp
+          left
+          refl
+          rewrite -> hl
+          refl
+      | right hr =>
+          obtain x hx := ih hr
+          exists x
+          split
+          simp
+          right
+          exact hx.left
+          exact hx.right
+
+theorem nodup_map (A : Type) (B : Type) (f : A -> B) (l : List A)
+  : Nodup(l)
+    -> (forall x y : A, elem(x, l) -> elem(y, l) -> f(x) = f(y) -> x = y)
+    -> Nodup(map(f, l)) := by
+  induction l with
+  | nil =>
+      intro hn
+      intro hinj
+      simp
+      trivial
+  | cons h t ih =>
+      intro hn
+      intro hinj
+      simp at hn
+      simp
+      split
+      intro hin
+      obtain x hx := elem_map_elim hin
+      have same : x = h := by
+        apply hinj x h
+        simp
+        right
+        exact hx.left
+        simp
+        left
+        refl
+        exact hx.right
+      apply hn.left
+      rewrite <- same
+      exact hx.left
+      apply ih
+      exact hn.right
+      intro x
+      intro y
+      intro hx
+      intro hy
+      apply hinj x y
+      simp
+      right
+      exact hx
+      simp
+      right
+      exact hy
+
+-- Functions between finite sets.
+def MapsTo (A : Type) (B : Type) (f : A -> B) (S : Set A) (T : Set B) : Prop := forall x : A, x in S -> f(x) in T
+
+def InjectiveOn (A : Type) (B : Type) (f : A -> B) (S : Set A) : Prop := forall x y : A, x in S -> y in S -> f(x) = f(y) -> x = y
+
+def SurjectiveOn (A : Type) (B : Type) (f : A -> B) (S : Set A) (T : Set B) : Prop := forall y : B, y in T -> exists x : A, x in S /\ f(x) = y
+
+-- An injection cannot land in a smaller set.
+theorem card_le_of_injective
+  (A : Type) (B : Type) (f : A -> B) (S : Set A) (T : Set B) (n m : Nat)
+  : HasCard(S, n) -> HasCard(T, m) -> MapsTo(f, S, T) -> InjectiveOn(f, S)
+    -> le(n, m) := by
+  intro hs
+  intro ht
+  intro hmaps
+  intro hinj
+  unfold HasCard at hs
+  unfold HasCard at ht
+  obtain ls h1 := hs
+  obtain lt h2 := ht
+  have e1 : forall x : A, x in S <-> elem(x, ls) := h1.right.left
+  have e2 : forall y : B, y in T <-> elem(y, lt) := h2.right.left
+  unfold MapsTo at hmaps
+  unfold InjectiveOn at hinj
+  rewrite <- h1.right.right
+  rewrite <- h2.right.right
+  rewrite <- length_map {f := f; l := ls}
+  apply nodup_sub_length
+  apply nodup_map
+  exact h1.left
+  intro x
+  intro y
+  intro hx
+  intro hy
+  apply hinj x y
+  apply (e1 x).right
+  exact hx
+  apply (e1 y).right
+  exact hy
+  intro y
+  intro hy
+  obtain x hx := elem_map_elim hy
+  apply (e2 y).left
+  rewrite <- hx.right
+  apply hmaps x
+  apply (e1 x).right
+  exact hx.left
+
+-- The pigeonhole principle: a function from a finite set into a
+-- strictly smaller one is not injective.
+theorem pigeonhole
+  (A : Type) (B : Type) (f : A -> B) (S : Set A) (T : Set B) (n m : Nat)
+  : HasCard(S, n) -> HasCard(T, m) -> MapsTo(f, S, T) -> lt(m, n)
+    -> not InjectiveOn(f, S) := by
+  intro hs
+  intro ht
+  intro hmaps
+  intro hlt
+  intro hinj
+  apply le_not_lt {n := n} m
+  apply card_le_of_injective {f := f; S := S; T := T}
+  exact hs
+  exact ht
+  exact hmaps
+  exact hinj
+  exact hlt
+
+-- A bijection carries the size across.
+theorem card_of_bijection
+  (A : Type) (B : Type) (f : A -> B) (S : Set A) (T : Set B) (n : Nat)
+  : HasCard(S, n) -> MapsTo(f, S, T) -> InjectiveOn(f, S) -> SurjectiveOn(f, S, T)
+    -> HasCard(T, n) := by
+  intro hs
+  intro hmaps
+  intro hinj
+  intro hsurj
+  unfold HasCard at hs
+  obtain ls h1 := hs
+  have e1 : forall x : A, x in S <-> elem(x, ls) := h1.right.left
+  unfold MapsTo at hmaps
+  unfold InjectiveOn at hinj
+  unfold SurjectiveOn at hsurj
+  unfold HasCard
+  exists map(f, ls)
+  split
+  apply nodup_map
+  exact h1.left
+  intro x
+  intro y
+  intro hx
+  intro hy
+  apply hinj x y
+  apply (e1 x).right
+  exact hx
+  apply (e1 y).right
+  exact hy
+  split
+  unfold Enumerates
+  intro y
+  split
+  intro hy
+  obtain x hx := hsurj y hy
+  rewrite <- hx.right
+  apply elem_map_intro
+  apply (e1 x).left
+  exact hx.left
+  intro hy
+  obtain x hx := elem_map_elim hy
+  rewrite <- hx.right
+  apply hmaps x
+  apply (e1 x).right
+  exact hx.left
+  rewrite -> length_map
+  exact h1.right.right
+
+mode classical
+
+-- The usual statement: two different pigeons share a hole. Producing the
+-- pair from "not injective" is a classical step.
+theorem pigeonhole_collision
+  (A : Type) (B : Type) (f : A -> B) (S : Set A) (T : Set B) (n m : Nat)
+  : HasCard(S, n) -> HasCard(T, m) -> MapsTo(f, S, T) -> lt(m, n)
+    -> exists x y : A, x in S /\ y in S /\ f(x) = f(y) /\ not (x = y) := by
+  intro hs
+  intro ht
+  intro hmaps
+  intro hlt
+  by_contra hnone
+  apply pigeonhole {f := f; S := S; T := T; n := n; m := m} hs ht hmaps hlt
+  unfold InjectiveOn
+  intro x
+  intro y
+  intro hx
+  intro hy
+  intro hf
+  by_contra hxy
+  apply hnone
+  exists x
+  exists y
+  split
+  exact hx
+  split
+  exact hy
+  split
+  exact hf
+  exact hxy

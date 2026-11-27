@@ -134,6 +134,58 @@ theorem not_not_em (P : Prop) : not not (P \/ not P) := by
   left
   exact p
 
+-- Simplifying with `True` and `False`. These are meant for `simp`, as in
+-- `simp [or_false_left, not_false]`, to clear what computation leaves.
+theorem or_false_left (P : Prop) : False \/ P <-> P := by
+  split
+  intro h
+  cases h with
+  | left hf =>
+      contradiction
+  | right hp =>
+      exact hp
+  intro h
+  right
+  exact h
+
+theorem or_false_right (P : Prop) : P \/ False <-> P := by
+  split
+  intro h
+  cases h with
+  | left hp =>
+      exact hp
+  | right hf =>
+      contradiction
+  intro h
+  left
+  exact h
+
+theorem and_true_left (P : Prop) : True /\ P <-> P := by
+  split
+  intro h
+  exact h.right
+  intro h
+  split
+  trivial
+  exact h
+
+theorem and_true_right (P : Prop) : P /\ True <-> P := by
+  split
+  intro h
+  exact h.left
+  intro h
+  split
+  exact h
+  trivial
+
+theorem not_false : not False <-> True := by
+  split
+  intro h
+  trivial
+  intro h
+  intro hf
+  exact hf
+
 mode classical
 
 theorem em (P : Prop) : P \/ not P := by

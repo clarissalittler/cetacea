@@ -117,6 +117,7 @@ pub fn standard_library() -> VirtualFs {
     fs.add("lib/fun.ctea", include_str!("../../../lib/fun.ctea"));
     fs.add("lib/list.ctea", include_str!("../../../lib/list.ctea"));
     fs.add("lib/finite.ctea", include_str!("../../../lib/finite.ctea"));
+    fs.add("lib/card.ctea", include_str!("../../../lib/card.ctea"));
     fs.add(
         "lib/qualified_prelude.ctea",
         include_str!("../../../lib/qualified_prelude.ctea"),

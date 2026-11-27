@@ -250,3 +250,56 @@ theorem le_trans (a : Nat) : forall b c : Nat, le(a, b) -> le(b, c) -> le(a, c) 
               apply ih b0 c0
               exact h1
               exact h2
+
+theorem le_antisymm (n : Nat) : forall m : Nat, le(n, m) -> le(m, n) -> n = m := by
+  induction n with
+  | zero =>
+      intro m
+      intro h1
+      intro h2
+      rewrite -> le_zero_inv h2
+      refl
+  | succ k ih =>
+      intro m
+      induction m with
+      | zero =>
+          intro h1
+          intro h2
+          simp at h1
+          exfalso
+          exact h1
+      | succ m0 ihm =>
+          intro h1
+          intro h2
+          simp at h1
+          simp at h2
+          simp
+          apply ih m0
+          exact h1
+          exact h2
+
+-- `n < m` is `succ(n) <= m`, so it cannot hold together with `m <= n`.
+theorem le_not_lt (n : Nat) : forall m : Nat, le(n, m) -> lt(m, n) -> False := by
+  induction n with
+  | zero =>
+      intro m
+      intro h1
+      intro h2
+      simp at h2
+      exact h2
+  | succ k ih =>
+      intro m
+      induction m with
+      | zero =>
+          intro h1
+          intro h2
+          simp at h1
+          exact h1
+      | succ m0 ihm =>
+          intro h1
+          intro h2
+          simp at h1
+          simp at h2
+          apply ih m0
+          exact h1
+          exact h2

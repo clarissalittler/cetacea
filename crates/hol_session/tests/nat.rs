@@ -189,7 +189,7 @@ theorem zero_le_all (n : Nat) : le(0, n) := by
 fn library_fs() -> VirtualFs {
     let mut fs = VirtualFs::default();
     for name in [
-        "prelude", "prop", "fol", "eq", "set", "nat", "modular", "fun", "list", "finite",
+        "prelude", "prop", "fol", "eq", "set", "nat", "modular", "fun", "list", "finite", "card",
     ] {
         let path = format!("lib/{name}.ctea");
         fs.add(
