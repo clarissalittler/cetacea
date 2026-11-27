@@ -211,6 +211,13 @@ shown. Share creates a link that reproduces the file. Save downloads
 it. The Logic menu sets the default tier for files without a `logic`
 line.
 
+The **Book** menu opens any of the book's companion files
+(`web2/book.js`, generated from `docs/book/code` by
+`scripts/build_web_book.py`, and checked for staleness in CI). Opening
+one selects that chapter's section, and a student's work on each file
+is kept separately in the browser's storage; "Start ... over" in the
+same menu returns the open file to the book's version.
+
 ## Countermodel feedback
 
 When a proof fails, the new checker can search small first-order worlds.

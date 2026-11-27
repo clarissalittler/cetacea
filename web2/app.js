@@ -8,10 +8,15 @@ import { EditorView, Decoration, keymap } from "https://esm.sh/@codemirror/view@
 import { indentWithTab } from "https://esm.sh/@codemirror/commands@6";
 import { EXAMPLES } from "./examples.js";
 import { COURSE } from "./course.js";
+import { BOOK } from "./book.js";
 
 const STORAGE_SOURCE = "cetacea2.source";
 const STORAGE_TIER = "cetacea2.tier";
 const STORAGE_SECTION = "cetacea2.section";
+// A student's work on each of the book's files is kept separately, so
+// opening another file never costs them a half-finished exercise.
+const STORAGE_BOOK_WORK = "cetacea2.book.";
+const STORAGE_BOOK_OPEN = "cetacea2.bookOpen";
 
 const statusEl = document.getElementById("status");
 const goalsEl = document.getElementById("goals");
@@ -23,6 +28,7 @@ const libraryEl = document.getElementById("library");
 const librarySearchEl = document.getElementById("librarySearch");
 const libraryScopeEl = document.getElementById("libraryScope");
 const exampleSelect = document.getElementById("exampleSelect");
+const bookSelect = document.getElementById("bookSelect");
 const tierSelect = document.getElementById("tierSelect");
 const sectionSelect = document.getElementById("sectionSelect");
 const rulesPanel = document.getElementById("rulesPanel");
@@ -200,19 +206,69 @@ function loadSavedSource() {
   return EXAMPLES[0].source;
 }
 
-function saveSource() {
+// The book file the editor holds, if any: `{ name, source }` with the
+// file's original text.
+let openBookFile = null;
+
+function findBookFile(name) {
+  for (const chapter of BOOK) {
+    const file = chapter.files.find((candidate) => candidate.name === name);
+    if (file) return file;
+  }
+  return null;
+}
+
+function savedBookWork(file) {
   try {
-    localStorage.setItem(STORAGE_SOURCE, editor.state.doc.toString());
+    return localStorage.getItem(STORAGE_BOOK_WORK + file.name);
   } catch (_) {
-    /* storage unavailable */
+    return null;
   }
 }
 
-function setSource(text) {
+function saveSource() {
+  const text = editor.state.doc.toString();
+  try {
+    localStorage.setItem(STORAGE_SOURCE, text);
+    if (openBookFile) {
+      const key = STORAGE_BOOK_WORK + openBookFile.name;
+      if (text === openBookFile.source) localStorage.removeItem(key);
+      else localStorage.setItem(key, text);
+    }
+  } catch (_) {
+    /* storage unavailable */
+  }
+  syncBookReset();
+}
+
+// Replaces the editor's contents. `bookFile` says which of the book's
+// files this is, when it is one; anything else (an example, a shared
+// link) is not saved as work on a book file.
+function setSource(text, bookFile = null) {
+  openBookFile = bookFile;
+  try {
+    if (bookFile) localStorage.setItem(STORAGE_BOOK_OPEN, bookFile.name);
+    else localStorage.removeItem(STORAGE_BOOK_OPEN);
+  } catch (_) {
+    /* storage unavailable */
+  }
   editor.dispatch({
     changes: { from: 0, to: editor.state.doc.length, insert: text },
     selection: { anchor: 0 },
   });
+  syncBookReset();
+}
+
+// The Book menu's "start over" entry appears only while the open book
+// file differs from its original.
+function syncBookReset() {
+  const reset = document.getElementById("bookReset");
+  if (!reset) return;
+  const changed =
+    openBookFile !== null && editor.state.doc.toString() !== openBookFile.source;
+  reset.hidden = !changed;
+  reset.disabled = !changed;
+  if (changed) reset.textContent = `Start ${openBookFile.name} over`;
 }
 
 function insertAfterLine(lineNumber, text) {
@@ -711,6 +767,50 @@ sectionSelect.addEventListener("change", () => {
   clearHints();
   runAnalysis();
 });
+
+// The book's companion files, grouped by chapter. Opening one also
+// selects the chapter's section, so the file is checked under the tier
+// and the rules the chapter assumes.
+for (const [chapterIndex, chapter] of BOOK.entries()) {
+  const group = document.createElement("optgroup");
+  group.label = `Chapter ${chapter.number}: ${chapter.title}`;
+  for (const [fileIndex, file] of chapter.files.entries()) {
+    const option = document.createElement("option");
+    option.value = `${chapterIndex}:${fileIndex}`;
+    option.textContent = `Ch. ${chapter.number} · ${file.label}`;
+    group.appendChild(option);
+  }
+  bookSelect.appendChild(group);
+}
+bookSelect.addEventListener("change", () => {
+  const choice = bookSelect.value;
+  bookSelect.value = "";
+  if (choice === "reset") {
+    // Back to the file as the book has it.
+    if (openBookFile) setSource(openBookFile.source, openBookFile);
+    return;
+  }
+  const [chapterIndex, fileIndex] = choice.split(":").map(Number);
+  const chapter = BOOK[chapterIndex];
+  const file = chapter && chapter.files[fileIndex];
+  if (!file) return;
+  // Pick up where the student left off in this file, if they had begun.
+  const work = savedBookWork(file);
+  setSource(work === null ? file.source : work, file);
+  if (COURSE.sections.some((section) => section.id === chapter.section)) {
+    sectionSelect.value = chapter.section;
+  }
+  sectionSelect.dispatchEvent(new Event("change"));
+});
+// After a reload the editor holds the last source; if that was a book
+// file, keep saving it as work on that file.
+try {
+  const reopened = findBookFile(localStorage.getItem(STORAGE_BOOK_OPEN) || "");
+  if (reopened) openBookFile = reopened;
+} catch (_) {
+  /* storage unavailable */
+}
+syncBookReset();
 
 checkButton.addEventListener("click", runAnalysis);
 hintButton.addEventListener("click", runHints);

@@ -28,8 +28,15 @@ instructor will have given you the link), and you get an editor on the
 left and the checker's verdict on the right. It re-checks as you type,
 so there is nothing to install and nothing to run.
 
-Three things on that page are worth finding before Chapter 1:
+Four things on that page are worth finding before Chapter 1:
 
+- **The Book menu.** Every companion file in this book is in it,
+  chapter by chapter. When a chapter says "load the examples file,"
+  this is where. Opening a file also sets the Section menu to its
+  chapter, and your work on each file is remembered separately — so
+  peeking at the solutions doesn't cost you your half-finished
+  exercises. (Changed your mind about all of it? The menu grows a
+  "start over" entry for the file you have open.)
 - **The Section menu.** Pick the chapter you're reading. That tells the
   checker which moves you've learned so far, and it politely refuses
   the ones you haven't — so you can't accidentally skip the point of an
@@ -41,9 +48,6 @@ Three things on that page are worth finding before Chapter 1:
   live in this panel.
 - **The Diagnostics panel.** When a proof is wrong, this is where the
   checker says so, with the line number.
-
-To work on one of this book's companion files, copy its contents into
-the editor.
 
 If you'd rather work in a terminal, or you're an instructor checking a
 stack of files, build the command-line checker once from the repository

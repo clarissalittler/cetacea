@@ -21,6 +21,13 @@
           </select>
         </label>
         <label class="picker">
+          <span class="visually-hidden">Open a file from the book</span>
+          <select id="bookSelect" title="Open one of the book's companion files; this also selects the chapter's section">
+            <option value="">Open a book file…</option>
+            <option id="bookReset" value="reset" hidden disabled>Start this file over</option>
+          </select>
+        </label>
+        <label class="picker">
           <span>Logic</span>
           <select id="tierSelect" title="Default logic tier when the file has no `logic` line">
             <option value="fol">fol</option>
