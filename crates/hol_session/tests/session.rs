@@ -192,3 +192,38 @@ theorem wrong_turn (P Q R : Prop) : (P -> R) -> (Q -> R) -> P -> R := by
     );
     assert_eq!(result.decls[0].render(), "failed theorem converse_error");
 }
+
+#[test]
+fn a_logic_or_mode_line_before_the_imports_changes_nothing_but_speed() {
+    let fs = library();
+    let body = "import ../lib/prelude.ctea\n\ndata Color\n| red\n| green\n\ntheorem t : not (red = green) := by\n  simp\n  intro h\n  exact h\n";
+    // Checked twice: the second run takes the imports from the cache.
+    for _ in 0..2 {
+        // With the tier on the first line, the data type is accepted.
+        let with_line = format!("logic hol\n{body}");
+        let result = check(&fs, Options::default(), "work/a.ctea", &with_line);
+        assert!(!result.has_errors(), "{:?}", result.diagnostics);
+        // The cached imports do not carry that tier to a file without it.
+        let result = check(&fs, Options::default(), "work/b.ctea", body);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("logic hol")),
+            "{:?}",
+            result.diagnostics
+        );
+        // Nor the mode: `em` needs a classical file.
+        let classical = "mode classical\nimport ../lib/prelude.ctea\n\ntheorem c (P : Prop) : P \\/ not P := by\n  exact em\n";
+        let result = check(&fs, Options::default(), "work/c.ctea", classical);
+        assert!(!result.has_errors(), "{:?}", result.diagnostics);
+        assert_eq!(result.decls.last().unwrap().mode, "classical");
+        let constructive =
+            "import ../lib/prelude.ctea\n\ntheorem c (P : Prop) : P \\/ not P := by\n  exact em\n";
+        let result = check(&fs, Options::default(), "work/d.ctea", constructive);
+        assert_ne!(
+            result.decls.last().unwrap().render(),
+            "accepted theorem c (constructive)"
+        );
+    }
+}

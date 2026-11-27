@@ -376,16 +376,28 @@ impl<'f> Session<'f> {
         }
         // Leading imports are memoized per thread: the environment after
         // loading the same library files is reused, which keeps re-checks
-        // (live editing, speculative hints) fast.
-        let leading = parsed
+        // (live editing, speculative hints) fast. A `logic` or `mode`
+        // line may come before or between them. An import is checked in
+        // its own fixed tier and mode and leaves the root's alone, so the
+        // imports can be loaded (or taken from the cache) first and the
+        // directives applied afterwards without changing the result.
+        let start = parsed
             .file
             .commands
             .iter()
-            .take_while(|c| matches!(c, Command::Import { .. }))
+            .take_while(|c| {
+                matches!(
+                    c,
+                    Command::Import { .. } | Command::Logic(..) | Command::Mode(..)
+                )
+            })
             .count();
+        let (imports, directives): (Vec<&Command>, Vec<&Command>) = parsed.file.commands[..start]
+            .iter()
+            .partition(|c| matches!(c, Command::Import { .. }));
         let mut cache_key = String::new();
-        let mut cacheable = true;
-        for command in &parsed.file.commands[..leading] {
+        let mut cacheable = !imports.is_empty();
+        for command in &imports {
             let Command::Import {
                 path: import,
                 alias,
@@ -407,21 +419,24 @@ impl<'f> Session<'f> {
                 None => cacheable = false,
             }
         }
-        let tier_override = self.opts.tier;
-        let cached = if cacheable && leading > 0 {
+        // The cached environment remembers the tier and mode of the
+        // session that stored it; this session keeps its own.
+        let (root_tier, root_mode) = (self.env.tier, self.env.mode);
+        let cached = if cacheable {
             IMPORT_CACHE.with(|cell| cell.borrow().get(&cache_key).cloned())
         } else {
             None
         };
-        let start = if let Some((env, loaded, decls)) = cached {
+        if let Some((env, loaded, decls)) = cached {
             self.env = env;
             self.loaded.extend(loaded);
             self.decls.extend(decls);
-            leading
         } else {
             let before = self.diagnostics.len();
-            self.check_commands(path, &parsed.file.commands[..leading], false);
-            if cacheable && leading > 0 && self.diagnostics.len() == before {
+            for command in &imports {
+                self.check_commands(path, std::slice::from_ref(*command), false);
+            }
+            if cacheable && self.diagnostics.len() == before {
                 IMPORT_CACHE.with(|cell| {
                     cell.borrow_mut().insert(
                         cache_key,
@@ -429,10 +444,11 @@ impl<'f> Session<'f> {
                     );
                 });
             }
-            leading
-        };
-        if let Some(tier) = tier_override {
-            self.env.tier = tier;
+        }
+        self.env.tier = root_tier;
+        self.env.mode = root_mode;
+        for command in &directives {
+            self.check_commands(path, std::slice::from_ref(*command), false);
         }
         self.check_commands(path, &parsed.file.commands[start..], false);
         let violations = self.policy_violations();
