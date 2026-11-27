@@ -175,7 +175,7 @@ that lemma, and its proof is the cleverest six lines in the chapter:
 ```text
 theorem succ_never_zero (k : Nat) : not (succ(k) = 0) := by
   intro h
-  apply congr_pred {A := Nat; P := fun n : Nat => le(succ(k), n); x := succ(k); y := 0}
+  apply congr_pred {A := Nat; P := fun n : Nat => succ(k) <= n; x := succ(k); y := 0}
   exact h
   exact le_refl {n := succ(k)}
 ```
@@ -184,11 +184,11 @@ Chapter 5 promised `congr_pred` — Leibniz's law as a *thing* — would
 star in a clever proof; here it is. We assume `h : succ(k) = 0` and
 owe `False`. The scheme: find a property that `succ(k)` *has* and `0`
 *lacks*, then ride it across the equality. The property is
-`P := fun n => le(succ(k), n)` — "being at least succ(k)."
+`P := fun n => succ(k) <= n` — "being at least succ(k)."
 `congr_pred` says `P` must transfer from `succ(k)` to its equal, `0` —
-but `P(succ(k))` is `le(succ(k), succ(k))`, true by `le_refl`, while
-`P(0)` is `le(succ(k), 0)`, which the checker *computes* straight down
-to `False` (Chapter 7's `le`-arithmetic again). So the `apply` matches
+but `P(succ(k))` is `succ(k) <= succ(k)`, true by `le_refl`, while
+`P(0)` is `succ(k) <= 0`, which the checker *computes* straight down
+to `False` (Chapter 7's `<=`-arithmetic again). So the `apply` matches
 our `False` goal, and the two remaining debts are the equality (`h`)
 and the true instance (`le_refl` — with explicit braces, since nothing
 in a `False` goal hints at which number we mean). A truth, an
@@ -287,7 +287,7 @@ injective without reproving the composition argument.
 
 ## 8.7 Common mistakes
 
-Run [`code/ch08-mistakes.ctea`](code/ch08-mistakes.ctea) — intended to
+Load [`code/ch08-mistakes.ctea`](code/ch08-mistakes.ctea) — intended to
 fail.
 
 **Mistake 1: a witness from the wrong column.** Proving totality of
@@ -295,7 +295,8 @@ fail.
 offers... `x`:
 
 ```text
-error: docs/book/code/ch08-mistakes.ctea:22: theorem `witness_from_wrong_column` failed: exists witness `x` has type `Person`, but the goal needs a `Nat`
+error: docs/book/code/ch08-mistakes.ctea:22: theorem `witness_from_wrong_column` failed: witness `x` has type `Person`, but `Nat` was expected here
+  note: h : forall p : Person, exists n : Nat, AgeIs(p, n)
   note: target: exists y : Nat, AgeIs(x, y)
 ```
 
@@ -312,7 +313,10 @@ from Section 8.4, mistaken for sameness — the file tries to *derive*
 hypothesis the injectivity data:
 
 ```text
-error: docs/book/code/ch08-mistakes.ctea:37: theorem `single_valued_is_not_injective` failed: cannot use proof `h` with an argument: proof has type `G(x1, y)`, but expected `G(x1, x2)`
+error: docs/book/code/ch08-mistakes.ctea:37: theorem `single_valued_is_not_injective` failed: proof has type `G(x1, y)`, but expected `G(x1, x2)`
+  note: h : SingleValued(G)
+  note: h1 : G(x1, y)
+  note: h2 : G(x2, y)
   note: target: x1 = x2
 ```
 
@@ -331,37 +335,35 @@ column each quantifier ranges over.*
 
 **Mistake 3: "inverting" succ with truncated subtraction.** Surely
 `succ` is surjective — every `y` is hit by `y - 1`? The proof offers
-`sub(y, 1)` as the preimage and asks `refl` to check:
+`y - 1` as the preimage and asks `refl` to check:
 
 ```text
-error: docs/book/code/ch08-mistakes.ctea:45: theorem `succ_surjective_wish` failed: refl cannot prove `succ(sub(y, 1)) = y` because the sides are not identical
-  note: target: succ(sub(y, 1)) = y
-  note: the open arithmetic goal does not follow from the current hypotheses: it is false when y = 0. Reconsider the earlier proof steps.
-  help: Use equality simplification first
-    `refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.
-    try:
-      simp
-      refl
+error: docs/book/code/ch08-mistakes.ctea:45: theorem `succ_surjective_wish` failed: `refl` failed: after computation the two sides are `succ(pred(y))` and `y`, which differ
+  note: target: succ(y - 1) = y
+  note: the open goal does not follow from the current hypotheses: it is false when y = 0. Reconsider the earlier proof steps.
 ```
 
-`refl` won't budge, and it's right not to: for a *variable* `y` the
-two sides aren't equal-by-computation, and they aren't even *true* —
-at `y = 0`, truncated subtraction gives `sub(0, 1) = 0`, so the left
-side is `succ(0) = 1`, not `0`. The wish fails at exactly the number
-Section 8.4 proved unreachable. (This is also your periodic reminder
-that Nat's subtraction is truncated — a fact `std/modular.ctea`'s
-authors worked around too, as its comments cheerfully admit.)
+`refl` won't budge, and it's right not to. The message shows how far
+computation got: `y - 1` became `pred(y)`, "the number before `y`," and
+there it stuck, because what comes before `y` depends on what `y` is.
+For a *variable* `y` the two sides aren't equal-by-computation, and
+they aren't even *true* — at `y = 0`, truncated subtraction gives `0 -
+1 = 0`, so the left side is `succ(0) = 1`, not `0`. The wish fails at
+exactly the number Section 8.4 proved unreachable. (This is also your
+periodic reminder that Nat's subtraction is truncated — a fact
+`std/modular.ctea`'s authors worked around too, as its comments
+cheerfully admit.)
 
 ## 8.8 Exercises
 
 Open [`code/ch08-exercises.ctea`](code/ch08-exercises.ctea) and clear
 the `sorry` flags.
 
-- **Exercise 8.1** the squaring graph `fun x y : Nat => mul(x, x) = y`
+- **Exercise 8.1** the squaring graph `fun x y : Nat => x * x = y`
   is total — the witness names itself, like `mother_graph_total`.
 - **Exercise 8.2** ...and single-valued — one `rewrite`, one `exact`.
 - **Exercise 8.3** adding two is injective. Hint: `simp at h1` (and
-  `h2`) computes `add(x, 2)` into successors; then `apply succ_inj`
+  `h2`) computes `x + 2` into successors; then `apply succ_inj`
   *twice* and finish the Section 8.4 endgame.
 - **Exercise 8.4** the identity graph is surjective: every `y` is hit
   — by whom?
@@ -381,6 +383,6 @@ Solutions: [`code/ch08-solutions.ctea`](code/ch08-solutions.ctea).
 
 *Next up (see the [outline](OUTLINE.md)): induction — the proof
 principle the natural numbers are born with. Chapter 7 owed you
-transitivity of `le`, and Chapter 9 pays the debt: prove the base,
+transitivity of `<=`, and Chapter 9 pays the debt: prove the base,
 prove each rung from the one below, conclude for all. The proofs stop
 being shape-shuffling and start being* work — *the good kind.*

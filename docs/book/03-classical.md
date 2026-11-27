@@ -241,7 +241,7 @@ theorem mode_is_measured (P : Prop) : P -> P := by
   exact h
 ```
 
-Run the file and read the verdicts:
+Load the file and read the verdicts, one line per theorem:
 
 ```text
 accepted theorem not_not_intro (constructive)
@@ -267,29 +267,25 @@ needs it — the way this chapter's proofs do.
 
 The file [`code/ch03-mistakes.ctea`](code/ch03-mistakes.ctea) contains
 two perfectly correct classical proofs — in a file that never says
-`mode classical`. Intended to fail; run it and read:
+`mode classical`. Intended to fail; load it and read:
 
 ```text
-error: docs/book/code/ch03-mistakes.ctea:12: theorem `em_needs_permission` failed: by_cases uses excluded middle for `P` and requires classical mode
-  note: target: P \/ (not P)
-  help: Switch modes or avoid the classical rule
-    This tactic uses classical reasoning. Put `mode classical` before the theorem, or prove a constructive version instead.
-    try:
-      mode classical
+error: docs/book/code/ch03-mistakes.ctea:12: theorem `em_needs_permission` failed: `by_cases` introduces a classical proof of `P`, but the file is in constructive mode
+  note: add `mode classical` above the theorem if classical reasoning is intended
+  note: target: P \/ not P
 ```
 
 ```text
-error: docs/book/code/ch03-mistakes.ctea:21: theorem `dne_needs_permission` failed: by_contra introduces a classical proof of `P`
+error: docs/book/code/ch03-mistakes.ctea:21: theorem `dne_needs_permission` failed: `by_contra` introduces a classical proof of `P`, but the file is in constructive mode
+  note: add `mode classical` above the theorem if classical reasoning is intended
+  note: hnn : not not P
   note: target: P
-  help: Switch modes or avoid the classical rule
-    This tactic uses classical reasoning. Put `mode classical` before the theorem, or prove a constructive version instead.
-    try:
-      mode classical
 ```
 
-In both cases the checker names the classical rule you used, tells you
-the two honest ways out ("switch modes or avoid the rule"), and offers
-the one-line fix under `try:`. When you hit this error in your own
+In both cases the checker names the tactic that crossed the line, says
+which line it was (the file is in constructive mode), and offers the
+one-line fix in its first note — with an honest "if" attached: *if
+classical reasoning is intended*. When you hit this error in your own
 work, it's asking you a real question: *does this theorem need
 classical logic, or did I just reach for `by_contra` out of habit?*
 Surprisingly often, an `intro` (if the goal is a negation) or a

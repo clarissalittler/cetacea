@@ -1,0 +1,10 @@
+[package]
+name = "hol_kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Trusted kernel for Cetacea 2: simply typed lambda terms, natural deduction rules, tags, and definitional principles"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

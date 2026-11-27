@@ -2,7 +2,7 @@
 -- INTENDED TO FAIL. Every theorem in this file contains a deliberate
 -- mistake discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch08-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch08 docs/book/code/ch08-mistakes.ctea
 
 import ../../../std/prelude.ctea
 
@@ -36,10 +36,10 @@ theorem single_valued_is_not_injective (A : Type) (G : A -> A -> Prop)
   intro h2
   exact h x1 x2 y h1 h2
 
--- Mistake 3: "inverting" succ with truncated subtraction. sub(y, 1)
+-- Mistake 3: "inverting" succ with truncated subtraction. y - 1
 -- looks like a predecessor, but at y = 0 it is 0, and succ(0) is not 0.
 theorem succ_surjective_wish : Surjective(fun x y : Nat => succ(x) = y) := by
   unfold Surjective
   intro y
-  exists sub(y, 1)
+  exists y - 1
   refl

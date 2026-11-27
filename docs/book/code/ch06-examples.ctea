@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 6: Sets: Collections You Can Reason About
 -- Companion file for docs/book/06-sets.md.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch06-examples.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch06 docs/book/code/ch06-examples.ctea
 
 import ../../../std/prelude.ctea
 

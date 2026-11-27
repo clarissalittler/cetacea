@@ -277,29 +277,21 @@ require different logics.)
 Now the payoff. The file
 [`code/ch02-fallacies.ctea`](code/ch02-fallacies.ctea) states three
 classic invalid arguments as theorems and "proves" them as best it can.
-It is intended to fail. Run it:
-
-```sh
-target/debug/cetacea_cli docs/book/code/ch02-fallacies.ctea
-```
+It is intended to fail. Load it.
 
 **Fallacy 1: affirming the consequent.** Our blown-fuse argument from
 Section 2.1: `(P -> Q) -> Q -> P`. The file's best attempt ends with
 `exact hq`, offering the `Q` it has for the `P` it owes:
 
 ```text
-error: docs/book/code/ch02-fallacies.ctea:15: theorem `affirming_the_consequent` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:15: theorem `affirming_the_consequent` failed: proof has type `Q`, but expected `P`
+  note: hpq : P -> Q
+  note: hq : Q
   note: target: P
   note: the statement is not a tautology: it is false when P = false, Q = true. No proof can close it; check the statement itself.
-  help: Match the proof to the target
-    `exact` closes the goal only when the expression proves the current target `P`. Check which hypothesis (or which projection, `.left`/`.right`) proves exactly this target; for an implication or theorem whose conclusion matches, use `apply`.
 ```
 
-(The remaining quotes in this section trim the `help:` paragraph, which
-is identical on every one of these errors — you'll see it in your
-terminal.)
-
-Look at the second `note:`. The checker isn't just rejecting your
+Look at the last `note:`. The checker isn't just rejecting your
 tactic — it has analyzed the *statement* and found a **countermodel**:
 set `P` false and `Q` true, and the premises hold while the conclusion
 fails. Fuse not blown, lights out anyway. This is exactly the
@@ -312,7 +304,10 @@ no proof exists.** The flaw is in the claim, not in you.
 countermodel, same verdict:
 
 ```text
-error: docs/book/code/ch02-fallacies.ctea:24: theorem `denying_the_antecedent` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:24: theorem `denying_the_antecedent` failed: proof has type `Q`, but expected `P`
+  note: hpq : P -> Q
+  note: hnp : not P
+  note: hq : Q
   note: target: P
   note: the statement is not a tautology: it is false when P = false, Q = true. No proof can close it; check the statement itself.
 ```
@@ -327,7 +322,9 @@ right arm — the world where only `Q` holds — where the fallacy has
 nowhere to hide:
 
 ```text
-error: docs/book/code/ch02-fallacies.ctea:34: theorem `or_gives_both` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:34: theorem `or_gives_both` failed: proof has type `Q`, but expected `P`
+  note: h : P \/ Q
+  note: hq : Q
   note: target: P
   note: the statement is not a tautology: it is false when P = false, Q = true. No proof can close it; check the statement itself.
 ```
@@ -338,9 +335,10 @@ goes `left` when it should go `right`. Read this error next to the
 three above, carefully:
 
 ```text
-error: docs/book/code/ch02-fallacies.ctea:42: theorem `wrong_turn` failed: exact proof does not solve the goal: proof has type `Q`, but expected `P`
+error: docs/book/code/ch02-fallacies.ctea:42: theorem `wrong_turn` failed: proof has type `Q`, but expected `P`
+  note: hq : Q
   note: target: P
-  note: the open goal does not follow from the current hypotheses: it is false when P = false, Q = true. Reconsider the earlier proof steps.
+  note: the open goal does not follow from the current hypotheses: it is false when Q = true, P = false. Reconsider the earlier proof steps.
 ```
 
 Different note! Not "the statement is not a tautology" but "the **open

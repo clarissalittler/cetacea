@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 2: exercises.
 -- Replace each `sorry` with a real proof.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch02-exercises.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch02 docs/book/code/ch02-exercises.ctea
 
 import ../../../std/prelude.ctea
 

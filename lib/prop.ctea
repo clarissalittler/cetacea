@@ -1,0 +1,202 @@
+mode constructive
+
+theorem id (P : Prop) : P -> P := by
+  intro h
+  exact h
+
+theorem false_elim (P : Prop) : False -> P := by
+  intro h
+  contradiction
+
+theorem imp_trans (P Q R : Prop) : (P -> Q) -> (Q -> R) -> P -> R := by
+  intro hpq
+  intro hqr
+  intro hp
+  apply hqr
+  apply hpq
+  exact hp
+
+theorem imp_swap (P Q R : Prop) : (P -> Q -> R) -> Q -> P -> R := by
+  intro h
+  intro hq
+  intro hp
+  apply h
+  exact hp
+  exact hq
+
+theorem modus_tollens (P Q : Prop) : (P -> Q) -> not Q -> not P := by
+  intro hpq
+  intro hnq
+  intro hp
+  apply hnq
+  apply hpq
+  exact hp
+
+theorem and_left (P Q : Prop) : P /\ Q -> P := by
+  intro h
+  exact h.left
+
+theorem and_right (P Q : Prop) : P /\ Q -> Q := by
+  intro h
+  exact h.right
+
+theorem and_intro (P Q : Prop) : P -> Q -> P /\ Q := by
+  intro hp
+  intro hq
+  split
+  exact hp
+  exact hq
+
+theorem and_comm (P Q : Prop) : P /\ Q -> Q /\ P := by
+  intro h
+  split
+  exact h.right
+  exact h.left
+
+theorem and_assoc_left (P Q R : Prop) : (P /\ Q) /\ R -> P /\ (Q /\ R) := by
+  intro h
+  split
+  exact h.left.left
+  split
+  exact h.left.right
+  exact h.right
+
+theorem and_assoc_right (P Q R : Prop) : P /\ (Q /\ R) -> (P /\ Q) /\ R := by
+  intro h
+  split
+  split
+  exact h.left
+  exact h.right.left
+  exact h.right.right
+
+theorem or_comm (P Q : Prop) : P \/ Q -> Q \/ P := by
+  intro h
+  cases h with
+  | left hp =>
+      right
+      exact hp
+  | right hq =>
+      left
+      exact hq
+
+theorem or_assoc_left (P Q R : Prop) : (P \/ Q) \/ R -> P \/ (Q \/ R) := by
+  intro h
+  cases h with
+  | left hpq =>
+      cases hpq with
+      | left hp =>
+          left
+          exact hp
+      | right hq =>
+          right
+          left
+          exact hq
+  | right hr =>
+      right
+      right
+      exact hr
+
+theorem or_assoc_right (P Q R : Prop) : P \/ (Q \/ R) -> (P \/ Q) \/ R := by
+  intro h
+  cases h with
+  | left hp =>
+      left
+      left
+      exact hp
+  | right hqr =>
+      cases hqr with
+      | left hq =>
+          left
+          right
+          exact hq
+      | right hr =>
+          right
+          exact hr
+
+theorem or_elim (P Q R : Prop) : (P -> R) -> (Q -> R) -> P \/ Q -> R := by
+  intro hpr
+  intro hqr
+  intro hpq
+  cases hpq with
+  | left hp =>
+      apply hpr
+      exact hp
+  | right hq =>
+      apply hqr
+      exact hq
+
+theorem not_not_em (P : Prop) : not not (P \/ not P) := by
+  intro h
+  apply h
+  right
+  intro p
+  apply h
+  left
+  exact p
+
+-- Simplifying with `True` and `False`. These are meant for `simp`, as in
+-- `simp [or_false_left, not_false]`, to clear what computation leaves.
+theorem or_false_left (P : Prop) : False \/ P <-> P := by
+  split
+  intro h
+  cases h with
+  | left hf =>
+      contradiction
+  | right hp =>
+      exact hp
+  intro h
+  right
+  exact h
+
+theorem or_false_right (P : Prop) : P \/ False <-> P := by
+  split
+  intro h
+  cases h with
+  | left hp =>
+      exact hp
+  | right hf =>
+      contradiction
+  intro h
+  left
+  exact h
+
+theorem and_true_left (P : Prop) : True /\ P <-> P := by
+  split
+  intro h
+  exact h.right
+  intro h
+  split
+  trivial
+  exact h
+
+theorem and_true_right (P : Prop) : P /\ True <-> P := by
+  split
+  intro h
+  exact h.left
+  intro h
+  split
+  exact h
+  trivial
+
+theorem not_false : not False <-> True := by
+  split
+  intro h
+  trivial
+  intro h
+  intro hf
+  exact hf
+
+mode classical
+
+theorem em (P : Prop) : P \/ not P := by
+  by_cases h : P
+  left
+  exact h
+  right
+  exact h
+
+theorem dne (P : Prop) : not not P -> P := by
+  intro hnn
+  by_contra hn
+  apply hnn
+  exact hn

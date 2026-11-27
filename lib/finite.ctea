@@ -1,0 +1,88 @@
+mode constructive
+
+import list.ctea
+import set.ctea
+
+-- Finite sets and cardinality, with lists as the evidence.
+
+def Enumerates (A : Type) (l : List A) (S : Set A) : Prop := forall x : A, x in S <-> elem(x, l)
+
+def Finite (A : Type) (S : Set A) : Prop := exists l : List A, Enumerates(l, S)
+
+defrec Nodup (A : Type) (l : List A) : Prop
+| nil => True
+| cons h t => not elem(h, t) /\ Nodup(t)
+
+def HasCard (A : Type) (S : Set A) (n : Nat) : Prop
+  := exists l : List A, Nodup(l) /\ Enumerates(l, S) /\ length(l) = n
+
+theorem enumerates_empty (A : Type) : Enumerates(nil, empty(A)) := by
+  unfold Enumerates
+  intro x
+  simp
+  trivial
+
+theorem finite_empty (A : Type) : Finite(empty(A)) := by
+  unfold Finite
+  exists nil
+  exact enumerates_empty
+
+theorem card_empty (A : Type) : HasCard(empty(A), 0) := by
+  unfold HasCard
+  exists nil
+  split
+  simp
+  trivial
+  split
+  exact enumerates_empty
+  refl
+
+theorem enumerates_singleton (A : Type) (a : A) : Enumerates(cons(a, nil), singleton(a)) := by
+  unfold Enumerates
+  intro x
+  simp
+  split
+  intro h
+  left
+  exact h
+  intro h
+  cases h with
+  | left hl =>
+      exact hl
+  | right hr =>
+      contradiction
+
+theorem finite_singleton (A : Type) (a : A) : Finite(singleton(a)) := by
+  unfold Finite
+  exists cons(a, nil)
+  exact enumerates_singleton
+
+theorem card_singleton (A : Type) (a : A) : HasCard(singleton(a), 1) := by
+  unfold HasCard
+  exists cons(a, nil)
+  split
+  simp
+  split
+  intro h
+  exact h
+  trivial
+  split
+  exact enumerates_singleton
+  refl
+
+theorem finite_union (A : Type) (S T : Set A) : Finite(S) -> Finite(T) -> Finite(union(S, T)) := by
+  intro hs
+  intro ht
+  obtain ls hls := hs
+  obtain lt hlt := ht
+  unfold Finite
+  exists append(ls, lt)
+  unfold Enumerates
+  intro x
+  unfold Enumerates at hls
+  unfold Enumerates at hlt
+  simp
+  rewrite -> elem_append
+  rewrite -> hls x
+  rewrite -> hlt x
+  refl

@@ -1,0 +1,564 @@
+//! Built-in rewrite rules derived from the kernel: datatype no-confusion
+//! (`succ n = zero <-> False`, `succ n = succ m <-> n = m`), reflexivity
+//! (`x = x <-> True`), and propositional simplifications with `True` and
+//! `False`. Every rule is a kernel theorem built from primitive rules.
+
+use hol_elab::Env;
+use hol_kernel::{
+    and_intro, and_left, and_right, assume, beta_norm, eq_mp, eta, exists_elim, exists_intro,
+    false_elim, forall_elim, forall_intro, iff_intro, imp_elim, imp_intro, mk_comb, or_elim,
+    or_left, or_right, refl, sym, trans, true_intro, DatatypeInfo, KernelError, Name, Term, Thm,
+    Type,
+};
+
+fn iff_of(forward: Thm, backward: Thm) -> hol_kernel::Result<Thm> {
+    iff_intro(&forward, &backward)
+}
+
+/// `|- A <-> False` from `|- A -> False`.
+fn negation_as_iff(neg: &Thm) -> hol_kernel::Result<Thm> {
+    let (a, _) = neg.concl().dest_imp().expect("implication");
+    let a = a.clone();
+    let backward = imp_intro(&Term::false_(), &false_elim(&assume(&Term::false_())?, &a)?)?;
+    iff_of(neg.clone(), backward)
+}
+
+/// Strips leading universal quantifiers with fresh free variables, and
+/// returns the variables so the result can be re-generalized.
+fn open_foralls(thm: &Thm) -> hol_kernel::Result<(Thm, Vec<Term>)> {
+    let mut thm = thm.clone();
+    let mut vars = Vec::new();
+    let mut taken = thm.concl().free_var_names();
+    while let Some(pred) = thm.concl().dest_forall() {
+        let (var, _) = pred.open_fresh(&taken).expect("lambda");
+        taken.insert(var.as_free().unwrap().0.clone());
+        thm = hol_kernel::forall_elim(&thm, &var)?;
+        vars.push(var);
+    }
+    Ok((thm, vars))
+}
+
+fn regeneralize(thm: Thm, vars: &[Term]) -> hol_kernel::Result<Thm> {
+    let mut current = thm;
+    for var in vars.iter().rev() {
+        current = forall_intro(var, &current)?;
+    }
+    Ok(current)
+}
+
+/// No-confusion rules for every datatype in the environment.
+pub fn datatype_rules(env: &Env) -> Vec<(String, Thm)> {
+    let mut out = Vec::new();
+    for (name, _) in env.sorts() {
+        let Some(info) = env.theory().datatype(name.as_str()) else {
+            continue;
+        };
+        for distinct in &info.distinct {
+            if let Ok((opened, vars)) = open_foralls(distinct) {
+                if let Ok(iff) = negation_as_iff(&opened) {
+                    if let Ok(rule) = regeneralize(iff, &vars) {
+                        out.push((format!("{name}.distinct"), rule));
+                    }
+                    // The mirrored orientation `d ys = c xs <-> False`.
+                    if let Ok(flipped) = flip_negation(&opened) {
+                        if let Ok(iff) = negation_as_iff(&flipped) {
+                            if let Ok(rule) = regeneralize(iff, &vars) {
+                                out.push((format!("{name}.distinct'"), rule));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for ctor in &info.ctors {
+            let Some(injective) = &ctor.injective else {
+                continue;
+            };
+            if let Ok(rule) = injectivity_iff(env, &ctor.name, injective) {
+                out.push((format!("{}.inj", ctor.name), rule));
+            }
+        }
+    }
+    out
+}
+
+/// From `|- a = b -> False`, `|- b = a -> False`.
+fn flip_negation(neg: &Thm) -> hol_kernel::Result<Thm> {
+    let (eq, _) = neg.concl().dest_imp().expect("implication");
+    let (a, b) = eq.dest_eq().expect("equation");
+    let flipped = Term::eq(b, a)?;
+    let derived = imp_elim(neg, &sym(&assume(&flipped)?)?)?;
+    imp_intro(&flipped, &derived)
+}
+
+/// `forall xs ys. c xs = c ys <-> x1 = y1 /\ ...` from the injectivity
+/// principle, whose converse is congruence.
+fn injectivity_iff(env: &Env, ctor: &Name, injective: &Thm) -> hol_kernel::Result<Thm> {
+    let (opened, vars) = open_foralls(injective)?;
+    let (eq, conj) = opened.concl().dest_imp().expect("implication");
+    let (lhs, rhs) = eq.dest_eq().expect("equation");
+    let conj = conj.clone();
+    // Converse: from the conjunction of component equalities, rebuild
+    // the constructor equation by congruence.
+    let assumed = assume(&conj)?;
+    let components = split_conjunction(&assumed, vars.len() / 2)?;
+    let (head, _) = lhs.strip_app();
+    let mut congruence = refl(head)?;
+    for component in &components {
+        congruence = mk_comb(&congruence, component)?;
+    }
+    if congruence.concl() != &Term::eq(lhs, rhs)? {
+        return Err(hol_kernel::KernelError::new(
+            "injectivity",
+            format!("congruence did not rebuild `{}` for `{ctor}`", eq),
+        ));
+    }
+    let _ = env;
+    let backward = imp_intro(&conj, &congruence)?;
+    let iff = iff_of(opened, backward)?;
+    regeneralize(iff, &vars)
+}
+
+/// Splits `|- a1 /\ (a2 /\ ...)` into `n` component theorems.
+fn split_conjunction(thm: &Thm, n: usize) -> hol_kernel::Result<Vec<Thm>> {
+    let mut out = Vec::new();
+    let mut current = thm.clone();
+    for i in 0..n {
+        if i + 1 == n {
+            out.push(current.clone());
+        } else {
+            out.push(and_left(&current)?);
+            current = and_right(&current)?;
+        }
+    }
+    Ok(out)
+}
+
+/// `forall x : A. (x = x) <-> True`.
+pub fn reflexivity_rule() -> hol_kernel::Result<Thm> {
+    let x = Term::free("x", Type::var("A"));
+    let eq = Term::eq(&x, &x)?;
+    let forward = imp_intro(&eq, &true_intro())?;
+    let backward = imp_intro(&Term::true_(), &refl(&x)?)?;
+    forall_intro(&x, &iff_of(forward, backward)?)
+}
+
+/// Propositional simplifications with `True` and `False`.
+pub fn propositional_rules() -> hol_kernel::Result<Vec<(String, Thm)>> {
+    let p = Term::free("P", Type::prop());
+    let t = Term::true_();
+    let f = Term::false_();
+    let hp = assume(&p)?;
+    let ht = true_intro();
+    let mut out = Vec::new();
+
+    // True /\ P <-> P
+    let lhs = Term::and(&t, &p)?;
+    let forward = imp_intro(&lhs, &and_right(&assume(&lhs)?)?)?;
+    let backward = imp_intro(&p, &and_intro(&ht, &hp)?)?;
+    out.push((
+        "and_true_left".to_string(),
+        forall_intro(&p, &iff_of(forward, backward)?)?,
+    ));
+
+    // P /\ True <-> P
+    let lhs = Term::and(&p, &t)?;
+    let forward = imp_intro(&lhs, &and_left(&assume(&lhs)?)?)?;
+    let backward = imp_intro(&p, &and_intro(&hp, &ht)?)?;
+    out.push((
+        "and_true_right".to_string(),
+        forall_intro(&p, &iff_of(forward, backward)?)?,
+    ));
+
+    // False /\ P <-> False, P /\ False <-> False
+    for (name, lhs, take_left) in [
+        ("and_false_left", Term::and(&f, &p)?, true),
+        ("and_false_right", Term::and(&p, &f)?, false),
+    ] {
+        let assumed = assume(&lhs)?;
+        let falsity = if take_left {
+            and_left(&assumed)?
+        } else {
+            and_right(&assumed)?
+        };
+        let forward = imp_intro(&lhs, &falsity)?;
+        let backward = imp_intro(&f, &false_elim(&assume(&f)?, &lhs)?)?;
+        out.push((
+            name.to_string(),
+            forall_intro(&p, &iff_of(forward, backward)?)?,
+        ));
+    }
+
+    // False \/ P <-> P, P \/ False <-> P
+    for (name, lhs, false_left) in [
+        ("or_false_left", Term::or(&f, &p)?, true),
+        ("or_false_right", Term::or(&p, &f)?, false),
+    ] {
+        let assumed = assume(&lhs)?;
+        let from_false = false_elim(&assume(&f)?, &p)?;
+        let forward_body = if false_left {
+            or_elim(&assumed, &from_false, &hp)?
+        } else {
+            or_elim(&assumed, &hp, &from_false)?
+        };
+        let forward = imp_intro(&lhs, &forward_body)?;
+        let backward_body = if false_left {
+            or_right(&f, &hp)?
+        } else {
+            or_left(&hp, &f)?
+        };
+        let backward = imp_intro(&p, &backward_body)?;
+        out.push((
+            name.to_string(),
+            forall_intro(&p, &iff_of(forward, backward)?)?,
+        ));
+    }
+
+    // True \/ P <-> True, P \/ True <-> True
+    for (name, lhs, true_left) in [
+        ("or_true_left", Term::or(&t, &p)?, true),
+        ("or_true_right", Term::or(&p, &t)?, false),
+    ] {
+        let forward = imp_intro(&lhs, &ht)?;
+        let backward_body = if true_left {
+            or_left(&ht, &p)?
+        } else {
+            or_right(&p, &ht)?
+        };
+        let backward = imp_intro(&t, &backward_body)?;
+        out.push((
+            name.to_string(),
+            forall_intro(&p, &iff_of(forward, backward)?)?,
+        ));
+    }
+
+    // (True -> P) <-> P
+    let lhs = Term::imp(&t, &p)?;
+    let forward = imp_intro(&lhs, &imp_elim(&assume(&lhs)?, &ht)?)?;
+    let backward = imp_intro(&p, &imp_intro(&t, &hp)?)?;
+    out.push((
+        "imp_true_left".to_string(),
+        forall_intro(&p, &iff_of(forward, backward)?)?,
+    ));
+
+    // (P -> True) <-> True
+    let lhs = Term::imp(&p, &t)?;
+    let forward = imp_intro(&lhs, &ht)?;
+    let backward = imp_intro(&t, &imp_intro(&p, &ht)?)?;
+    out.push((
+        "imp_true_right".to_string(),
+        forall_intro(&p, &iff_of(forward, backward)?)?,
+    ));
+
+    // (False -> P) <-> True
+    let lhs = Term::imp(&f, &p)?;
+    let forward = imp_intro(&lhs, &ht)?;
+    let backward = imp_intro(&t, &imp_intro(&f, &false_elim(&assume(&f)?, &p)?)?)?;
+    out.push((
+        "imp_false_left".to_string(),
+        forall_intro(&p, &iff_of(forward, backward)?)?,
+    ));
+
+    // not True <-> False   (True -> False <-> False)
+    let lhs = Term::not(&t)?;
+    let forward = imp_intro(&lhs, &imp_elim(&assume(&lhs)?, &ht)?)?;
+    let backward = imp_intro(&f, &false_elim(&assume(&f)?, &lhs)?)?;
+    out.push(("not_true".to_string(), iff_of(forward, backward)?));
+
+    // not False <-> True
+    let lhs = Term::not(&f)?;
+    let forward = imp_intro(&lhs, &ht)?;
+    let backward = imp_intro(&t, &imp_intro(&f, &assume(&f)?)?)?;
+    out.push(("not_false".to_string(), iff_of(forward, backward)?));
+
+    // (True <-> P) <-> P, (P <-> True) <-> P
+    for (name, lhs, true_left) in [
+        ("iff_true_left", Term::iff(&t, &p)?, true),
+        ("iff_true_right", Term::iff(&p, &t)?, false),
+    ] {
+        let assumed = assume(&lhs)?;
+        let forward_body = if true_left {
+            eq_mp(&assumed, &ht)?
+        } else {
+            eq_mp(&sym(&assumed)?, &ht)?
+        };
+        let forward = imp_intro(&lhs, &forward_body)?;
+        let to_true = imp_intro(&p, &ht)?;
+        let from_true = imp_intro(&t, &hp)?;
+        let backward_body = if true_left {
+            iff_intro(&from_true, &to_true)?
+        } else {
+            iff_intro(&to_true, &from_true)?
+        };
+        let backward = imp_intro(&p, &backward_body)?;
+        out.push((
+            name.to_string(),
+            forall_intro(&p, &iff_of(forward, backward)?)?,
+        ));
+    }
+
+    // (False <-> P) <-> not P, (P <-> False) <-> not P
+    let not_p = Term::not(&p)?;
+    for (name, lhs, false_left) in [
+        ("iff_false_left", Term::iff(&f, &p)?, true),
+        ("iff_false_right", Term::iff(&p, &f)?, false),
+    ] {
+        let assumed = assume(&lhs)?;
+        let falsity = if false_left {
+            eq_mp(&sym(&assumed)?, &hp)?
+        } else {
+            eq_mp(&assumed, &hp)?
+        };
+        let forward = imp_intro(&lhs, &imp_intro(&p, &falsity)?)?;
+        let from_false = imp_intro(&f, &false_elim(&assume(&f)?, &p)?)?;
+        let to_false = assume(&not_p)?;
+        let backward_body = if false_left {
+            iff_intro(&from_false, &to_false)?
+        } else {
+            iff_intro(&to_false, &from_false)?
+        };
+        let backward = imp_intro(&not_p, &backward_body)?;
+        out.push((
+            name.to_string(),
+            forall_intro(&p, &iff_of(forward, backward)?)?,
+        ));
+    }
+
+    Ok(out)
+}
+
+/// `(forall x : A, True) <-> True`: a statement that holds at every
+/// value needs no list of the values.
+pub fn forall_true_rule() -> hol_kernel::Result<Thm> {
+    let x = Term::free("x", Type::var("A"));
+    let all = Term::forall(&x, &Term::true_())?;
+    let forward = imp_intro(&all, &true_intro())?;
+    let backward = imp_intro(&Term::true_(), &forall_intro(&x, &true_intro())?)?;
+    iff_of(forward, backward)
+}
+
+/// True when every value of the datatype is one of finitely many
+/// constants: no type parameters and no constructor arguments.
+pub fn is_enumeration(info: &DatatypeInfo) -> bool {
+    info.params.is_empty() && !info.ctors.is_empty() && info.ctors.iter().all(|c| c.args.is_empty())
+}
+
+/// For every enumeration type, the two rules that replace a quantifier
+/// by its finitely many instances:
+/// `forall P. (forall x. P x) <-> P c1 /\ ... /\ P cn` and
+/// `forall P. (exists x. P x) <-> P c1 \/ ... \/ P cn`.
+/// Both come from the type's induction principle, so they carry its tag.
+pub fn enumeration_rules(env: &Env) -> Vec<(String, Thm)> {
+    let mut out = Vec::new();
+    for (name, _) in env.sorts() {
+        let Some(info) = env.theory().datatype(name.as_str()) else {
+            continue;
+        };
+        if !is_enumeration(info) {
+            continue;
+        }
+        if let Ok((all, ex)) = enumeration_rule_pair(info) {
+            out.push((format!("{name}.forall"), all));
+            out.push((format!("{name}.exists"), ex));
+        }
+    }
+    out
+}
+
+/// The constructors of an enumeration type as terms, read off the
+/// induction principle so no signature lookup is needed.
+pub fn enumeration_values(info: &DatatypeInfo) -> hol_kernel::Result<Vec<Term>> {
+    let p = Term::free("P", Type::fun(info.generic_type(), Type::prop()));
+    let opened = forall_elim(&info.induction, &p)?;
+    let mut rest = opened.concl().clone();
+    let mut values = Vec::new();
+    for _ in &info.ctors {
+        let Some((instance, tail)) = rest.dest_imp() else {
+            return Err(KernelError::new(
+                "enumeration",
+                "unexpected induction principle",
+            ));
+        };
+        let Some((_, value)) = instance.as_app() else {
+            return Err(KernelError::new("enumeration", "unexpected induction step"));
+        };
+        values.push(value.clone());
+        rest = tail.clone();
+    }
+    Ok(values)
+}
+
+fn disjoin(parts: &[Term]) -> hol_kernel::Result<Term> {
+    let mut iter = parts.iter().rev();
+    let mut acc = iter.next().expect("non-empty").clone();
+    for part in iter {
+        acc = Term::or(part, &acc)?;
+    }
+    Ok(acc)
+}
+
+/// `|- parts[0] \/ (... \/ parts[n])` from a proof of `parts[i]`.
+fn inject(parts: &[Term], i: usize, thm: Thm) -> hol_kernel::Result<Thm> {
+    if parts.len() == 1 {
+        return Ok(thm);
+    }
+    if i == 0 {
+        or_left(&thm, &disjoin(&parts[1..])?)
+    } else {
+        or_right(&parts[0], &inject(&parts[1..], i - 1, thm)?)
+    }
+}
+
+/// From proofs of one conclusion under each of `parts`, a proof of it
+/// under their disjunction.
+fn eliminate(parts: &[Term], cases: &[Thm]) -> hol_kernel::Result<Thm> {
+    if parts.len() == 1 {
+        return Ok(cases[0].clone());
+    }
+    let disjunction = assume(&disjoin(parts)?)?;
+    or_elim(
+        &disjunction,
+        &cases[0],
+        &eliminate(&parts[1..], &cases[1..])?,
+    )
+}
+
+fn enumeration_rule_pair(info: &DatatypeInfo) -> hol_kernel::Result<(Thm, Thm)> {
+    let ty = info.generic_type();
+    let p = Term::free("P", Type::fun(ty.clone(), Type::prop()));
+    let v = Term::free("v", ty.clone());
+    let n = info.ctors.len();
+    let values = enumeration_values(info)?;
+    let instances: Vec<Term> = values
+        .iter()
+        .map(|value| Term::app(&p, value))
+        .collect::<hol_kernel::Result<_>>()?;
+    let p_v = Term::app(&p, &v)?;
+    // `(fun v => P v) = P`, to state the rules about `forall P` itself.
+    let eta_p = eta(&Term::lam(&v, &p_v)?)?;
+
+    // Universal: instantiate one way, use induction the other.
+    let opened = forall_elim(&info.induction, &p)?;
+    let all_stmt = Term::forall(&v, &p_v)?;
+    let conj = conjoin(&instances)?;
+    let assumed_all = assume(&all_stmt)?;
+    let parts: Vec<Thm> = values
+        .iter()
+        .map(|value| forall_elim(&assumed_all, value))
+        .collect::<hol_kernel::Result<_>>()?;
+    let joined =
+        join_thms(&parts).ok_or_else(|| KernelError::new("enumeration", "no constructors"))?;
+    let forward = imp_intro(&all_stmt, &joined)?;
+    let components = split_conjunction(&assume(&conj)?, n)?;
+    let mut by_induction = opened;
+    for component in &components {
+        by_induction = imp_elim(&by_induction, component)?;
+    }
+    let backward = imp_intro(&conj, &by_induction)?;
+    let all_iff = iff_of(forward, backward)?;
+    let (all_head, _) = all_stmt.as_app().expect("quantifier");
+    let all_eta = mk_comb(&refl(all_head)?, &eta_p)?;
+    let all_rule = forall_intro(&p, &trans(&sym(&all_eta)?, &all_iff)?)?;
+
+    // Existential: a witness one way; the other way, induction on the
+    // statement `P v -> P c1 \/ ... \/ P cn`.
+    let ex_stmt = Term::exists(&v, &p_v)?;
+    let disj = disjoin(&instances)?;
+    let cases: Vec<Thm> = values
+        .iter()
+        .zip(&instances)
+        .map(|(value, instance)| exists_intro(&ex_stmt, value, &assume(instance)?))
+        .collect::<hol_kernel::Result<_>>()?;
+    let backward = imp_intro(&disj, &eliminate(&instances, &cases)?)?;
+    let motive = Term::lam(&v, &Term::imp(&p_v, &disj)?)?;
+    let mut covered = beta_norm(&forall_elim(&info.induction, &motive)?)?;
+    for (i, instance) in instances.iter().enumerate() {
+        let step = imp_intro(instance, &inject(&instances, i, assume(instance)?)?)?;
+        covered = imp_elim(&covered, &step)?;
+    }
+    let at_v = imp_elim(&forall_elim(&covered, &v)?, &assume(&p_v)?)?;
+    let forward = imp_intro(&ex_stmt, &exists_elim(&assume(&ex_stmt)?, &v, &at_v)?)?;
+    let ex_iff = iff_of(forward, backward)?;
+    let (ex_head, _) = ex_stmt.as_app().expect("quantifier");
+    let ex_eta = mk_comb(&refl(ex_head)?, &eta_p)?;
+    let ex_rule = forall_intro(&p, &trans(&sym(&ex_eta)?, &ex_iff)?)?;
+
+    Ok((all_rule, ex_rule))
+}
+
+/// Splits a right-nested conjunction into its components.
+fn conjuncts(t: &Term) -> Vec<Term> {
+    match t.dest_and() {
+        Some((a, b)) => {
+            let mut out = vec![a.clone()];
+            out.extend(conjuncts(b));
+            out
+        }
+        None => vec![t.clone()],
+    }
+}
+
+fn conjoin(parts: &[Term]) -> hol_kernel::Result<Term> {
+    let mut iter = parts.iter().rev();
+    let mut acc = iter.next().expect("non-empty").clone();
+    for part in iter {
+        acc = Term::and(part, &acc)?;
+    }
+    Ok(acc)
+}
+
+/// For the conjunction produced by an injectivity rewrite, `|- conj <->
+/// kept` where `kept` drops the components `x = x` (proved by `refl`),
+/// keeping the first component when all are trivial so the result stays
+/// an equation rather than collapsing to `True`.
+pub fn tidy_injectivity(conj: &Term) -> Option<Thm> {
+    let parts = conjuncts(conj);
+    let trivial: Vec<bool> = parts
+        .iter()
+        .map(|p| p.dest_eq().map(|(a, b)| a == b).unwrap_or(false))
+        .collect();
+    if !trivial.iter().any(|t| *t) || parts.len() < 2 {
+        return None;
+    }
+    let mut kept: Vec<usize> = (0..parts.len()).filter(|i| !trivial[*i]).collect();
+    if kept.is_empty() {
+        kept.push(0);
+    }
+    let kept_terms: Vec<Term> = kept.iter().map(|i| parts[*i].clone()).collect();
+    let kept_conj = conjoin(&kept_terms).ok()?;
+    // Forward: project the kept components out of the full conjunction.
+    let full = assume(conj).ok()?;
+    let components = split_conjunction(&full, parts.len()).ok()?;
+    let forward_body = join_thms(
+        &kept
+            .iter()
+            .map(|i| components[*i].clone())
+            .collect::<Vec<_>>(),
+    )?;
+    let forward = imp_intro(conj, &forward_body).ok()?;
+    // Backward: rebuild every component, using `refl` for the dropped ones.
+    let kept_thm = assume(&kept_conj).ok()?;
+    let kept_components = split_conjunction(&kept_thm, kept.len()).ok()?;
+    let mut all = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        match kept.iter().position(|k| *k == i) {
+            Some(pos) => all.push(kept_components[pos].clone()),
+            None => {
+                let (a, _) = part.dest_eq()?;
+                all.push(refl(a).ok()?);
+            }
+        }
+    }
+    let backward_body = join_thms(&all)?;
+    let backward = imp_intro(&kept_conj, &backward_body).ok()?;
+    iff_of(forward, backward).ok()
+}
+
+fn join_thms(thms: &[Thm]) -> Option<Thm> {
+    let mut iter = thms.iter().rev();
+    let mut acc = iter.next()?.clone();
+    for thm in iter {
+        acc = and_intro(thm, &acc).ok()?;
+    }
+    Some(acc)
+}

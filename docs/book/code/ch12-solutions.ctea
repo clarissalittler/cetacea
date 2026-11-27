@@ -1,13 +1,13 @@
 -- Proofs, Checked — Chapter 12: exercise solutions.
 -- Spoilers! Try docs/book/code/ch12-exercises.ctea yourself first.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch12-solutions.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch12 docs/book/code/ch12-solutions.ctea
 
 import ../../../std/prelude.ctea
 
 mode constructive
 
-theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
+theorem le_n_succ_n (n : Nat) : n <= succ(n) := by
   induction n with
   | zero =>
       simp
@@ -16,7 +16,7 @@ theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
       simp
       exact ih
 
-theorem pred_le (n : Nat) : le(pred(n), n) := by
+theorem pred_le (n : Nat) : pred(n) <= n := by
   induction n with
   | zero =>
       simp
@@ -25,9 +25,9 @@ theorem pred_le (n : Nat) : le(pred(n), n) := by
       simp
       exact le_n_succ_n
 
--- Exercise 12.1. Both goals reduce to True: le(0, anything) computes.
-theorem ex12_1 (n : Nat) : le(0, mul(n, n)) := by
-  apply strong_induction {P := fun m : Nat => le(0, mul(m, m)); n := n}
+-- Exercise 12.1. Both goals reduce to True: 0 <= anything computes.
+theorem ex12_1 (n : Nat) : 0 <= n * n := by
+  apply strong_induction {P := fun m : Nat => 0 <= m * m; n := n}
   simp
   trivial
   intro k

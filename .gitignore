@@ -5,3 +5,8 @@ target/
 .DS_Store
 *.swp
 *.swo
+scripts/__pycache__/
+
+# Local assistant settings and files the Claude app saves here
+.claude/
+Claude outputs/

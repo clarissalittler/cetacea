@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 12: Strong Induction, and Where to Go Next
 -- Companion file for docs/book/12-strong-induction.md.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch12-examples.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch12 docs/book/code/ch12-examples.ctea
 
 import ../../../std/prelude.ctea
 
@@ -10,8 +10,8 @@ mode constructive
 -- Section 12.3: first contact with strong_induction. Same theorem as
 -- Chapter 9's sub_self_demo, proved with the stronger principle: the
 -- step goal hands us P(m) for EVERY m <= k, and we use it at m = k.
-theorem sub_self_strong (n : Nat) : sub(n, n) = 0 := by
-  apply strong_induction {P := fun m : Nat => sub(m, m) = 0; n := n}
+theorem sub_self_strong (n : Nat) : n - n = 0 := by
+  apply strong_induction {P := fun m : Nat => m - m = 0; n := n}
   refl
   intro k
   intro hk
@@ -21,7 +21,7 @@ theorem sub_self_strong (n : Nat) : sub(n, n) = 0 := by
 
 -- Section 12.4: two order lemmas, by ordinary Chapter 9 induction.
 -- Neither is in std/nat.ctea, so we prove them here.
-theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
+theorem le_n_succ_n (n : Nat) : n <= succ(n) := by
   induction n with
   | zero =>
       simp
@@ -30,7 +30,7 @@ theorem le_n_succ_n (n : Nat) : le(n, succ(n)) := by
       simp
       exact ih
 
-theorem pred_le (n : Nat) : le(pred(n), n) := by
+theorem pred_le (n : Nat) : pred(n) <= n := by
   induction n with
   | zero =>
       simp

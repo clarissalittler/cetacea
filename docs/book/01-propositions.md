@@ -145,8 +145,8 @@ get to negation in Chapter 2.
 
 ## 1.4 Your first Cetacea file
 
-Time to make a claim and defend it. Create a file `first.ctea`
-containing:
+Time to make a claim and defend it. Open Cetacea, clear out whatever
+is in the editor, and type:
 
 ```text
 mode constructive
@@ -193,15 +193,19 @@ Now you owe a proof of `P`, and you're holding one — it's `h`. The
 tactic `exact h` says "the thing I owe is exactly `h`." Goal closed,
 proof complete.
 
-Check it (from the repository root):
-
-```sh
-target/debug/cetacea_cli first.ctea
-```
+You don't have to ask for a verdict — the checker has been reading
+over your shoulder the whole time. Its report:
 
 ```text
 accepted theorem my_first_proof (constructive)
 ```
+
+(The browser says it in fewer words, `1 accepted`, in the green bar at
+the top right. The full line is what the command-line checker prints,
+and it's the form this book quotes.) While you're here, click on the
+`intro h` line and then on the `exact h` line, and watch the Goals
+panel: it shows the goal *after* the line your cursor is on, so you can
+replay the two states we just wrote out.
 
 That `accepted` line is the entire point of this book. It means a
 program with no goodwill, no context, and no imagination verified every
@@ -219,7 +223,7 @@ The companion file
 [`code/ch01-examples.ctea`](code/ch01-examples.ctea) contains every
 proof from this chapter (plus an `import` line that loads Cetacea's
 standard library — we won't need it until later chapters, but all our
-companion files start that way so you get used to seeing it). Run it
+companion files start that way so you get used to seeing it). Load it
 now and watch all eight theorems get accepted.
 
 ## 1.5 Proving an "and": `split`
@@ -369,42 +373,37 @@ treatment.
 
 The file [`code/ch01-mistakes.ctea`](code/ch01-mistakes.ctea) contains
 four deliberately broken proofs — and unlike every other companion
-file, it is *supposed* to fail. Run it:
-
-```sh
-target/debug/cetacea_cli docs/book/code/ch01-mistakes.ctea
-```
+file, it is *supposed* to fail. Load it.
 
 You'll get one error per broken theorem (the checker doesn't stop at
 the first — each theorem is judged independently). Let's read them.
-Everything below is the checker's real output; only the leading path
-will differ on your machine.
+Everything below is the checker's real output, in the form the
+command-line checker prints it; the browser shows the same messages in
+its Diagnostics panel, with the line number in place of the path.
 
 **Mistake 1: grabbing the wrong half.** The proof of `P /\ Q -> Q`
 says `exact h.left`:
 
 ```text
-error: docs/book/code/ch01-mistakes.ctea:13: theorem `wrong_half` failed: exact proof does not solve the goal: proof has type `P`, but expected `Q`
+error: docs/book/code/ch01-mistakes.ctea:13: theorem `wrong_half` failed: proof has type `P`, but expected `Q`
+  note: h : P /\ Q
   note: target: Q
-  help: Match the proof to the target
-    `exact` closes the goal only when the expression proves the current target `Q`. Check which hypothesis (or which projection, `.left`/`.right`) proves exactly this target; for an implication or theorem whose conclusion matches, use `apply`.
 ```
 
 Learn the anatomy, because every Cetacea error has it: the **line
 number** of the failing tactic, what you **offered** (`proof has type
-P`), what was **owed** (`expected Q`, repeated in `note: target:`), and
-a `help:` paragraph suggesting a fix. Here the fix is obvious:
-`h.right`.
+P`), what was **owed** (`expected Q`), and then the goal at the moment
+things went wrong — one `note:` per hypothesis you were holding, and a
+last one for the target. That's everything you need to find the fix,
+and here it's obvious: `h.right`.
 
 **Mistake 2: `split` before its time.** `split` works on a goal that
 *is* a conjunction — `P -> Q -> P /\ Q` is an implication (the `/\` is
 buried under two arrows):
 
 ```text
-error: docs/book/code/ch01-mistakes.ctea:17: theorem `split_too_soon` failed: split expects a conjunction goal
+error: docs/book/code/ch01-mistakes.ctea:17: theorem `split_too_soon` failed: `split` needs a conjunction or biconditional as the goal, but the goal is `P -> Q -> P /\ Q`
   note: target: P -> Q -> P /\ Q
-  help: Use `split` only for conjunctions
-    `split` works when the current target has the form `P /\ Q`; here it is `P -> Q -> P /\ Q`.
 ```
 
 Rule of thumb: look at the target's *outermost* connective. Arrows
@@ -414,16 +413,21 @@ outside? `intro` first.
 goal, forget the second:
 
 ```text
-error: docs/book/code/ch01-mistakes.ctea:20: theorem `forgot_a_goal` failed: unsolved goal `Q`
+error: docs/book/code/ch01-mistakes.ctea:24: theorem `forgot_a_goal` failed: the proof is incomplete: 1 goal remains
+  note: hp : P
+  note: hq : Q
   note: target: Q
 ```
 
-Every goal you open, you must close. The error names the orphan.
+Every goal you open, you must close. The error points at the last line
+of the proof — that's where the checker ran out of tactics — and the
+notes describe the orphan.
 
 **Mistake 4: reusing a name.** Two `intro h` in a row:
 
 ```text
-error: docs/book/code/ch01-mistakes.ctea:29: theorem `name_reuse` failed: `intro` would shadow existing hypothesis `h`
+error: docs/book/code/ch01-mistakes.ctea:29: theorem `name_reuse` failed: the name `h` is already in use; choose another
+  note: h : P
   note: target: P -> P
 ```
 
@@ -437,14 +441,17 @@ mistakes file isn't wrong so much as unfinished: it inserts the tactic
 are:
 
 ```text
-error: docs/book/code/ch01-mistakes.ctea:36: theorem `peek_at_the_goal` failed: current goal is `Q`
+error: docs/book/code/ch01-mistakes.ctea:36: theorem `peek_at_the_goal` failed: show_goal: the proof stops here so you can read the goal
+  note: h : P /\ Q
   note: target: Q
 ```
 
-Whenever a proof stops making sense, drop in a `show_goal`, run the
-checker, see exactly what's owed, then delete the line and continue.
-It's the formal-proof equivalent of a print statement, and you should
-use it *constantly* while learning.
+Whenever a proof stops making sense, drop in a `show_goal`, see exactly
+what you hold and what's owed, then delete the line and continue. It's
+the formal-proof equivalent of a print statement. In the browser the
+Goals panel does the same job without your typing anything — just put
+the cursor where you're confused — and you should use one or the other
+*constantly* while learning.
 
 ## 1.9 Exercises
 

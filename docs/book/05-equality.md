@@ -49,27 +49,37 @@ prove `clark = clark`? But `refl` has a hidden talent: before
 comparing the two sides, it **computes** them. Watch:
 
 ```text
-theorem two_plus_three : add(2, 3) = 5 := by
+theorem two_plus_three : 2 + 3 = 5 := by
   refl
 ```
 
-`add(2, 3)` and `5` are not the same expression — one is a sum, the
-other a numeral. But Cetacea's natural numbers *compute*: `add` has
+`2 + 3` and `5` are not the same expression — one is a sum, the
+other a numeral. But Cetacea's natural numbers *compute*: `+` has
 built-in equations, and under the hood the numeral `5` is shorthand for
 a five-layer tower of successors over `0`. (You'll meet this structure
 properly in Chapter 9; today it's enough to know that numerals are not
-magic.) `refl` evaluates `add(2, 3)`, evaluates `5`, sees the same
+magic.) `refl` evaluates `2 + 3`, evaluates `5`, sees the same
 natural number on both sides, and accepts. One line, and the checker did
 the arithmetic.
+
+Two practical notes, since this is the first chapter with numbers in
+it. If the checker tells you that numbers need `logic fol_nat`, your
+Section menu is still set to an earlier chapter — they're switched on
+from Chapter 5. And the arithmetic symbols have names. `+` is `add`,
+`*` is `mul`, `-` is `sub`; you can even write `add(2, 3)` and the
+checker will take it, and say `2 + 3` back. This book writes the
+symbols. The names are worth knowing anyway, because the library is
+full of them: the theorem that addition commutes is called `add_comm`,
+and now you know why.
 
 This makes `refl` a tiny calculator that only ever says "yes" when the
 answer is right:
 
 ```text
-theorem seven_times_six : mul(7, 6) = 42 := by
+theorem seven_times_six : 7 * 6 = 42 := by
   refl
 
-theorem four_two_ways : add(2, 2) = add(1, 3) := by
+theorem four_two_ways : 2 + 2 = 1 + 3 := by
   refl
 ```
 
@@ -80,16 +90,16 @@ Computation even works with variables in the way, as long as the
 built-in equations can still make progress:
 
 ```text
-theorem add_zero_demo (n : Nat) : add(n, 0) = n := by
+theorem add_zero_demo (n : Nat) : n + 0 = n := by
   refl
 
-theorem add_one_demo (n : Nat) : add(n, 1) = succ(n) := by
+theorem add_one_demo (n : Nat) : n + 1 = succ(n) := by
   refl
 ```
 
-We don't know what `n` is, but `add(n, 0)` simplifies to `n` anyway —
+We don't know what `n` is, but `n + 0` simplifies to `n` anyway —
 adding zero is one of the equations the checker knows. When the two
-sides *don't* compute to the same thing (`add(n, m) = add(m, n)`,
+sides *don't* compute to the same thing (`n + m = m + n`,
 say — true, but no amount of evaluation shows it), `refl` refuses, and
 you need either the heavier machinery below or, eventually, Chapter
 9's induction.
@@ -150,13 +160,14 @@ keep the two straight: **look at your goal, find which side of the
 equation appears in it, and pick the form that hunts for that side** —
 `->` hunts left sides, `<-` hunts right sides.
 
-**Warning for Lean/Rocq readers.** Cetacea also accepts bare
-`rewrite h` as a legacy shorthand for `rewrite <- h`, not for
-`rewrite -> h`. This book uses explicit arrows from here on: write
-`rewrite -> h` for left-to-right and `rewrite <- h` for right-to-left.
-Getting this backwards is this chapter's Mistake 1, and the error
-message (Section 5.8) tells you precisely which term it went looking
-for and couldn't find.
+**A note on bare `rewrite h`.** Cetacea also accepts `rewrite h` with
+no arrow, and reads it left-to-right, the same as `rewrite -> h` (Lean
+and Rocq readers: yes, the way you're used to). This book writes the
+arrow every time anyway, because the direction is the whole decision
+and it's worth making on purpose: `rewrite -> h` for left-to-right,
+`rewrite <- h` for right-to-left. Getting this backwards is this
+chapter's Mistake 1, and the error message (Section 5.8) tells you
+precisely which term it went looking for and couldn't find.
 
 One more variant. `rewrite` replaces *one* occurrence at a time
 (handy for precision). If several occurrences match, Cetacea accepts
@@ -370,21 +381,25 @@ directions a workout.
 
 ## 5.8 Common mistakes
 
-Run [`code/ch05-mistakes.ctea`](code/ch05-mistakes.ctea) — intended to
+Load [`code/ch05-mistakes.ctea`](code/ch05-mistakes.ctea) — intended to
 fail, as always.
 
 **Mistake 1: rewriting against the grain.** The proof holds
-`h : clark = superman` and a goal about `clark`, and reaches for bare
-`rewrite h` — legacy shorthand for `rewrite <- h`, which hunts for the
-equation's *right* side:
+`h : clark = superman` and a goal about `clark`, and reaches for
+`rewrite <- h`, which hunts for the equation's *right* side:
 
 ```text
-error: docs/book/code/ch05-mistakes.ctea:21: theorem `wrong_direction` failed: rewrite could not find `superman` in goal `Flies(clark)`
+error: docs/book/code/ch05-mistakes.ctea:21: theorem `wrong_direction` failed: no occurrence of `superman` to rewrite in the goal
+  note: `clark` does occur; rewrite in the other direction with `rewrite -> ...`
+  note: h : clark = superman
+  note: hs : Flies(superman)
   note: target: Flies(clark)
 ```
 
 Read the message the way the checker means it: *I looked for
-`superman` in `Flies(clark)` and it isn't there.* That's your cue that
+`superman` in `Flies(clark)` and it isn't there.* And then it does you
+a kindness: it noticed the *other* side of your equation sitting right
+there in the goal, and says so. That's your cue that
 you wanted the other form — `rewrite -> h`. This error is harmless,
 instantly diagnosable, and you will cause it roughly weekly for the
 rest of your formal-proof career. (Everyone does.)
@@ -394,24 +409,16 @@ sides and compares. If the equation is false, no tactic can help, and
 the error shows you the computation-eye view:
 
 ```text
-error: docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: refl cannot prove `add(2, 2) = 5` because the sides are not identical
-  note: target: add(2, 2) = 5
-  note: the arithmetic statement is false when it is false outright. No proof can close it; check the statement itself.
-  help: Use equality simplification first
-    `refl` closes goals whose two sides are already identical. Try `simp` or `rewrite` before `refl` if the sides should compute to the same term.
-    try:
-      simp
-      refl
+error: docs/book/code/ch05-mistakes.ctea:26: theorem `arithmetic_optimism` failed: `refl` failed: after computation the two sides are `4` and `5`, which differ
+  note: target: 2 + 2 = 5
 ```
 
-The goal now prints with the same decimals you wrote: `add(2, 2)` on
-the left, `5` on the right, and no way to make them equal. Two lessons.
-First, numerals still have successor structure underneath. Second, note
-that the `help:` block suggests `simp` before
-`refl` — good advice when the sides *should* compute to the same term
-and you're one simplification away, but no rescue for an equation
-that's simply false. The checker flags the failed step; deciding
-whether the statement was ever true remains your job.
+The checker did the arithmetic and is showing its work: the left side
+came to `4`, the right side is `5`, and no tactic is going to talk
+those two into being equal. When the two sides it reports look like
+they *should* match and don't, you're usually one `rewrite` away. When
+they're two different numbers, the statement is simply false, and the
+only fix is to the theorem.
 
 **Mistake 3: `have` says one thing, the proof says another.** The
 `:=` form of `have` checks the expression against the formula you
@@ -420,6 +427,7 @@ even the mirror image of what you asked for:
 
 ```text
 error: docs/book/code/ch05-mistakes.ctea:31: theorem `have_backwards` failed: have proof has type `clark = superman`, but the stated formula is `superman = clark`
+  note: h : clark = superman
   note: target: superman = clark
 ```
 
@@ -432,13 +440,12 @@ superman = clark := eq_symm h`.
 Section 5.1, enforced:
 
 ```text
-error: docs/book/code/ch05-mistakes.ctea:35: theorem `type_confusion` has invalid statement
-  note: equality compares `clark` of type `Person` with `0` of type `Nat`
-  note: target: clark = 0
+error: docs/book/code/ch05-mistakes.ctea:35: cannot compare `clark` of type `Person` with `0` of type `Nat`
 ```
 
-Note the different flavor of failure: not "theorem failed" but
-"theorem **has invalid statement**." No tactic ever ran — the
+Note the different flavor of failure: every other error in this
+section says "theorem ... **failed**," and this one doesn't mention a
+theorem at all. No tactic ever ran — the
 statement never made it into the game. Chapter 4's wrong-type witness
 got caught the same way, and this is the general principle: the type
 system screens out *nonsense* before the logic even considers
@@ -449,9 +456,9 @@ system screens out *nonsense* before the logic even considers
 Open [`code/ch05-exercises.ctea`](code/ch05-exercises.ctea) and clear
 the `sorry` flags.
 
-- **Exercise 5.1** `mul(3, 4) = 12` — let the checker do the
+- **Exercise 5.1** `3 * 4 = 12` — let the checker do the
   arithmetic.
-- **Exercise 5.2** `add(n, 2) = succ(succ(n))` — computation with a
+- **Exercise 5.2** `n + 2 = succ(succ(n))` — computation with a
   variable in the way, like `add_one_demo`.
 - **Exercise 5.3** `superman = clark -> clark = superman` — one lemma;
   or, if you're feeling tactile, a `rewrite` and a `refl`.

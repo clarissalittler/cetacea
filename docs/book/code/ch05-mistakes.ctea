@@ -2,7 +2,7 @@
 -- INTENDED TO FAIL. Every theorem in this file contains a deliberate
 -- mistake discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch05-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch05 docs/book/code/ch05-mistakes.ctea
 
 mode constructive
 
@@ -14,15 +14,15 @@ const superman : Person
 pred Flies(Person)
 
 -- Mistake 1: rewriting in the wrong direction. The goal mentions
--- `clark`, but bare `rewrite h` hunts for the equation's RIGHT side.
+-- `clark`, but `rewrite <- h` hunts for the equation's RIGHT side.
 theorem wrong_direction : clark = superman -> Flies(superman) -> Flies(clark) := by
   intro h
   intro hs
-  rewrite h
+  rewrite <- h
   exact hs
 
 -- Mistake 2: refl on an equation that is simply false.
-theorem arithmetic_optimism : add(2, 2) = 5 := by
+theorem arithmetic_optimism : 2 + 2 = 5 := by
   refl
 
 -- Mistake 3: `have` states one equality, the proof provides the other.

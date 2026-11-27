@@ -11,7 +11,7 @@
 Chapter 10 ended with the checker refusing something perfectly true:
 
 ```text
-theorem append_nil_right (l : List) : append(l, nil) = l := by
+theorem append_nil_right (l : List Nat) : append(l, nil) = l := by
   refl
 ```
 
@@ -25,18 +25,20 @@ survives each `succ`.
 So look at how a `List` is built:
 
 ```text
-data List
+data List (A : Type)
 | nil
-| cons(Nat, List)
+| cons(A, List A)
 ```
 
-Every list is built from `nil` by finitely many `cons`es. The same
-argument should work: prove the claim for `nil`, then show it survives
-each `cons`. It does work — it's called **structural induction**, and
-the wonderful thing is that you've already learned it. Chapter 9's
-induction on `Nat` wasn't a special fact about numbers; it was the
-general principle, applied to the simplest interesting `data` type.
-This chapter applies it to the rest of them.
+(As in Chapter 10, we fill the blank with `Nat` and work with `List
+Nat` throughout.) Every list is built from `nil` by finitely many
+`cons`es. The same argument should work: prove the claim for `nil`,
+then show it survives each `cons`. It does work — it's called
+**structural induction**, and the wonderful thing is that you've
+already learned it. Chapter 9's induction on `Nat` wasn't a special
+fact about numbers; it was the general principle, applied to the
+simplest interesting `data` type. This chapter applies it to the rest
+of them.
 
 ## 11.2 Reading the principle off the declaration
 
@@ -51,9 +53,9 @@ Apply it to `List`. Two constructors, two cases:
 
 - `nil` has no arguments: prove `P(nil)` outright. The base of the
   ladder.
-- `cons(Nat, List)` has two arguments — a head `h : Nat` and a tail
-  `t : List` — of which one (`t`) is recursive, i.e. is itself a
-  `List`. So: prove `P(cons(h, t))` for arbitrary `h` and `t`, given
+- `cons(A, List A)` has two arguments — for us, a head `h : Nat` and
+  a tail `t : List Nat` — of which one (`t`) is recursive, i.e. is
+  itself a list. So: prove `P(cons(h, t))` for arbitrary `h` and `t`, given
   **one** induction hypothesis, `ih : P(t)` — the claim for the tail,
   the list one layer *inside* the one you're proving.
 
@@ -61,7 +63,7 @@ The `induction` tactic takes exactly this shape, and the cliffhanger
 resolves:
 
 ```text
-theorem append_nil_demo (l : List) : append(l, nil) = l := by
+theorem append_nil_demo (l : List Nat) : append(l, nil) = l := by
   induction l with
   | nil =>
       refl
@@ -75,7 +77,7 @@ The `nil` arm owes `append(nil, nil) = nil` — that's the free
 direction, `refl`. The `cons` arm opens at
 
 ```text
-h : Nat, t : List, ih : append(t, nil) = t  |-  append(cons(h, t), nil) = cons(h, t)
+h : Nat, t : List Nat, ih : append(t, nil) = t  |-  append(cons(h, t), nil) = cons(h, t)
 ```
 
 `simp` fires `append`'s cons equation on the left:
@@ -95,8 +97,8 @@ The flagship list theorem — concatenating adds the lengths (it's
 `length_append` in `std/list.ctea`):
 
 ```text
-theorem length_append_demo (l1 : List) (l2 : List)
-  : length(append(l1, l2)) = add(length(l1), length(l2)) := by
+theorem length_append_demo (l1 : List Nat) (l2 : List Nat)
+  : length(append(l1, l2)) = length(l1) + length(l2) := by
   induction l1 with
   | nil =>
       refl
@@ -113,13 +115,13 @@ immediately, with an `ih` no rewrite can use. Choosing the induction
 variable to match the recursion is most of the art in these proofs.)
 
 Second, the `cons` arm. It opens owing
-`length(append(cons(h, t), l2)) = add(length(cons(h, t)), length(l2))`,
+`length(append(cons(h, t), l2)) = length(cons(h, t)) + length(l2)`,
 and `simp` pushes computation through every function in sight —
-`append`'s cons equation, then `length`'s, then `add`'s:
+`append`'s cons equation, then `length`'s, then `+`'s:
 
 ```text
-ih : length(append(t, l2)) = add(length(t), length(l2))
-  |-  succ(length(append(t, l2))) = succ(add(length(t), length(l2)))
+ih : length(append(t, l2)) = length(t) + length(l2)
+  |-  succ(length(append(t, l2))) = succ(length(t) + length(l2))
 ```
 
 Under the `succ`s, the goal *is* `ih`. `rewrite -> ih`, `refl`. The
@@ -147,7 +149,7 @@ left subtree with its right sibling, all the way down:
 ```text
 defrec size (t : Tree) : Nat
 | leaf => 0
-| node l v r recl recr => succ(add(recl, recr))
+| node l v r recl recr => succ(recl + recr)
 
 defrec mirror (t : Tree) : Tree
 | leaf => leaf
@@ -182,7 +184,7 @@ For reference, the recipe applied to everything you've met:
 | Declaration | Arms of `induction ... with` |
 |---|---|
 | `Nat`: `0`, `succ(Nat)` | `\| zero =>` · `\| succ k ih =>` |
-| `List`: `nil`, `cons(Nat, List)` | `\| nil =>` · `\| cons h t ih =>` |
+| `List A`: `nil`, `cons(A, List A)` | `\| nil =>` · `\| cons h t ih =>` |
 | `Tree`: `leaf`, `node(Tree, Nat, Tree)` | `\| leaf =>` · `\| node l v r ihl ihr =>` |
 
 The shape of the proof is the shape of the data. Once you can read a
@@ -214,7 +216,7 @@ then `size`, on the left:
 
 ```text
 ihl : ..., ihr : ...
-  |-  succ(add(size(mirror(r)), size(mirror(l)))) = succ(add(size(l), size(r)))
+  |-  succ(size(mirror(r)) + size(mirror(l))) = succ(size(l) + size(r))
 ```
 
 Read the left side: the mirror put *r*'s size first — the subtrees
@@ -223,13 +225,13 @@ traded places. The two rewrites clean up the mirrors
 `ihr`), leaving
 
 ```text
-succ(add(size(r), size(l))) = succ(add(size(l), size(r)))
+succ(size(r) + size(l)) = succ(size(l) + size(r))
 ```
 
 — true, but not *identical*: the sum is flipped, and this is
 arithmetic, not tree structure. So the last step borrows Chapter 9's
 crown jewel from the library, instantiated to say exactly
-`add(size(l), size(r)) = add(size(r), size(l))`:
+`size(l) + size(r) = size(r) + size(l)`:
 `rewrite -> add_comm {n := size(l); m := size(r)}`, then `refl`. A
 structural induction with an equational cameo — most interesting
 proofs about data end this way, structure and arithmetic doing one
@@ -237,7 +239,7 @@ step each.
 
 ## 11.6 Common mistakes
 
-Run [`code/ch11-mistakes.ctea`](code/ch11-mistakes.ctea) — intended
+Load [`code/ch11-mistakes.ctea`](code/ch11-mistakes.ctea) — intended
 to fail. All three mistakes are misreadings of the recipe, and the
 checker recites the correct reading back each time.
 
@@ -246,7 +248,7 @@ first, so the `nil` arm comes first — the proof below leads with
 `cons`:
 
 ```text
-error: docs/book/code/ch11-mistakes.ctea:14: theorem `arms_out_of_order` failed: induction arm `cons` does not match constructor `nil`; arms must follow the declaration order
+error: docs/book/code/ch11-mistakes.ctea:15: theorem `arms_out_of_order` failed: expected the case `| nil ... =>` here
   note: target: append(l, nil) = l
 ```
 
@@ -257,27 +259,30 @@ else.
 `| cons h t =>` looks plausible — two arguments, two names:
 
 ```text
-error: docs/book/code/ch11-mistakes.ctea:25: theorem `missing_binders` failed: induction arm `cons` expects 3 binder(s): one per constructor argument, then one induction hypothesis per recursive argument
+error: docs/book/code/ch11-mistakes.ctea:28: theorem `missing_binders` failed: case `cons` binds 3 names: one per constructor argument (2) and one induction hypothesis per recursive argument (1)
   note: target: append(l, nil) = l
 ```
 
 Two constructor arguments *plus one hypothesis* for the recursive one:
 three binders. If you forget, the checker's message is the recipe of
-Section 11.2, word for word.
+Section 11.2 with the arithmetic done for you. (Chapter 10's `defrec`
+let you leave the extra names off and write the recursive call
+yourself. `induction` doesn't: a hypothesis has to be called
+something before you can use it.)
 
 **Mistake 3: one hypothesis where two are owed.** The tree version of
 the same miscount — `| node l v r ih =>`:
 
 ```text
-error: docs/book/code/ch11-mistakes.ctea:44: theorem `one_ih_for_node` failed: induction arm `node` expects 5 binder(s): one per constructor argument, then one induction hypothesis per recursive argument
-  note: target: le(0, size(t))
+error: docs/book/code/ch11-mistakes.ctea:48: theorem `one_ih_for_node` failed: case `node` binds 5 names: one per constructor argument (3) and one induction hypothesis per recursive argument (2)
+  note: target: 0 <= size(t)
 ```
 
 Three arguments, two of them recursive: five binders. When in doubt,
 don't count from memory — count from the `data` declaration. (And
 remember Chapter 9's freshness rule: all these binders must be new
 names. `| node l v r ihl ihr =>` inside a theorem that already has a
-variable `v` will be rejected as shadowing.)
+variable `v` will be rejected, because the name is taken.)
 
 ## 11.7 Exercises
 
@@ -289,7 +294,7 @@ variable, which arms, how many binders.
 - **Exercise 11.1** a concrete `size` — count first, then `refl`.
 - **Exercise 11.2** `append(append(l1, l2), l3) = append(l1, append(l2, l3))`
   — associativity of append, same skeleton as `length_append_demo`.
-- **Exercise 11.3** `sum(append(l1, l2)) = add(sum(l1), sum(l2))` —
+- **Exercise 11.3** `sum(append(l1, l2)) = sum(l1) + sum(l2)` —
   like `length_append_demo`, plus one arithmetic cameo:
   `add_assoc {n := h; m := sum(t); k := sum(l2)}`.
 - **Exercise 11.4** `mirror(mirror(t)) = t` — mirroring is its own

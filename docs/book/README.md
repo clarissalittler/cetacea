@@ -23,22 +23,57 @@ This book is the slow, friendly path.
 
 ## What you need
 
-Build the checker once, from the repository root:
+A web browser. Cetacea runs entirely in the page: open it (your
+instructor will have given you the link), and you get an editor on the
+left and the checker's verdict on the right. It re-checks as you type,
+so there is nothing to install and nothing to run.
+
+Four things on that page are worth finding before Chapter 1:
+
+- **The Book menu.** Every companion file in this book is in it,
+  chapter by chapter. When a chapter says "load the examples file,"
+  this is where. Opening a file also sets the Section menu to its
+  chapter, and your work on each file is remembered separately — so
+  peeking at the solutions doesn't cost you your half-finished
+  exercises. (Changed your mind about all of it? The menu grows a
+  "start over" entry for the file you have open.)
+- **The Section menu.** Pick the chapter you're reading. That tells the
+  checker which moves you've learned so far, and it politely refuses
+  the ones you haven't — so you can't accidentally skip the point of an
+  exercise. It also switches on the right kind of mathematics for the
+  chapter (numbers arrive in Chapter 5, your own data types in
+  Chapter 10).
+- **The Goals panel.** Put your cursor on any line of a proof and it
+  shows what you have and what you still owe at that point. You will
+  live in this panel.
+- **The Diagnostics panel.** When a proof is wrong, this is where the
+  checker says so, with the line number.
+
+If you'd rather work in a terminal, or you're an instructor checking a
+stack of files, build the command-line checker once from the repository
+root:
 
 ```sh
 cargo build
 ```
 
-Then check any file like this (also from the repository root):
+and check a file like this:
 
 ```sh
-target/debug/cetacea_cli docs/book/code/ch01-examples.ctea
+target/debug/cetacea2 docs/book/code/ch01-examples.ctea
 ```
 
-or equivalently `cargo run -p cetacea_cli -- <file>`. There is also an
-interactive terminal UI (`cargo run -p cetacea_cli -- --tui <file>`)
-that shows the proof state as you move your cursor through a proof —
-worth trying once you are comfortable with the basics.
+To check it the way the browser does with a chapter selected, name the
+course and the section:
+
+```sh
+target/debug/cetacea2 --course courses/proofs-checked.json --section ch05 docs/book/code/ch05-examples.ctea
+```
+
+The error messages quoted in this book are in the terminal's format,
+which starts with the file and line number. The browser shows the same
+message; the line number is in the Diagnostics panel and marked in the
+editor.
 
 ## How to use this book
 
@@ -52,18 +87,19 @@ Each chapter comes with three (sometimes four) companion files in
 | `chNN-solutions.ctea` | Full solutions. Genuinely try the exercises first. |
 | `chNN-mistakes.ctea` / `ch02-fallacies.ctea` | **Intended to fail.** Deliberately wrong proofs whose error messages the chapter dissects. Run them; read the errors. |
 
-From the repository root, `./scripts/check_all.sh` verifies the companion files,
-requires each deliberately wrong theorem to fail independently, and checks the
-book's quoted error headlines and acceptance receipts against current output.
+From the repository root, `./scripts/check_hol.sh` verifies the companion files,
+requires each deliberately wrong theorem to fail independently, and checks every
+line of checker output quoted in the chapters against what the checker prints today.
 
 The rhythm for each chapter:
 
 1. Read the chapter with the examples file open next to it.
-2. Run the examples file and watch every theorem get accepted.
-3. Run the mistakes file and read what rejection looks like.
-4. Open the exercises file and replace each `sorry` with a proof,
-   re-running the checker as you go. The `incomplete theorem` markers
-   are your to-do list; the chapter is done when they are all gone.
+2. Load the examples file and watch every theorem get accepted.
+3. Load the mistakes file and read what rejection looks like.
+4. Load the exercises file and replace each `sorry` with a proof,
+   watching the checker's verdict change as you go. The `incomplete`
+   markers are your to-do list; the chapter is done when they are all
+   gone.
 
 A small notational convention used throughout: when we narrate the
 middle of a proof, we write the *goal state* as `hypotheses |- target`.

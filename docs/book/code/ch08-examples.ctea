@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 8: Functions: Relations with Rules
 -- Companion file for docs/book/08-functions.md.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch08-examples.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch08 docs/book/code/ch08-examples.ctea
 
 import ../../../std/prelude.ctea
 
@@ -51,11 +51,11 @@ theorem succ_graph_injective : Injective(fun x y : Nat => succ(x) = y) := by
   exact eq_symm h2
 
 -- ...but not surjective: nothing maps to 0. First, a lemma — successors
--- are never zero. (congr_pred carries the truth of le(succ(k), n)
+-- are never zero. (congr_pred carries the truth of succ(k) <= n
 -- across the alleged equality succ(k) = 0, where it collapses to False.)
 theorem succ_never_zero (k : Nat) : not (succ(k) = 0) := by
   intro h
-  apply congr_pred {A := Nat; P := fun n : Nat => le(succ(k), n); x := succ(k); y := 0}
+  apply congr_pred {A := Nat; P := fun n : Nat => succ(k) <= n; x := succ(k); y := 0}
   exact h
   exact le_refl {n := succ(k)}
 

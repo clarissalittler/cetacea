@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 9: Induction: Climbing the Number Line
 -- Companion file for docs/book/09-induction.md.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch09-examples.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch09 docs/book/code/ch09-examples.ctea
 
 import ../../../std/prelude.ctea
 
@@ -9,20 +9,20 @@ mode constructive
 
 -- Section 9.2: numerals are shorthand for towers of succ. Both sides
 -- of this equality compute down to the same tower, so `refl` closes it.
-theorem two_plus_three : add(2, 3) = 5 := by
+theorem two_plus_three : 2 + 3 = 5 := by
   refl
 
 -- Section 9.3: the additive identities are pure computation. No
 -- induction needed -- `refl` normalizes both sides itself.
-theorem add_zero_left_demo (n : Nat) : add(0, n) = n := by
+theorem add_zero_left_demo (n : Nat) : 0 + n = n := by
   refl
 
-theorem add_zero_right_demo (n : Nat) : add(n, 0) = n := by
+theorem add_zero_right_demo (n : Nat) : n + 0 = n := by
   refl
 
 -- Section 9.5: the first real induction proof. In the succ arm, the
 -- goal after `simp` is *exactly* the induction hypothesis.
-theorem sub_self_demo (n : Nat) : sub(n, n) = 0 := by
+theorem sub_self_demo (n : Nat) : n - n = 0 := by
   induction n with
   | zero =>
       refl
@@ -33,7 +33,7 @@ theorem sub_self_demo (n : Nat) : sub(n, n) = 0 := by
 -- Section 9.6: commutativity of addition. The succ arm needs both
 -- computation (`simp`) and the induction hypothesis (`rewrite ih`).
 -- This is `add_comm` in std/nat.ctea.
-theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
+theorem add_comm_demo (n m : Nat) : n + m = m + n := by
   induction n with
   | zero =>
       simp
@@ -45,7 +45,7 @@ theorem add_comm_demo (n m : Nat) : add(n, m) = add(m, n) := by
 
 -- Section 9.8: if a dependent premise was introduced too early,
 -- `revert` restores the implication goal before induction.
-theorem revert_before_induction (n : Nat) : le(n, n) -> le(n, n) := by
+theorem revert_before_induction (n : Nat) : n <= n -> n <= n := by
   intro h
   revert h
   induction n with

@@ -2,7 +2,7 @@
 -- Replace each `sorry` with a real proof. Exercise 3.1 must stay in the
 -- constructive part of the file; the rest may use classical tactics.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch03-exercises.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch03 docs/book/code/ch03-exercises.ctea
 
 import ../../../std/prelude.ctea
 

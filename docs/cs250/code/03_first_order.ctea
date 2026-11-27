@@ -51,7 +51,7 @@ theorem rewrite_demo
   : alice = bob -> P(alice) -> P(bob) := by
   intro h
   intro hp
-  rewrite h
+  rewrite <- h
   exact hp
 
 -- For the reverse-direction rewrite we use eq_subst_left from std/eq.ctea

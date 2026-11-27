@@ -2,22 +2,22 @@
 -- INTENDED TO FAIL. Each theorem contains a deliberate mistake
 -- discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch09-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch09 docs/book/code/ch09-mistakes.ctea
 
 import ../../../std/prelude.ctea
 
 mode constructive
 
 -- Mistake 1: hoping computation alone proves a claim about *every* n.
--- With variables in the way, add(n, m) and add(m, n) are stuck terms:
+-- With variables in the way, n + m and m + n are stuck terms:
 -- nothing computes, and refl sees two different expressions.
-theorem comm_by_computation (n m : Nat) : add(n, m) = add(m, n) := by
+theorem comm_by_computation (n m : Nat) : n + m = m + n := by
   refl
 
 -- Mistake 2: using the induction hypothesis as if it already proved
 -- the whole theorem. It proves the statement for k -- one rung, not
--- the ladder.
-theorem ih_is_not_the_theorem (n m : Nat) : add(n, m) = add(m, n) := by
+-- the ladder. (Commutativity again, this time of multiplication.)
+theorem ih_is_not_the_theorem (n m : Nat) : n * m = m * n := by
   induction n with
   | zero =>
       simp
@@ -27,7 +27,7 @@ theorem ih_is_not_the_theorem (n m : Nat) : add(n, m) = add(m, n) := by
 
 -- Mistake 3: reusing the theorem's own variable as an induction
 -- binder. The succ arm needs a *fresh* name for the predecessor.
-theorem shadowed_binder (n : Nat) : sub(n, n) = 0 := by
+theorem shadowed_binder (n : Nat) : n - n = 0 := by
   induction n with
   | zero =>
       refl
@@ -38,7 +38,7 @@ theorem shadowed_binder (n : Nat) : sub(n, n) = 0 := by
 -- Mistake 4: introducing a hypothesis about n and then inducting on n.
 -- The hypothesis talks about the original n, so the checker refuses to
 -- split n into cases underneath it.
-theorem square_positive (n : Nat) : le(1, n) -> le(1, mul(n, n)) := by
+theorem square_positive (n : Nat) : 1 <= n -> 1 <= n * n := by
   intro h
   induction n with
   | zero =>

@@ -235,29 +235,29 @@ packaging — a set is nothing but its members. So:
 
 This principle is called **extensionality**, and here's something the
 other chapters didn't have: it cannot be *proved* from what came
-before. It's a genuinely new assumption about what sets are. Cetacea
-is honest about this — `std/set.ctea` declares it as an **axiom**, a
-statement accepted without proof:
+before. It's a genuinely new principle about what sets are. So Cetacea
+doesn't pretend to prove it. It comes built in with `Set` itself —
+part of what a set *is*, the way the rule behind `split` is part of
+what "and" is — under the name `set_ext`:
 
 ```text
-axiom set_ext
+set_ext
   (T : Type)
   (A B : Set T)
   : (forall x : T, x in A <-> x in B) -> A = B
 ```
 
-You've been watching the checker report `(constructive)` after every
-accepted theorem. Axioms add a third piece of bookkeeping: any theorem
-whose proof touches one is labeled with it, forever, transitively.
-Run the examples file and look:
+You use it like any theorem in the library. And because it's a rule of
+the game rather than a favor you're asking, leaning on it doesn't
+change a proof's label — load the examples file and look:
 
 ```text
-accepted theorem inter_union_dist (constructive; axioms: set_ext)
+accepted theorem inter_union_dist (constructive)
 ```
 
-Nothing is hidden: this theorem is true *given* extensionality, and
-the checker will never let you forget the "given." (Chapter 10 has
-more to say about living with axioms.)
+(Cetacea *does* have a way to assume a statement without proof, and
+when you use it the checker labels every theorem that leans on the
+assumption, forever. Chapter 10 has that story.)
 
 Now the method. `set_ext` says: to prove `A = B`, prove
 `forall x, x in A <-> x in B`. That unlocks a four-line ritual —
@@ -341,18 +341,17 @@ that's exactly the constructive gap from Chapter 3, where the
 propositional version, `not (P /\ Q) -> not P \/ not Q`, was the "hard
 direction" of De Morgan and needed `by_cases`. The examples
 file finishes the chapter with the fix: a `mode classical` line, a
-`by_cases ha : x in A`, and an accepted line that wears the whole
-story on its sleeve:
+`by_cases ha : x in A`, and an accepted line that wears the story on
+its sleeve:
 
 ```text
-accepted theorem compl_inter_demo (classical; axioms: set_ext)
+accepted theorem compl_inter_demo (classical)
 ```
 
-One theorem, two disclosures: it leaned on excluded middle, and it
-leaned on extensionality. This is what "the checker keeps you honest"
-means in practice — compare `compl_union_demo`, whose accepted line
-says `(constructive; axioms: set_ext)`, and you can read off *which De
-Morgan law is deeper* from the bookkeeping alone.
+It leaned on excluded middle, and says so. This is what "the checker
+keeps you honest" means in practice — compare `compl_union_demo`,
+whose accepted line says `(constructive)`, and you can read off *which
+De Morgan law is deeper* from the bookkeeping alone.
 
 ## 6.7 The other road: mutual inclusion
 
@@ -395,7 +394,7 @@ theorem union_empty_right_demo (T : Type) (A : Set T) : A = union(A, empty(T)) :
 
 ## 6.8 Common mistakes
 
-Run [`code/ch06-mistakes.ctea`](code/ch06-mistakes.ctea) — intended to
+Load [`code/ch06-mistakes.ctea`](code/ch06-mistakes.ctea) — intended to
 fail.
 
 **Mistake 1: proving set equality by staring.** `union(A, B)` and
@@ -403,31 +402,40 @@ fail.
 compares *expressions*, and these are different expressions:
 
 ```text
-error: docs/book/code/ch06-mistakes.ctea:21: theorem `sets_equal_by_staring` failed: refl cannot prove `union(A, B) = union(B, A)` because the sides are not identical
+error: docs/book/code/ch06-mistakes.ctea:21: theorem `sets_equal_by_staring` failed: `refl` failed: after computation the two sides are `{ x : T | x in A \/ x in B }` and `{ x : T | x in B \/ x in A }`, which differ
   note: target: union(A, B) = union(B, A)
 ```
 
-(The `help:` block suggests trying `simp` first — fair advice
-elsewhere, but no simplification makes these two syntactically
-identical.) Equal-as-sets is a *theorem about members*, not a fact
-about spelling, and members mean the Section 6.6 ritual. This mistake
-has a moral: extensionality isn't bureaucratic ceremony, it's the
-actual mathematical content of "sets are equal."
+Look at how hard `refl` tried. It unfolded both unions all the way
+down to their set-builders, and the two it ended up with are *so
+close* — same members, written in a different order. But `refl` only
+computes; it doesn't know that "or" can be flipped, and no amount of
+computing makes these two spell the same. Equal-as-sets is a *theorem
+about members*, not a fact about spelling, and members mean the
+Section 6.6 ritual. This mistake has a moral: extensionality isn't
+bureaucratic ceremony, it's the actual mathematical content of "sets
+are equal."
 
-**Mistake 2: `intro` before the coat comes off.**
+**Mistake 2: forgetting what's under the coat.** The proof holds
+`h : A subset B` and `ha : a in A`, wants `a in B`, and writes
+`exact h ha` — feeding the membership straight to the subset, the way
+you'd cash an implication:
 
 ```text
-error: docs/book/code/ch06-mistakes.ctea:25: theorem `subset_too_fast` failed: intro expects an implication or universal goal
-  note: target: A subset A
-  help: Match the goal shape
-    `intro` only opens implication or universal goals. The current target is `A subset A`.
+error: docs/book/code/ch06-mistakes.ctea:27: theorem `subset_skips_a_step` failed: expected a term for the variable `x`, but found a proof
+  note: h : A subset B
+  note: ha : a in A
+  note: target: a in B
 ```
 
-`A subset A` *is* a `forall` — but it's wearing the trench coat, and
-`intro` only opens goals that visibly start with `forall` or `->`. One
-`simp` first and the same `intro` succeeds. If you remember one
-debugging reflex from this chapter: **when a tactic refuses a set
-goal, `simp` and try again.**
+`A subset B` isn't an implication. It's a `forall` wrapped around one
+— `forall x, x in A -> x in B` — and a `forall` has to be told *who*
+before it will discuss *what*. The checker was waiting for an element
+to put in for `x` and got handed a proof instead. Say who:
+`exact h a ha`. (Or write `apply h` and then `exact ha`, and let the
+checker work out who from the goal.) If you remember one debugging
+reflex from this chapter: **when a set hypothesis won't cooperate,
+`simp at` it and read what it really says.**
 
 **Mistake 3: flipping a subset.** Subset is not symmetric, and here's
 what it looks like to find that out mid-proof. The attempt assumes
@@ -435,7 +443,10 @@ what it looks like to find that out mid-proof. The attempt assumes
 until the hypothesis is asked to run backwards:
 
 ```text
-error: docs/book/code/ch06-mistakes.ctea:35: theorem `subset_flip` failed: cannot use this proof here: its conclusion `x1 in B` does not match goal `x in A`
+error: docs/book/code/ch06-mistakes.ctea:35: theorem `subset_flip` failed: cannot apply this: its conclusion does not match the goal `x in A`
+  note: it proves: A subset B
+  note: h : A subset B
+  note: hx : x in B
   note: target: x in A
 ```
 
@@ -449,12 +460,12 @@ indeed false: take `A` empty and `B` not.
 **Mistake 4: an element is not a one-element set.**
 
 ```text
-error: docs/book/code/ch06-mistakes.ctea:39: theorem `element_confusion` has invalid statement
-  note: subset expects set arguments, but got `Student` and `Set Student`
-  note: target: ana subset CS
+error: docs/book/code/ch06-mistakes.ctea:39: `ana` has type `Student`, but `Set ?1` was expected here
 ```
 
-`ana subset CS` is malformed — subset relates sets to sets. What the
+(`Set ?1` is the checker's way of saying "a set of *something* — I
+hadn't got as far as working out what.") `ana subset CS` is malformed
+— subset relates sets to sets. What the
 writer meant is either `ana in CS` (membership) or
 `singleton(ana) subset CS` (the one-element set). The `in`-versus-
 `subset` confusion is the classic set-theory pitfall — on paper it
@@ -488,7 +499,7 @@ campus is declared at the top. Clear the `sorry` flags.
   complement. One inclusion is constructive; the other is
   double-negation elimination wearing a set costume, and the file
   grants `mode classical` for it. Expect your accepted line to read
-  `(classical; axioms: set_ext)` — and now you know exactly why.
+  `(classical)` — and now you know exactly why.
 
 Solutions: [`code/ch06-solutions.ctea`](code/ch06-solutions.ctea).
 

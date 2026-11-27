@@ -1,7 +1,7 @@
 -- Proofs, Checked — Chapter 8: exercise solutions.
 -- Spoilers! Try docs/book/code/ch08-exercises.ctea yourself first.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch08-solutions.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch08 docs/book/code/ch08-solutions.ctea
 
 import ../../../std/prelude.ctea
 
@@ -12,14 +12,14 @@ sort Person
 const alice : Person
 
 -- Exercise 8.1
-theorem ex8_1 : Total(fun x y : Nat => mul(x, x) = y) := by
+theorem ex8_1 : Total(fun x y : Nat => x * x = y) := by
   unfold Total
   intro x
-  exists mul(x, x)
+  exists x * x
   refl
 
 -- Exercise 8.2
-theorem ex8_2 : SingleValued(fun x y : Nat => mul(x, x) = y) := by
+theorem ex8_2 : SingleValued(fun x y : Nat => x * x = y) := by
   unfold SingleValued
   intro x
   intro y1
@@ -29,9 +29,9 @@ theorem ex8_2 : SingleValued(fun x y : Nat => mul(x, x) = y) := by
   rewrite <- h1
   exact h2
 
--- Exercise 8.3. simp computes add(x, 2) to succ(succ(x)), and then
+-- Exercise 8.3. simp computes x + 2 to succ(succ(x)), and then
 -- succ_inj peels the successors two at a time.
-theorem ex8_3 : Injective(fun x y : Nat => add(x, 2) = y) := by
+theorem ex8_3 : Injective(fun x y : Nat => x + 2 = y) := by
   unfold Injective
   intro x1
   intro x2

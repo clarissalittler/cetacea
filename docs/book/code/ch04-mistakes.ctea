@@ -2,21 +2,23 @@
 -- INTENDED TO FAIL. Each theorem contains a deliberate mistake
 -- discussed in the "Common mistakes" section of the chapter.
 --
---   cargo run -p cetacea_cli -- docs/book/code/ch04-mistakes.ctea
+--   cargo run -p hol_cli -- --course courses/proofs-checked.json --section ch04 docs/book/code/ch04-mistakes.ctea
 
 mode constructive
 
 sort Person
+sort Pet
 
 const alice : Person
+const rex : Pet
 
 pred Happy(Person)
 
 -- Mistake 1: a witness of the wrong type. The goal asks for a Person,
--- and 0 is a natural number.
+-- and rex is a Pet.
 theorem wrong_witness : Happy(alice) -> exists x : Person, Happy(x) := by
   intro h
-  exists 0
+  exists rex
   exact h
 
 -- Mistake 2: trying to swap quantifiers the wrong way. `cases ... with

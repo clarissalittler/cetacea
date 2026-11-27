@@ -1,0 +1,9 @@
+[package]
+name = "hol_tactics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hol_kernel = { path = "../hol_kernel" }
+hol_syntax = { path = "../hol_syntax" }
+hol_elab = { path = "../hol_elab" }
