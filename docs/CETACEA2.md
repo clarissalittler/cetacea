@@ -253,9 +253,67 @@ arithmetic axiom: use a standalone file or only the axiom-free `prop`,
 ## Libraries
 
 `lib/` is the standard library: `prop`, `fol`, `eq`, `set`, `nat`,
-`modular`, `fun`, `list` (polymorphic `List A`), `finite`. Import all of
-them with `import ../std/prelude.ctea` from a file next to the repo, or
-`import std/prelude.ctea` in the browser.
+`modular`, `fun`, `list` (polymorphic `List A`), `finite`, `card`. Import
+all of them with `import ../std/prelude.ctea` from a file next to the
+repo, or `import std/prelude.ctea` in the browser.
+
+### Counting
+
+`HasCard(S, n)` says the set `S` has exactly `n` elements: some list
+without repeats holds exactly the members of `S` and has length `n`.
+To prove it for a concrete set, give the list. `card` proves what
+counting arguments cite:
+
+| Theorem | Says |
+|---|---|
+| `card_unique` | a set has one size |
+| `card_subset_le` | a subset is no larger |
+| `card_union_disjoint` | sizes of sets with no common element add |
+| `card_le_of_injective` | an injection cannot land in a smaller set |
+| `card_of_bijection` | a bijection carries the size across |
+| `pigeonhole` | a function into a strictly smaller set is not injective |
+| `pigeonhole_collision` | so two different inputs share an output (classical) |
+
+Functions here are real functions `f : A -> B` with `MapsTo(f, S, T)`,
+`InjectiveOn(f, S)` and `SurjectiveOn(f, S, T)`, so these need
+`logic hol`. Everything except `pigeonhole_collision` is constructive.
+`examples/counting.ctea` counts two small types and applies pigeonhole
+to them.
+
+### `decide`
+
+`decide` closes a goal that has no unknowns by evaluating it. It
+computes definitions and arithmetic, compares data constructors,
+simplifies with `True` and `False`, and runs a quantifier over an
+enumeration type (a `data` type whose constructors take no arguments)
+through each of its values:
+
+```text
+theorem three_colors : HasCard(univ(Color), 3) := by
+  unfold HasCard
+  exists cons(red, cons(green, cons(blue, nil)))
+  decide
+```
+
+Every step is a kernel rewrite, so the result is an ordinary
+constructive proof, and `decide` adds nothing to what is trusted. When
+the goal is false it says so and points at the false part:
+
+```text
+error: hw.ctea:4: theorem `t` failed: `decide` evaluated the goal, and it is false
+  note: this part is false: `blue = red \/ blue = green`
+  note: it fails when c = blue
+```
+
+When it cannot evaluate the goal it says why: a quantifier over a type
+with no fixed list of values (`Nat`, `List A`), or a variable whose
+value is unknown. It does not use hypotheses.
+
+`decide` is a tactic name like any other in a course file. The sample
+course's sections do not list it, so it is refused there until a section
+adds it to `allow_tactics`. To do the same job by hand, `simp` takes the
+`True`/`False` lemmas from `prop` as rules:
+`simp [or_false_left, or_false_right, and_true_right, not_false]`.
 
 ## Checking the corpus
 

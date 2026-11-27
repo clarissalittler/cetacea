@@ -1,0 +1,99 @@
+logic hol
+
+import std/prelude.ctea
+
+-- Counting a small type, then using the pigeonhole principle on it.
+
+data Color
+| red
+| green
+| blue
+
+data Suit
+| clubs
+| diamonds
+| hearts
+| spades
+
+-- To show a set has size 3, list its elements once each. Checking the
+-- list (no repeats, nothing missing, three long) is a finite check with
+-- no unknowns, which `decide` does by evaluating it.
+theorem three_colors : HasCard(univ(Color), 3) := by
+  unfold HasCard
+  exists cons(red, cons(green, cons(blue, nil)))
+  decide
+
+theorem four_suits : HasCard(univ(Suit), 4) := by
+  unfold HasCard
+  exists cons(clubs, cons(diamonds, cons(hearts, cons(spades, nil))))
+  decide
+
+-- The same check by hand, to show what `decide` is doing: the list has
+-- no repeats, every colour is in it, and its length is 3.
+theorem three_colors_by_hand : HasCard(univ(Color), 3) := by
+  unfold HasCard
+  exists cons(red, cons(green, cons(blue, nil)))
+  split
+  simp [or_false_left, or_false_right, and_true_right, not_false]
+  trivial
+  split
+  unfold Enumerates
+  intro c
+  cases c with
+  | red =>
+      simp [or_false_left, or_false_right]
+      split
+      intro h
+      refl
+      intro h
+      trivial
+  | green =>
+      simp [or_false_left, or_false_right]
+      split
+      intro h
+      refl
+      intro h
+      trivial
+  | blue =>
+      simp [or_false_left, or_false_right]
+      split
+      intro h
+      refl
+      intro h
+      trivial
+  refl
+
+-- Four suits cannot be given three colours without two suits sharing
+-- one: no way of colouring the suits is injective.
+theorem no_injective_coloring (f : Suit -> Color)
+  : not InjectiveOn(f, univ(Suit)) := by
+  apply pigeonhole {f := f; S := univ(Suit); T := univ(Color); n := 4; m := 3}
+  exact four_suits
+  exact three_colors
+  unfold MapsTo
+  intro s
+  intro hs
+  simp
+  trivial
+  decide
+
+-- Classically, that gives two different suits with the same colour.
+mode classical
+
+theorem two_suits_share_a_color (f : Suit -> Color)
+  : exists s t : Suit, f(s) = f(t) /\ not (s = t) := by
+  have hm : MapsTo(f, univ(Suit), univ(Color)) := by
+    unfold MapsTo
+    intro s
+    intro hs
+    simp
+    trivial
+  have hl : lt(3, 4) := by
+    decide
+  obtain s hs := pigeonhole_collision four_suits three_colors hm hl
+  obtain t ht := hs
+  exists s
+  exists t
+  split
+  exact ht.right.right.left
+  exact ht.right.right.right

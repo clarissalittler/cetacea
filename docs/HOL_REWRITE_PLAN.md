@@ -35,9 +35,15 @@ datatype values, and the `list` and `finite` libraries (`Finite`,
 `HasCard`, `Nodup`, closure of finiteness under union). Book chapters
 10 and 11 and tutorial 07 were migrated to `List Nat` and are checked
 by the new script only (`scripts/migrated_to_v2.txt`). Every corpus
-file now checks. Not yet done from the M4 list: the pigeonhole
-principle and cardinality of unions, which need a longer library
-development. M5 followed: `--deny-tactics`, assignment
+file now checks. The rest of the M4 list landed on 27 November 2026 as
+`lib/card.ctea`: uniqueness of cardinality, the subset bound, the sum
+rule for disjoint unions, cardinality under injections and bijections,
+and the pigeonhole principle, all constructive except the form that
+produces two colliding elements. `decide` arrived with it: it evaluates
+a goal with no unknowns by kernel rewriting, running quantifiers over
+enumeration types through their values, and works on `Prop` directly
+(decision 8 expected it to go through `Bool`; no `Bool` was needed).
+M5 followed: `--deny-tactics`, assignment
 manifests generated from a skeleton (`--make-assignment`) and checked
 with `--assignment`, an Assignment panel and share links in the
 browser, and `docs/CETACEA2.md` as the instructor's guide. Course
@@ -468,7 +474,7 @@ Sizes are relative to one another, not calendar estimates.
   infix, `defrec`, `induction`, `calc`, arithmetic countermodels,
   `std/nat`, `std/modular`. Acceptance: tutorials 04, 07 (Nat part),
   09; book chapters 9 and 12.
-- M4 Tier 3 (large). Done except pigeonhole. Polymorphic `data`, general `defrec`, lambdas and
+- M4 Tier 3 (large). Done. Polymorphic `data`, general `defrec`, lambdas and
   higher types everywhere, `funext`, sets via `setOf`, recursive
   predicates, quickcheck feedback, `std/list`, `std/fun` with real
   functions, `std/finite` and `std/card` with pigeonhole as the

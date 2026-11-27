@@ -93,6 +93,8 @@
               <p><code>left</code> or <code>right</code> picks a side of the goal. <code>cases h with</code> followed by <code>| left hp =&gt;</code> and <code>| right hq =&gt;</code> arms analyzes a hypothesis.</p></details>
             <details><summary><span>Existentials</span><code>exists</code><code>obtain</code></summary>
               <p><code>exists t</code> supplies a witness. <code>obtain x hx := h</code> or <code>cases h with | intro x hx =&gt;</code> unpacks one.</p></details>
+            <details><summary><span>Evaluation</span><code>decide</code></summary>
+              <p><code>decide</code> closes a goal with no unknowns by evaluating it: arithmetic on numerals, data constructors, defined predicates, and quantifiers over a <code>data</code> type whose values are a fixed list of constants. If the goal is false, it says which part.</p></details>
             <details><summary><span>Equality and definitions</span><code>refl</code><code>rewrite</code><code>unfold</code><code>simp</code></summary>
               <p><code>refl</code> closes <code>a = b</code> when both sides compute to the same term. <code>rewrite -&gt; h</code> replaces the left side of the equation <code>h</code> by its right side (<code>&lt;-</code> for the other direction, <code>at h2</code> to rewrite a hypothesis). <code>unfold Name</code> and <code>simp</code> expand definitions.</p></details>
             <details><summary><span>Negation and absurdity</span><code>contradiction</code><code>exfalso</code></summary>

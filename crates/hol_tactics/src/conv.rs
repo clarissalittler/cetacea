@@ -184,6 +184,23 @@ impl Rules {
         }
     }
 
+    /// Adds, for every enumeration type, the rules that replace a
+    /// quantifier over it by its finitely many instances.
+    pub fn with_enumeration_rules(&mut self, env: &Env, subst: &mut Subst) {
+        hol_kernel::record::paused(|| {
+            if let Ok(thm) = crate::simp_rules::forall_true_rule() {
+                if let Some(rule) = Rule::from_thm(subst, &thm, "forall_true", true) {
+                    self.rules.push(rule);
+                }
+            }
+            for (name, thm) in crate::simp_rules::enumeration_rules(env) {
+                if let Some(rule) = Rule::from_thm(subst, &thm, &name, true) {
+                    self.rules.push(rule);
+                }
+            }
+        })
+    }
+
     /// The same rules with the structural recursion equations first, so
     /// that a step-by-step search sees the unfolded shapes the old checker
     /// produced.
@@ -226,7 +243,7 @@ fn rigid_head(t: &Term) -> Option<(&Name, usize)> {
 }
 
 /// Tries every rule at the root of `t`. Returns `|- t = t'`.
-fn rewrite_root(subst: &Subst, rules: &Rules, t: &Term) -> Option<Thm> {
+pub(crate) fn rewrite_root(subst: &Subst, rules: &Rules, t: &Term) -> Option<Thm> {
     let head = rigid_head(t);
     // Computed only if some rule matches: most nodes match none.
     let mut own_metas: Option<BTreeSet<Name>> = None;

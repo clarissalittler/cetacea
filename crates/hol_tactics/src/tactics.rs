@@ -355,6 +355,7 @@ impl<'a> Runner<'a> {
             TacticKind::Exact(expr) => self.exact(state, goal, expr, span),
             TacticKind::Apply(expr) => self.apply(state, goal, expr, span),
             TacticKind::Trivial => self.trivial(state, goal, span),
+            TacticKind::Decide => self.decide(state, goal, span),
             TacticKind::Assumption => self.assumption(state, goal, span),
             TacticKind::Split => self.split(state, goal, span),
             TacticKind::Left => self.left_right(state, goal, true, span),
@@ -735,6 +736,63 @@ impl<'a> Runner<'a> {
         ))
     }
 
+    /// Evaluates a goal with no unknowns. See [`crate::decide`].
+    fn decide(&mut self, state: &mut ProofState, goal: &Goal, span: Span) -> Result<()> {
+        let mut subst = Subst::new();
+        let rules = crate::decide::decision_rules(self.env, &mut subst);
+        let (conv, _) = normalize(&subst, &rules, &goal.target).map_err(kernel(span))?;
+        let evaluated = rhs(&conv);
+        if evaluated.is_true() {
+            let just: Justification = Box::new(move |_| eq_mp(&sym(&conv)?, &true_intro()));
+            state.close(goal.id, vec![], just);
+            return Ok(());
+        }
+        if evaluated.is_false() {
+            let found = crate::decide::locate_false(self.env, &subst, &rules, &goal.target);
+            let mut diag = Diagnostic::new(
+                span,
+                "`decide` evaluated the goal, and it is false".to_string(),
+            );
+            if found.part != goal.target {
+                diag = diag.note(format!("this part is false: `{}`", self.show(&found.part)));
+            }
+            if !found.choices.is_empty() {
+                let choices: Vec<String> = found
+                    .choices
+                    .iter()
+                    .map(|(name, value)| format!("{name} = {}", self.show(value)))
+                    .collect();
+                diag = diag.note(format!("it fails when {}", choices.join(", ")));
+            }
+            if let Some((a, b)) = found.part.dest_eq() {
+                let plain = Rules::definitional(self.env, &mut subst);
+                let (na, nb) = (
+                    crate::conv::normal_form(&subst, &plain, a),
+                    crate::conv::normal_form(&subst, &plain, b),
+                );
+                if (&na, &nb) != (a, b) {
+                    diag = diag.note(format!(
+                        "the two sides compute to `{}` and `{}`",
+                        self.show(&na),
+                        self.show(&nb)
+                    ));
+                }
+            }
+            return Err(diag);
+        }
+        let mut diag = Diagnostic::new(
+            span,
+            format!(
+                "`decide` could not settle the goal by evaluating it; it got as far as `{}`",
+                self.show(&evaluated)
+            ),
+        );
+        for reason in crate::decide::stuck_reasons(self.env, &evaluated) {
+            diag = diag.note(reason);
+        }
+        Err(diag)
+    }
+
     fn assumption(&mut self, state: &mut ProofState, goal: &Goal, span: Span) -> Result<()> {
         let ctx = self.ctx(goal);
         let nt = ctx.norm(&goal.target).map_err(kernel(span))?;
@@ -1089,6 +1147,20 @@ impl<'a> Runner<'a> {
             return Ok(());
         }
         let Some((a, b)) = normalized.dest_eq() else {
+            // An equation whose sides compute to different values
+            // simplifies all the way to `False`; say what the sides were.
+            if let Some((left, right)) = goal.target.dest_eq() {
+                if let (Ok(nl), Ok(nr)) = (ctx.norm(left), ctx.norm(right)) {
+                    return Err(Diagnostic::new(
+                        span,
+                        format!(
+                            "`refl` failed: after computation the two sides are `{}` and `{}`, which differ",
+                            self.show(&rhs(&nl)),
+                            self.show(&rhs(&nr))
+                        ),
+                    ));
+                }
+            }
             return Err(Diagnostic::new(
                 span,
                 format!(

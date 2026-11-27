@@ -398,6 +398,8 @@ pub enum TacticKind {
     Revert(Ident),
     Exact(ProofExpr),
     Trivial,
+    /// Settle a statement with no unknowns by evaluating it.
+    Decide,
     Assumption,
     Apply(ProofExpr),
     Split,

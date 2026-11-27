@@ -9,3 +9,4 @@ docs/book/code/ch11-solutions.ctea
 docs/cs250/code/07_structural_induction.ctea
 docs/book/10-recursion-data.md
 docs/book/11-structural-induction.md
+examples/counting.ctea

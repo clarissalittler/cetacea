@@ -2,6 +2,7 @@
 //! expressions, unification, conversions, and the tactic interpreter.
 
 pub mod conv;
+pub mod decide;
 pub mod pexpr;
 pub mod proof;
 pub mod simp_rules;

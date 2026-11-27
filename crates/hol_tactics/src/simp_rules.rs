@@ -5,8 +5,10 @@
 
 use hol_elab::Env;
 use hol_kernel::{
-    and_intro, and_left, and_right, assume, false_elim, forall_intro, iff_intro, imp_elim,
-    imp_intro, mk_comb, or_elim, or_left, or_right, refl, sym, true_intro, Name, Term, Thm, Type,
+    and_intro, and_left, and_right, assume, beta_norm, eq_mp, eta, exists_elim, exists_intro,
+    false_elim, forall_elim, forall_intro, iff_intro, imp_elim, imp_intro, mk_comb, or_elim,
+    or_left, or_right, refl, sym, trans, true_intro, DatatypeInfo, KernelError, Name, Term, Thm,
+    Type,
 };
 
 fn iff_of(forward: Thm, backward: Thm) -> hol_kernel::Result<Thm> {
@@ -269,7 +271,219 @@ pub fn propositional_rules() -> hol_kernel::Result<Vec<(String, Thm)>> {
     let backward = imp_intro(&t, &imp_intro(&f, &assume(&f)?)?)?;
     out.push(("not_false".to_string(), iff_of(forward, backward)?));
 
+    // (True <-> P) <-> P, (P <-> True) <-> P
+    for (name, lhs, true_left) in [
+        ("iff_true_left", Term::iff(&t, &p)?, true),
+        ("iff_true_right", Term::iff(&p, &t)?, false),
+    ] {
+        let assumed = assume(&lhs)?;
+        let forward_body = if true_left {
+            eq_mp(&assumed, &ht)?
+        } else {
+            eq_mp(&sym(&assumed)?, &ht)?
+        };
+        let forward = imp_intro(&lhs, &forward_body)?;
+        let to_true = imp_intro(&p, &ht)?;
+        let from_true = imp_intro(&t, &hp)?;
+        let backward_body = if true_left {
+            iff_intro(&from_true, &to_true)?
+        } else {
+            iff_intro(&to_true, &from_true)?
+        };
+        let backward = imp_intro(&p, &backward_body)?;
+        out.push((
+            name.to_string(),
+            forall_intro(&p, &iff_of(forward, backward)?)?,
+        ));
+    }
+
+    // (False <-> P) <-> not P, (P <-> False) <-> not P
+    let not_p = Term::not(&p)?;
+    for (name, lhs, false_left) in [
+        ("iff_false_left", Term::iff(&f, &p)?, true),
+        ("iff_false_right", Term::iff(&p, &f)?, false),
+    ] {
+        let assumed = assume(&lhs)?;
+        let falsity = if false_left {
+            eq_mp(&sym(&assumed)?, &hp)?
+        } else {
+            eq_mp(&assumed, &hp)?
+        };
+        let forward = imp_intro(&lhs, &imp_intro(&p, &falsity)?)?;
+        let from_false = imp_intro(&f, &false_elim(&assume(&f)?, &p)?)?;
+        let to_false = assume(&not_p)?;
+        let backward_body = if false_left {
+            iff_intro(&from_false, &to_false)?
+        } else {
+            iff_intro(&to_false, &from_false)?
+        };
+        let backward = imp_intro(&not_p, &backward_body)?;
+        out.push((
+            name.to_string(),
+            forall_intro(&p, &iff_of(forward, backward)?)?,
+        ));
+    }
+
     Ok(out)
+}
+
+/// `(forall x : A, True) <-> True`: a statement that holds at every
+/// value needs no list of the values.
+pub fn forall_true_rule() -> hol_kernel::Result<Thm> {
+    let x = Term::free("x", Type::var("A"));
+    let all = Term::forall(&x, &Term::true_())?;
+    let forward = imp_intro(&all, &true_intro())?;
+    let backward = imp_intro(&Term::true_(), &forall_intro(&x, &true_intro())?)?;
+    iff_of(forward, backward)
+}
+
+/// True when every value of the datatype is one of finitely many
+/// constants: no type parameters and no constructor arguments.
+pub fn is_enumeration(info: &DatatypeInfo) -> bool {
+    info.params.is_empty() && !info.ctors.is_empty() && info.ctors.iter().all(|c| c.args.is_empty())
+}
+
+/// For every enumeration type, the two rules that replace a quantifier
+/// by its finitely many instances:
+/// `forall P. (forall x. P x) <-> P c1 /\ ... /\ P cn` and
+/// `forall P. (exists x. P x) <-> P c1 \/ ... \/ P cn`.
+/// Both come from the type's induction principle, so they carry its tag.
+pub fn enumeration_rules(env: &Env) -> Vec<(String, Thm)> {
+    let mut out = Vec::new();
+    for (name, _) in env.sorts() {
+        let Some(info) = env.theory().datatype(name.as_str()) else {
+            continue;
+        };
+        if !is_enumeration(info) {
+            continue;
+        }
+        if let Ok((all, ex)) = enumeration_rule_pair(info) {
+            out.push((format!("{name}.forall"), all));
+            out.push((format!("{name}.exists"), ex));
+        }
+    }
+    out
+}
+
+/// The constructors of an enumeration type as terms, read off the
+/// induction principle so no signature lookup is needed.
+pub fn enumeration_values(info: &DatatypeInfo) -> hol_kernel::Result<Vec<Term>> {
+    let p = Term::free("P", Type::fun(info.generic_type(), Type::prop()));
+    let opened = forall_elim(&info.induction, &p)?;
+    let mut rest = opened.concl().clone();
+    let mut values = Vec::new();
+    for _ in &info.ctors {
+        let Some((instance, tail)) = rest.dest_imp() else {
+            return Err(KernelError::new(
+                "enumeration",
+                "unexpected induction principle",
+            ));
+        };
+        let Some((_, value)) = instance.as_app() else {
+            return Err(KernelError::new("enumeration", "unexpected induction step"));
+        };
+        values.push(value.clone());
+        rest = tail.clone();
+    }
+    Ok(values)
+}
+
+fn disjoin(parts: &[Term]) -> hol_kernel::Result<Term> {
+    let mut iter = parts.iter().rev();
+    let mut acc = iter.next().expect("non-empty").clone();
+    for part in iter {
+        acc = Term::or(part, &acc)?;
+    }
+    Ok(acc)
+}
+
+/// `|- parts[0] \/ (... \/ parts[n])` from a proof of `parts[i]`.
+fn inject(parts: &[Term], i: usize, thm: Thm) -> hol_kernel::Result<Thm> {
+    if parts.len() == 1 {
+        return Ok(thm);
+    }
+    if i == 0 {
+        or_left(&thm, &disjoin(&parts[1..])?)
+    } else {
+        or_right(&parts[0], &inject(&parts[1..], i - 1, thm)?)
+    }
+}
+
+/// From proofs of one conclusion under each of `parts`, a proof of it
+/// under their disjunction.
+fn eliminate(parts: &[Term], cases: &[Thm]) -> hol_kernel::Result<Thm> {
+    if parts.len() == 1 {
+        return Ok(cases[0].clone());
+    }
+    let disjunction = assume(&disjoin(parts)?)?;
+    or_elim(
+        &disjunction,
+        &cases[0],
+        &eliminate(&parts[1..], &cases[1..])?,
+    )
+}
+
+fn enumeration_rule_pair(info: &DatatypeInfo) -> hol_kernel::Result<(Thm, Thm)> {
+    let ty = info.generic_type();
+    let p = Term::free("P", Type::fun(ty.clone(), Type::prop()));
+    let v = Term::free("v", ty.clone());
+    let n = info.ctors.len();
+    let values = enumeration_values(info)?;
+    let instances: Vec<Term> = values
+        .iter()
+        .map(|value| Term::app(&p, value))
+        .collect::<hol_kernel::Result<_>>()?;
+    let p_v = Term::app(&p, &v)?;
+    // `(fun v => P v) = P`, to state the rules about `forall P` itself.
+    let eta_p = eta(&Term::lam(&v, &p_v)?)?;
+
+    // Universal: instantiate one way, use induction the other.
+    let opened = forall_elim(&info.induction, &p)?;
+    let all_stmt = Term::forall(&v, &p_v)?;
+    let conj = conjoin(&instances)?;
+    let assumed_all = assume(&all_stmt)?;
+    let parts: Vec<Thm> = values
+        .iter()
+        .map(|value| forall_elim(&assumed_all, value))
+        .collect::<hol_kernel::Result<_>>()?;
+    let joined =
+        join_thms(&parts).ok_or_else(|| KernelError::new("enumeration", "no constructors"))?;
+    let forward = imp_intro(&all_stmt, &joined)?;
+    let components = split_conjunction(&assume(&conj)?, n)?;
+    let mut by_induction = opened;
+    for component in &components {
+        by_induction = imp_elim(&by_induction, component)?;
+    }
+    let backward = imp_intro(&conj, &by_induction)?;
+    let all_iff = iff_of(forward, backward)?;
+    let (all_head, _) = all_stmt.as_app().expect("quantifier");
+    let all_eta = mk_comb(&refl(all_head)?, &eta_p)?;
+    let all_rule = forall_intro(&p, &trans(&sym(&all_eta)?, &all_iff)?)?;
+
+    // Existential: a witness one way; the other way, induction on the
+    // statement `P v -> P c1 \/ ... \/ P cn`.
+    let ex_stmt = Term::exists(&v, &p_v)?;
+    let disj = disjoin(&instances)?;
+    let cases: Vec<Thm> = values
+        .iter()
+        .zip(&instances)
+        .map(|(value, instance)| exists_intro(&ex_stmt, value, &assume(instance)?))
+        .collect::<hol_kernel::Result<_>>()?;
+    let backward = imp_intro(&disj, &eliminate(&instances, &cases)?)?;
+    let motive = Term::lam(&v, &Term::imp(&p_v, &disj)?)?;
+    let mut covered = beta_norm(&forall_elim(&info.induction, &motive)?)?;
+    for (i, instance) in instances.iter().enumerate() {
+        let step = imp_intro(instance, &inject(&instances, i, assume(instance)?)?)?;
+        covered = imp_elim(&covered, &step)?;
+    }
+    let at_v = imp_elim(&forall_elim(&covered, &v)?, &assume(&p_v)?)?;
+    let forward = imp_intro(&ex_stmt, &exists_elim(&assume(&ex_stmt)?, &v, &at_v)?)?;
+    let ex_iff = iff_of(forward, backward)?;
+    let (ex_head, _) = ex_stmt.as_app().expect("quantifier");
+    let ex_eta = mk_comb(&refl(ex_head)?, &eta_p)?;
+    let ex_rule = forall_intro(&p, &trans(&sym(&ex_eta)?, &ex_iff)?)?;
+
+    Ok((all_rule, ex_rule))
 }
 
 /// Splits a right-nested conjunction into its components.

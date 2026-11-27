@@ -326,6 +326,9 @@ fn explain_step(text: &str, before: &[GoalView], after: &[GoalView]) -> String {
         "unfold" => format!("Unfold `{rest}`; the goal becomes `{next}`."),
         "simp" => format!("Simplify by computing definitions; the goal becomes `{next}`."),
         "trivial" => "The goal is `True`, which holds outright.".to_string(),
+        "decide" => {
+            "The goal has no unknowns, and evaluating it gives `True`, so it is done.".to_string()
+        }
         "assumption" => format!("A hypothesis already states `{target}`."),
         "contradiction" => "The hypotheses are contradictory, so anything follows.".to_string(),
         "exfalso" => "It suffices to derive a contradiction: the goal becomes `False`.".to_string(),
@@ -437,6 +440,12 @@ fn candidates(goal: &GoalView, result: &CheckResult) -> Vec<(String, String)> {
         "both sides compute to the same term".to_string(),
     ));
     out.push(("trivial".to_string(), "the goal holds outright".to_string()));
+    if goal.vars.is_empty() && goal.hyps.is_empty() {
+        out.push((
+            "decide".to_string(),
+            "the goal has no unknowns: evaluate it".to_string(),
+        ));
+    }
     out.push((
         "assumption".to_string(),
         "a hypothesis matches the goal".to_string(),
