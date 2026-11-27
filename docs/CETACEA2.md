@@ -204,8 +204,8 @@ Assignment panel with each required theorem's status.
 
 ## Browser
 
-`web2/` runs entirely in the browser. It checks as you type, shows the
-goal at the cursor, marks errors inline, explains each step, searches
+The editor (`web2/index.html`) runs entirely in the browser. It checks
+as you type, shows the goal at the cursor, marks errors inline, explains each step, searches
 the library, and offers tactic suggestions that were run before being
 shown. Share creates a link that reproduces the file. Save downloads
 it. The Logic menu sets the default tier for files without a `logic`
@@ -217,6 +217,13 @@ The **Book** menu opens any of the book's companion files
 one selects that chapter's section, and a student's work on each file
 is kept separately in the browser's storage; "Start ... over" in the
 same menu returns the open file to the book's version.
+
+The editor's **Tutorial** button opens `web2/tutorial.html`, which
+walks a newcomer through the editor: the screen, a first proof, reading
+errors, `sorry`, the help panels, the library and the menus. Each of
+its examples has a link that opens it in the editor, and
+`scripts/check_tutorial.py` (run in CI) checks every example and every
+quoted error against the checker.
 
 ## Countermodel feedback
 
@@ -286,6 +293,42 @@ Functions here are real functions `f : A -> B` with `MapsTo(f, S, T)`,
 `logic hol`. Everything except `pigeonhole_collision` is constructive.
 `examples/counting.ctea` counts two small types and applies pigeonhole
 to them.
+
+### Graphs
+
+`graph` is not part of the prelude; add `import std/graph.ctea` (it
+needs `logic hol`). A graph on a type `V` of vertices is a relation
+`E : V -> V -> Prop`, so everything in the relations chapter applies.
+
+| Name | Says |
+|---|---|
+| `Undirected(E)`, `Loopless(E)` | every edge goes both ways; no vertex has an edge to itself |
+| `Walk(E, x, p, y)` | starting at `x`, the vertices of the list `p` follow edges and end at `y` |
+| `Reachable(E, x, y)` | some walk leads from `x` to `y` |
+| `Connected(E)` | every vertex reaches every other |
+| `Subgraph(E, F)` | every edge of `E` is an edge of `F` |
+| `Closed(E, S)` | no edge leaves the set `S` |
+| `ProperColoring(E, c)` | the ends of every edge get different colours under `c` |
+
+The theorems: walks join (`walk_append`) and, in an undirected graph,
+reverse (`walk_reverse`); reachability is reflexive, transitive, and
+symmetric in an undirected graph (`reachable_refl`, `reachable_trans`,
+`reachable_symm`), so it is an equivalence relation there;
+`connected_from_hub` reduces connectedness to reaching everything from
+one vertex; adding edges preserves walks, reachability and
+connectedness (`walk_mono`, `reachable_mono`, `connected_mono`); a
+walk that starts in a closed set stays in it, which is how to prove a
+vertex is *not* reachable (`not_reachable_of_closed`); and a proper
+colouring forbids loops and survives removing edges
+(`coloring_loopless`, `coloring_subgraph`). Everything is
+constructive.
+
+`examples/graphs.ctea` (also in the browser's example menu) defines a
+six-vertex graph as a `data` type and a `def`, and uses `decide` for
+every question about it that is a finite check: that it is undirected,
+that a given list is a walk, that a set is closed, that a colouring is
+proper. There is no degree, cycle, or tree yet; those need counting
+over the edges.
 
 ### `decide`
 

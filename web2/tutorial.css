@@ -1,0 +1,495 @@
+/* The tutorial page. Same palette as the editor (styles.css), but a
+   page that scrolls and is meant to be read. */
+
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --ink: #1d2430;
+  --muted: #5b6573;
+  --line: #d9dee6;
+  --accent: #1f6feb;
+  --accent-ink: #ffffff;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --error: #cf222e;
+  --error-bg: #ffebe9;
+  --code-bg: #f0f2f5;
+  --mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1419;
+    --panel: #161b22;
+    --ink: #e6edf3;
+    --muted: #9aa5b1;
+    --line: #30363d;
+    --accent: #58a6ff;
+    --accent-ink: #0f1419;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --error: #ff7b72;
+    --error-bg: #3a1d1f;
+    --code-bg: #1f2630;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 4rem;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--accent);
+}
+
+code,
+pre {
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+
+code {
+  background: var(--code-bg);
+  padding: 0.08em 0.3em;
+  border-radius: 0.25rem;
+}
+
+/* ---- top bar ---- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.brand-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--mono);
+}
+
+.brand-sub {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.button {
+  display: inline-block;
+  padding: 0.45rem 0.9rem;
+  border-radius: 0.4rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.button:hover {
+  filter: brightness(1.08);
+}
+
+.button.big {
+  font-size: 1.05rem;
+  padding: 0.65rem 1.2rem;
+}
+
+/* ---- layout ---- */
+
+.page {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 44rem);
+  gap: 3rem;
+  justify-content: center;
+  padding: 0 1rem 5rem;
+}
+
+.toc {
+  position: sticky;
+  top: 4rem;
+  align-self: start;
+  max-height: calc(100vh - 5rem);
+  overflow-y: auto;
+  padding-top: 2.5rem;
+  font-size: 0.88rem;
+}
+
+.toc h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toc ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.toc li a {
+  display: block;
+  padding: 0.22rem 0.6rem;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.toc li a:hover {
+  color: var(--ink);
+  border-left-color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .page {
+    grid-template-columns: minmax(0, 44rem);
+  }
+
+  /* The page is one column here, and the contents list would push the
+     title off the first screen. */
+  .toc {
+    display: none;
+  }
+
+  body {
+    font-size: 16px;
+  }
+}
+
+/* ---- prose ---- */
+
+.hero {
+  padding: 3rem 0 1rem;
+}
+
+.hero h1 {
+  margin: 0 0 0.4rem;
+  font-size: 2.3rem;
+  line-height: 1.15;
+}
+
+.hero .lede {
+  margin: 0 0 1.4rem;
+  font-size: 1.2rem;
+  color: var(--muted);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+}
+
+article h2 {
+  margin: 3rem 0 0.6rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 1.5rem;
+}
+
+article h3 {
+  margin: 1.8rem 0 0.4rem;
+  font-size: 1.1rem;
+}
+
+article p,
+article ul,
+article ol {
+  margin: 0.8rem 0;
+}
+
+article li {
+  margin: 0.3rem 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.92em;
+}
+
+th,
+td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  font-size: 0.8em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.aside {
+  margin: 1.2rem 0;
+  padding: 0.7rem 1rem;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  border-radius: 0 0.4rem 0.4rem 0;
+}
+
+.aside p {
+  margin: 0.3rem 0;
+}
+
+/* ---- code samples ---- */
+
+.sample {
+  margin: 1.1rem 0;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.sample pre {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+  line-height: 1.5;
+  counter-reset: line;
+}
+
+.sample-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.35rem 1rem;
+  border-top: 1px solid var(--line);
+  background: var(--code-bg);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.sample-bar a {
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sample-bar a:hover {
+  text-decoration: underline;
+}
+
+.verdict.ok {
+  color: var(--ok);
+}
+
+.verdict.bad {
+  color: var(--error);
+}
+
+.verdict.partial {
+  color: var(--warn);
+}
+
+/* ---- pieces that look like the editor's panels ---- */
+
+.steps {
+  margin: 1.1rem 0;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+
+.step:last-child {
+  border-bottom: 0;
+}
+
+.step > code {
+  background: none;
+  padding: 0.25rem 0 0;
+  white-space: pre;
+}
+
+@media (max-width: 560px) {
+  .step {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.4rem;
+  }
+}
+
+.goal {
+  border-left: 3px solid var(--accent);
+  padding: 0.25rem 0.6rem;
+  margin-bottom: 0.4rem;
+  background: var(--code-bg);
+  border-radius: 0 0.3rem 0.3rem 0;
+  font-family: var(--mono);
+  font-size: 0.82em;
+  overflow-x: auto;
+}
+
+.goal:last-child {
+  margin-bottom: 0;
+}
+
+.goal .hyp {
+  color: var(--muted);
+}
+
+.goal .hyp b {
+  color: var(--ink);
+}
+
+.goal .target {
+  margin-top: 0.2rem;
+  padding-top: 0.2rem;
+  border-top: 1px dashed var(--line);
+}
+
+.goal.done {
+  border-left-color: var(--ok);
+  color: var(--ok);
+  font-family: var(--sans);
+}
+
+.diag {
+  margin: 1.1rem 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--error);
+  border-radius: 0.4rem;
+  background: var(--error-bg);
+  font-size: 0.92em;
+}
+
+.diag .where {
+  font-size: 0.78em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--error);
+}
+
+.diag ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.statusline {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.3rem;
+  background: var(--code-bg);
+  font-size: 0.88em;
+}
+
+/* ---- the map of the screen ---- */
+
+.screen {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  grid-template-rows: auto 1fr;
+  margin: 1.2rem 0;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  overflow: hidden;
+  font-size: 0.8rem;
+}
+
+.screen-top {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.screen-top span,
+.screen-side span {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.3rem;
+  background: var(--code-bg);
+}
+
+.screen-top .go {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.screen-editor {
+  padding: 0.8rem;
+  border-right: 1px solid var(--line);
+  font-family: var(--mono);
+  white-space: pre;
+  overflow: hidden;
+  color: var(--muted);
+}
+
+.screen-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.7rem;
+}
+
+.screen-side .status {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+footer {
+  margin-top: 4rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--muted);
+}

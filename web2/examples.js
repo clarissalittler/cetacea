@@ -209,6 +209,94 @@ theorem add_zero_fun : (fun n : Nat => n + 0) = (fun n : Nat => n) := by
 `,
   },
   {
+    name: "Graphs: walks, reachability, colouring",
+    source: `logic hol
+
+import std/prelude.ctea
+import std/graph.ctea
+
+-- A small graph, and what the graph library can say about it.
+--
+--     a --- b --- c --- d        e --- f
+--
+-- Six vertices in two pieces: a path of four, and a separate edge.
+
+data Vertex
+| a
+| b
+| c
+| d
+| e
+| f
+
+-- The edges, each listed in both directions.
+def Edge (x y : Vertex) : Prop :=
+  (x = a /\\ y = b) \\/ (x = b /\\ y = a)
+  \\/ (x = b /\\ y = c) \\/ (x = c /\\ y = b)
+  \\/ (x = c /\\ y = d) \\/ (x = d /\\ y = c)
+  \\/ (x = e /\\ y = f) \\/ (x = f /\\ y = e)
+
+-- Questions about a finite graph with no unknowns are finite checks,
+-- so \`decide\` settles them.
+theorem edge_undirected : Undirected(Edge) := by
+  unfold Undirected
+  decide
+
+theorem edge_loopless : Loopless(Edge) := by
+  unfold Loopless
+  decide
+
+-- To show one vertex reaches another, give the walk.
+theorem a_reaches_d : Reachable(Edge, a, d) := by
+  unfold Reachable
+  exists cons(b, cons(c, cons(d, nil)))
+  decide
+
+-- The graph is undirected, so the way back comes for free.
+theorem d_reaches_a : Reachable(Edge, d, a) := by
+  apply reachable_symm
+  exact edge_undirected
+  exact a_reaches_d
+
+-- To show a vertex is NOT reachable, no list of walks will do: there
+-- are infinitely many. Instead, fence the start in. No edge leaves the
+-- set {a, b, c, d}, so a walk from \`a\` can never get out to \`e\`.
+def Left : Set Vertex := { x : Vertex | x = a \\/ x = b \\/ x = c \\/ x = d }
+
+theorem left_is_closed : Closed(Edge, Left) := by
+  unfold Closed
+  decide
+
+theorem a_does_not_reach_e : not Reachable(Edge, a, e) := by
+  apply not_reachable_of_closed {S := Left}
+  exact left_is_closed
+  decide
+  decide
+
+theorem not_connected : not Connected(Edge) := by
+  intro h
+  apply a_does_not_reach_e
+  exact h a e
+
+-- Two colours are enough: alternate along the path.
+data Color
+| red
+| blue
+
+defrec color (v : Vertex) : Color
+| a => red
+| b => blue
+| c => red
+| d => blue
+| e => red
+| f => blue
+
+theorem two_colorable : ProperColoring(Edge, color) := by
+  unfold ProperColoring
+  decide
+`,
+  },
+  {
     name: "Classical reasoning",
     source: `-- Constructive mode rejects excluded middle; classical mode allows it.
 
