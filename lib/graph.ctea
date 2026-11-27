@@ -1,0 +1,279 @@
+mode constructive
+
+import list.ctea
+import set.ctea
+
+-- Graphs as relations. A graph on a type `V` of vertices is a relation
+-- `E : V -> V -> Prop`, where `E(x, y)` says there is an edge from `x`
+-- to `y`. Nothing else is needed: the relations chapter already is
+-- graph theory, read with pictures.
+
+-- An undirected graph has every edge in both directions, and a
+-- loopless one has no edge from a vertex to itself. Together these are
+-- what most textbooks call a simple graph.
+def Undirected (V : Type) (E : V -> V -> Prop) : Prop := forall x y : V, E(x, y) -> E(y, x)
+
+def Loopless (V : Type) (E : V -> V -> Prop) : Prop := forall x : V, not E(x, x)
+
+-- Walks. `Walk(E, x, p, y)` says that starting at `x` and visiting the
+-- vertices of `p` in order follows an edge at every step and ends at
+-- `y`. The list holds every vertex after the start, so the empty list
+-- is the walk that stays put, and the length of the list is the number
+-- of edges.
+defrec Walk (V : Type) (E : V -> V -> Prop) (x : V) (p : List V) (y : V) : Prop on p
+| nil => x = y
+| cons h t => E(x, h) /\ Walk(E, h, t, y)
+
+theorem walk_nil (V : Type) (E : V -> V -> Prop) (x : V) : Walk(E, x, nil, x) := by
+  simp
+  refl
+
+theorem walk_edge (V : Type) (E : V -> V -> Prop) (x y : V)
+  : E(x, y) -> Walk(E, x, cons(y, nil), y) := by
+  intro h
+  simp
+  split
+  exact h
+  refl
+
+-- A walk can be extended at the front by one edge.
+theorem walk_cons (V : Type) (E : V -> V -> Prop) (x h y : V) (t : List V)
+  : E(x, h) -> Walk(E, h, t, y) -> Walk(E, x, cons(h, t), y) := by
+  intro he
+  intro hw
+  simp
+  split
+  exact he
+  exact hw
+
+-- Two walks that meet end to start join into one.
+theorem walk_append (V : Type) (E : V -> V -> Prop) (p q : List V) (y z : V)
+  : forall x : V, Walk(E, x, p, y) -> Walk(E, y, q, z) -> Walk(E, x, append(p, q), z) := by
+  induction p with
+  | nil =>
+      intro x
+      intro h1
+      intro h2
+      simp at h1
+      simp
+      rewrite -> h1
+      exact h2
+  | cons h t ih =>
+      intro x
+      intro h1
+      intro h2
+      simp at h1
+      simp
+      split
+      exact h1.left
+      apply ih h
+      exact h1.right
+      exact h2
+
+-- In an undirected graph a walk can be retraced. The walk back visits
+-- different vertices in between (the old start is now the end), so the
+-- statement only promises that some walk back exists.
+theorem walk_reverse (V : Type) (E : V -> V -> Prop) (p : List V) (y : V)
+  : Undirected(E) -> forall x : V, Walk(E, x, p, y) -> exists q : List V, Walk(E, y, q, x) := by
+  intro hu
+  induction p with
+  | nil =>
+      intro x
+      intro h
+      simp at h
+      exists nil
+      simp
+      rewrite -> h
+      refl
+  | cons h t ih =>
+      intro x
+      intro hw
+      simp at hw
+      obtain q hq := ih h hw.right
+      exists append(q, cons(x, nil))
+      apply walk_append {y := h}
+      exact hq
+      apply walk_edge
+      apply hu
+      exact hw.left
+
+-- Reachability: some walk leads from `x` to `y`.
+def Reachable (V : Type) (E : V -> V -> Prop) (x : V) (y : V) : Prop := exists p : List V, Walk(E, x, p, y)
+
+theorem reachable_refl (V : Type) (E : V -> V -> Prop) (x : V) : Reachable(E, x, x) := by
+  unfold Reachable
+  exists nil
+  exact walk_nil
+
+theorem reachable_edge (V : Type) (E : V -> V -> Prop) (x y : V)
+  : E(x, y) -> Reachable(E, x, y) := by
+  intro h
+  unfold Reachable
+  exists cons(y, nil)
+  apply walk_edge
+  exact h
+
+theorem reachable_trans (V : Type) (E : V -> V -> Prop) (x y z : V)
+  : Reachable(E, x, y) -> Reachable(E, y, z) -> Reachable(E, x, z) := by
+  intro h1
+  intro h2
+  unfold Reachable at h1
+  unfold Reachable at h2
+  obtain p hp := h1
+  obtain q hq := h2
+  unfold Reachable
+  exists append(p, q)
+  apply walk_append {y := y}
+  exact hp
+  exact hq
+
+-- With `reachable_refl` and `reachable_trans`, this makes reachability
+-- an equivalence relation on the vertices of an undirected graph. Its
+-- classes are the graph's connected components.
+theorem reachable_symm (V : Type) (E : V -> V -> Prop) (x y : V)
+  : Undirected(E) -> Reachable(E, x, y) -> Reachable(E, y, x) := by
+  intro hu
+  intro h
+  unfold Reachable at h
+  obtain p hp := h
+  unfold Reachable
+  exact walk_reverse hu x hp
+
+-- A graph is connected when every vertex can reach every other.
+def Connected (V : Type) (E : V -> V -> Prop) : Prop := forall x y : V, Reachable(E, x, y)
+
+-- In an undirected graph it is enough to reach everything from one
+-- vertex: go back to it, then out again.
+theorem connected_from_hub (V : Type) (E : V -> V -> Prop) (c : V)
+  : Undirected(E) -> (forall y : V, Reachable(E, c, y)) -> Connected(E) := by
+  intro hu
+  intro hc
+  unfold Connected
+  intro x
+  intro y
+  apply reachable_trans {y := c}
+  apply reachable_symm
+  exact hu
+  exact hc x
+  exact hc y
+
+-- Subgraphs. `F` has every edge of `E` (and perhaps more), so whatever
+-- can be walked in `E` can be walked in `F`.
+def Subgraph (V : Type) (E : V -> V -> Prop) (F : V -> V -> Prop) : Prop := forall x y : V, E(x, y) -> F(x, y)
+
+theorem walk_mono (V : Type) (E F : V -> V -> Prop) (p : List V) (y : V)
+  : Subgraph(E, F) -> forall x : V, Walk(E, x, p, y) -> Walk(F, x, p, y) := by
+  intro hs
+  induction p with
+  | nil =>
+      intro x
+      intro h
+      simp at h
+      simp
+      exact h
+  | cons h t ih =>
+      intro x
+      intro hw
+      simp at hw
+      simp
+      split
+      apply hs
+      exact hw.left
+      exact ih h hw.right
+
+theorem reachable_mono (V : Type) (E F : V -> V -> Prop) (x y : V)
+  : Subgraph(E, F) -> Reachable(E, x, y) -> Reachable(F, x, y) := by
+  intro hs
+  intro h
+  unfold Reachable at h
+  obtain p hp := h
+  unfold Reachable
+  exists p
+  exact walk_mono hs x hp
+
+-- Adding edges cannot disconnect a graph.
+theorem connected_mono (V : Type) (E F : V -> V -> Prop)
+  : Subgraph(E, F) -> Connected(E) -> Connected(F) := by
+  intro hs
+  intro hc
+  unfold Connected
+  intro x
+  intro y
+  apply reachable_mono {E := E}
+  exact hs
+  exact hc x y
+
+-- How to show a vertex cannot be reached. A set of vertices is closed
+-- when no edge leaves it; a walk that starts inside a closed set stays
+-- inside. So to prove `y` is unreachable from `x`, find a closed set
+-- that contains `x` and not `y`.
+def Closed (V : Type) (E : V -> V -> Prop) (S : Set V) : Prop := forall x y : V, x in S -> E(x, y) -> y in S
+
+theorem walk_stays_in_closed (V : Type) (E : V -> V -> Prop) (S : Set V) (p : List V) (y : V)
+  : Closed(E, S) -> forall x : V, x in S -> Walk(E, x, p, y) -> y in S := by
+  intro hc
+  induction p with
+  | nil =>
+      intro x
+      intro hx
+      intro hw
+      simp at hw
+      rewrite <- hw
+      exact hx
+  | cons h t ih =>
+      intro x
+      intro hx
+      intro hw
+      simp at hw
+      apply ih h
+      apply hc x h
+      exact hx
+      exact hw.left
+      exact hw.right
+
+theorem reachable_stays_in_closed (V : Type) (E : V -> V -> Prop) (S : Set V) (x y : V)
+  : Closed(E, S) -> x in S -> Reachable(E, x, y) -> y in S := by
+  intro hc
+  intro hx
+  intro hr
+  unfold Reachable at hr
+  obtain p hp := hr
+  exact walk_stays_in_closed hc x hx hp
+
+theorem not_reachable_of_closed (V : Type) (E : V -> V -> Prop) (S : Set V) (x y : V)
+  : Closed(E, S) -> x in S -> not y in S -> not Reachable(E, x, y) := by
+  intro hc
+  intro hx
+  intro hy
+  intro hr
+  apply hy
+  exact reachable_stays_in_closed hc hx hr
+
+-- Colourings. `c` colours the vertices so that the two ends of every
+-- edge get different colours. The colours can be any type: a graph
+-- with a proper colouring by a two-element type is bipartite.
+def ProperColoring (V : Type) (C : Type) (E : V -> V -> Prop) (c : V -> C) : Prop := forall x y : V, E(x, y) -> not c(x) = c(y)
+
+-- A loop could never be properly coloured.
+theorem coloring_loopless (V : Type) (C : Type) (E : V -> V -> Prop) (c : V -> C)
+  : ProperColoring(E, c) -> Loopless(E) := by
+  intro hc
+  unfold Loopless
+  intro x
+  intro he
+  apply hc x x he
+  refl
+
+-- A colouring that works for a graph works for any graph with fewer
+-- edges.
+theorem coloring_subgraph (V : Type) (C : Type) (E F : V -> V -> Prop) (c : V -> C)
+  : Subgraph(E, F) -> ProperColoring(F, c) -> ProperColoring(E, c) := by
+  intro hs
+  intro hc
+  unfold ProperColoring
+  intro x
+  intro y
+  intro he
+  apply hc x y
+  apply hs
+  exact he

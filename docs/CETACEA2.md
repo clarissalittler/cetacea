@@ -287,6 +287,42 @@ Functions here are real functions `f : A -> B` with `MapsTo(f, S, T)`,
 `examples/counting.ctea` counts two small types and applies pigeonhole
 to them.
 
+### Graphs
+
+`graph` is not part of the prelude; add `import std/graph.ctea` (it
+needs `logic hol`). A graph on a type `V` of vertices is a relation
+`E : V -> V -> Prop`, so everything in the relations chapter applies.
+
+| Name | Says |
+|---|---|
+| `Undirected(E)`, `Loopless(E)` | every edge goes both ways; no vertex has an edge to itself |
+| `Walk(E, x, p, y)` | starting at `x`, the vertices of the list `p` follow edges and end at `y` |
+| `Reachable(E, x, y)` | some walk leads from `x` to `y` |
+| `Connected(E)` | every vertex reaches every other |
+| `Subgraph(E, F)` | every edge of `E` is an edge of `F` |
+| `Closed(E, S)` | no edge leaves the set `S` |
+| `ProperColoring(E, c)` | the ends of every edge get different colours under `c` |
+
+The theorems: walks join (`walk_append`) and, in an undirected graph,
+reverse (`walk_reverse`); reachability is reflexive, transitive, and
+symmetric in an undirected graph (`reachable_refl`, `reachable_trans`,
+`reachable_symm`), so it is an equivalence relation there;
+`connected_from_hub` reduces connectedness to reaching everything from
+one vertex; adding edges preserves walks, reachability and
+connectedness (`walk_mono`, `reachable_mono`, `connected_mono`); a
+walk that starts in a closed set stays in it, which is how to prove a
+vertex is *not* reachable (`not_reachable_of_closed`); and a proper
+colouring forbids loops and survives removing edges
+(`coloring_loopless`, `coloring_subgraph`). Everything is
+constructive.
+
+`examples/graphs.ctea` (also in the browser's example menu) defines a
+six-vertex graph as a `data` type and a `def`, and uses `decide` for
+every question about it that is a finite check: that it is undirected,
+that a given list is a walk, that a set is closed, that a colouring is
+proper. There is no degree, cycle, or tree yet; those need counting
+over the edges.
+
 ### `decide`
 
 `decide` closes a goal that has no unknowns by evaluating it. It

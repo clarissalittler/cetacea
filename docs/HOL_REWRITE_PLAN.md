@@ -44,6 +44,12 @@ produces two colliding elements. `decide` arrived with it: it evaluates
 a goal with no unknowns by kernel rewriting, running quantifiers over
 enumeration types through their values, and works on `Prop` directly
 (decision 8 expected it to go through `Bool`; no `Bool` was needed).
+The first part of the graph library followed the same day as
+`lib/graph.ctea`, imported on request and not by the prelude: graphs
+as relations, walks as lists, reachability as an equivalence relation
+on undirected graphs, connectedness, subgraphs, closed sets for
+proving unreachability, and proper colourings. Degree, cycles and
+trees wait for counting over edges.
 M5 followed: `--deny-tactics`, assignment
 manifests generated from a skeleton (`--make-assignment`) and checked
 with `--assignment`, an Assignment panel and share links in the

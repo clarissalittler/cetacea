@@ -190,6 +190,7 @@ fn library_fs() -> VirtualFs {
     let mut fs = VirtualFs::default();
     for name in [
         "prelude", "prop", "fol", "eq", "set", "nat", "modular", "fun", "list", "finite", "card",
+        "graph",
     ] {
         let path = format!("lib/{name}.ctea");
         fs.add(
