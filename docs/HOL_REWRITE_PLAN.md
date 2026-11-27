@@ -15,7 +15,8 @@ session API, `lib/` standard library, and `cetacea2` CLI landed on the
 same day, and every tier-1 corpus file checks through the kernel
 (`scripts/check_hol.sh`). Propositional countermodels, verified tactic hints, and
 step explanations followed. M2 landed the same day as `web2/`
-(published under `/v2/` by the Pages workflow): a CodeMirror editor, a
+(published by the Pages workflow, at the site root since 27 November
+2026, with the old UI under `/v1/`): a CodeMirror editor, a
 Web Worker hosting the checker, goals at the cursor, diagnostics with
 inline markers, hints, explanations, the theorem library, examples,
 and autosave. Two deviations from section 7 and 8: the Wasm binding

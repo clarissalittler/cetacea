@@ -34,13 +34,16 @@ jobs:
           cargo build -p cetacea_wasm --target wasm32-unknown-unknown --release
           cargo build -p hol_wasm --target wasm32-unknown-unknown --release
 
+      # The current checker is the site; the old one is kept under /v1/.
+      # /v2/ was the current checker's first address, so it redirects.
       - name: Assemble site
         run: |
-          mkdir -p site/pkg site/v2/pkg
-          cp -r web/. site/
-          cp target/wasm32-unknown-unknown/release/cetacea_wasm.wasm site/pkg/
-          cp -r web2/. site/v2/
-          cp target/wasm32-unknown-unknown/release/hol_wasm.wasm site/v2/pkg/
+          mkdir -p site/pkg site/v1/pkg site/v2
+          cp -r web2/. site/
+          cp target/wasm32-unknown-unknown/release/hol_wasm.wasm site/pkg/
+          cp -r web/. site/v1/
+          cp target/wasm32-unknown-unknown/release/cetacea_wasm.wasm site/v1/pkg/
+          cp scripts/pages_v2_redirect.html site/v2/index.html
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
